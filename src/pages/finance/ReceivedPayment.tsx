@@ -2,6 +2,7 @@ import React from "react";
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
+import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,9 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -49,17 +52,30 @@ import {
   Landmark,
   ChevronsUpDown,
   Check,
-  SendHorizontal,
   X,
   Eye,
   Printer,
+  BookOpen,
 } from "lucide-react";
 import {
   getReceivedPayments,
+  getReceivedPayment,
   addReceivedPayment,
   updateReceivedPayment,
   deleteReceivedPayment,
+  getReceivedPaymentPosting,
+  type ReceivedPaymentRecord,
+  type ReceivedPaymentPosting,
 } from "@/api/receivedPaymentApi";
+import { useSearchParams } from "react-router-dom";
+import {
+  getPayableEmis,
+  payLoan,
+  getUndisbursedIncomingLoans,
+  disburseLoan,
+  type PayableEmi,
+  type UndisbursedIncomingLoan,
+} from "@/api/loanSanctionApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import { getContractOptions, type ContractOption } from "@/api/contractApi";
@@ -96,8 +112,10 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 
 export type PaymentMode =
   | "Cash"
-  | "Check"
+  | "Cheque"
+  | "Demand Draft"
   | "UPI"
+  | "IMPS"
   | "NEFT"
   | "RTGS"
   | "Card"
@@ -134,10 +152,44 @@ interface CustomerOption {
   label: string;
 }
 
+// Shared between the paginated list load and the single-record deep-link
+// fetch (Trial Balance's ledger drill-down navigates here as
+// /received-payments?view=<id>) — same raw-row shape from the backend either
+// way, so both map through here instead of duplicating the field list.
+function mapReceivedPaymentRow(r: ReceivedPaymentRecord): ReceivedPayment {
+  return {
+    id: String(r.RPPaymentID),
+    docNo: (r as any).RPDocNo || `REC/${String(r.RPPaymentID).padStart(6, "0")}`,
+    companyId: (r as any).RPCompanyId ?? undefined,
+    companyName: r.RPCompanyName ?? "",
+    projectId: (r as any).RPProjectId ?? undefined,
+    projectName: r.RPProjectName,
+    finYear: (r as any).RPFinYear ?? undefined,
+    docTypeId: (r as any).RPDocTypeId ?? undefined,
+    receivedFrom: r.RPReceivedFrom,
+    customerName: (r as any).RPCustomerName ?? undefined,
+    depositBankId: (r as any).RPDepositBankId ?? undefined,
+    depositBankName: (r as any).RPDepositBankName ?? undefined,
+    docDate: r.RPDocDate,
+    mode: r.RPMode as ReceivedPayment["mode"],
+    amount: Number(r.RPAmount),
+    bankName: r.RPBankName ?? undefined,
+    transactionId: r.RPTransactionID ?? undefined,
+    checkNumber: r.RPCheckNumber ?? undefined,
+    chequeDate: r.RPChequeDate ? String(r.RPChequeDate).slice(0, 10) : undefined,
+    isPostDated: !!r.RPIsPostDated,
+    remarks: r.RPRemarks ?? undefined,
+    status: (r.RPStatus as ReceivedPayment["status"]) || "Draft",
+    createdAt: r.RPCreatedAt,
+  };
+}
+
 const PAYMENT_MODES: PaymentMode[] = [
   "Cash",
-  "Check",
+  "Cheque",
+  "Demand Draft",
   "UPI",
+  "IMPS",
   "NEFT",
   "RTGS",
   "Card",
@@ -155,7 +207,8 @@ const normalizeCompanyName = (value: string | null | undefined) =>
 const modeIcon = (mode: string) => {
   if (mode === "Cash")
     return <Banknote size={13} className="text-emerald-500" />;
-  if (mode === "Check") return <FileText size={13} className="text-blue-500" />;
+  if (mode === "Cheque") return <FileText size={13} className="text-blue-500" />;
+  if (mode === "Demand Draft") return <FileText size={13} className="text-blue-500" />;
   if (mode === "UPI")
     return <Smartphone size={13} className="text-violet-500" />;
   if (mode === "Card")
@@ -166,13 +219,18 @@ const modeIcon = (mode: string) => {
 
 const modeColor: Record<string, string> = {
   Cash: "bg-emerald-500/10 text-emerald-600",
-  Check: "bg-blue-500/10 text-blue-600",
+  Cheque: "bg-blue-500/10 text-blue-600",
+  "Demand Draft": "bg-blue-500/10 text-blue-600",
   UPI: "bg-violet-500/10 text-violet-600",
+  IMPS: "bg-teal-500/10 text-teal-600",
   NEFT: "bg-sky-500/10 text-sky-600",
   RTGS: "bg-cyan-500/10 text-cyan-600",
   Card: "bg-orange-500/10 text-orange-600",
   EMI: "bg-primary/10 text-primary",
 };
+
+// Short label for compact single-line badges (list rows); full name is used elsewhere.
+const modeShortLabel = (mode: string) => (mode === "Demand Draft" ? "DD" : mode);
 
 const EMPTY_FORM = {
   companyId: "" as string,
@@ -315,7 +373,7 @@ function EmptyState() {
   return (
     <div className="text-center py-14 text-muted-foreground text-sm">
       <AlertCircle size={18} className="mx-auto mb-2 opacity-30" />
-      No received payments yet. Click "Add Payment" to get started.
+      No received payments yet. Click "Add Received Payment" to get started.
     </div>
   );
 }
@@ -339,14 +397,52 @@ export default function ReceivedPaymentPage() {
   const [summary, setSummary] = useState({ totalAmount: 0, approvedCount: 0, draftCount: 0, pendingCount: 0, rejectedCount: 0 });
   const [apiLoading, setApiLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  // Bumped on every reset/add/edit so BankNamePicker remounts fresh —
+  // editingId alone repeats "null" across successive Add clicks and
+  // wouldn't force a remount, leaving a previously-typed "Other" bank name
+  // stuck in the picker's own internal state.
+  const [bankPickerKey, setBankPickerKey] = useState(0);
   const [actionLoading, setActionLoading] = useState(false);
-  const [submitTarget, setSubmitTarget] = useState<ReceivedPayment | null>(
-    null,
-  );
   const [viewingPayment, setViewingPayment] = useState<ReceivedPayment | null>(
     null,
   );
+  const [detailTab, setDetailTab] = useState<"details" | "posting">("details");
+  const [postingData, setPostingData] = useState<ReceivedPaymentPosting | null>(null);
+  const [postingLoading, setPostingLoading] = useState(false);
+
+  // Always reopen on Details, never leave the modal stuck on a stale
+  // Posting tab from whichever payment was viewed previously.
+  useEffect(() => {
+    setDetailTab("details");
+  }, [viewingPayment?.id]);
+
+  // Fetch GL posting details when the Posting tab opens — same on-demand
+  // fetch pattern Payment.tsx's own Posting tab uses.
+  useEffect(() => {
+    if (detailTab !== "posting" || !viewingPayment?.id) return;
+    setPostingLoading(true);
+    setPostingData(null);
+    getReceivedPaymentPosting(Number(viewingPayment.id))
+      .then(setPostingData)
+      .catch(() => setPostingData(null))
+      .finally(() => setPostingLoading(false));
+  }, [detailTab, viewingPayment?.id]);
+
   const PAGE_SIZE = 20;
+
+  // Deep-link support — Trial Balance's ledger drill-down navigates here as
+  // /received-payments?view=<id> to open this exact receipt.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    getReceivedPayment(Number(viewId))
+      .then((row) => setViewingPayment(mapReceivedPaymentRow(row)))
+      .catch(() => toast.error(`Received payment #${viewId} not found`));
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── Form state ───────────────────────────────────────────────────────────────
   // This form only shows when view === "form" (a full-page swap), so a
@@ -356,6 +452,131 @@ export default function ReceivedPaymentPage() {
   const [form, setForm] = useDraftForm("received-payment", EMPTY_FORM, {
     skip: editingId !== null,
   });
+
+  // ── Loan Repayment (every loan type) ────────────────────────────────────
+  // Repayment of every loan type — Customer Loan, Inter-Company, Bank Loan
+  // — is recorded here exclusively; the Payment page no longer has a
+  // repayment picker of its own (only a "Loan Disbursement" one, a
+  // different action — see Payment.tsx). Customer Loan and Inter-Company
+  // repayment is cash coming IN to this company (the lender). Bank Loan
+  // repayment is genuinely outgoing (we're paying an external bank back),
+  // but is tracked through this same single surface by design rather than
+  // a separate outgoing page — payLoan()'s own GL posting is correct for
+  // each loan type regardless of which page triggered it.
+  const [loanEmiOptions, setLoanEmiOptions] = useState<PayableEmi[]>([]);
+  const [loanEmisLoading, setLoanEmisLoading] = useState(false);
+  const [selectedLoanEmi, setSelectedLoanEmi] = useState<PayableEmi | null>(null);
+  const [loanPaymentDetailsOpen, setLoanPaymentDetailsOpen] = useState(false);
+  const [loanPayMode, setLoanPayMode] = useState<"emis" | "lumpsum">("emis");
+  const [selectedLoanEmiIds, setSelectedLoanEmiIds] = useState<number[]>([]);
+  const [loanLumpSumAmount, setLoanLumpSumAmount] = useState("");
+  const [loanLateFee, setLoanLateFee] = useState("");
+  const [loanPaymentNotes, setLoanPaymentNotes] = useState("");
+
+  useEffect(() => {
+    const companyId = Number(form.companyId) || null;
+    if (!companyId) {
+      setLoanEmiOptions([]);
+      return;
+    }
+    setLoanEmisLoading(true);
+    getPayableEmis(companyId)
+      .then(setLoanEmiOptions)
+      .catch(() => setLoanEmiOptions([]))
+      .finally(() => setLoanEmisLoading(false));
+  }, [form.companyId]);
+
+  const loanSiblingEmis = selectedLoanEmi
+    ? loanEmiOptions.filter((e) => e.LoanId === selectedLoanEmi.LoanId).sort((a, b) => a.InstallmentNo - b.InstallmentNo)
+    : [];
+  const loanSelectedEmisTotal = loanSiblingEmis
+    .filter((e) => selectedLoanEmiIds.includes(e.EMIId))
+    .reduce((s, e) => s + Number(e.EMIAmount), 0);
+  const loanOutstandingTotal = loanSiblingEmis.reduce((s, e) => s + Number(e.EMIAmount), 0);
+
+  const clearLoanEmiLink = () => {
+    setSelectedLoanEmi(null);
+    setSelectedLoanEmiIds([]);
+    setLoanLumpSumAmount("");
+    setLoanLateFee("");
+    setLoanPaymentNotes("");
+  };
+
+  const handleLoanEmiSelect = (emi: PayableEmi) => {
+    setSelectedLoanEmi(emi);
+    setLoanPayMode("emis");
+    setSelectedLoanEmiIds([emi.EMIId]);
+    setLoanLumpSumAmount("");
+    setLoanLateFee("");
+    setLoanPaymentNotes("");
+    // form.companyId (the page's own top-level company selector, already
+    // scoped server-side by /emi-payable) is left untouched — for the
+    // original Customer Loan direction/Inter-Company it's already the
+    // lender receiving repayment; for Bank Loan and the newer "Customer to
+    // Company" Customer Loan direction (migration 402) it's already the
+    // borrower (us) settling with the external party. "Customer Name" here
+    // means "who this settlement is with," so it needs the OPPOSITE party
+    // whenever we're the borrower: the lender (bank or customer), not us.
+    // Inter-Company rows in this list are always ones where we're the
+    // LENDER (the query only matches Inter-Company via LenderCompanyId —
+    // see /emi-payable), so BorrowerCompanyName being set doesn't mean
+    // "we're the borrower" there the way it does for Customer Loan.
+    const weAreBorrower = emi.LoanType === "Bank Loan" || (emi.LoanType === "Customer Loan" && !!emi.BorrowerCompanyName);
+    const counterpartyName = weAreBorrower ? emi.LenderName : emi.BorrowerName;
+    setForm((prev) => ({
+      ...prev,
+      customerName: counterpartyName || prev.customerName,
+      amount: String(Number(emi.EMIAmount)),
+      remarks: `Loan EMI ${emi.InstallmentNo} — ${emi.LoanNo}`,
+    }));
+    setLoanPaymentDetailsOpen(true);
+  };
+
+  const toggleLoanEmiSelected = (emiId: number) => {
+    setSelectedLoanEmiIds((prev) => {
+      const next = prev.includes(emiId) ? prev.filter((id) => id !== emiId) : [...prev, emiId];
+      const total = loanSiblingEmis.filter((e) => next.includes(e.EMIId)).reduce((s, e) => s + Number(e.EMIAmount), 0);
+      setForm((f) => ({ ...f, amount: String(total) }));
+      return next;
+    });
+  };
+
+  // ── Bank Loan Disbursement — "we are the BORROWER, money comes IN from
+  // an external bank" ───────────────────────────────────────────────────
+  // The counterpart to Payment.tsx's "Loan Disbursement" picker (Inter-
+  // Company/Customer Loan, money OUT). Selecting one pre-fills the
+  // counterparty + amount here; the rest of the form (deposit bank, mode,
+  // date) is filled normally, and POST /:id/disburse links the two once
+  // this Received Payment is saved.
+  const [undisbursedBankLoans, setUndisbursedBankLoans] = useState<UndisbursedIncomingLoan[]>([]);
+  const [undisbursedBankLoansLoading, setUndisbursedBankLoansLoading] = useState(false);
+  const [disbursingBankLoan, setDisbursingBankLoan] = useState<UndisbursedIncomingLoan | null>(null);
+
+  const refetchUndisbursedBankLoans = useCallback(() => {
+    const companyId = Number(form.companyId) || null;
+    if (!companyId) {
+      setUndisbursedBankLoans([]);
+      return;
+    }
+    setUndisbursedBankLoansLoading(true);
+    getUndisbursedIncomingLoans(companyId)
+      .then(setUndisbursedBankLoans)
+      .catch(() => setUndisbursedBankLoans([]))
+      .finally(() => setUndisbursedBankLoansLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.companyId]);
+
+  useEffect(() => { refetchUndisbursedBankLoans(); }, [refetchUndisbursedBankLoans]);
+
+  const handleSelectBankLoanDisbursement = (loan: UndisbursedIncomingLoan) => {
+    setDisbursingBankLoan(loan);
+    setForm((prev) => ({
+      ...prev,
+      customerName: loan.LenderName || prev.customerName,
+      amount: String(Number(loan.Amount)),
+      remarks: `Loan disbursement — ${loan.LoanNo}`,
+    }));
+  };
 
   // Only reopen on an actual browser reload, not a plain in-app navigation
   // (e.g. clicking "Received Payment" in the sidebar remounts this
@@ -494,37 +715,7 @@ export default function ReceivedPaymentPage() {
       setTotalCount(res.total);
       setCurrentPage(page);
       if (res.summary) setSummary(res.summary);
-      setPayments(
-        res.data.map((r) => ({
-          id: String(r.RPPaymentID),
-          docNo:
-            (r as any).RPDocNo ||
-            `REC/${String(r.RPPaymentID).padStart(6, "0")}`,
-          companyId: (r as any).RPCompanyId ?? undefined,
-          companyName: r.RPCompanyName ?? "",
-          projectId: (r as any).RPProjectId ?? undefined,
-          projectName: r.RPProjectName,
-          finYear: (r as any).RPFinYear ?? undefined,
-          docTypeId: (r as any).RPDocTypeId ?? undefined,
-          receivedFrom: r.RPReceivedFrom,
-          customerName: (r as any).RPCustomerName ?? undefined,
-          depositBankId: (r as any).RPDepositBankId ?? undefined,
-          depositBankName: (r as any).RPDepositBankName ?? undefined,
-          docDate: r.RPDocDate,
-          mode: r.RPMode as ReceivedPayment["mode"],
-          amount: Number(r.RPAmount),
-          bankName: r.RPBankName ?? undefined,
-          transactionId: r.RPTransactionID ?? undefined,
-          checkNumber: r.RPCheckNumber ?? undefined,
-          chequeDate: r.RPChequeDate
-            ? String(r.RPChequeDate).slice(0, 10)
-            : undefined,
-          isPostDated: !!r.RPIsPostDated,
-          remarks: r.RPRemarks ?? undefined,
-          status: (r.RPStatus as ReceivedPayment["status"]) || "Draft",
-          createdAt: r.RPCreatedAt,
-        })),
-      );
+      setPayments(res.data.map(mapReceivedPaymentRow));
     } catch {
       toast.error("Failed to load received payments");
     } finally {
@@ -551,12 +742,13 @@ export default function ReceivedPaymentPage() {
     form.finYear &&
     form.mode &&
     form.customerName &&
-    form.depositBankId &&
+    (form.mode === "Cash" || form.depositBankId) &&
     Number(form.amount) > 0
   );
 
   const handleReset = () => {
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
+    setBankPickerKey((k) => k + 1);
     setDate(new Date());
     setDocNoPreview("");
   };
@@ -565,12 +757,14 @@ export default function ReceivedPaymentPage() {
     setView("list");
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
+    setBankPickerKey((k) => k + 1);
   };
 
   // ── Open add form ─────────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
+    setBankPickerKey((k) => k + 1);
     setDate(new Date());
     setDocNoPreview("");
     setView("form");
@@ -599,6 +793,7 @@ export default function ReceivedPaymentPage() {
       remarks: p.remarks ?? "",
       contractId: String((p as { ContractId?: number }).ContractId ?? ""),
     });
+    setBankPickerKey((k) => k + 1);
     setDate(p.docDate ? new Date(p.docDate) : new Date());
     setDocNoPreview(p.docNo);
     setView("form");
@@ -626,7 +821,7 @@ export default function ReceivedPaymentPage() {
       toast.error("Customer name is required");
       return;
     }
-    if (!form.depositBankId) {
+    if (form.mode !== "Cash" && !form.depositBankId) {
       toast.error("Deposit bank is required");
       return;
     }
@@ -664,9 +859,54 @@ export default function ReceivedPaymentPage() {
         await updateReceivedPayment(Number(editingId), payload as any);
         toast.success("Payment updated");
       } else {
-        await addReceivedPayment(payload as any);
+        const created = await addReceivedPayment(payload as any);
         toast.success("Payment recorded successfully");
+
+        // This Received Payment IS a Customer Loan repayment settling —
+        // link it back to the loan (migration 356) the same way Finance >
+        // Payment already does for the outgoing directions, so the loan's
+        // own Repayment History shows how it was actually paid.
+        if (selectedLoanEmi) {
+          try {
+            const res = await payLoan(selectedLoanEmi.LoanId, {
+              receivedPaymentId: created.RPPaymentID,
+              emiIds: loanPayMode === "emis" ? selectedLoanEmiIds : undefined,
+              lumpSumAmount: loanPayMode === "lumpsum" ? loanLumpSumAmount : undefined,
+              paymentDate: date!.toISOString().slice(0, 10),
+              lateFee: loanLateFee || undefined,
+              notes: loanPaymentNotes || `Received via Received Payment — ${payload.RPDocDate}`,
+            });
+            toast.success(
+              res.readyToClose
+                ? `All installments settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef} — go to Loan Sanction to formally close it.`
+                : `Loan repayment settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef}`,
+            );
+            if (res.glPostingWarning) toast.error(res.glPostingWarning);
+          } catch (loanErr: any) {
+            toast.error(
+              `Payment was recorded, but linking it to the loan failed: ${loanErr.message}. Settle it manually from Loan Sanction.`,
+            );
+          }
+        }
+
+        // This Received Payment IS a Bank Loan disbursement — link it back
+        // to the loan (migration 401) the same way repayment above does,
+        // so the loan-ledger side posts and DisbursedAt reflects a real
+        // bank-side record.
+        if (disbursingBankLoan) {
+          try {
+            const res = await disburseLoan(disbursingBankLoan.LoanId, { receivedPaymentId: created.RPPaymentID });
+            toast.success(`${disbursingBankLoan.LoanNo} disbursed — JV ${res.voucherNo}`);
+            refetchUndisbursedBankLoans();
+          } catch (loanErr: any) {
+            toast.error(
+              `Payment was recorded, but linking it to the loan failed: ${loanErr.message}. Post it manually from Loan Sanction.`,
+            );
+          }
+        }
       }
+      setDisbursingBankLoan(null);
+      clearLoanEmiLink();
       setView("list");
       setEditingId(null);
       await loadPayments(currentPage);
@@ -679,27 +919,6 @@ export default function ReceivedPaymentPage() {
     }
   };
 
-  const handleSubmitForApproval = async () => {
-    if (!submitTarget) return;
-    setActionLoading(true);
-    try {
-      const res = await fetchWithAuth(
-        `/api/received-payment/${submitTarget.id}/submit`,
-        { method: "PATCH" },
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Submit failed");
-      }
-      toast.success("Sent to Approval Inbox ✓");
-      setSubmitTarget(null);
-      await loadPayments(currentPage);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to submit");
-    } finally {
-      setActionLoading(false);
-    }
-  };
 
   const deletePayment = async (id: string) => {
     try {
@@ -780,9 +999,12 @@ export default function ReceivedPaymentPage() {
     },
   ];
 
-  const needsBankRef = ["Check", "UPI", "NEFT", "RTGS", "Card"].includes(
+  const needsBankRef = ["Cheque", "Demand Draft", "UPI", "IMPS", "NEFT", "RTGS", "Card"].includes(
     form.mode,
   );
+  // Cheque and Demand Draft both capture an instrument number + date.
+  const isInstrument = form.mode === "Cheque" || form.mode === "Demand Draft";
+  const instrumentLabel = form.mode === "Demand Draft" ? "DD" : "Cheque";
 
   // ── Print receipt ─────────────────────────────────────────────────────────────
   const handlePrintPayment = (p: ReceivedPayment) => {
@@ -809,7 +1031,7 @@ export default function ReceivedPaymentPage() {
       field("Project", p.projectName),
       field("Deposit Bank", p.depositBankName || "—"),
       field("Customer Bank", p.bankName || "—"),
-      field("Cheque No.", p.checkNumber || null),
+      field(p.mode === "Demand Draft" ? "DD No." : "Cheque No.", p.checkNumber || null),
       field("Transaction ID", p.transactionId || null),
       field("Remarks", p.remarks || null),
     ].join("");
@@ -891,7 +1113,7 @@ export default function ReceivedPaymentPage() {
                   className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
                 >
                   <Plus size={13} className="sm:mr-1" />
-                  <span className="hidden sm:inline">Add Payment</span>
+                  <span className="hidden sm:inline">Add Received Payment</span>
                 </Button>
               )}
               <ExportMenu
@@ -1041,7 +1263,7 @@ export default function ReceivedPaymentPage() {
                         <td className="px-4 py-3 text-foreground whitespace-nowrap text-xs">
                           {p.docDate ? format(new Date(p.docDate), "dd/MM/yyyy") : "—"}
                         </td>
-                        <td className="px-4 py-3 text-muted-foreground text-xs">
+                        <td className="px-4 py-3 text-muted-foreground text-xs whitespace-nowrap">
                           {p.finYear || "—"}
                         </td>
                         <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
@@ -1055,10 +1277,10 @@ export default function ReceivedPaymentPage() {
                         </td>
                         <td className="px-4 py-3">
                           <span
-                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit ${modeColor[p.mode]}`}
+                            className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit whitespace-nowrap ${modeColor[p.mode]}`}
                           >
                             {modeIcon(p.mode)}
-                            {p.mode}
+                            {modeShortLabel(p.mode)}
                           </span>
                         </td>
                         <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
@@ -1074,38 +1296,11 @@ export default function ReceivedPaymentPage() {
                           <div className="flex items-center gap-1">
                             <button
                               onClick={() => setViewingPayment(p)}
-                              title="View"
+                              title="View (print & edit are here too)"
                               className="p-1.5 rounded-md text-muted-foreground/50 hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors"
                             >
                               <Eye size={13} />
                             </button>
-                            {rights.canPrint && (
-                              <button
-                                onClick={() => handlePrintPayment(p)}
-                                title="Print"
-                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-sky-600 hover:bg-sky-500/10 transition-colors"
-                              >
-                                <Printer size={13} />
-                              </button>
-                            )}
-                            {rights.canEdit && (p.status === "Draft" || p.status === "Approved") && (
-                              <button
-                                onClick={() => openEdit(p)}
-                                title="Edit"
-                                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                              >
-                                <Pencil size={12} />
-                              </button>
-                            )}
-                            {p.status === "Draft" && (
-                              <button
-                                onClick={() => setSubmitTarget(p)}
-                                title="Submit for Approval"
-                                className="p-1.5 rounded-md text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
-                              >
-                                <SendHorizontal size={13} />
-                              </button>
-                            )}
                             {p.status === "Pending" && (
                               <span
                                 title="Awaiting admin approval"
@@ -1160,46 +1355,19 @@ export default function ReceivedPaymentPage() {
                     </div>
                     <div className="flex items-center justify-between">
                       <span
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit ${modeColor[p.mode]}`}
+                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit whitespace-nowrap ${modeColor[p.mode]}`}
                       >
                         {modeIcon(p.mode)}
-                        {p.mode}
+                        {modeShortLabel(p.mode)}
                       </span>
                       <div className="flex items-center gap-1">
                         <button
                           onClick={() => setViewingPayment(p)}
                           className="p-1.5 text-muted-foreground/50 hover:text-emerald-600"
-                          title="View"
+                          title="View (print & edit are here too)"
                         >
                           <Eye size={13} />
                         </button>
-                        {rights.canPrint && (
-                          <button
-                            onClick={() => handlePrintPayment(p)}
-                            className="p-1.5 text-muted-foreground/50 hover:text-sky-600"
-                            title="Print"
-                          >
-                            <Printer size={13} />
-                          </button>
-                        )}
-                        {rights.canEdit && (p.status === "Draft" || p.status === "Approved") && (
-                          <button
-                            onClick={() => openEdit(p)}
-                            className="p-1.5 text-muted-foreground/50 hover:text-foreground"
-                            title="Edit"
-                          >
-                            <Pencil size={13} />
-                          </button>
-                        )}
-                        {p.status === "Draft" && (
-                          <button
-                            onClick={() => setSubmitTarget(p)}
-                            className="p-1.5 text-muted-foreground/50 hover:text-primary"
-                            title="Submit for Approval"
-                          >
-                            <SendHorizontal size={13} />
-                          </button>
-                        )}
                         {p.status === "Pending" && (
                           <span
                             title="Awaiting admin approval"
@@ -1370,6 +1538,121 @@ export default function ReceivedPaymentPage() {
                   </div>
                 </div>
 
+                {/* Loan EMIs — any loan repayment this company is due to
+                    settle (Customer Loan/Inter-Company as lender, Bank
+                    Loan as borrower). Only shows once a company with
+                    outstanding EMIs is picked. */}
+                {form.companyId && !editingId && (loanEmisLoading || loanEmiOptions.length > 0) && (
+                  <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
+                    <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-muted-foreground">
+                      Settle a Loan Repayment
+                    </p>
+                    {loanEmisLoading ? (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <Loader2 size={12} className="animate-spin" /> Checking for outstanding loan EMIs…
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {Array.from(new Map(loanEmiOptions.map((e) => [e.LoanId, e])).values()).map((emi) => (
+                          <button
+                            key={emi.LoanId}
+                            type="button"
+                            onClick={() => handleLoanEmiSelect(emi)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                              selectedLoanEmi?.LoanId === emi.LoanId
+                                ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                : "border-border bg-background text-muted-foreground hover:border-emerald-500/40",
+                            )}
+                          >
+                            <Landmark size={11} />
+                            {emi.LoanNo} — {emi.LoanType === "Bank Loan" || (emi.LoanType === "Customer Loan" && !!emi.BorrowerCompanyName) ? emi.LenderName : emi.BorrowerName}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {selectedLoanEmi && (
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <p className="text-[11px] text-muted-foreground">
+                          {loanPayMode === "lumpsum"
+                            ? "Lump sum"
+                            : `${selectedLoanEmiIds.length} EMI${selectedLoanEmiIds.length === 1 ? "" : "s"} selected`}
+                          {" · "}
+                          <span className="font-mono font-medium text-foreground/80">{formatINR(Number(form.amount) || 0)}</span>
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setLoanPaymentDetailsOpen(true)}
+                            className="text-[11px] font-medium text-primary hover:underline"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            type="button"
+                            onClick={clearLoanEmiLink}
+                            className="text-[11px] font-medium text-muted-foreground hover:text-destructive"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Bank Loans / Customer-to-Company Customer Loans not yet
+                    disbursed — "we are the BORROWER, money comes IN from an
+                    external party" (a bank, or now a customer — migration
+                    402). Selecting one pre-fills counterparty + amount;
+                    POST /:id/disburse links it once this Received Payment
+                    is saved. */}
+                {form.companyId && !editingId && (undisbursedBankLoansLoading || undisbursedBankLoans.length > 0) && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                    <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-amber-600 dark:text-amber-400">
+                      Disburse a Loan
+                    </p>
+                    {undisbursedBankLoansLoading ? (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                        <Loader2 size={12} className="animate-spin" /> Checking for undisbursed loans…
+                      </p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {undisbursedBankLoans.map((loan) => (
+                          <button
+                            key={loan.LoanId}
+                            type="button"
+                            onClick={() => handleSelectBankLoanDisbursement(loan)}
+                            className={cn(
+                              "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
+                              disbursingBankLoan?.LoanId === loan.LoanId
+                                ? "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                                : "border-border bg-background text-muted-foreground hover:border-amber-500/40",
+                            )}
+                          >
+                            <Landmark size={11} />
+                            {loan.LoanNo} — {formatINR(loan.Amount)}{loan.LenderName ? ` from ${loan.LenderName}` : ""}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    {disbursingBankLoan && (
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                          Disbursing <span className="font-semibold">{disbursingBankLoan.LoanNo}</span> — fill in the deposit bank/mode below, then Save.
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setDisbursingBankLoan(null)}
+                          className="text-[11px] font-medium text-muted-foreground hover:text-destructive shrink-0"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* Date of Receipt */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -1411,18 +1694,23 @@ export default function ReceivedPaymentPage() {
                     <FieldLabel required>Payment Type</FieldLabel>
                     <Select
                       value={form.mode}
-                      onValueChange={(v) => setField("mode", v as PaymentMode)}
+                      onValueChange={(v) => {
+                        // Cash never has a depositing bank -- clear any bank
+                        // picked while a different mode was selected instead
+                        // of silently submitting it alongside a cash receipt.
+                        if (v === "Cash") {
+                          setForm((f) => ({ ...f, mode: v as PaymentMode, depositBankId: "", depositBankName: "" }));
+                        } else {
+                          setField("mode", v as PaymentMode);
+                        }
+                      }}
                     >
                       <SelectTrigger className="h-9 text-sm">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
                         {PAYMENT_MODES.map((m) => (
-                          <SelectItem key={m} value={m}>
-                            <span className="flex items-center gap-2">
-                              {modeIcon(m)} {m}
-                            </span>
-                          </SelectItem>
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -1440,10 +1728,10 @@ export default function ReceivedPaymentPage() {
                     />
                   </div>
                   <div>
-                    <FieldLabel required>Deposit Bank</FieldLabel>
+                    <FieldLabel required={form.mode !== "Cash"}>Deposit Bank</FieldLabel>
                     <Select
                       value={form.depositBankId}
-                      disabled={!form.companyId}
+                      disabled={!form.companyId || form.mode === "Cash"}
                       onValueChange={(v) => {
                         const bank = depositBanks.find(
                           (b) => String(b.BId) === v,
@@ -1460,7 +1748,9 @@ export default function ReceivedPaymentPage() {
                       <SelectTrigger className="h-9 text-sm">
                         <SelectValue
                           placeholder={
-                            form.companyId
+                            form.mode === "Cash"
+                              ? "Not applicable for cash"
+                              : form.companyId
                               ? "Select deposit bank…"
                               : "Select company first"
                           }
@@ -1585,12 +1875,12 @@ export default function ReceivedPaymentPage() {
                 {/* Row 5: Bank ref (conditional) */}
                 {needsBankRef && (
                   <div className="grid grid-cols-2 gap-4">
-                    {form.mode === "Check" ? (
+                    {isInstrument ? (
                       <div>
-                        <FieldLabel>Cheque Number</FieldLabel>
+                        <FieldLabel>{instrumentLabel} Number</FieldLabel>
                         <Input
                           className="h-9 text-sm"
-                          placeholder="Cheque No."
+                          placeholder={`${instrumentLabel} No.`}
                           value={form.checkNumber}
                           onChange={(e) =>
                             setField("checkNumber", e.target.value)
@@ -1598,7 +1888,7 @@ export default function ReceivedPaymentPage() {
                         />
                         <div className="flex items-end gap-2 mt-2">
                           <div className="flex-1">
-                            <FieldLabel>Cheque Date</FieldLabel>
+                            <FieldLabel>{instrumentLabel} Date</FieldLabel>
                             <Input
                               type="date"
                               className="h-9 text-sm"
@@ -1609,20 +1899,28 @@ export default function ReceivedPaymentPage() {
                                 // Auto-flag as post-dated when the cheque date
                                 // is in the future — same convention the
                                 // outgoing Payment page already uses for
-                                // PIsPostDated, applied here for parity.
+                                // PIsPostDated, applied here for parity. A
+                                // Demand Draft is prepaid, so it's never
+                                // treated as post-dated.
+                                if (form.mode === "Demand Draft") {
+                                  setField("isPostDated", false);
+                                  return;
+                                }
                                 const today = new Date().toISOString().slice(0, 10);
                                 setField("isPostDated", !!date && date > today);
                               }}
                             />
                           </div>
-                          <label className="flex items-center gap-1.5 h-9 text-xs text-muted-foreground select-none">
-                            <input
-                              type="checkbox"
-                              checked={form.isPostDated}
-                              onChange={(e) => setField("isPostDated", e.target.checked)}
-                            />
-                            Post-dated
-                          </label>
+                          {form.mode === "Cheque" && (
+                            <label className="flex items-center gap-1.5 h-9 text-xs text-muted-foreground select-none">
+                              <input
+                                type="checkbox"
+                                checked={form.isPostDated}
+                                onChange={(e) => setField("isPostDated", e.target.checked)}
+                              />
+                              Post-dated
+                            </label>
+                          )}
                         </div>
                       </div>
                     ) : (
@@ -1640,11 +1938,12 @@ export default function ReceivedPaymentPage() {
                     )}
                     <div>
                       <FieldLabel>Customer Bank Name</FieldLabel>
-                      <Input
-                        className="h-9 text-sm"
-                        placeholder="Bank of customer"
+                      <BankNamePicker
+                        key={bankPickerKey}
                         value={form.bankName}
-                        onChange={(e) => setField("bankName", e.target.value)}
+                        onChange={(v) => setField("bankName", v)}
+                        placeholder="Select customer's bank…"
+                        otherPlaceholder="Bank of customer"
                       />
                     </div>
                   </div>
@@ -1699,61 +1998,117 @@ export default function ReceivedPaymentPage() {
         )}
       </FinanceShell>
 
-      {/* ── Submit for Approval Confirm ─────────────────────────────────────── */}
+      {/* ── Loan Repayment details — EMIs / lump sum, late fee, notes ──────── */}
       <Dialog
-        open={!!submitTarget}
+        open={loanPaymentDetailsOpen}
         onOpenChange={(o) => {
-          if (!o) setSubmitTarget(null);
+          if (!o) setLoanPaymentDetailsOpen(false);
         }}
       >
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="font-heading text-base flex items-center gap-2">
-              <SendHorizontal size={16} className="text-primary" />
-              Submit for Approval
+              <Landmark size={16} className="text-primary" />
+              Loan Repayment — {selectedLoanEmi?.LoanNo}
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              This will send the payment to the admin Approval Inbox. You won't
-              be able to edit it until it's reviewed.
+              {selectedLoanEmi?.BorrowerName}
             </DialogDescription>
           </DialogHeader>
-          <div className="py-3 space-y-2">
-            <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 space-y-1">
-              <p className="text-xs text-muted-foreground font-heading uppercase tracking-wide">
-                Payment
-              </p>
-              <p className="text-sm font-semibold text-foreground">
-                {submitTarget?.docNo}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {submitTarget?.customerName || submitTarget?.receivedFrom}
-              </p>
-              <p className="text-sm font-mono font-bold text-emerald-600">
-                +{submitTarget ? fmt(submitTarget.amount) : ""}
-              </p>
-            </div>
-          </div>
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSubmitTarget(null)}
-              disabled={actionLoading}
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleSubmitForApproval}
-              disabled={actionLoading}
-              className="gap-1.5"
-            >
-              {actionLoading ? (
-                <Loader2 size={13} className="animate-spin" />
+          {selectedLoanEmi && (
+            <div className="space-y-4 py-1">
+              <div className="flex rounded-lg border border-border p-0.5 bg-muted/30 w-fit">
+                <button
+                  type="button"
+                  onClick={() => setLoanPayMode("emis")}
+                  className={cn(
+                    "px-3 py-1 rounded-md text-xs font-medium transition-colors",
+                    loanPayMode === "emis" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  Select EMIs
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLoanPayMode("lumpsum");
+                    if (!loanLumpSumAmount) {
+                      setLoanLumpSumAmount(String(loanOutstandingTotal));
+                      setForm((f) => ({ ...f, amount: String(loanOutstandingTotal) }));
+                    }
+                  }}
+                  className={cn(
+                    "px-3 py-1 rounded-md text-xs font-medium transition-colors",
+                    loanPayMode === "lumpsum" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  Lump Sum
+                </button>
+              </div>
+
+              {loanPayMode === "emis" ? (
+                <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                  {loanSiblingEmis.map((e) => {
+                    const checked = selectedLoanEmiIds.includes(e.EMIId);
+                    return (
+                      <label
+                        key={e.EMIId}
+                        className={cn(
+                          "flex items-center justify-between gap-3 px-3 py-2 rounded-lg border cursor-pointer transition-colors",
+                          checked ? "border-emerald-500/40 bg-emerald-500/5" : "border-border hover:bg-muted/30",
+                        )}
+                      >
+                        <span className="flex items-center gap-2 text-xs">
+                          <input type="checkbox" checked={checked} onChange={() => toggleLoanEmiSelected(e.EMIId)} className="accent-emerald-500" />
+                          Installment #{e.InstallmentNo}
+                          {e.IsOverdue && <span className="text-[10px] font-semibold text-destructive">OVERDUE</span>}
+                        </span>
+                        <span className="font-mono text-xs font-medium">{formatINR(Number(e.EMIAmount))}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               ) : (
-                <SendHorizontal size={13} />
+                <div>
+                  <FieldLabel>Lump Sum Amount</FieldLabel>
+                  <Input
+                    type="number"
+                    value={loanLumpSumAmount}
+                    onChange={(e) => {
+                      setLoanLumpSumAmount(e.target.value);
+                      setForm((f) => ({ ...f, amount: e.target.value }));
+                    }}
+                    className="h-9 text-sm"
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Outstanding on this loan: <span className="font-mono font-medium text-foreground/80">{formatINR(loanOutstandingTotal)}</span>
+                  </p>
+                </div>
               )}
-              Submit
+
+              <div>
+                <FieldLabel>Late Fee (optional)</FieldLabel>
+                <Input
+                  type="number"
+                  value={loanLateFee}
+                  onChange={(e) => setLoanLateFee(e.target.value)}
+                  placeholder="0.00"
+                  className="h-9 text-sm"
+                />
+              </div>
+              <div>
+                <FieldLabel>Notes (optional)</FieldLabel>
+                <Input
+                  value={loanPaymentNotes}
+                  onChange={(e) => setLoanPaymentNotes(e.target.value)}
+                  className="h-9 text-sm"
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button size="sm" onClick={() => setLoanPaymentDetailsOpen(false)}>
+              Done
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1805,6 +2160,25 @@ export default function ReceivedPaymentPage() {
               </div>
             </div>
 
+            {/* Tabs */}
+            <div className="flex items-center gap-1 px-5 pt-3 border-b border-border">
+              {(["details", "posting"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setDetailTab(t)}
+                  className={`px-3 py-2 text-xs font-heading font-semibold border-b-2 -mb-px transition-colors ${
+                    detailTab === t
+                      ? "border-emerald-500 text-emerald-600 dark:text-emerald-400"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t === "details" ? "Details" : "Posting"}
+                </button>
+              ))}
+            </div>
+
+            {detailTab === "details" && (
+              <>
             {/* Amount highlight */}
             <div className="px-5 pt-4 pb-2">
               <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-5 py-4 flex items-center justify-between">
@@ -1863,7 +2237,7 @@ export default function ReceivedPaymentPage() {
                   value: viewingPayment.bankName || "—",
                 },
                 ...(viewingPayment.checkNumber
-                  ? [{ label: "Cheque No.", value: viewingPayment.checkNumber }]
+                  ? [{ label: viewingPayment.mode === "Demand Draft" ? "DD No." : "Cheque No.", value: viewingPayment.checkNumber }]
                   : []),
                 ...(viewingPayment.transactionId
                   ? [
@@ -1896,6 +2270,75 @@ export default function ReceivedPaymentPage() {
                 </div>
               </div>
             )}
+              </>
+            )}
+
+            {detailTab === "posting" && (
+              <div className="px-5 py-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <BookOpen size={13} className="text-primary" />
+                  <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                    GL Posting
+                  </span>
+                </div>
+
+                {postingLoading ? (
+                  <div className="rounded-xl border border-border py-8 text-center text-xs text-muted-foreground">
+                    Loading posting details…
+                  </div>
+                ) : !postingData ? (
+                  <div className="rounded-xl border border-dashed border-border py-8 text-center text-xs text-muted-foreground">
+                    Could not load posting data.
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border overflow-hidden">
+                    <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/40">
+                      <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        {postingData.entries[0]?.docNo}
+                      </span>
+                      {postingData.isPosted ? (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
+                          ✓ {postingData.jvNo}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 font-medium whitespace-nowrap">
+                          Not yet posted
+                        </span>
+                      )}
+                    </div>
+                    <div className="divide-y divide-border/50">
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                        <span>Account</span>
+                        <span className="text-right">Debit (₹)</span>
+                        <span className="text-right">Credit (₹)</span>
+                      </div>
+                      {[
+                        { label: postingData.accounts.bank?.label ?? "Bank A/c", side: "debit" as const },
+                        { label: postingData.accounts.customer?.label ?? "Customer A/c", side: "credit" as const },
+                      ].map((row, i) => (
+                        <div key={i} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2.5 items-center gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                            <span className="text-xs text-foreground truncate">{row.label}</span>
+                          </div>
+                          <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                            {row.side === "debit" ? fmt(postingData.amount) : ""}
+                          </span>
+                          <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                            {row.side === "credit" ? fmt(postingData.amount) : ""}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
+                        <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                        <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(postingData.amount)}</span>
+                        <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(postingData.amount)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Footer */}
             <div className="px-5 py-3 border-t border-border bg-muted/10 flex items-center justify-between">
@@ -1917,30 +2360,16 @@ export default function ReceivedPaymentPage() {
                   Awaiting admin approval
                 </span>
               )}
-              {viewingPayment.status === "Draft" && (
-                <div className="flex items-center gap-2">
-                  {rights.canEdit && (
-                    <button
-                      onClick={() => {
-                        setViewingPayment(null);
-                        openEdit(viewingPayment);
-                      }}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
-                    >
-                      <Pencil size={12} /> Edit
-                    </button>
-                  )}
-                  <button
-                    onClick={() => {
-                      const p = viewingPayment;
-                      setViewingPayment(null);
-                      setSubmitTarget(p);
-                    }}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium bg-primary/10 border border-primary/20 text-primary hover:bg-primary/20 transition-colors"
-                  >
-                    <SendHorizontal size={12} /> Submit
-                  </button>
-                </div>
+              {viewingPayment.status === "Draft" && rights.canEdit && (
+                <button
+                  onClick={() => {
+                    setViewingPayment(null);
+                    openEdit(viewingPayment);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                >
+                  <Pencil size={12} /> Edit
+                </button>
               )}
               {viewingPayment.status === "Approved" && rights.canEdit && (
                 <button

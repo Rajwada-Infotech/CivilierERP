@@ -1207,7 +1207,7 @@ function PrintView({ data }: { data: DPRResponse }) {
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function DailyProgressReport() {
-  const rights = usePageRights("daily-progress-report");
+  const rights = usePageRights("dpr");
   const [date, setDate] = useState(todayStr());
   const printRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();

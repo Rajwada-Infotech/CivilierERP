@@ -1249,6 +1249,19 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
       }
     }
 
+    // Reverse whatever GL this payment posted (cheque clearance, bounce
+    // charges, or a loan-repayment leg — see vendorLedger.js's join, which
+    // is the exact set of SourceTypes ever keyed to a NewPayment's
+    // PPaymentID) before hard-deleting it. Previously skipped, so a deleted
+    // payment's GeneralLedgerEntry rows survived with IsReversed=0 forever —
+    // every ledger/report reading off that table (Vendor Ledger Report
+    // included) kept counting a payment that no longer existed. Same fix
+    // already applied to loanSanction.js's DELETE.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    for (const sourceType of ["NewPayment", "PaymentPosting", "BounceChargePosting", "LoanRepayment"]) {
+      await reversePostingBySource(pool, sourceType, id);
+    }
+
     const result = await pool
       .request()
       .input("PPaymentID", sql.Int, id)
@@ -2000,6 +2013,7 @@ router.get(/^\/chain-posting\/(.+)$/, async (req, res) => {
       ? { id: genericSupplierLed?.id ?? null, label: `Supplier/Creditor Payable — ${resolvedSupplierName}`, code: genericSupplierLed?.code ?? null }
       : genericSupplierLed;
     const bankChargesLed = findLed((l) => l.LHeadName.toLowerCase().includes("bank charge"));
+    const debitNoteAdjLed = findLed((l) => l.LHeadName.toLowerCase().includes("debit note adjustment"));
 
     // Check posted status for payment and bounce-charge entries
     const pmtIds = pmtRes.recordset.map((p) => p.PPaymentID);
@@ -2072,6 +2086,52 @@ router.get(/^\/chain-posting\/(.+)$/, async (req, res) => {
           jvNo: bouncePostedMap[p.PPaymentID] ?? null,
         });
       }
+    }
+
+    // Debit Notes against this invoice (dbo.DebitNote, see routes/debitNote.js)
+    // — value adjustments that INCREASE what's owed, posted immediately on
+    // save (no separate approval/posting step exists for them), so they
+    // always show up here already posted.
+    const DN_PARTY_LABEL = { S: "Supplier", C: "Contractor", A: "Customer", BR: "Broker" };
+    const dnRes = await pool.request().input("EDocNoDN", sql.NVarChar(100), expenseRef).query(`
+      SELECT dn.id, dn.DocNo, dn.DebitDate, dn.TotalAmount, dn.party_type,
+             party.LHeadId AS PartyId, party.LHeadName AS PartyName
+      FROM dbo.DebitNote dn
+      JOIN dbo.ExpenseBooking eb4 ON eb4.Eid = dn.bill_id
+      LEFT JOIN dbo.AccountHeadMaster party ON party.LHeadId = dn.supplier_id
+      WHERE eb4.EDocNo = @EDocNoDN AND dn.is_active = 1
+      ORDER BY dn.DebitDate ASC, dn.id ASC
+    `);
+    const dnIds = dnRes.recordset.map((d) => d.id);
+    const dnPostedMap = {};
+    if (dnIds.length) {
+      const dIds = dnIds.join(",");
+      const dnPostedRes = await pool.request().query(
+        `SELECT SourceId, VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='DebitNoteAdjustment' AND SourceId IN (${dIds}) AND IsReversed=0`
+      );
+      dnPostedRes.recordset.forEach((r) => { dnPostedMap[r.SourceId] = r.VoucherNo; });
+    }
+    for (const dn of dnRes.recordset) {
+      const partyLed = dn.PartyId
+        ? { id: dn.PartyId, label: `${DN_PARTY_LABEL[dn.party_type] ?? dn.party_type} — ${dn.PartyName}`, code: null }
+        : null;
+      const isDebtor = dn.party_type === "A"; // Customer — increases what THEY owe
+      entries.push({
+        date: toDateStr(dn.DebitDate),
+        docNo: dn.DocNo,
+        pmtId: dn.id,
+        type: "debit_note",
+        amount: parseFloat(dn.TotalAmount) || 0,
+        mode: null,
+        isBounced: false,
+        bounceReason: null,
+        tdsAmount: 0,
+        accounts: isDebtor
+          ? { debitLeg: partyLed, creditLeg: debitNoteAdjLed }
+          : { debitLeg: debitNoteAdjLed, creditLeg: partyLed },
+        isPosted: !!dnPostedMap[dn.id],
+        jvNo: dnPostedMap[dn.id] ?? null,
+      });
     }
 
     // Sort all entries by date ascending
@@ -2308,7 +2368,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const { postVoucher, resolvePaymentSupplierHeadId, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
-      SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef,
+      SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
              np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
              ISNULL(np.TDSAmount, 0) AS TDSAmount,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
@@ -2385,7 +2445,9 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     await postVoucher(pool, {
       voucherNo: finalDocNo || `JV-PMT${pmtId}`,
-      voucherDate: new Date(),
+      // The payment's own date, not the date it happened to get posted —
+      // same fix as Invoice/GRN/Loan posting.
+      voucherDate: pmt.PDate,
       sourceType: "PaymentPosting",
       sourceId: pmtId,
       companyId: pmt.CompanyId ?? null,

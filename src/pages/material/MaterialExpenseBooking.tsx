@@ -179,6 +179,7 @@ const INVOICE_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Vendor", accessor: (r: any) => r.supplier || "—" },
   { header: "Company", accessor: (r: any) => r.companyName || "—" },
   { header: "Project", accessor: (r: any) => r.projectName || "—" },
+  { header: "Expense Head", accessor: (r: any) => r.expenseHeadName || "—" },
   { header: "Basic Amt", accessor: (r: any) => (r.status === "Draft" ? "—" : `Rs. ${fmt(r.basicAmount)}`) },
   { header: "GST %", accessor: (r: any) => (r.status === "Draft" ? "—" : (r.igstRate ?? 0) > 0 ? `${r.igstRate}%` : `${(r.cgstRate ?? 0) + (r.sgstRate ?? 0)}%`) },
   { header: "Net Amt", accessor: (r: any) => `Rs. ${fmt(computeEffectiveNet(r))}` },
@@ -299,6 +300,15 @@ export default function MaterialExpenseBooking() {
   const [companyFilter, setCompanyFilter] = useState("");
   const [projectFilter, setProjectFilter] = useState("");
   const [docNoFilter, setDocNoFilter] = useState("");
+  // The input itself stays bound to docNoFilter (immediate, so typing feels
+  // responsive), but the actual server fetch only fires off this debounced
+  // copy — otherwise every single keystroke re-queried the list and yanked
+  // focus out from under the next character typed.
+  const [debouncedDocNoFilter, setDebouncedDocNoFilter] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedDocNoFilter(docNoFilter), 400);
+    return () => clearTimeout(t);
+  }, [docNoFilter]);
   const [vendorFilter, setVendorFilter] = useState("");
   // Same scoping as filteredProjectOptions above, but for the list-view
   // filter panel (independent of the create/edit form's own company field).
@@ -346,6 +356,23 @@ export default function MaterialExpenseBooking() {
     () => [...supplierHeads, ...contractorHeads, ...customerHeads],
     [supplierHeads, contractorHeads, customerHeads],
   );
+  // Payable Party picker below — the Select's own value has to be each
+  // head's unique id, not its display name. Two different real parties can
+  // share the exact same name (e.g. two people both named "Raja Biswas",
+  // one a Contractor and one a Broker) — keying by name gave Radix's Select
+  // two DOM nodes registered under the identical value, and it rendered
+  // BOTH matching labels concatenated in the trigger ("Raja BiswasRaja
+  // Biswas"). Derived here (not separate state) from supplierLHeadId, the
+  // one field that's already guaranteed unique.
+  const supplierSelectValue = useMemo(() => {
+    const id = form.supplierLHeadId;
+    if (id == null) return "";
+    if (supplierHeads.some((s) => s.id === id)) return `s:${id}`;
+    if (contractorHeads.some((c) => c.id === id)) return `c:${id}`;
+    if (brokerHeads.some((b) => b.id === id)) return `b:${id}`;
+    if (customerHeads.some((cu) => cu.id === id)) return `a:${id}`;
+    return "";
+  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads]);
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
@@ -376,7 +403,7 @@ export default function MaterialExpenseBooking() {
       if (dateToFilter) qs.set("to", dateToFilter);
       if (companyFilter) qs.set("companyId", companyFilter);
       if (projectFilter) qs.set("projectName", projectFilter);
-      if (docNoFilter) qs.set("docNo", docNoFilter);
+      if (debouncedDocNoFilter) qs.set("docNo", debouncedDocNoFilter);
       if (vendorFilter) qs.set("supplierId", vendorFilter);
       const data = await apiFetch(`${API}?${qs.toString()}`);
       setRecords((data.data ?? []).map(dbToRecord));
@@ -391,7 +418,7 @@ export default function MaterialExpenseBooking() {
       setLoading(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter]);
+  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, debouncedDocNoFilter, vendorFilter]);
 
   // Export must cover every matching record, not just whatever page happens
   // to be on screen — the list endpoint caps `limit` at 100 server-side, so
@@ -424,14 +451,19 @@ export default function MaterialExpenseBooking() {
     }) as unknown as Record<string, unknown>[];
   }, [statusFilter, finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter]);
 
-  // Deep-link support — Linked Documents panels navigate here as
-  // /material/expense-booking?view=<Eid> to open this exact Invoice/booking.
+  // Deep-link support — Linked Documents panels and Trial Balance's ledger
+  // drill-down navigate here as /material/expense-booking?view=<Eid> to open
+  // this exact Invoice/booking. View-only users get the read-only preview
+  // instead of the editable form — openEditForm had no permission check at
+  // all here, letting a deep link bypass rights.canEdit entirely.
   useEffect(() => {
     const viewId = searchParams.get("view");
     if (!viewId) return;
-    apiFetch(`${API}/${viewId}`)
-      .then((row: any) => setPreviewRecord(dbToRecord(row)))
-      .catch(() => toast.error(`Booking #${viewId} not found`));
+    if (rights.canEdit) {
+      openEditForm({ id: viewId } as unknown as ExpenseRecord);
+    } else {
+      openPreview({ id: viewId } as unknown as ExpenseRecord);
+    }
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -582,7 +614,7 @@ export default function MaterialExpenseBooking() {
       return;
     }
     fetchRecords(1);
-  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter, fetchRecords]);
+  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, debouncedDocNoFilter, vendorFilter, fetchRecords]);
 
   useEffect(() => {
     fetchRecords(1);
@@ -1250,7 +1282,7 @@ export default function MaterialExpenseBooking() {
     // the PO/GRN flow — see the backend post-to-gl fallback branch) and
     // rows must add up to the invoice's net amount, same check the backend
     // re-runs, but catching it here avoids a round trip.
-    if (isDirect && selectedDoc?.kind === "TOD") {
+    if (isDirectPartyMode) {
       if ((form.expenseHeadAllocations?.length ?? 0) === 0) {
         toast.error("At least one Expense Head is required for this invoice.");
         return;
@@ -1300,7 +1332,12 @@ export default function MaterialExpenseBooking() {
         bd.netAmount,
         selectedDoc?.kind === "TOD" ? (selectedDoc.sourceId ?? null) : null,
       ),
-      ESourceType: selectedDoc?.kind ?? null,
+      // A party picked straight from Payable Party with nothing linked
+      // never sets selectedDoc (see the Select's onValueChange above, which
+      // deliberately leaves it alone) — still a direct/"Other Expenses"
+      // booking as far as the backend's own ESourceType='TOD' convention
+      // goes (see openEditForm's reverse mapping on load).
+      ESourceType: selectedDoc?.kind ?? (isDirectPartyMode ? "TOD" : null),
       ESourceId: selectedDoc?.sourceId ?? null,
       // Present only when multiple GRNs (same PO) were combined into this
       // one invoice — see ExpenseBooking/invoiceLinking.ts.
@@ -1428,6 +1465,61 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "WO_PO";
   /** True when the booking is a direct / Other-Expenses (TOD) entry with no linked source doc. */
   const isDirect = !isGRN && !isPOorWO;
+  // True once a direct booking actually has a party picked — whether that
+  // came from a formal "Other Expenses" template pick first (selectedDoc
+  // already {kind:"TOD"}) or straight from the Payable Party field with no
+  // document selected at all (selectedDoc still null). Gates TDS, the
+  // Direct Items table, and Expense Head Allocation — using selectedDoc's
+  // kind alone here would leave all three permanently hidden for a party
+  // picked without ever going through the template list, since nothing else
+  // sets selectedDoc to "TOD" for that flow.
+  const isDirectPartyMode =
+    isDirect && (selectedDoc?.kind === "TOD" || (!selectedDoc && !!form.supplierLHeadId));
+
+  // Re-preview the booking reference when Year is changed on an EXISTING
+  // direct/TOD booking. The create-time effect below (keyed on selectedTod)
+  // only ever fires while picking a fresh "Other Expenses" template — it
+  // never runs on edit, because openEditForm has no template to restore
+  // (only the resulting docNo is stored, not which TypeOfDoc generated it).
+  // So editing FY 2025-2026 -> 2026-2027 silently kept the old year's
+  // number. Uses the record's own EDocTypeId (loaded via dbToRecord) instead
+  // of selectedTod. Skipped once Approved — a payment/on-account/debit-note
+  // reference may already point at the current bookingReference string, and
+  // renumbering would silently orphan it (nothing else in this app updates
+  // those references when EDocNo changes).
+  const editOriginalFinYearRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isEditing) editOriginalFinYearRef.current = form.financialYear;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId]);
+  useEffect(() => {
+    if (!isEditing || !isDirectPartyMode || !form.docTypeId) return;
+    if (form.status === "Approved") return;
+    if (form.financialYear === editOriginalFinYearRef.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const qs = form.financialYear
+          ? `?finYear=${encodeURIComponent(form.financialYear)}`
+          : "";
+        const data = await apiFetch(`/api/document-type/${form.docTypeId}/next-number${qs}`);
+        if (cancelled || !data.nextDocNo) return;
+        setForm((prev) => ({ ...prev, bookingReference: data.nextDocNo }));
+        toast.info(`Booking reference updated to ${data.nextDocNo} for the new financial year`);
+      } catch (err) {
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Could not generate a booking reference for the new financial year",
+        );
+      }
+    })();
+    editOriginalFinYearRef.current = form.financialYear;
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.financialYear, isEditing, isDirectPartyMode, form.docTypeId, form.status]);
 
   // TDS eligibility — live-checked as the direct/TOD form fills in. Scoped
   // to direct bookings only: GRN/PO/WORK_DONE-sourced bookings don't carry
@@ -1437,7 +1529,7 @@ export default function MaterialExpenseBooking() {
   // this is purely a frontend UI gap for a later pass.
   const tdsSupplierId = (form as any).supplierLHeadId as number | null | undefined;
   useEffect(() => {
-    if (!isDirect || selectedDoc?.kind !== "TOD" || !tdsSupplierId || !form.companyId) {
+    if (!isDirectPartyMode || !tdsSupplierId || !form.companyId) {
       setTdsEligibility(null);
       return;
     }
@@ -1459,7 +1551,7 @@ export default function MaterialExpenseBooking() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDirect, selectedDoc?.kind, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate]);
+  }, [isDirectPartyMode, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate]);
 
   // Keep form.tdsAmount live — it used to only be set once, inside the TDS
   // <select>'s onChange, so editing the basic amount (or anything else that
@@ -1790,19 +1882,31 @@ export default function MaterialExpenseBooking() {
                         </div>
                       ) : (
                         <Select
-                          value={form.supplier || ""}
-                          onValueChange={(name) => {
+                          value={supplierSelectValue}
+                          onValueChange={(key) => {
+                            const [prefix, idStr] = key.split(":");
+                            const id = Number(idStr);
+                            const list =
+                              prefix === "s" ? supplierHeads
+                              : prefix === "c" ? contractorHeads
+                              : prefix === "a" ? customerHeads
+                              : brokerHeads;
+                            const head = list.find((h) => h.id === id);
+                            const name = head?.label ?? "";
                             set("supplier", name);
-                            const head = name
-                              ? supplierHeads.find((s) => s.label === name) ??
-                                contractorHeads.find((c) => c.label === name) ??
-                                brokerHeads.find((b) => b.label === name)
-                              : undefined;
                             set("supplierLHeadId", head?.id ?? null);
                             // Other Expenses (TOD) bookings have no source-doc
                             // label to name themselves after — keep the
                             // booking name in sync with the chosen supplier.
-                            if (name && selectedDoc?.kind === "TOD") {
+                            // Deliberately NOT stamping selectedDoc here —
+                            // DocSelectorPanel treats any non-null selectedDoc
+                            // as "a document is already picked" and collapses
+                            // into its locked summary view, which would hide
+                            // the PO/GRN/Work Done picker for a party chosen
+                            // before any document. isDirectPartyMode below
+                            // covers this case for TDS/Direct Items/Expense
+                            // Head Allocation without touching this state.
+                            if (name && (selectedDoc?.kind === "TOD" || !selectedDoc)) {
                               set("bookingName", `Payment for ${name}`);
                             }
                             if (!name) return;
@@ -1828,7 +1932,7 @@ export default function MaterialExpenseBooking() {
                               <SelectGroup>
                                 <SelectLabel>Suppliers</SelectLabel>
                                 {supplierHeads.map((s) => (
-                                  <SelectItem key={`s-${s.id}`} value={s.label}>{s.label}</SelectItem>
+                                  <SelectItem key={`s-${s.id}`} value={`s:${s.id}`}>{s.label}</SelectItem>
                                 ))}
                               </SelectGroup>
                             )}
@@ -1836,7 +1940,7 @@ export default function MaterialExpenseBooking() {
                               <SelectGroup>
                                 <SelectLabel>Contractors</SelectLabel>
                                 {contractorHeads.map((c) => (
-                                  <SelectItem key={`c-${c.id}`} value={c.label}>{c.label}</SelectItem>
+                                  <SelectItem key={`c-${c.id}`} value={`c:${c.id}`}>{c.label}</SelectItem>
                                 ))}
                               </SelectGroup>
                             )}
@@ -1844,7 +1948,15 @@ export default function MaterialExpenseBooking() {
                               <SelectGroup>
                                 <SelectLabel>Brokers</SelectLabel>
                                 {brokerHeads.map((b) => (
-                                  <SelectItem key={`b-${b.id}`} value={b.label}>{b.label}</SelectItem>
+                                  <SelectItem key={`b-${b.id}`} value={`b:${b.id}`}>{b.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {customerHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Customers</SelectLabel>
+                                {customerHeads.map((cu) => (
+                                  <SelectItem key={`a-${cu.id}`} value={`a:${cu.id}`}>{cu.label}</SelectItem>
                                 ))}
                               </SelectGroup>
                             )}
@@ -2142,7 +2254,7 @@ export default function MaterialExpenseBooking() {
                     <Field
                       label="Cost Center"
                       className={
-                        isDirect && selectedDoc?.kind === "TOD"
+                        isDirectPartyMode
                           ? undefined
                           : "sm:col-span-2"
                       }
@@ -2166,7 +2278,7 @@ export default function MaterialExpenseBooking() {
                         TDS Applicable flag). Never mandatory here — the
                         ₹30k single-bill / ₹1L yearly-cumulative threshold is
                         only enforced later, at payment time. */}
-                    {isDirect && selectedDoc?.kind === "TOD" && tdsEligibility?.tdsApplicable && (
+                    {isDirectPartyMode && tdsEligibility?.tdsApplicable && (
                       <Field
                         label="TDS"
                         className="sm:col-span-2"
@@ -2208,7 +2320,7 @@ export default function MaterialExpenseBooking() {
               </div>
 
               {/* ── Direct (Other Expenses) Items ──────────────────────── */}
-              {isDirect && selectedDoc?.kind === "TOD" && (
+              {isDirectPartyMode && (
                 <DirectItemsTable
                   items={form.directItems ?? []}
                   readOnly={
@@ -2283,7 +2395,7 @@ export default function MaterialExpenseBooking() {
                   Only makes sense for Other Expenses (TOD) bookings —
                   PO/GRN/WO-linked invoices already resolve GL posting from
                   the linked document's own accounts. */}
-              {isDirect && selectedDoc?.kind === "TOD" && (
+              {isDirectPartyMode && (
                 <div className="space-y-3">
                   <SectionHeader label="Expense Head" />
                   <Field
@@ -2867,6 +2979,7 @@ export default function MaterialExpenseBooking() {
           previewRecord={previewRecord}
           onClose={() => setPreviewRecord(null)}
           onEdit={(record) => openEditForm(record)}
+          canEdit={rights.canEdit}
         />
 
         {/* Remaining GRN Items — auto-created silently on save */}

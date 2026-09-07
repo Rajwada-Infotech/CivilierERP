@@ -7,10 +7,6 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
-import { ExpenseBookingPreviewModal } from "@/pages/material/ExpenseBookingPreviewModal";
-import { dbToRecord } from "@/pages/material/ExpenseBooking/helpers";
-import type { ExpenseRecord } from "@/pages/material/ExpenseBooking/types";
-import { API as EXPENSE_BOOKING_API, apiFetch as ebApiFetch } from "@/pages/material/ExpenseBooking/apiFetch";
 import {
   Dialog,
   DialogContent,
@@ -89,6 +85,13 @@ interface TBTransaction {
   invoiceNo: string | null;
   payment: { id: number; docNo: string | null; mode: string | null; status: string | null } | null;
   costCenter: { id: number; code: string | null; name: string | null } | null;
+  fixedAsset: {
+    assetId: number;
+    assetCode: string | null;
+    assetName: string | null;
+    faItemCode: string | null;
+    finYear: string | null;
+  } | null;
 }
 
 interface TBTransactionsResponse {
@@ -445,6 +448,7 @@ function TBRow({
                       <th className="px-3 py-2">Source / Entry</th>
                       <th className="px-3 py-2">Invoice No.</th>
                       <th className="px-3 py-2">Mode</th>
+                      <th className="px-3 py-2">Fixed Asset</th>
                       <th className="px-3 py-2">Cost Centre</th>
                       <th className="px-3 py-2 text-right">Debit</th>
                       <th className="px-3 py-2 text-right">Credit</th>
@@ -461,6 +465,7 @@ function TBRow({
                                   : st === "invoiceposting"  ? { label: "Invoice",    cls: "bg-amber-500/10 text-amber-600" }
                                   : st === "grn" || st === "grnposting" ? { label: "GRN", cls: "bg-violet-500/10 text-violet-500" }
                                   : st === "journalvoucher"  ? { label: "JV",         cls: "bg-rose-500/10 text-rose-500" }
+                                  : st === "onaccountledger" ? { label: "On Account", cls: "bg-cyan-500/10 text-cyan-600" }
                                   : { label: t.sourceType ?? "Entry", cls: "bg-muted text-muted-foreground" };
 
                       const ref = (t as any).sourceRef as { id: number; docNo: string; type: string } | null;
@@ -496,6 +501,24 @@ function TBRow({
                           </td>
                           <td className="px-3 py-1.5 text-[11px]">{t.invoiceNo || "—"}</td>
                           <td className="px-3 py-1.5 text-[11px]">{(t as any).mode || t.payment?.mode || "—"}</td>
+                          <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
+                            {t.fixedAsset ? (
+                              <span
+                                title={[
+                                  t.fixedAsset.assetCode,
+                                  t.fixedAsset.assetName,
+                                  t.fixedAsset.finYear,
+                                ].filter(Boolean).join(" · ")}
+                              >
+                                {t.fixedAsset.faItemCode || t.fixedAsset.assetCode || `Asset #${t.fixedAsset.assetId}`}
+                                {t.fixedAsset.finYear ? (
+                                  <span className="text-muted-foreground/60"> · {t.fixedAsset.finYear}</span>
+                                ) : null}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
                           <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
                             {t.costCenter
                               ? `${t.costCenter.code ?? ""}${t.costCenter.code ? " - " : ""}${t.costCenter.name ?? ""}`
@@ -793,11 +816,6 @@ export default function TrialBalance() {
   const [payDetail, setPayDetail] = useState<Record<string, any> | null>(null);
   const [payDetailLoading, setPayDetailLoading] = useState(false);
 
-  // ── Level 3: invoice / expense booking preview (same popup used on the
-  // Expense Booking page itself) ───────────────────────────────────────────
-  const [ebPreview, setEbPreview] = useState<ExpenseRecord | null>(null);
-  const [ebPreviewLoading, setEbPreviewLoading] = useState(false);
-
   // ── Cost Centre view — replaces the account tree when a cost centre is
   // selected, showing individual PO/GRN/Invoice postings instead of an
   // account-group rollup ────────────────────────────────────────────────────
@@ -991,35 +1009,22 @@ export default function TrialBalance() {
 
     if (!t.sourceId) return;
 
-    // Invoice / Expense Booking: fetch full detail and show the same
-    // popup-style preview card used on the Expense Booking page itself,
-    // instead of navigating away.
-    if (srcType === "EXPENSEBOOKING" || srcType === "INVOICEPOSTING") {
-      setEbPreview(null);
-      setEbPreviewLoading(true);
-      try {
-        const row = await ebApiFetch(`${EXPENSE_BOOKING_API}/${t.sourceId}`);
-        setEbPreview(dbToRecord(row));
-      } catch {
-        // leave ebPreview null — modal simply won't open
-      } finally {
-        setEbPreviewLoading(false);
-      }
-      return;
-    }
-
-    // Other source types — navigate to the relevant page. srcType here is
-    // t.sourceType.toUpperCase() straight from GeneralLedgerEntry.SourceType
-    // (see backend/routes/trialBalance.js), e.g. "ReceivedPayment",
-    // "JournalVoucher", "GRNPosting" — match those exactly, not underscored
-    // guesses that never fired.
+    // Every source type navigates straight to that document's own real
+    // detail/form view via its ?view= deep link — same pattern across the
+    // board (Invoice/Expense Booking used to open its own inline preview
+    // popup here instead, which was one extra step short of ever reaching
+    // the real form). srcType here is t.sourceType.toUpperCase() straight
+    // from GeneralLedgerEntry.SourceType (see backend/routes/trialBalance.js).
     switch (srcType) {
+      case "EXPENSEBOOKING":
+      case "INVOICEPOSTING":
+        navigate(`/material/expense-booking?view=${t.sourceId}`); break;
       case "RECEIVEDPAYMENT":
       case "RECEIPT":
         navigate(`/received-payments?view=${t.sourceId}`); break;
       case "PURCHASE_ORDER":
       case "PO":
-        navigate(`/purchase-orders?view=${t.sourceId}`); break;
+        navigate(`/material/purchase-order?view=${t.sourceId}`); break;
       case "GRN":
       case "GRNPOSTING":
         navigate(`/material/grn?view=${t.sourceId}`); break;
@@ -1803,25 +1808,6 @@ export default function TrialBalance() {
           ) : null}
         </DialogContent>
       </Dialog>
-
-      {/* ── Level 3: invoice / expense booking preview popup ─────────────── */}
-      <Dialog open={ebPreviewLoading} onOpenChange={() => {}}>
-        <DialogContent className="max-w-xs">
-          <div className="flex items-center justify-center gap-2 py-6 text-muted-foreground text-xs">
-            <Loader2 size={14} className="animate-spin" /> Loading invoice…
-          </div>
-        </DialogContent>
-      </Dialog>
-      <ExpenseBookingPreviewModal
-        previewRecord={ebPreview}
-        onClose={() => setEbPreview(null)}
-        onEdit={() => {
-          if (ebPreview) navigate(`/material/expense-booking?view=${ebPreview.id}`);
-          setEbPreview(null);
-        }}
-      />
-
-      {/* ── Drill-down dialog — Level 2: entity transactions, Level 3: open receipt ── */}
 
     </>
   );

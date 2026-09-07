@@ -97,6 +97,7 @@ import {
   fetchProjectOptions,
   fetchSupplierOptions,
   fetchFinYearOptions,
+  fetchChequeLots,
   PARTY_TYPE_LABELS,
 } from "./payment/api";
 import { blankForm, dbToRecord } from "./payment/formHelpers";
@@ -115,9 +116,18 @@ import { ChequePanel } from "./payment/components/ChequePanel";
 import { DigitalRefPanel } from "./payment/components/DigitalRefPanel";
 import { CardPanel } from "./payment/components/CardPanel";
 import { ExpenseHeadAllocationEditor } from "@/pages/material/ExpenseBooking/ExpenseHeadAllocationEditor";
-import { getPayableEmis, payLoan, type PayableEmi } from "@/api/loanSanctionApi";
+import { getUndisbursedLoans, postLoanToGL, disburseLoan, type UndisbursedLoan } from "@/api/loanSanctionApi";
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
+
+// Same helper ReceivedPayment.tsx uses to compare company names for the
+// bank-company scoping filter below — tolerant of casing/whitespace so
+// "ABC Test Company " and "abc test company" still match.
+const normalizeCompanyName = (value: string | null | undefined) =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -302,7 +312,10 @@ const Payment: React.FC = () => {
   useEffect(() => {
     if (detailTab !== "posting" || pmtPostingLoading || pmtPosting) return;
     const entries: any[] = pmtPostingData?.entries ?? [];
-    const next = entries.find((e) => !e.isPosted && !e.isBounced);
+    // Debit Notes (routes/debitNote.js) post themselves immediately on save
+    // — there's no /:id/post-to-gl for a debit note id, so this loop must
+    // never try to "auto-post" one the way it does payments/bounce charges.
+    const next = entries.find((e) => !e.isPosted && !e.isBounced && e.type !== "debit_note");
     if (!next) return;
     const url =
       next.type === "bounce_charge"
@@ -746,6 +759,22 @@ const Payment: React.FC = () => {
     queryFn: fetchBankOptions,
   });
 
+  // ── Banks scoped to the selected company ────────────────────────────────
+  // Same convention ReceivedPayment.tsx already uses: a bank with no
+  // company tagged is shared across every company, so it stays in the
+  // list regardless; one tagged to a DIFFERENT company is hidden. Falls
+  // back to the full list if the filter would otherwise leave nothing to
+  // pick — better an unscoped dropdown than a dead end.
+  const filteredBanks = useMemo(() => {
+    if (!form.company) return banks;
+    const selected = normalizeCompanyName(form.company);
+    const matched = banks.filter((b) => {
+      const bankCompany = normalizeCompanyName(b.companyName);
+      return !bankCompany || bankCompany === selected;
+    });
+    return matched.length > 0 ? matched : banks;
+  }, [banks, form.company]);
+
   const { data: enterprises = [] } = useQuery<{ id: number; label: string }[]>({
     queryKey: ["company-options-payment-filter"],
     queryFn: fetchCompanyOptions,
@@ -995,128 +1024,94 @@ const Payment: React.FC = () => {
     }));
   };
 
-  // ── Loan EMI source ──────────────────────────────────────────────────────
-  // selectedLoanEmi is the anchor row clicked in the picker — it identifies
-  // the loan and seeds the initial selection, but the modal lets the user
-  // widen this to multiple EMIs on the same loan, or switch to a lump sum
-  // covering the whole (or partial) outstanding balance.
-  const [selectedLoanEmi, setSelectedLoanEmi] = useState<PayableEmi | null>(null);
-  const [loanPaymentDetailsOpen, setLoanPaymentDetailsOpen] = useState(false);
-  const [loanPayMode, setLoanPayMode] = useState<"emis" | "lumpsum">("emis");
-  const [selectedLoanEmiIds, setSelectedLoanEmiIds] = useState<number[]>([]);
-  const [loanLumpSumAmount, setLoanLumpSumAmount] = useState("");
-  const [loanLateFee, setLoanLateFee] = useState("");
-  const [loanPaymentNotes, setLoanPaymentNotes] = useState("");
-  // Loan EMIs are only "payable" from the company that's actually the
-  // lender or borrower on that loan. At the point the user is browsing the
-  // Loan EMIs tab, form.company is still empty — the whole point of picking
-  // an EMI here is to auto-fill it — so the only company context that
-  // actually exists yet is the FilterBar's own Company filter above the
-  // picker. Once a booking has been linked (form.company set), prefer that.
-  const loanEmiCompanyId =
-    companyOptions.find((c) => c.label === form.company)?.id ??
-    companyOptions.find((c) => c.label === bookingFilters.company)?.id;
-  const { data: loanEmiOptions = [], isLoading: loanEmisLoading } = useQuery<PayableEmi[]>({
-    queryKey: ["payment-loan-emis", loanEmiCompanyId],
-    queryFn: () => getPayableEmis(loanEmiCompanyId!),
-    enabled: !!loanEmiCompanyId,
-    staleTime: 60_000,
+  // ── Loan Disbursement (Inter-Company) ───────────────────────────────────
+  // The only loan-related action left on this page — repayment of every
+  // loan type now happens exclusively through Received Payment (see its
+  // own Loan Repayment picker). Disbursement is the initial money-out
+  // event: pick a Sanctioned, undisbursed Inter-Company loan and post it.
+  // No NewPayment record and no fresh bank/cheque entry needed — the
+  // loan's own sanction already carries its Lender/Borrower Bank A/C, and
+  // POST /:id/post-to-gl posts both companies' legs from those, the same
+  // mechanism that used to fire automatically at sanction time.
+  const loanDisbursementCompanyId = companyOptions.find((c) => c.label === bookingFilters.company)?.id;
+  const {
+    data: undisbursedLoans = [],
+    isLoading: undisbursedLoansLoading,
+    refetch: refetchUndisbursedLoans,
+  } = useQuery<UndisbursedLoan[]>({
+    queryKey: ["payment-undisbursed-loans", loanDisbursementCompanyId],
+    queryFn: () => getUndisbursedLoans(loanDisbursementCompanyId!),
+    enabled: !!loanDisbursementCompanyId,
+    staleTime: 30_000,
   });
-  // Every other pending EMI on the same loan — lets the modal offer "pay
-  // multiple EMIs at once" without a second fetch.
-  const loanSiblingEmis = selectedLoanEmi
-    ? loanEmiOptions.filter((e) => e.LoanId === selectedLoanEmi.LoanId).sort((a, b) => a.InstallmentNo - b.InstallmentNo)
-    : [];
-  const loanSelectedEmisTotal = loanSiblingEmis
-    .filter((e) => selectedLoanEmiIds.includes(e.EMIId))
-    .reduce((s, e) => s + Number(e.EMIAmount), 0);
-  const loanOutstandingTotal = loanSiblingEmis.reduce((s, e) => s + Number(e.EMIAmount), 0);
-
-  const applyLoanPaymentAmount = useCallback((mode: "emis" | "lumpsum", emiIds: number[], lumpSum: string, sibs: PayableEmi[]) => {
-    const total = mode === "lumpsum"
-      ? Number(lumpSum) || 0
-      : sibs.filter((e) => emiIds.includes(e.EMIId)).reduce((s, e) => s + Number(e.EMIAmount), 0);
-    setForm((prev) => ({ ...prev, amount: total }));
-  }, []);
-
-  const handleLoanEmiSelect = (emi: PayableEmi) => {
-    setSelectedLoanEmi(emi);
-    setSelectedContract(null);
-    setLoanPayMode("emis");
-    setSelectedLoanEmiIds([emi.EMIId]);
-    setLoanLumpSumAmount("");
-    setLoanLateFee("");
-    setLoanPaymentNotes("");
-    // Auto-fill Company/Payable To from the loan's own borrower/lender —
-    // this is a loan repayment, not a fresh manual entry, so who pays and
-    // who gets paid is already on file and shouldn't need re-selecting.
-    //
-    // Inter-Company/Bank Loan: the BORROWER is one of our own companies
-    // (the one settling the debt), and the LENDER is who it's paid to — so
-    // Company = borrower, Payee = lender.
-    //
-    // Customer Loan flips this: the borrower is external (a customer, not
-    // one of our companies), and it's the LENDER whose books this repayment
-    // is actually recorded under — so Company = lender, Payee = the
-    // customer (BorrowerName).
-    const isCustomerLoan = emi.LoanType === "Customer Loan";
-    const companySourceName = isCustomerLoan ? emi.LenderCompanyName : emi.BorrowerCompanyName;
-    const payeeSourceName = isCustomerLoan ? emi.BorrowerName : emi.LenderName;
-    const matchedCompany = companySourceName
-      ? companyOptions.find((c) => c.label === companySourceName)
-      : undefined;
-    // Payee/Party is a dropdown over AccountHeadMaster Suppliers/
-    // Contractors/Brokers only (see fetchSupplierOptions) — neither a loan's
-    // lender company nor a customer borrower lives in that list, so it's
-    // shown as plain text below instead of forced through that dropdown.
-    // Still worth setting partyId when the name genuinely happens to match
-    // a real ledger option, in case anything downstream keys off it.
-    const matchedParty = payeeSourceName
-      ? supplierOptions.find((s) => s.label === payeeSourceName)
-      : undefined;
-    setForm((prev) => ({
-      ...prev,
-      paymentName: `Loan EMI ${emi.InstallmentNo} — ${emi.LoanNo} (${emi.BorrowerName})`,
-      expenseRef: "",
-      expenseId: "",
-      contractId: "",
-      amount: Number(emi.EMIAmount),
-      company: matchedCompany ? matchedCompany.label : prev.company,
-      paidTo: payeeSourceName || prev.paidTo,
-      partyId: matchedParty ? matchedParty.id : prev.partyId,
-    }));
-    // Late fee / loan-specific charges — and now multi-EMI / lump-sum
-    // selection — are handled in a dedicated modal, not the regular
-    // payment form.
-    setLoanPaymentDetailsOpen(true);
-  };
-  const toggleLoanEmiSelected = (emiId: number) => {
-    setSelectedLoanEmiIds((prev) => {
-      const next = prev.includes(emiId) ? prev.filter((id) => id !== emiId) : [...prev, emiId];
-      applyLoanPaymentAmount("emis", next, loanLumpSumAmount, loanSiblingEmis);
-      return next;
-    });
-  };
-  const setLoanPayModeAndSync = (mode: "emis" | "lumpsum") => {
-    setLoanPayMode(mode);
-    if (mode === "lumpsum" && !loanLumpSumAmount) {
-      setLoanLumpSumAmount(String(loanOutstandingTotal));
-      applyLoanPaymentAmount("lumpsum", selectedLoanEmiIds, String(loanOutstandingTotal), loanSiblingEmis);
-    } else {
-      applyLoanPaymentAmount(mode, selectedLoanEmiIds, loanLumpSumAmount, loanSiblingEmis);
+  const [disbursingLoanId, setDisbursingLoanId] = useState<number | null>(null);
+  const handleDisburseLoan = async (loan: UndisbursedLoan) => {
+    if (!loan.LenderBankAccountId || !loan.BorrowerBankAccountId) {
+      toast.error(
+        `${loan.LoanNo} is missing a Lender or Borrower Bank A/C — add it from Loan Sanction before disbursing.`,
+      );
+      return;
+    }
+    setDisbursingLoanId(loan.LoanId);
+    try {
+      const res = await postLoanToGL(loan.LoanId);
+      toast.success(`${loan.LoanNo} disbursed — JV ${res.voucherNo}`);
+      refetchUndisbursedLoans();
+    } catch (err: any) {
+      toast.error(err.message || "Disbursement failed");
+    } finally {
+      setDisbursingLoanId(null);
     }
   };
-  // Only clears the loan-side selection state — deliberately does NOT touch
-  // paymentName/amount, since this also fires defensively whenever an
-  // invoice/contract is picked (to un-highlight a previous loan pick), and
-  // must not stomp on the fields that selection just set.
-  const clearLoanEmiLink = () => {
-    setSelectedLoanEmi(null);
-    setSelectedLoanEmiIds([]);
-    setLoanLumpSumAmount("");
-    setLoanLateFee("");
-    setLoanPaymentNotes("");
+
+  // Customer Loan disbursement — unlike Inter-Company (a real bank account
+  // on both sides, so one click posts a voucher directly with no separate
+  // document), the other side here is a customer, not one of our own
+  // companies — a real NewPayment is needed as the bank-side record (bank/
+  // cheque/reference the user actually picks), same as loan repayment
+  // already requires. Selecting one just pre-fills the party + amount on
+  // THIS form; the rest (bank, mode, project, date) is filled normally,
+  // and POST /:id/disburse links the two once the payment is saved below.
+  const [disbursingCustomerLoan, setDisbursingCustomerLoan] = useState<UndisbursedLoan | null>(null);
+  const handleSelectCustomerLoanDisbursement = (loan: UndisbursedLoan) => {
+    if (loan.BorrowerCustomerSource === "CRM") {
+      toast.error(`${loan.LoanNo}'s borrower is a CRM customer — record this disbursement manually for now.`);
+      return;
+    }
+    if (!loan.BorrowerCustomerId) {
+      toast.error(`${loan.LoanNo} has no borrower customer on file.`);
+      return;
+    }
+    setDisbursingCustomerLoan(loan);
+    const isChequeMode = loan.PaymentMode === "Cheque" || loan.PaymentMode === "Post-Dated Cheque";
+    setForm((f) => ({
+      ...f,
+      // Company wasn't being pre-filled — the picker itself is scoped by
+      // company (bookingFilters.company, same label form.company expects),
+      // but nothing carried it onto the form. Left empty, the Bank field
+      // below has no company to scope its options by, so every mode
+      // (Cheque included) looked "locked" — there was simply nothing to
+      // pick from, not an actual disabled control.
+      company: bookingFilters.company || f.company,
+      partyId: loan.BorrowerCustomerId,
+      amount: loan.Amount,
+      paymentName: f.paymentName || `Loan disbursement — ${loan.LoanNo}`,
+      // The loan already recorded which bank/cheque it was disbursed
+      // through at sanction time — carry all of it over instead of leaving
+      // the Bank field on whatever was last selected (previously this left
+      // the wrong bank showing, and the cheque number blank/unpickable
+      // since it had already been deducted from the lot under this loan).
+      bankId: loan.LenderBankAccountId ?? f.bankId,
+      mode: loan.PaymentMode || f.mode,
+      chequeLotId: isChequeMode ? (loan.ChequeLotId ?? f.chequeLotId) : f.chequeLotId,
+      chequeLotNumber: isChequeMode ? (loan.ChequeLotNumber || f.chequeLotNumber) : f.chequeLotNumber,
+      chequeNo: isChequeMode ? (loan.ChequeNo || f.chequeNo) : f.chequeNo,
+      chequeDate: isChequeMode ? (loan.ChequeDate ? loan.ChequeDate.slice(0, 10) : f.chequeDate) : f.chequeDate,
+      isPostDated: isChequeMode ? !!loan.IsPostDated : f.isPostDated,
+    }));
+    toast.success(`${loan.LoanNo} selected — bank/cheque carried over from the loan. Review and save to disburse.`);
   };
+
 
   // ── Stats ──────────────────────────────────────────────────────────────────
 
@@ -1140,8 +1135,6 @@ const Payment: React.FC = () => {
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setSelectedContract(null);
-    clearLoanEmiLink();
-    setLoanPaymentDetailsOpen(false);
     setFormLiveRemaining(null);
     setFormKnownTotalPaid(null);
     setFormKnownTdsAmount(null);
@@ -1157,8 +1150,6 @@ const Payment: React.FC = () => {
 
   const openEdit = (rec: PaymentRecord) => {
     setSelectedContract(null);
-    clearLoanEmiLink();
-    setLoanPaymentDetailsOpen(false);
     setEditingId(rec.id);
     refetchExpenseOptions();
     const { id, ...rest } = rec;
@@ -1184,8 +1175,6 @@ const Payment: React.FC = () => {
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setSelectedContract(null);
-    clearLoanEmiLink();
-    setLoanPaymentDetailsOpen(false);
   };
 
   const blank = blankForm();
@@ -1476,9 +1465,24 @@ const Payment: React.FC = () => {
                       )
                     : Math.round(t.totalInclGST * 100) / 100;
 
+                // netPayable is the full GST-inclusive gross — it does NOT yet
+                // account for TDS withheld or anything already paid. Left
+                // unadjusted, this silently overwrote the correct TDS-net/
+                // paid-net amount the synchronous set above (line ~1433)
+                // already computed, making form.amount exceed the invoice's
+                // real outstanding balance by the TDS amount (and any prior
+                // payments) — which then made the Payment Breakdown card's
+                // "entered > prevOutstanding" check misfire and mislabel a
+                // perfectly normal payment as "On A/c" overpayment. Apply
+                // the same TDS/paid-so-far subtraction here.
+                const paidSoFarGrn = selectedOption?.totalPaid ?? 0;
+                const trueRemainingGrn = Math.max(0, netPayable - freshTdsAmt - paidSoFarGrn);
+                const netPayableAfterTdsAndPaid =
+                  trueRemainingGrn > 0 ? trueRemainingGrn : netPayable - freshTdsAmt;
+
                 setForm((prev) => ({
                   ...prev,
-                  amount: amountOverride != null ? amountOverride : netPayable,
+                  amount: amountOverride != null ? amountOverride : netPayableAfterTdsAndPaid,
                   baseAmount: Math.round(t.totalBase * 100) / 100,
                   cgstRate: Math.round(avgCGST * 100) / 100,
                   sgstRate: Math.round(avgSGST * 100) / 100,
@@ -1550,9 +1554,18 @@ const Payment: React.FC = () => {
                   )
                 : Math.round(totals.totalInclGST * 100) / 100;
 
+            // Same TDS/paid-so-far adjustment as applyGrnBreakdown — see the
+            // comment there for why this is required (netPayable is the raw
+            // GST-inclusive gross across every linked GRN, not yet net of
+            // TDS or prior payments).
+            const paidSoFarMulti = selectedOption?.totalPaid ?? 0;
+            const trueRemainingMulti = Math.max(0, netPayable - freshTdsAmt - paidSoFarMulti);
+            const netPayableAfterTdsAndPaid =
+              trueRemainingMulti > 0 ? trueRemainingMulti : netPayable - freshTdsAmt;
+
             setForm((prev) => ({
               ...prev,
-              amount: amountOverride != null ? amountOverride : netPayable,
+              amount: amountOverride != null ? amountOverride : netPayableAfterTdsAndPaid,
               baseAmount: Math.round(totals.totalBase * 100) / 100,
               cgstRate: Math.round(avgCGST * 100) / 100,
               sgstRate: Math.round(avgSGST * 100) / 100,
@@ -2004,50 +2017,28 @@ const Payment: React.FC = () => {
         await updatePayment(editingId, payload);
         toast.success("Payment updated.");
       } else {
-        const newPaymentRes = await addPayment(payload);
-        // A Loan EMI payment isn't just a NewPayment record — it also has to
-        // actually settle the EMI on the loan itself (mark it paid, run the
-        // payoff/early-closure check, generate the payment ref). That's what
-        // the loan-sanction backend's own /pay endpoint does; this triggers
-        // it right after the payment record is created. Passing this
-        // payment's own id through (see migration 340) is what lets the
-        // loan's Repayment History later show the real cheque/mode/bank it
-        // was actually paid with, instead of nothing.
-        if (selectedLoanEmi) {
+        const created = await addPayment(payload);
+        toast.success(reissueCtx ? "Re-issue payment saved. Linked to original." : "Payment saved.");
+
+        // This payment IS a Customer Loan disbursement — link it back to
+        // the loan (migration 401), the same way loan repayment already
+        // does, so the loan's ledger side posts and DisbursedAt reflects a
+        // real bank-side record instead of never being set.
+        if (disbursingCustomerLoan) {
           try {
-            const res = await payLoan(selectedLoanEmi.LoanId, {
-              newPaymentId: newPaymentRes?.PPaymentID,
-              emiIds: loanPayMode === "emis" ? selectedLoanEmiIds : undefined,
-              lumpSumAmount: loanPayMode === "lumpsum" ? loanLumpSumAmount : undefined,
-              paymentDate: form.date,
-              lateFee: loanLateFee || undefined,
-              notes: loanPaymentNotes || `Paid via Payment — ${form.paymentName}`,
-            });
-            // loanClosed is always false now — closure is a deliberate step
-            // from Loan Sanction. readyToClose tells us all EMIs are now paid
-            // so we can guide the user to close it from the Loan Sanction page.
-            toast.success(
-              res.readyToClose
-                ? `All installments settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef} — go to Loan Sanction to formally close it.`
-                : `Loan payment settled on ${selectedLoanEmi.LoanNo}. Ref: ${res.paymentRef}`,
-              { duration: res.readyToClose ? 8000 : 4000 },
-            );
-            if (res.glPostingWarning) {
-              toast.warning(`⚠️ GL posting skipped: ${res.glPostingWarning}`, { duration: 8000 });
-            }
-            queryClient.invalidateQueries({ queryKey: ["payment-loan-emis"] });
-            queryClient.invalidateQueries({ queryKey: ["loan-sanctions"] });
+            const res = await disburseLoan(disbursingCustomerLoan.LoanId, { newPaymentId: created.PPaymentID });
+            toast.success(`${disbursingCustomerLoan.LoanNo} disbursed — JV ${res.voucherNo}`);
+            refetchUndisbursedLoans();
           } catch (loanErr: any) {
             toast.error(
-              `Payment saved, but the loan payment could not be settled: ${loanErr.message}. Settle it manually from the Loan Sanction page.`,
+              `Payment was recorded, but linking it to the loan failed: ${loanErr.message}. Post it manually from Loan Sanction.`,
             );
           }
-        } else {
-          toast.success(reissueCtx ? "Re-issue payment saved. Linked to original." : "Payment saved.");
         }
       }
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+      setDisbursingCustomerLoan(null);
       cancelForm();
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
@@ -2355,6 +2346,69 @@ const Payment: React.FC = () => {
                             });
                           }}
                         />
+                        {!!loanDisbursementCompanyId && (undisbursedLoansLoading || undisbursedLoans.length > 0) && (
+                          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                            <p className="text-xs font-heading font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                              Loan Disbursement — loans not yet posted to GL
+                            </p>
+                            {undisbursedLoansLoading ? (
+                              <p className="text-[11px] text-muted-foreground">Checking for undisbursed loans…</p>
+                            ) : (
+                              <div className="space-y-1.5">
+                                {undisbursedLoans.map((loan) => {
+                                  const isInterCompany = loan.LoanType === "Inter-Company";
+                                  const selected = disbursingCustomerLoan?.LoanId === loan.LoanId;
+                                  return (
+                                    <div
+                                      key={loan.LoanId}
+                                      className={`flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-md bg-background border ${selected ? "border-amber-500" : "border-border"}`}
+                                    >
+                                      <div className="min-w-0">
+                                        <p className="font-mono text-xs font-semibold text-foreground truncate">
+                                          {loan.LoanNo}{" "}
+                                          {isInterCompany
+                                            ? loan.BorrowerCompanyName ? `— to ${loan.BorrowerCompanyName}` : ""
+                                            : loan.BorrowerCustomerName ? `— to ${loan.BorrowerCustomerName}` : ""}
+                                        </p>
+                                        <p className="text-[11px] text-muted-foreground">
+                                          {formatINR(loan.Amount)} · sanctioned {new Date(loan.LoanDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                                          {!isInterCompany && " · Customer Loan"}
+                                        </p>
+                                      </div>
+                                      {isInterCompany ? (
+                                        <button
+                                          type="button"
+                                          disabled={disbursingLoanId === loan.LoanId}
+                                          onClick={() => handleDisburseLoan(loan)}
+                                          className="shrink-0 px-3 py-1 rounded-md text-[11px] font-heading font-semibold bg-amber-600 text-white hover:bg-amber-600/90 transition-colors disabled:opacity-50"
+                                        >
+                                          {disbursingLoanId === loan.LoanId ? "Disbursing…" : "Disburse"}
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSelectCustomerLoanDisbursement(loan)}
+                                          className={`shrink-0 px-3 py-1 rounded-md text-[11px] font-heading font-semibold transition-colors ${
+                                            selected
+                                              ? "bg-amber-600/20 text-amber-700 dark:text-amber-400 border border-amber-500"
+                                              : "bg-amber-600 text-white hover:bg-amber-600/90"
+                                          }`}
+                                        >
+                                          {selected ? "Selected ✓" : "Select"}
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {disbursingCustomerLoan && (
+                              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                                Disbursing <span className="font-semibold">{disbursingCustomerLoan.LoanNo}</span> — party and amount pre-filled below. Pick the bank/mode, then Save.
+                              </p>
+                            )}
+                          </div>
+                        )}
                         <ExpenseBookingPicker
                           options={filteredOptions}
                           value={form.expenseId}
@@ -2365,34 +2419,7 @@ const Payment: React.FC = () => {
                           selectedContract={selectedContract}
                           onContractSelect={handleContractSelect}
                           onContractClear={clearContractLink}
-                          loanEmis={loanEmiOptions}
-                          loanEmisLoading={loanEmisLoading}
-                          loanEmisNoCompany={!loanEmiCompanyId}
-                          selectedLoanEmi={selectedLoanEmi}
-                          onLoanEmiSelect={handleLoanEmiSelect}
-                          onLoanEmiClear={clearLoanEmiLink}
                         />
-                        {selectedLoanEmi && (
-                          <p className="text-[11px] text-muted-foreground flex items-center gap-2 flex-wrap">
-                            <span>
-                              {loanPayMode === "lumpsum"
-                                ? "Lump sum"
-                                : `${selectedLoanEmiIds.length} EMI${selectedLoanEmiIds.length === 1 ? "" : "s"} selected`}
-                              {" · "}
-                              <span className="font-mono font-medium text-foreground/80">{formatINR(form.amount ?? 0)}</span>
-                            </span>
-                            <span>
-                              Late fee: <span className="font-mono font-medium text-foreground/80">{loanLateFee ? formatINR(Number(loanLateFee)) : "—"}</span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setLoanPaymentDetailsOpen(true)}
-                              className="text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
-                            >
-                              Edit loan payment details
-                            </button>
-                          </p>
-                        )}
                         <div className="flex items-center gap-2 pt-1">
                           {filteredOptions.length === 0 && !loadingExpense && (
                             <p className="text-[11px] text-muted-foreground">Invoice not visible?</p>
@@ -2524,70 +2551,54 @@ const Payment: React.FC = () => {
                     </Field>
                     <Field
                       label="Payee / Party"
-                      hint={
-                        selectedLoanEmi
-                          ? "From the loan record — a loan counterparty isn't a Supplier/Contractor/Broker, so it isn't picked from that list"
-                          : "Required for On Account tracking — who this payment is being made to"
-                      }
+                      hint="Required for On Account tracking — who this payment is being made to"
                     >
-                      {selectedLoanEmi ? (
-                        // A loan's lender is a company (or, for a Bank Loan, a
-                        // bank head) — never a Supplier/Contractor/Broker, so
-                        // it can't live in the dropdown below. Show it as
-                        // plain fact instead of a dropdown with nothing
-                        // selectable in it.
-                        <div className="flex items-center gap-2">
-                          <Users size={13} className="text-muted-foreground shrink-0" />
-                          <ReadOnlyField value={form.paidTo} placeholder="From loan record" />
-                        </div>
-                      ) : (
-                        <div className="relative">
-                          <Users
-                            size={13}
-                            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                          />
-                          <select
-                            value={form.partyId !== null ? String(form.partyId) : ""}
-                            onChange={(e) => {
-                              const id = e.target.value;
-                              const opt = supplierOptions.find((s) => String(s.id) === id);
-                              set("partyId", id ? Number(id) : null);
-                              set("paidTo", opt?.label || "");
-                            }}
-                            className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                          >
-                            <option value="">Select party…</option>
-                            {(() => {
-                              // Group by category (Suppliers / Contractors / Brokers) so the
-                              // list isn't one flat undifferentiated block — falls back to a
-                              // single "Other" group for any row missing a recognised type.
-                              const groups = new Map<string, typeof supplierOptions>();
-                              supplierOptions.forEach((s) => {
-                                const key = PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
-                                if (!groups.has(key)) groups.set(key, []);
-                                groups.get(key)!.push(s);
-                              });
-                              const order = ["Suppliers", "Contractors", "Brokers", "Other"];
-                              const sortedKeys = [...groups.keys()].sort(
-                                (a, b) => order.indexOf(a) - order.indexOf(b),
-                              );
-                              return sortedKeys.map((groupLabel) => (
-                                <optgroup key={groupLabel} label={groupLabel}>
-                                  {groups.get(groupLabel)!.map((s) => (
-                                    <option key={s.id} value={String(s.id)}>
-                                      {s.label}
-                                    </option>
-                                  ))}
-                                </optgroup>
-                              ));
-                            })()}
-                          </select>
-                          <ChevronDown
-                            size={11}
-                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                          />
-                        </div>
-                      )}
+                      <div className="relative">
+                        <Users
+                          size={13}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                        <select
+                          value={form.partyId !== null ? String(form.partyId) : ""}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            const opt = supplierOptions.find((s) => String(s.id) === id);
+                            set("partyId", id ? Number(id) : null);
+                            set("paidTo", opt?.label || "");
+                          }}
+                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Select party…</option>
+                          {(() => {
+                            // Group by category (Suppliers / Contractors / Brokers / Customers)
+                            // so the list isn't one flat undifferentiated block — falls back
+                            // to a single "Other" group for any row missing a recognised type.
+                            const groups = new Map<string, typeof supplierOptions>();
+                            supplierOptions.forEach((s) => {
+                              const key = PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
+                              if (!groups.has(key)) groups.set(key, []);
+                              groups.get(key)!.push(s);
+                            });
+                            const order = ["Suppliers", "Contractors", "Brokers", "Customers", "Other"];
+                            const sortedKeys = [...groups.keys()].sort(
+                              (a, b) => order.indexOf(a) - order.indexOf(b),
+                            );
+                            return sortedKeys.map((groupLabel) => (
+                              <optgroup key={groupLabel} label={groupLabel}>
+                                {groups.get(groupLabel)!.map((s) => (
+                                  <option key={s.id} value={String(s.id)}>
+                                    {s.label}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ));
+                          })()}
+                        </select>
+                        <ChevronDown
+                          size={11}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
                     </Field>
                     {/* TDS — only shown once the chosen party is actually
                         TDS-eligible. Never mandatory to fill here in the
@@ -3956,7 +3967,7 @@ const Payment: React.FC = () => {
                       className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed"
                     >
                       <option value="">— Select bank account —</option>
-                      {banks.map((b) => (
+                      {filteredBanks.map((b) => (
                         <option key={b.id} value={String(b.id)}>
                           {b.label}
                         </option>
@@ -4061,14 +4072,14 @@ const Payment: React.FC = () => {
                   <button
                     onClick={handleSave}
                     disabled={saving || !canSave}
-                    className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                    className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-opacity whitespace-nowrap"
                   >
                     {saving ? (
-                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                     ) : editingId ? (
-                      <Check size={14} />
+                      <Check size={12} />
                     ) : (
-                      <Plus size={14} />
+                      <Plus size={12} />
                     )}
                     {saving
                       ? "Saving…"
@@ -5524,7 +5535,7 @@ const Payment: React.FC = () => {
                     const fmtAmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                     const fmtDate = (d: string) => d ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(d)) : "—";
                     type ChainEntry = {
-                      date: string; docNo: string; pmtId: number; type: "payment" | "bounce_charge";
+                      date: string; docNo: string; pmtId: number; type: "payment" | "bounce_charge" | "debit_note";
                       amount: number; mode: string; bounceReason?: string;
                       isBounced?: boolean;
                       accounts: any; isPosted: boolean; jvNo: string | null;
@@ -5535,11 +5546,17 @@ const Payment: React.FC = () => {
                         {entries.map((entry, idx) => {
                           const isPayment = entry.type === "payment";
                           const isBounce = entry.type === "bounce_charge";
+                          const isDebitNote = entry.type === "debit_note";
                           const isBouncedPayment = isPayment && !!entry.isBounced;
                           const rows = isPayment
                             ? [
                                 { label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const },
                                 { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const },
+                              ]
+                            : isDebitNote
+                            ? [
+                                { label: entry.accounts?.debitLeg?.label ?? "—", code: entry.accounts?.debitLeg?.code, side: "debit" as const },
+                                { label: entry.accounts?.creditLeg?.label ?? "—", code: entry.accounts?.creditLeg?.code, side: "credit" as const },
                               ]
                             : [
                                 { label: entry.accounts?.bankCharges?.label ?? "Bank Charges (Other Expenses)", code: entry.accounts?.bankCharges?.code, side: "debit" as const },
@@ -5549,12 +5566,12 @@ const Payment: React.FC = () => {
                           const entryKey = `${entry.pmtId}-${entry.type}`;
 
                           return (
-                            <div key={entryKey} className={`rounded-xl border overflow-hidden ${isBounce ? "border-rose-500/30" : isBouncedPayment ? "border-rose-500/20 opacity-60" : "border-border"}`}>
+                            <div key={entryKey} className={`rounded-xl border overflow-hidden ${isBounce ? "border-rose-500/30" : isDebitNote ? "border-primary/30" : isBouncedPayment ? "border-rose-500/20 opacity-60" : "border-border"}`}>
                               {/* Entry header */}
-                              <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isBounce ? "bg-rose-500/5 border-rose-500/20" : isBouncedPayment ? "bg-rose-500/5 border-rose-500/10" : "bg-muted/40 border-border"}`}>
+                              <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isBounce ? "bg-rose-500/5 border-rose-500/20" : isDebitNote ? "bg-primary/5 border-primary/20" : isBouncedPayment ? "bg-rose-500/5 border-rose-500/10" : "bg-muted/40 border-border"}`}>
                                 <div className="flex items-center gap-2.5 flex-wrap">
-                                  <span className={`text-[10px] font-semibold uppercase tracking-widest ${isBounce ? "text-rose-600" : isBouncedPayment ? "text-rose-500" : "text-muted-foreground"}`}>
-                                    {isBounce ? "Bounce Charge" : "Payment"}
+                                  <span className={`text-[10px] font-semibold uppercase tracking-widest ${isBounce ? "text-rose-600" : isDebitNote ? "text-primary" : isBouncedPayment ? "text-rose-500" : "text-muted-foreground"}`}>
+                                    {isBounce ? "Bounce Charge" : isDebitNote ? "Debit Note" : "Payment"}
                                   </span>
                                   <span className="text-[10px] font-mono text-muted-foreground">{entry.docNo}</span>
                                   <span className="text-[10px] text-muted-foreground">{fmtDate(entry.date)}</span>
@@ -5748,250 +5765,6 @@ const Payment: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* Loan Payment Details — pick single/multiple EMIs or a lump sum for
-          this loan, plus late fee / notes. Separate from the main payment
-          form since a loan repayment carries charges (bank-applied or
-          company-set late fee) and a payoff shape that invoice/contract
-          payments don't have. */}
-      {loanPaymentDetailsOpen && selectedLoanEmi && (() => {
-        const base = loanPayMode === "lumpsum" ? Number(loanLumpSumAmount) || 0 : loanSelectedEmisTotal;
-        const fee = Number(loanLateFee) || 0;
-        const willPayOff = loanPayMode === "lumpsum" && loanOutstandingTotal > 0 && Number(loanLumpSumAmount) >= loanOutstandingTotal;
-        return (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
-          <div className="w-full max-w-md rounded-2xl bg-card border border-border shadow-2xl max-h-[88vh] flex flex-col overflow-hidden">
-            {/* Header */}
-            <div className="px-6 pt-6 pb-5 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border-b border-border">
-              <div className="flex items-start gap-3">
-                <div className="p-2.5 rounded-xl bg-amber-500/15 shrink-0">
-                  <Receipt size={18} className="text-amber-600" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="font-heading font-bold text-foreground text-base">
-                    Loan Payment Details
-                  </h3>
-                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
-                    <span className="font-mono text-xs font-semibold text-foreground/80">{selectedLoanEmi.LoanNo}</span>
-                    <span className="text-muted-foreground/50">·</span>
-                    <span className="text-xs text-muted-foreground truncate">{selectedLoanEmi.BorrowerName}</span>
-                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-400">
-                      {selectedLoanEmi.LoanType}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Body */}
-            <div className="px-6 py-5 space-y-5 overflow-y-auto">
-              {/* Payment mode toggle */}
-              <div className="grid grid-cols-2 gap-2 p-1 rounded-xl bg-muted/50">
-                <button
-                  type="button"
-                  onClick={() => setLoanPayModeAndSync("emis")}
-                  className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    loanPayMode === "emis" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <ListChecks size={13} /> Select EMI(s)
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLoanPayModeAndSync("lumpsum")}
-                  className={`flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    loanPayMode === "lumpsum" ? "bg-card shadow-sm text-primary border border-border" : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <Layers size={13} /> Lump Sum
-                </button>
-              </div>
-
-              {loanPayMode === "emis" ? (
-                <div className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
-                      Installments
-                    </label>
-                    <span className="text-[11px] text-muted-foreground">
-                      {selectedLoanEmiIds.length} selected
-                    </span>
-                  </div>
-                  <div className="rounded-xl border border-border divide-y divide-border max-h-48 overflow-y-auto">
-                    {loanSiblingEmis.map((e) => {
-                      const checked = selectedLoanEmiIds.includes(e.EMIId);
-                      return (
-                        <label
-                          key={e.EMIId}
-                          className={`flex items-center gap-2.5 px-3 py-2.5 text-sm cursor-pointer transition-colors ${
-                            checked ? "bg-primary/5" : "hover:bg-muted/40"
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => toggleLoanEmiSelected(e.EMIId)}
-                            className="w-4 h-4 rounded accent-primary cursor-pointer shrink-0"
-                          />
-                          <span className="flex-1 min-w-0">
-                            <span className="flex items-center gap-1.5">
-                              <span className="font-medium">EMI {e.InstallmentNo}</span>
-                              {!!e.IsOverdue && (
-                                <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-red-500/15 text-red-600 dark:text-red-400">
-                                  OVERDUE
-                                </span>
-                              )}
-                            </span>
-                            <span className="block text-[11px] text-muted-foreground">
-                              Due {new Date(e.DueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
-                            </span>
-                          </span>
-                          <span className="font-mono text-xs font-semibold shrink-0">{formatINR(e.EMIAmount)}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
-                    Lump Sum Amount
-                  </label>
-                  <div className="relative">
-                    <IndianRupee size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      autoComplete="off"
-                      value={loanLumpSumAmount}
-                      onChange={(e) => {
-                        setLoanLumpSumAmount(e.target.value);
-                        applyLoanPaymentAmount("lumpsum", selectedLoanEmiIds, e.target.value, loanSiblingEmis);
-                      }}
-                      placeholder="Enter amount"
-                      className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                    />
-                  </div>
-                  <p className="text-[11px] text-muted-foreground">
-                    Outstanding on this loan: <span className="font-mono font-medium text-foreground/80">{formatINR(loanOutstandingTotal)}</span>
-                  </p>
-                  {willPayOff && (
-                    <p className="flex items-center gap-1.5 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                      <CheckCircle2 size={12} /> This pays it off — the loan will close automatically.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Late fee */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
-                  Late Fee <span className="normal-case text-muted-foreground/70">({selectedLoanEmi.LoanType === "Bank Loan" ? "bank-applied" : "company-set"}, optional)</span>
-                </label>
-                <div className="relative">
-                  <IndianRupee size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    autoComplete="off"
-                    value={loanLateFee}
-                    onChange={(e) => setLoanLateFee(e.target.value)}
-                    placeholder="0"
-                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                </div>
-                {!!selectedLoanEmi.IsOverdue && (
-                  <p className="flex items-center gap-1.5 text-[11px] text-red-500">
-                    <AlertCircle size={11} /> This loan has an overdue installment — a late fee may apply.
-                  </p>
-                )}
-              </div>
-
-              {/* Breakdown — makes clear the late fee is added on top of the
-                  EMI/lump-sum amount, not folded into it, before this gets
-                  recorded as a single loan payment (principal+interest,
-                  late fee, and grand total tracked separately). */}
-              <div className="rounded-xl border border-primary/20 bg-primary/[0.04] px-4 py-3.5 space-y-2 text-xs tabular-nums">
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">
-                    {loanPayMode === "lumpsum" ? "Lump sum amount" : "Selected EMI(s)"}
-                  </span>
-                  <span className="font-mono font-medium text-foreground">{formatINR(base)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-muted-foreground">Late fee</span>
-                  <span className="font-mono font-medium text-foreground">{formatINR(fee)}</span>
-                </div>
-                <div className="flex items-center justify-between pt-2 border-t border-primary/15">
-                  <span className="font-heading font-semibold text-foreground text-[13px]">Total to pay</span>
-                  <span className="font-mono font-bold text-primary text-base">{formatINR(base + fee)}</span>
-                </div>
-              </div>
-
-              {/* Notes */}
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
-                  Notes (optional)
-                </label>
-                <div className="relative">
-                  <MessageSquare size={13} className="absolute left-3 top-2.5 text-muted-foreground pointer-events-none" />
-                  <input
-                    type="text"
-                    autoComplete="off"
-                    value={loanPaymentNotes}
-                    onChange={(e) => setLoanPaymentNotes(e.target.value)}
-                    placeholder="Reason for late fee, remarks…"
-                    className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="flex justify-end gap-2 px-6 py-4 border-t border-border bg-muted/20">
-              <button
-                onClick={() => {
-                  clearLoanEmiLink();
-                  setLoanPaymentDetailsOpen(false);
-                  // Selecting a loan EMI cleared the invoice/contract side
-                  // and set form fields directly — undo that too so
-                  // cancelling leaves a clean form, not a half-filled one.
-                  setForm((prev) => ({ ...prev, paymentName: "", amount: null }));
-                }}
-                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-              >
-                Cancel Loan Payment
-              </button>
-              <button
-                onClick={() => {
-                  if (base <= 0) {
-                    toast.error(loanPayMode === "lumpsum" ? "Enter a lump sum amount" : "Select at least one EMI");
-                    return;
-                  }
-                  setForm((prev) => ({
-                    ...prev,
-                    paymentName:
-                      loanPayMode === "lumpsum"
-                        ? `Loan Lump Sum — ${selectedLoanEmi.LoanNo} (${selectedLoanEmi.BorrowerName})`
-                        : `Loan EMI${selectedLoanEmiIds.length > 1 ? "s" : ""} ${loanSiblingEmis.filter((e) => selectedLoanEmiIds.includes(e.EMIId)).map((e) => e.InstallmentNo).join(", ")} — ${selectedLoanEmi.LoanNo} (${selectedLoanEmi.BorrowerName})`,
-                    // The actual bank/cheque transaction is the full amount
-                    // that changes hands — principal+interest (or lump sum)
-                    // plus the late fee, not just the EMI/lump-sum portion.
-                    amount: base + fee,
-                  }));
-                  setLoanPaymentDetailsOpen(false);
-                }}
-                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
-              >
-                Continue
-              </button>
-            </div>
-          </div>
-        </div>
-        );
-      })()}
     </>
   );
 };

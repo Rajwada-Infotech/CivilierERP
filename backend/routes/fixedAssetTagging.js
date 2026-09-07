@@ -8,6 +8,7 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
+const { generateFAItemCodes } = require("../services/faItemCodeGenerator");
 
 router.use(authenticateToken);
 
@@ -22,43 +23,148 @@ function toInt(val) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// ── GET /eligible-items — Pending FixedAssetRecord batches with untagged qty > 0 ──
+// Financial Year is derived from the Document Date, never trusted from the
+// client — this is the single source of truth both at save time and for the
+// list's Financial Year filter, so a tagging entry's date and its FinYear
+// can never drift apart the way manually-picked values could.
+async function deriveFinYear(pool, docDate) {
+  if (!docDate) return null;
+  const result = await pool.request().input("DocDate", sql.Date, docDate).query(`
+    SELECT TOP 1 FName FROM dbo.FinYear
+    WHERE @DocDate BETWEEN FStartDate AND FEndDate
+    ORDER BY FStartDate DESC
+  `);
+  return result.recordset[0]?.FName || null;
+}
+
+// ── GET /eligible-items — Fixed-Asset-type Item Master items with untagged
+// stock (StockLedger balance minus tagged-so-far) at the given Godown ───────
 router.get("/eligible-items", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
+  const godownId = toInt(req.query.godownId);
+  if (!godownId) return res.json([]);
   try {
     const pool = getPool();
-    const request = pool.request();
-    let where = ["fa.AssetStatus = 'Pending'", "fa.Status <> 'Deleted'"];
+    const request = pool.request().input("GodownId", sql.Int, godownId);
+    let faWhere = ["fa.AssetStatus = 'Pending'", "fa.Status <> 'Deleted'", "fa.GodownID = @GodownId"];
 
-    if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("fa.CompanyId = @CompanyId"); }
-    if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("fa.ProjectId = @ProjectId"); }
-    if (req.query.finYear)   { request.input("FinYear",   sql.NVarChar(20), req.query.finYear);        where.push("fa.FinYear = @FinYear"); }
+    if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); faWhere.push("fa.CompanyId = @CompanyId"); }
+    if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); faWhere.push("fa.ProjectId = @ProjectId"); }
+    if (req.query.finYear)   { request.input("FinYear",   sql.NVarChar(20), req.query.finYear);        faWhere.push("fa.FinYear = @FinYear"); }
 
     const result = await request.query(`
       SELECT
-        fa.AssetId, fa.AssetName, fa.AssetCategory, fa.AssetCode,
-        fa.SourceItemId AS ItemId, im.M_Name AS ItemName,
-        fa.Quantity,
+        CONVERT(NVARCHAR(100), im.M_Id) AS ItemId,
+        im.M_Name AS ItemName,
+        MAX(fa.AssetCategory) AS AssetCategory,
+        ISNULL(stock.Balance, 0) AS AvailableQty,
         ISNULL(tagged.Qty, 0) AS TaggedQty,
-        fa.Quantity - ISNULL(tagged.Qty, 0) AS UntaggedQty,
-        fa.CompanyId, co.name AS CompanyName,
-        fa.ProjectId, pr.name AS ProjectName,
-        fa.FinYear, fa.PurchaseDate, fa.DocNo
-      FROM dbo.FixedAssetRecord fa
-      LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = fa.SourceItemId
-      LEFT JOIN dbo.enterprise co ON co.id = fa.CompanyId
-      LEFT JOIN dbo.enterprise pr ON pr.id = fa.ProjectId
+        ISNULL(stock.Balance, 0) - ISNULL(tagged.Qty, 0) AS UntaggedQty
+      FROM dbo.Item_Master_Group im
+      JOIN dbo.FixedAssetRecord fa ON fa.SourceItemId = CONVERT(NVARCHAR(100), im.M_Id) AND ${faWhere.join(" AND ")}
+      OUTER APPLY (
+        SELECT SUM(CASE WHEN sl.Type = 'IN' THEN sl.Qty ELSE -sl.Qty END) AS Balance
+        FROM dbo.StockLedger sl
+        WHERE sl.ItemID = CONVERT(NVARCHAR(100), im.M_Id) AND sl.GodownID = @GodownId
+      ) stock
       OUTER APPLY (
         SELECT SUM(t.TaggedQty) AS Qty
         FROM dbo.FixedAssetTagging t
-        WHERE t.AssetId = fa.AssetId AND t.Status = 'Tagged'
+        WHERE t.ItemId = CONVERT(NVARCHAR(100), im.M_Id) AND t.GodownId = @GodownId AND t.Status = 'Tagged'
       ) tagged
-      WHERE ${where.join(" AND ")}
-        AND (fa.Quantity - ISNULL(tagged.Qty, 0)) > 0
-      ORDER BY fa.CreatedAt DESC
+      WHERE im.M_Type = 'Fixed Asset'
+      GROUP BY im.M_Id, im.M_Name, stock.Balance, tagged.Qty
+      HAVING (ISNULL(stock.Balance, 0) - ISNULL(tagged.Qty, 0)) > 0
+      ORDER BY im.M_Name
     `);
     res.json(result.recordset);
   } catch (err) {
     console.error("[fixedAssetTagging] GET /eligible-items:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /unassigned-codes — generated FA Item Codes not yet linked to a
+// Fixed Asset Record (used by Fixed Asset Record's "Fixed Asset Name" picker) ─
+router.get("/unassigned-codes", requirePageRight("fixed-asset-record", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        t.TagId, t.FAItemCode, t.DocNo,
+        CONVERT(NVARCHAR(100), im.M_Id) AS ItemId, im.M_Name AS ItemName,
+        t.CompanyId, co.name AS CompanyName,
+        t.ProjectId, pr.name AS ProjectName,
+        t.GodownId, gd.GodownName
+      FROM dbo.FixedAssetTagging t
+      LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
+      LEFT JOIN dbo.enterprise co ON co.id = t.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = t.ProjectId
+      LEFT JOIN dbo.Godowns gd ON gd.GodownID = t.GodownId
+      WHERE t.FAItemCode IS NOT NULL AND t.Status = 'Tagged'
+        AND NOT EXISTS (SELECT 1 FROM dbo.FixedAssetRecord fa WHERE fa.SourceTagId = t.TagId AND fa.Status <> 'Deleted')
+      ORDER BY t.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[fixedAssetTagging] GET /unassigned-codes:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /tagged-codes — FA Item Codes whose Fixed Asset Depreciation Tag
+// (Asset Register) process is COMPLETE, for the sticker-print page. Hard
+// rule: the tag is Status='Tagged', carries an FAItemCode, AND a live
+// Fixed Asset Record has been created from it (fr.SourceTagId = t.TagId).
+// Codes stay listed forever once that record exists, so stickers can be
+// reprinted. Filters: company, financial year, tagging-date range,
+// FA-Item-Code search, Item-Name search. ───────────────────────────────────
+router.get("/tagged-codes", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    const where = [
+      "t.Status = 'Tagged'",
+      "t.FAItemCode IS NOT NULL AND LTRIM(RTRIM(t.FAItemCode)) <> ''",
+      // Asset Register process done: a non-deleted Fixed Asset Record links back to this tag.
+      "fr.AssetId IS NOT NULL",
+    ];
+
+    if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("ISNULL(fr.CompanyId, t.CompanyId) = @CompanyId"); }
+    if (req.query.finYear)   { request.input("FinYear",   sql.NVarChar(20), req.query.finYear);        where.push("t.FinYear = @FinYear"); }
+    if (req.query.fromDate)  { request.input("FromDate",  sql.Date, req.query.fromDate);                where.push("t.DocDate >= @FromDate"); }
+    if (req.query.toDate)    { request.input("ToDate",    sql.Date, req.query.toDate);                  where.push("t.DocDate <= @ToDate"); }
+    if (req.query.faCode)    { request.input("FaCode",    sql.NVarChar(200), `%${String(req.query.faCode).trim()}%`);   where.push("t.FAItemCode LIKE @FaCode"); }
+    if (req.query.itemName)  { request.input("ItemName",  sql.NVarChar(200), `%${String(req.query.itemName).trim()}%`); where.push("ISNULL(fr.AssetName, im.M_Name) LIKE @ItemName"); }
+    if (req.query.search) {
+      request.input("Search", sql.NVarChar(200), `%${String(req.query.search).trim()}%`);
+      where.push("(t.FAItemCode LIKE @Search OR ISNULL(fr.AssetName, im.M_Name) LIKE @Search)");
+    }
+
+    const result = await request.query(`
+      SELECT
+        t.TagId, t.FAItemCode,
+        ISNULL(fr.AssetName, im.M_Name) AS ItemName,
+        fr.AssetId, fr.AssetCode,
+        t.DocNo, t.DocDate, t.FinYear, t.Status,
+        ISNULL(fr.CompanyId, t.CompanyId) AS CompanyId,
+        ISNULL(frco.name, co.name) AS CompanyName,
+        ISNULL(fr.ProjectId, t.ProjectId) AS ProjectId,
+        ISNULL(frpr.name, pr.name) AS ProjectName,
+        1 AS HasRecord
+      FROM dbo.FixedAssetTagging t
+      INNER JOIN dbo.FixedAssetRecord fr
+        ON fr.SourceTagId = t.TagId AND fr.Status <> 'Deleted' AND fr.AssetCode IS NOT NULL
+      LEFT JOIN dbo.Item_Master_Group im ON CONVERT(NVARCHAR(100), im.M_Id) = t.ItemId
+      LEFT JOIN dbo.enterprise co   ON co.id   = t.CompanyId
+      LEFT JOIN dbo.enterprise pr   ON pr.id   = t.ProjectId
+      LEFT JOIN dbo.enterprise frco ON frco.id = fr.CompanyId
+      LEFT JOIN dbo.enterprise frpr ON frpr.id = fr.ProjectId
+      WHERE ${where.join(" AND ")}
+      ORDER BY t.FAItemCode
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[fixedAssetTagging] GET /tagged-codes:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -68,7 +174,9 @@ router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res
   try {
     const pool = getPool();
     const request = pool.request();
-    let where = [];
+    // Cancelled tags are soft-kept in the DB for FA Item Code / stock audit,
+    // but never surface in the Tagging Transaction History list on any client.
+    let where = ["t.Status <> 'Cancelled'"];
 
     if (req.query.companyId) { request.input("CompanyId", sql.Int, parseInt(req.query.companyId, 10)); where.push("t.CompanyId = @CompanyId"); }
     if (req.query.projectId) { request.input("ProjectId", sql.Int, parseInt(req.query.projectId, 10)); where.push("t.ProjectId = @ProjectId"); }
@@ -76,19 +184,30 @@ router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res
     if (req.query.assetId)   { request.input("AssetId",   sql.Int, parseInt(req.query.assetId, 10));   where.push("t.AssetId = @AssetId"); }
     if (req.query.fromDate)  { request.input("FromDate",  sql.Date, req.query.fromDate);                where.push("t.DocDate >= @FromDate"); }
     if (req.query.toDate)    { request.input("ToDate",    sql.Date, req.query.toDate);                  where.push("t.DocDate <= @ToDate"); }
+    if (req.query.godownId)  { request.input("GodownId",  sql.Int, parseInt(req.query.godownId, 10));   where.push("t.GodownId = @GodownId"); }
 
     const whereClause = where.length ? `WHERE ${where.join(" AND ")}` : "";
 
     const result = await request.query(`
       SELECT
-        t.TagId, t.DocNo, t.DocDate, t.FinYear, t.TaggedQty, t.Remarks, t.Status,
+        t.TagId, t.DocNo, t.DocDate, t.FinYear, t.TaggedQty, t.FAItemCode, t.Remarks, t.Status,
         t.CreatedBy, t.CreatedAt,
         t.CompanyId, co.name AS CompanyName,
         t.ProjectId, pr.name AS ProjectName,
-        t.AssetId, fa.AssetName, fa.AssetCategory, fa.AssetCode
+        t.GodownId, gd.GodownName,
+        t.AssetId, fa.AssetName, fa.AssetCategory, fa.AssetCode,
+        CASE
+          WHEN t.FAItemCode IS NULL THEN NULL
+          WHEN EXISTS (
+            SELECT 1 FROM dbo.FixedAssetRecord fr
+            WHERE fr.SourceTagId = t.TagId AND fr.Status <> 'Deleted'
+          ) THEN 'Done'
+          ELSE 'Pending'
+        END AS RecordStatus
       FROM dbo.FixedAssetTagging t
       LEFT JOIN dbo.enterprise co ON co.id = t.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = t.ProjectId
+      LEFT JOIN dbo.Godowns gd ON gd.GodownID = t.GodownId
       LEFT JOIN dbo.FixedAssetRecord fa ON fa.AssetId = t.AssetId
       ${whereClause}
       ORDER BY t.CreatedAt DESC
@@ -111,10 +230,12 @@ router.get("/:id", requirePageRight("fixed-asset-tagging", "view"), async (req, 
         t.*,
         co.name AS CompanyName,
         pr.name AS ProjectName,
+        gd.GodownName,
         fa.AssetName, fa.AssetCategory, fa.AssetCode, fa.Quantity AS BatchQuantity
       FROM dbo.FixedAssetTagging t
       LEFT JOIN dbo.enterprise co ON co.id = t.CompanyId
       LEFT JOIN dbo.enterprise pr ON pr.id = t.ProjectId
+      LEFT JOIN dbo.Godowns gd ON gd.GodownID = t.GodownId
       LEFT JOIN dbo.FixedAssetRecord fa ON fa.AssetId = t.AssetId
       WHERE t.TagId = @TagId
     `);
@@ -126,44 +247,88 @@ router.get("/:id", requirePageRight("fixed-asset-tagging", "view"), async (req, 
   }
 });
 
-// ── POST / — create a tagging entry ───────────────────────────────────────────
+// ── POST / — generate FA Item Codes + tag N units ─────────────────────────────
+// Generates numberOfItems unique FA Item Codes ("ProjectAlias/ItemName/0001/
+// FinYear") and tags that many units of a Fixed-Asset item at a Godown, one
+// FixedAssetTagging row per unit. May span multiple Pending FixedAssetRecord
+// batches for that (item, godown) — oldest first — flipping each batch to
+// Active the moment it's fully consumed.
 router.post("/", requirePageRight("fixed-asset-tagging", "create"), async (req, res) => {
   const email = requireUser(req, res);
   if (!email) return;
 
   const {
-    docDate, companyId, projectId, finYear, assetId, taggedQty, remarks,
+    docDate, companyId, projectId, godownId, itemId, numberOfItems, remarks,
   } = req.body;
 
-  const assetIdVal = toInt(assetId);
-  const qtyVal = parseFloat(taggedQty);
+  const projectIdVal = toInt(projectId);
+  const godownIdVal = toInt(godownId);
+  const itemIdVal = itemId ? String(itemId) : null;
+  const countVal = parseInt(numberOfItems, 10);
 
-  if (!assetIdVal) return res.status(400).json({ error: "assetId is required" });
-  if (!Number.isFinite(qtyVal) || qtyVal <= 0) return res.status(400).json({ error: "taggedQty must be a positive number" });
+  if (!docDate) return res.status(400).json({ error: "docDate is required" });
+  if (!projectIdVal) return res.status(400).json({ error: "projectId is required" });
+  if (!godownIdVal) return res.status(400).json({ error: "godownId is required" });
+  if (!itemIdVal) return res.status(400).json({ error: "itemId is required" });
+  if (!Number.isFinite(countVal) || countVal <= 0) return res.status(400).json({ error: "numberOfItems must be a positive whole number" });
 
   try {
     const pool = getPool();
+
+    const finYear = await deriveFinYear(pool, docDate);
+    if (!finYear) {
+      return res.status(400).json({ error: "No Financial Year is configured for this date — set one up in Financial Year Setup first" });
+    }
+
+    const templateRes = await pool.request().input("ProjectId", sql.Int, projectIdVal).query(`
+      SELECT ProjectAlias FROM dbo.IDTemplateMaster WHERE ProjectId = @ProjectId AND IsActive = 1
+    `);
+    const template = templateRes.recordset[0];
+    if (!template) {
+      return res.status(400).json({ error: "Configure a Project Alias in ID Template Master before tagging this project's assets" });
+    }
+
+    const itemRes = await pool.request().input("ItemId", sql.NVarChar(100), itemIdVal).query(`
+      SELECT M_Name FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100), M_Id) = @ItemId
+    `);
+    const itemName = itemRes.recordset[0]?.M_Name || "Item";
+
     const tx = pool.transaction();
     await tx.begin();
     try {
-      // Lock the batch row + re-derive UntaggedQty inside the transaction so
-      // two concurrent tagging requests against the same batch can't both pass
-      // validation and jointly over-tag it.
-      const batchRes = await tx.request().input("AssetId", sql.Int, assetIdVal).query(`
-        SELECT fa.AssetId, fa.Quantity, fa.AssetStatus, fa.SourceItemId,
-               ISNULL((SELECT SUM(t.TaggedQty) FROM dbo.FixedAssetTagging t WITH (UPDLOCK, HOLDLOCK)
-                       WHERE t.AssetId = fa.AssetId AND t.Status = 'Tagged'), 0) AS TaggedSoFar
-        FROM dbo.FixedAssetRecord fa WITH (UPDLOCK, HOLDLOCK)
-        WHERE fa.AssetId = @AssetId
-      `);
-      const batch = batchRes.recordset[0];
-      if (!batch) { await tx.rollback(); return res.status(404).json({ error: "Fixed asset batch not found" }); }
-      if (batch.AssetStatus !== "Pending") { await tx.rollback(); return res.status(400).json({ error: "This batch is not open for tagging" }); }
+      // Lock every Pending batch for this (item, godown) so a concurrent tag
+      // request against the same item/godown can't jointly over-tag it, then
+      // re-derive the live StockLedger balance and tagged-so-far inside the lock.
+      const batchesRes = await tx.request()
+        .input("ItemId", sql.NVarChar(100), itemIdVal)
+        .input("GodownId", sql.Int, godownIdVal)
+        .query(`
+          SELECT fa.AssetId, fa.Quantity, fa.AssetStatus, fa.CreatedAt,
+                 ISNULL((SELECT SUM(t.TaggedQty) FROM dbo.FixedAssetTagging t
+                         WHERE t.AssetId = fa.AssetId AND t.Status = 'Tagged'), 0) AS TaggedSoFar
+          FROM dbo.FixedAssetRecord fa WITH (UPDLOCK, HOLDLOCK)
+          WHERE fa.SourceItemId = @ItemId AND fa.GodownID = @GodownId
+            AND fa.AssetStatus = 'Pending' AND fa.Status <> 'Deleted'
+          ORDER BY fa.CreatedAt ASC
+        `);
+      const batches = batchesRes.recordset;
+      if (!batches.length) { await tx.rollback(); return res.status(404).json({ error: "No untagged stock found for this item at this godown" }); }
 
-      const untagged = Number(batch.Quantity) - Number(batch.TaggedSoFar);
-      if (qtyVal > untagged) {
+      const stockRes = await tx.request()
+        .input("ItemId", sql.NVarChar(100), itemIdVal)
+        .input("GodownId", sql.Int, godownIdVal)
+        .query(`
+          SELECT
+            ISNULL((SELECT SUM(CASE WHEN Type = 'IN' THEN Qty ELSE -Qty END) FROM dbo.StockLedger
+                    WHERE ItemID = @ItemId AND GodownID = @GodownId), 0) AS Balance,
+            ISNULL((SELECT SUM(TaggedQty) FROM dbo.FixedAssetTagging
+                    WHERE ItemId = @ItemId AND GodownId = @GodownId AND Status = 'Tagged'), 0) AS TaggedSoFar
+        `);
+      const { Balance, TaggedSoFar } = stockRes.recordset[0];
+      const untagged = Number(Balance) - Number(TaggedSoFar);
+      if (countVal > untagged) {
         await tx.rollback();
-        return res.status(400).json({ error: `Cannot tag ${qtyVal} — only ${untagged} untagged unit(s) available for this item` });
+        return res.status(400).json({ error: `Cannot generate ${countVal} — only ${untagged} untagged unit(s) available for this item at this godown` });
       }
 
       const docTypeId = await resolveDocTypeId(pool, sql, "FAT");
@@ -171,47 +336,73 @@ router.post("/", requirePageRight("fixed-asset-tagging", "create"), async (req, 
         docTypeId, finYear, tableName: "FixedAssetTagging", issuedBy: email,
       });
 
-      const insert = await tx.request()
-        .input("DocNo",     sql.NVarChar(100), docNo)
-        .input("DocDate",   sql.Date,          docDate || null)
-        .input("CompanyId", sql.Int,           companyId ? parseInt(companyId, 10) : null)
-        .input("ProjectId", sql.Int,           projectId ? parseInt(projectId, 10) : null)
-        .input("FinYear",   sql.NVarChar(20),  finYear || null)
-        .input("AssetId",   sql.Int,           assetIdVal)
-        .input("ItemId",    sql.NVarChar(100), batch.SourceItemId || null)
-        .input("TaggedQty", sql.Decimal(18,3), qtyVal)
-        .input("Remarks",   sql.NVarChar(sql.MAX), remarks || null)
-        .input("CreatedBy", sql.NVarChar(200), email)
-        .query(`
-          INSERT INTO dbo.FixedAssetTagging
-            (DocNo, DocDate, CompanyId, ProjectId, FinYear, AssetId, ItemId, TaggedQty, Remarks, Status, CreatedBy, CreatedAt)
-          OUTPUT INSERTED.TagId
-          VALUES
-            (@DocNo, @DocDate, @CompanyId, @ProjectId, @FinYear, @AssetId, @ItemId, @TaggedQty, @Remarks, 'Tagged', @CreatedBy, SYSDATETIME())
-        `);
-      const newId = insert.recordset[0].TagId;
+      const codes = await generateFAItemCodes(pool, {
+        projectId: projectIdVal, projectAlias: template.ProjectAlias,
+        itemId: itemIdVal, itemName, finYear, count: countVal,
+      });
 
-      const newTaggedTotal = Number(batch.TaggedSoFar) + qtyVal;
-      if (newTaggedTotal >= Number(batch.Quantity)) {
-        await tx.request()
-          .input("AssetId",       sql.Int,  assetIdVal)
-          .input("ActivationDate", sql.Date, docDate || null)
-          .input("UpdatedBy",     sql.NVarChar(200), email)
+      let batchIdx = 0;
+      let batchRemaining = Number(batches[0].Quantity) - Number(batches[0].TaggedSoFar);
+      let firstTagId = null;
+
+      for (const code of codes) {
+        while (batchIdx < batches.length && batchRemaining <= 0) {
+          batchIdx++;
+          if (batchIdx < batches.length) {
+            batchRemaining = Number(batches[batchIdx].Quantity) - Number(batches[batchIdx].TaggedSoFar);
+          }
+        }
+        if (batchIdx >= batches.length) {
+          // Another concurrent tagger consumed the remaining stock between
+          // our balance check and now — bail out rather than under-tag.
+          throw new Error("Untagged stock changed while processing — please retry");
+        }
+        const batch = batches[batchIdx];
+
+        const insert = await tx.request()
+          .input("DocNo",     sql.NVarChar(100), docNo)
+          .input("DocDate",   sql.Date,          docDate || null)
+          .input("CompanyId", sql.Int,           companyId ? parseInt(companyId, 10) : null)
+          .input("ProjectId", sql.Int,           projectIdVal)
+          .input("FinYear",   sql.NVarChar(20),  finYear || null)
+          .input("AssetId",   sql.Int,           batch.AssetId)
+          .input("ItemId",    sql.NVarChar(100), itemIdVal)
+          .input("GodownId",  sql.Int,           godownIdVal)
+          .input("TaggedQty", sql.Decimal(18,3), 1)
+          .input("FAItemCode",sql.NVarChar(200), code)
+          .input("Remarks",   sql.NVarChar(sql.MAX), remarks || null)
+          .input("CreatedBy", sql.NVarChar(200), email)
           .query(`
-            UPDATE dbo.FixedAssetRecord
-            SET AssetStatus = 'Active',
-                ActivationDate = ISNULL(ActivationDate, @ActivationDate),
-                UpdatedBy = @UpdatedBy,
-                UpdatedAt = SYSDATETIME()
-            WHERE AssetId = @AssetId
+            INSERT INTO dbo.FixedAssetTagging
+              (DocNo, DocDate, CompanyId, ProjectId, FinYear, AssetId, ItemId, GodownId, TaggedQty, FAItemCode, Remarks, Status, CreatedBy, CreatedAt)
+            OUTPUT INSERTED.TagId
+            VALUES
+              (@DocNo, @DocDate, @CompanyId, @ProjectId, @FinYear, @AssetId, @ItemId, @GodownId, @TaggedQty, @FAItemCode, @Remarks, 'Tagged', @CreatedBy, SYSDATETIME())
           `);
+        if (firstTagId == null) firstTagId = insert.recordset[0].TagId;
+
+        batchRemaining -= 1;
+        if (batchRemaining <= 0) {
+          await tx.request()
+            .input("AssetId",        sql.Int,  batch.AssetId)
+            .input("ActivationDate", sql.Date, docDate || null)
+            .input("UpdatedBy",      sql.NVarChar(200), email)
+            .query(`
+              UPDATE dbo.FixedAssetRecord
+              SET AssetStatus = 'Active',
+                  ActivationDate = ISNULL(ActivationDate, @ActivationDate),
+                  UpdatedBy = @UpdatedBy,
+                  UpdatedAt = SYSDATETIME()
+              WHERE AssetId = @AssetId
+            `);
+        }
       }
 
       await tx.commit();
-      await backPatchRecordId(pool, sql, docNo, "FixedAssetTagging", newId);
+      await backPatchRecordId(pool, sql, docNo, "FixedAssetTagging", firstTagId);
       await bumpCacheVersion("fixed-asset-tagging");
       await bumpCacheVersion("fixed-assets");
-      res.json({ tagId: newId, docNo });
+      res.json({ tagId: firstTagId, docNo, codes });
     } catch (e) { await tx.rollback(); throw e; }
   } catch (err) {
     console.error("[fixedAssetTagging] POST /:", err.message);
@@ -271,6 +462,20 @@ router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (
       const tag = tagRes.recordset[0];
       if (!tag) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
       if (tag.Status === "Cancelled") { await tx.rollback(); return res.json({ ok: true }); }
+
+      // A tag that's already been completed into a Fixed Asset Record
+      // can't be cancelled out from under it — that would leave a live
+      // asset record referencing a "Cancelled" tag in its own history.
+      // Delete the Fixed Asset Record first (frees the FA Item Code back
+      // to "unassigned"), then the tag can be cancelled.
+      const recordRes = await tx.request().input("TagId", sql.Int, id).query(`
+        SELECT AssetId FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK)
+        WHERE SourceTagId = @TagId AND Status <> 'Deleted'
+      `);
+      if (recordRes.recordset.length > 0) {
+        await tx.rollback();
+        return res.status(400).json({ error: "This FA Item Code already has a Fixed Asset Record — delete that record first, then cancel the tag." });
+      }
 
       await tx.request()
         .input("TagId",     sql.Int, id)

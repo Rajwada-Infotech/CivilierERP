@@ -1,0 +1,13 @@
+# CivilierERP
+
+> CivilierERP is an Enterprise Resource Planning platform built for civil contractors, covering procurement, inventory, sales, finance, and project accounting for construction and infrastructure businesses.
+
+CivilierERP is a product of Rajwada Infotech. It provides modules for Purchase Orders, GRN, Sale Orders, Sale Invoices, Payments, General Ledger, Loan Sanction, Fund Transfer, and project/company-level cost tracking, aimed at civil-contracting companies that need multi-company, multi-project financial control.
+
+## Product
+
+- [Home](https://civiliererp.in/): Product overview and entry point to the application.
+
+## Company
+
+- [Rajwada Infotech](https://civiliererp.in/): Publisher of CivilierERP.

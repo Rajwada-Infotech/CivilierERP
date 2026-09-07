@@ -195,7 +195,7 @@ export function FilterBar({
   // VendorCombo renders one labeled header per group (Suppliers/Contractors/
   // Brokers/Other), matching PARTY_TYPE_LABELS' categorization — same
   // grouping the Payment form's own Payee/Party dropdown uses.
-  const CATEGORY_ORDER = ["Suppliers", "Contractors", "Brokers", "Other"];
+  const CATEGORY_ORDER = ["Suppliers", "Contractors", "Brokers", "Customers", "Other"];
   const supplierGroups = (() => {
     const groups = new Map<string, { id: number; label: string }[]>();
     supplierOptions.forEach((s) => {

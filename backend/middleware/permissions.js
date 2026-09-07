@@ -220,17 +220,29 @@ async function getRolePagePermissions(roleId) {
   }));
 }
 
-function mergePagePermissions(...lists) {
+// A per-user override REPLACES the role's grant for any page it touches —
+// it is not unioned with it. If it were a union, unchecking an action in
+// Custom User-wise mode (MenuRights.tsx) could never actually revoke
+// anything the user's role already grants, since the role's entry for that
+// same page would keep re-adding it. Only pages the user has never
+// customized (no entry at all in their own UserPageRightsJson) fall back to
+// the role baseline — that's the "overrides add on top of the role" case
+// (extending access beyond it); restricting below it now works too.
+function mergePagePermissions(rolePerms, userPerms) {
   const byPage = new Map();
-  for (const list of lists) {
-    for (const entry of list || []) {
-      const page = String(entry?.page || "").toLowerCase();
-      if (!page) continue;
-      const actions = Array.isArray(entry?.actions) ? entry.actions : [];
-      const existing = byPage.get(page) ?? new Set();
-      actions.forEach((a) => existing.add(String(a).toLowerCase()));
-      byPage.set(page, existing);
-    }
+  for (const entry of rolePerms || []) {
+    const page = String(entry?.page || "").toLowerCase();
+    if (!page) continue;
+    const actions = Array.isArray(entry?.actions) ? entry.actions : [];
+    byPage.set(page, new Set(actions.map((a) => String(a).toLowerCase())));
+  }
+  for (const entry of userPerms || []) {
+    const page = String(entry?.page || "").toLowerCase();
+    if (!page) continue;
+    const actions = Array.isArray(entry?.actions) ? entry.actions : [];
+    // Full override, not union — even an empty actions list here means
+    // "this user's access to this page is explicitly none", not "unset".
+    byPage.set(page, new Set(actions.map((a) => String(a).toLowerCase())));
   }
   return Array.from(byPage.entries()).map(([page, actions]) => ({
     page,

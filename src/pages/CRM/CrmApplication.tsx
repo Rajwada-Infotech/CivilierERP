@@ -649,6 +649,7 @@ const CrmApplication: React.FC = () => {
   const { currentUser, canDoAction } = useAuth();
   const isAdmin = ["admin", "super_admin"].includes(normalizeRole(currentUser?.role));
   const canEditApplications = canDoAction("crm-applications", "edit");
+  const canCreateApplications = canDoAction("crm-applications", "create");
   const canRequestBookingCancellation = canDoAction("crm-cancellations", "create");
   const { theme } = useTheme();
   const isDark = theme !== "light";
@@ -1699,7 +1700,7 @@ const CrmApplication: React.FC = () => {
     { id: "actions", header: "", size: 200, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
-        const canResume = activeStage === "InProcess" && isResumeEditable(a);
+        const canResume = canEditApplications && activeStage === "InProcess" && isResumeEditable(a);
         return (
           <div className="flex flex-col gap-1.5 py-0.5">
             <div className="flex items-center gap-1.5 flex-wrap">
@@ -1864,10 +1865,12 @@ const CrmApplication: React.FC = () => {
         title="CRM — Applications"
       subtitle="Every detail captured once, here — Bookings is review-only from this point on"
       action={
-        <button onClick={() => { resetWizard(); setDialogOpen(true); }}
-          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
-          <Plus size={14} /> New Application
-        </button>
+        canCreateApplications && (
+          <button onClick={() => { resetWizard(); setDialogOpen(true); }}
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+            <Plus size={14} /> New Application
+          </button>
+        )
       }
     >
       {/* ── Pipeline stats ── */}
@@ -2948,7 +2951,7 @@ const CrmApplication: React.FC = () => {
                 Delete Application
               </button>
             )}
-            {viewingAppDetail && (isResumable(viewingAppDetail.application) || isEditableApplication(viewingAppDetail.application)) && (
+            {canEditApplications && viewingAppDetail && (isResumable(viewingAppDetail.application) || isEditableApplication(viewingAppDetail.application)) && (
               <button
                 onClick={() => { const id = viewingAppDetail.application.Id; closeApplication(); setTimeout(() => loadApplicationIntoWizard(id), 180); }}
                 disabled={loadingApplication}

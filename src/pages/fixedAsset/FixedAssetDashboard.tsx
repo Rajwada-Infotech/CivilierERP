@@ -127,13 +127,13 @@ export default function FixedAssetDashboard() {
             />
             <QuickLinkCard
               icon={Tag}
-              title="Fixed Asset Tagging"
+              title="FA Inventory"
               desc="Tag received stock, track untagged qty"
               onClick={() => navigate("/fixed-asset/tagging")}
             />
             <QuickLinkCard
               icon={ArrowSwapHorizontal}
-              title="Asset Transfer"
+              title="User-Wise Asset Transfer"
               desc="Move assets between users, project-wise"
               onClick={() => navigate("/fixed-asset/transfer")}
             />

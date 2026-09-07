@@ -5,6 +5,9 @@ const BASE = "/api/asset-transfer";
 export interface TransferUser {
   id: number;
   name: string;
+  avatar_url?: string | null;
+  DepartmentId?: number | null;
+  DepartmentName?: string | null;
 }
 
 export interface EligibleTransferAsset {
@@ -15,6 +18,21 @@ export interface EligibleTransferAsset {
   CompanyId: number | null;
   ProjectId: number | null;
   FinYear: string | null;
+}
+
+export interface TransferableAsset {
+  AssetId: number;
+  AssetName: string;
+  AssetCode: string | null;
+  AssetCategory: string;
+  FAItemCode: string | null;
+  CompanyId: number | null;
+  ProjectId: number | null;
+  FinYear: string | null;
+  PictureBase64: string | null;
+  CustodianUserId: number | null;
+  CustodianName: string | null;
+  CustodianAvatar: string | null;
 }
 
 export interface TransferListItem {
@@ -33,12 +51,17 @@ export interface TransferListItem {
   AssetName: string | null;
   AssetCode: string | null;
   AssetCategory: string | null;
+  FAItemCode: string | null;
   FromUserId: number;
   FromUserName: string | null;
+  FromUserAvatar: string | null;
   ToUserId: number;
   ToUserName: string | null;
+  ToUserAvatar: string | null;
   TransferredBy: number | null;
   TransferredByName: string | null;
+  DepartmentId: number | null;
+  DepartmentName: string | null;
 }
 
 export type TransferDetail = TransferListItem;
@@ -52,8 +75,11 @@ export interface TransferPayload {
   assetId: number;
   fromUserId: number;
   toUserId: number;
-  remarks?: string;
+  departmentId: number;
+  remarks: string;
 }
+
+export type UpdateTransferPayload = TransferPayload;
 
 async function handleError(res: Response, fallback: string) {
   const err = await res.json().catch(() => ({}));
@@ -79,6 +105,20 @@ export const getEligibleTransferAssets = async (params: {
   if (params.finYear)    qs.set("finYear",    params.finYear);
   const res = await fetchWithAuth(`${BASE}/eligible-assets${qs.toString() ? `?${qs}` : ""}`);
   if (!res.ok) await handleError(res, "Failed to fetch eligible assets");
+  return res.json();
+};
+
+export const getTransferableAssets = async (params: {
+  projectId?: number;
+  companyId?: number;
+  finYear?: string;
+}): Promise<TransferableAsset[]> => {
+  const qs = new URLSearchParams();
+  if (params.projectId)  qs.set("projectId",  String(params.projectId));
+  if (params.companyId)  qs.set("companyId",  String(params.companyId));
+  if (params.finYear)    qs.set("finYear",    params.finYear);
+  const res = await fetchWithAuth(`${BASE}/transferable-assets${qs.toString() ? `?${qs}` : ""}`);
+  if (!res.ok) await handleError(res, "Failed to fetch transferable assets");
   return res.json();
 };
 
@@ -122,11 +162,30 @@ export const createAssetTransfer = async (data: TransferPayload): Promise<{ id: 
   return res.json();
 };
 
-export const updateAssetTransfer = async (id: number, data: { transferDate?: string; remarks?: string }): Promise<void> => {
+export const updateAssetTransfer = async (id: number, data: UpdateTransferPayload): Promise<{ ok: true }> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) await handleError(res, "Failed to update asset transfer");
+  return res.json();
+};
+
+// Sets/replaces/removes the Item Picture on the Fixed Asset Record for this
+// asset — shared with Assignment and every other asset view. Pass null/"" to
+// remove.
+export const setAssetPicture = async (assetId: number, pictureBase64: string | null): Promise<{ ok: true }> => {
+  const res = await fetchWithAuth(`${BASE}/asset-picture/${assetId}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pictureBase64 }),
+  });
+  if (!res.ok) await handleError(res, "Failed to save item picture");
+  return res.json();
+};
+
+export const deleteAssetTransfer = async (id: number): Promise<void> => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  if (!res.ok) await handleError(res, "Failed to delete asset transfer");
 };

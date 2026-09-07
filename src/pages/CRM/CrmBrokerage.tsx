@@ -51,8 +51,8 @@ const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 const CrmBrokerage: React.FC = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const rights = usePageRights("crm-brokerage");
   const { canEdit: hasApprovalInboxEdit } = usePageRights("approval-inbox");
-  usePageRights("crm-brokerage");
   const [searchParams, setSearchParams] = useSearchParams();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -103,7 +103,13 @@ const CrmBrokerage: React.FC = () => {
     const viewId = searchParams.get("view");
     if (!viewId || !(records as any[]).length) return;
     const row = (records as any[]).find((r) => String(r.Id) === viewId);
-    if (row) openEdit(row);
+    if (row) {
+      if (rights.canEdit) {
+        openEdit(row);
+      } else {
+        toast.info("You don't have edit rights on this page — ask an admin to grant access to review this record.");
+      }
+    }
     setSearchParams((sp) => { sp.delete("view"); return sp; }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, records]);
@@ -240,7 +246,7 @@ const CrmBrokerage: React.FC = () => {
               submitOnly
               onSuccess={() => qc.invalidateQueries({ queryKey: ["crm-brokerage"] })}
             />
-            {r.Status === CrmStatus.PENDING && (
+            {rights.canEdit && r.Status === CrmStatus.PENDING && (
               <button onClick={() => openEdit(r)} className="text-xs text-primary hover:underline">Customize amount</button>
             )}
             {r.Status === CrmStatus.APPROVED && (
@@ -263,10 +269,12 @@ const CrmBrokerage: React.FC = () => {
       action={
           <div className="flex items-center gap-3">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-          <button onClick={openCreate}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-          <Plus size={14} /> Add Broker
-        </button>
+          {rights.canCreate && (
+            <button onClick={openCreate}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            <Plus size={14} /> Add Broker
+          </button>
+          )}
         </div>
       }
     >

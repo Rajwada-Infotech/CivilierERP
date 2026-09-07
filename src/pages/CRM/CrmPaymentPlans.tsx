@@ -78,7 +78,7 @@ const MilestoneBar: React.FC<{ milestones: MilestoneRow[]; height?: string }> = 
 
 const CrmPaymentPlans: React.FC = () => {
   const qc = useQueryClient();
-  usePageRights("crm-payment-plans");
+  const rights = usePageRights("crm-payment-plans");
 
   // Edit/Create form dialog — always editable while open (see previewPlan
   // below for the read-only view; there's no longer a "locked" mode here).
@@ -487,16 +487,20 @@ const CrmPaymentPlans: React.FC = () => {
               </div>
 
               <div className="flex justify-end gap-2 pt-4 border-t border-border">
-                <button onClick={() => handleDelete(previewPlan.Id)} disabled={deletingId === previewPlan.Id}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-lg text-red-600 hover:bg-red-500/10 disabled:opacity-40 mr-auto">
-                  <Trash2 size={13} /> {deletingId === previewPlan.Id ? "Deleting..." : "Delete"}
-                </button>
+                {rights.canDelete && (
+                  <button onClick={() => handleDelete(previewPlan.Id)} disabled={deletingId === previewPlan.Id}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm border border-border rounded-lg text-red-600 hover:bg-red-500/10 disabled:opacity-40 mr-auto">
+                    <Trash2 size={13} /> {deletingId === previewPlan.Id ? "Deleting..." : "Delete"}
+                  </button>
+                )}
                 <button onClick={() => setPreviewPlan(null)}
                   className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-                <button onClick={() => openEdit(previewPlan.Id)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
-                  <Pencil size={13} /> Edit Plan
-                </button>
+                {rights.canEdit && (
+                  <button onClick={() => openEdit(previewPlan.Id)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                    <Pencil size={13} /> Edit Plan
+                  </button>
+                )}
               </div>
             </>
           )}

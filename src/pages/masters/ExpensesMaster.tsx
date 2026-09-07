@@ -186,7 +186,7 @@ function buildExpenseColumns(
 // ─── Component ───────────────────────────────────────────────────────────────
 
 const ExpensesMaster: React.FC = () => {
-  const rights = usePageRights("expense-master");
+  const rights = usePageRights("expenses-master");
   const qc = useQueryClient();
 
   // ── Remote data ────────────────────────────────────────────────────────────

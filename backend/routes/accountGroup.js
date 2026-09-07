@@ -65,7 +65,7 @@ router.get("/", authenticateToken, cache("account-group", 300), async (req, res)
   }
 });
 
-router.post("/", authenticateToken, requirePageRight("account-group", "create"), async (req, res) => {
+router.post("/", authenticateToken, requirePageRight("account-head", "create"), async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
     const userId = req.user?.id ?? req.user?.userId;
@@ -100,7 +100,7 @@ router.post("/", authenticateToken, requirePageRight("account-group", "create"),
   }
 });
 
-router.put("/:id", authenticateToken, requirePageRight("account-group", "edit"), async (req, res) => {
+router.put("/:id", authenticateToken, requirePageRight("account-head", "edit"), async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
     const userId = req.user?.id ?? req.user?.userId;
@@ -143,7 +143,7 @@ router.put("/:id", authenticateToken, requirePageRight("account-group", "edit"),
   }
 });
 
-router.delete("/:id", authenticateToken, requirePageRight("account-group", "delete"), async (req, res) => {
+router.delete("/:id", authenticateToken, requirePageRight("account-head", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0) {
     return res.status(400).json({ error: "Invalid account group id" });

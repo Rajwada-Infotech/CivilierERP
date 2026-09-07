@@ -10,6 +10,7 @@ const compression = require("compression");
 
 const { connectDB, closeDB } = require("./db");
 const { startCrmSlaEngine } = require("./services/crmSlaEngine");
+const { startFollowupReminderEngine } = require("./services/fixedAssetFollowupReminders");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
@@ -167,6 +168,9 @@ const ALL_ROUTES = [
   { path: "/api/fin-year", file: "./routes/finYear" },
   { path: "/api/general-ledger", file: "./routes/generalLedger" },
   { path: "/api/hsn", file: "./routes/hsn" },
+  { path: "/api/charge-head", file: "./routes/chargeHead" },
+  { path: "/api/maintenance", file: "./routes/maintenance" },
+  { path: "/api/maintenance-bills", file: "./routes/maintenanceBill" },
   { path: "/api/item-groups", file: "./routes/itemGroup" },
   { path: "/api/item-master", file: "./routes/itemMaster" },
   { path: "/api/tds-master", file: "./routes/tdsMaster" },
@@ -197,6 +201,7 @@ const ALL_ROUTES = [
   { path: "/api/financial-statements", file: "./routes/financialStatements" },
   { path: "/api/year-end-close", file: "./routes/yearEndClose" },
   { path: "/api/balance-enquiry", file: "./routes/balanceEnquiry" },
+  { path: "/api/vendor-ledger", file: "./routes/vendorLedger" },
   { path: "/api/grns", file: "./routes/grns" },
   { path: "/api/vehicle-in-out", file: "./routes/vehicleInOut" },
   { path: "/api/quality-debit-note", file: "./routes/qualityRejectionDebitNote" },
@@ -225,7 +230,13 @@ const ALL_ROUTES = [
   { path: "/api/depreciation-setup", file: "./routes/depreciationSetup" },
   { path: "/api/fixed-assets",       file: "./routes/fixedAssets" },
   { path: "/api/fixed-asset-tagging", file: "./routes/fixedAssetTagging" },
+  { path: "/api/fixed-asset-inventory-import", file: "./routes/fixedAssetInventoryImport" },
+  { path: "/api/fixed-asset-assignment", file: "./routes/fixedAssetAssignment" },
   { path: "/api/asset-transfer", file: "./routes/assetTransfer" },
+  { path: "/api/fixed-asset-quality-check", file: "./routes/fixedAssetQualityCheck" },
+  { path: "/api/fixed-asset-maintenance", file: "./routes/fixedAssetMaintenance" },
+  { path: "/api/home/activity-feed", file: "./routes/homeActivity" },
+  { path: "/api/id-template-master", file: "./routes/idTemplateMaster" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
   { path: "/api/contractor-allocation", file: "./routes/contractorAllocation" },
   { path: "/api/daily-labour", file: "./routes/dailyLabour" },
@@ -609,6 +620,7 @@ async function startServer() {
       printBanner(PORT);
       logger.info(`[START] Server ready on port ${PORT}`);
       startCrmSlaEngine();
+      startFollowupReminderEngine();
     });
 
     setupGracefulShutdown(server, worker);

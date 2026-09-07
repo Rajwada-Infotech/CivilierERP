@@ -404,7 +404,7 @@ function AdjustDialog({
 // ── Main Page ────────────────────────────────────────────────────────────────
 export default function OnAccountAdjustment() {
   const queryClient = useQueryClient();
-  usePageRights("on-account-adjustment");
+  const rights = usePageRights("on-account-adjustment");
   const [selectedPartyId, setSelectedPartyId] = useState<string>("all");
   const [adjustingEntry, setAdjustingEntry] = useState<CreditEntry | null>(null);
   // Live balance override after adjustment (partyId → new balance)
@@ -629,13 +629,13 @@ export default function OnAccountAdjustment() {
                           <span className="shrink-0 text-[10px] text-muted-foreground italic px-2 py-1">
                             Apply via CRM
                           </span>
-                        ) : (
+                        ) : rights.canEdit ? (
                           <Button size="sm" variant="outline"
                             className="shrink-0 h-7 text-xs gap-1 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10"
                             onClick={() => handleAdjust(entry)}>
                             Adjust <ArrowRight size={11} />
                           </Button>
-                        )}
+                        ) : null}
                       </div>
                       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
                         <div>
@@ -779,13 +779,13 @@ export default function OnAccountAdjustment() {
                               <span className="text-[10px] text-muted-foreground italic opacity-0 group-hover:opacity-100 transition-opacity">
                                 Apply via CRM
                               </span>
-                            ) : (
+                            ) : rights.canEdit ? (
                               <Button size="sm" variant="outline"
                                 className="h-7 text-xs gap-1 border-emerald-500/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 opacity-0 group-hover:opacity-100 transition-opacity"
                                 onClick={() => handleAdjust(entry)}>
                                 Adjust <ArrowRight size={12} />
                               </Button>
-                            )}
+                            ) : null}
                           </td>
                         </tr>
                       );

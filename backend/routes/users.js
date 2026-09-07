@@ -263,9 +263,11 @@ router.get(
                r.RName AS roleName,
                u.created_datetime, u.discontinue,
                ISNULL(u.can_accept_tickets, 0) AS can_accept_tickets,
-               u.avatar_url
+               u.avatar_url,
+               u.DepartmentId, d.DepartmentName
         FROM dbo.users u
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
+        LEFT JOIN dbo.DepartmentMaster d ON d.Id = u.DepartmentId
       `);
 
       // Normalize roles for frontend
@@ -291,7 +293,7 @@ router.post(
   authMiddleware,
   checkPermission("Users", "List", "CanAdd"),
   async (req, res) => {
-    const { name, email, RoleId, roleId, password, can_accept_tickets } =
+    const { name, email, RoleId, roleId, password, can_accept_tickets, DepartmentId } =
       req.body;
     if (!password) {
       return res.status(400).json({ error: "Password required" });
@@ -306,11 +308,12 @@ router.post(
         .input("email", sql.NVarChar, email)
         .input("RoleId", sql.Int, assignedRoleId)
         .input("can_accept_tickets", sql.Bit, can_accept_tickets ? 1 : 0)
+        .input("DepartmentId", sql.Int, DepartmentId ? Number(DepartmentId) : null)
         .input("password", sql.NVarChar, hashed).query(`
-          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets)
+          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue, can_accept_tickets, DepartmentId)
           VALUES (
             @name, @email, @password, @RoleId,
-            GETDATE(), 0, @can_accept_tickets
+            GETDATE(), 0, @can_accept_tickets, @DepartmentId
           )
         `);
       res.json({ message: "User created" });
@@ -339,7 +342,7 @@ router.put(
   checkPermission("Users", "List", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
-    const { name, email, RoleId, roleId, discontinue, can_accept_tickets } =
+    const { name, email, RoleId, roleId, discontinue, can_accept_tickets, DepartmentId } =
       req.body;
     try {
       const pool = getPool();
@@ -352,7 +355,8 @@ router.put(
         email === undefined &&
         RoleId === undefined &&
         roleId === undefined &&
-        can_accept_tickets === undefined;
+        can_accept_tickets === undefined &&
+        DepartmentId === undefined;
 
       if (isToggleOnly) {
         await pool
@@ -377,6 +381,7 @@ router.put(
                 ? 1
                 : 0,
           )
+          .input("DepartmentId", sql.Int, DepartmentId ? Number(DepartmentId) : null)
           .input("discontinue", sql.Bit, discontinue ? 1 : 0).query(`
           UPDATE dbo.users
           SET name=@name,
@@ -384,7 +389,8 @@ router.put(
               RoleId=@RoleId,
               role=(SELECT RName FROM dbo.Role WHERE RId = @RoleId),
               discontinue=@discontinue,
-              can_accept_tickets=COALESCE(@can_accept_tickets, can_accept_tickets)
+              can_accept_tickets=COALESCE(@can_accept_tickets, can_accept_tickets),
+              DepartmentId=@DepartmentId
           WHERE id=@id
         `);
       }

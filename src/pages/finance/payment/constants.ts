@@ -47,6 +47,11 @@ export const MODE_STYLE: Record<
     text: "text-pink-600 dark:text-pink-400",
     dot: "bg-pink-500",
   },
+  "Demand Draft": {
+    ring: "ring-teal-500/30 bg-teal-500/10",
+    text: "text-teal-600 dark:text-teal-400",
+    dot: "bg-teal-500",
+  },
 };
 
 // ─── IFSC → bank display name lookup ────────────────────────────────────────

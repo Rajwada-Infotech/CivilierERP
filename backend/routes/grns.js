@@ -32,6 +32,7 @@ const {
   resolveGRNPrefix,
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
+const { downstreamOfGRN } = require("../utils/materialChainGuard");
 const {
   assertVehicleInOutHasNoGRN,
   assertGRNQuantitiesWithinVehicleInOut,
@@ -571,6 +572,12 @@ router.get("/", cache("grns", 300), async (req, res) => {
         td.Description AS DocTypeDescription,
         grn.SourceTransferID,
         grn.SourceTransferDocNo,
+        grn.VehicleInOutID,
+        grn.DirectEntryReason,
+        -- Derived, not stored — see migration 357's own comment on why a
+        -- separate EntryMode column would just be one more thing to drift
+        -- out of sync with the FK it describes.
+        CASE WHEN grn.VehicleInOutID IS NULL THEN 'DIRECT' ELSE 'GATE' END AS EntryMode,
         COUNT(*) OVER() AS _total
       FROM GoodsReceiptNotes grn
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
@@ -673,6 +680,8 @@ router.get("/:id", async (req, res) => {
           grn.SupplierID,
           grn.POID,
           grn.VehicleInOutID,
+          grn.DirectEntryReason,
+          CASE WHEN grn.VehicleInOutID IS NULL THEN 'DIRECT' ELSE 'GATE' END AS EntryMode,
           grn.GRNItems,
           grn.Status,
           grn.Remarks,
@@ -733,6 +742,12 @@ async function createGRNInternal(pool, body, userEmail) {
       supplierId,
       poId,
       vehicleInOutId = null,
+      // Only meaningful when vehicleInOutId is null — why the vehicle gate
+      // was skipped for this GRN (Local Supplier, Emergency Procurement,
+      // etc.), for audit trail. Silently ignored otherwise rather than
+      // erroring, since a client could legitimately send a stale value
+      // left over from toggling the form back to Gate mode.
+      directEntryReason = null,
       grnItems,
       status,
       remarks,
@@ -880,6 +895,11 @@ async function createGRNInternal(pool, body, userEmail) {
           vehicleInOutId ? parseInt(vehicleInOutId, 10) : null,
         )
         .input(
+          "DirectEntryReason",
+          sql.NVarChar(200),
+          !vehicleInOutId && directEntryReason ? String(directEntryReason).slice(0, 200) : null,
+        )
+        .input(
           "GRNItems",
           sql.NVarChar(sql.MAX),
           JSON.stringify(grnItems || []),
@@ -896,12 +916,12 @@ async function createGRNInternal(pool, body, userEmail) {
         .input("GodownID", sql.Int, resolvedGodownId)
         .input("CreatedDate", sql.DateTime2, new Date()).query(`
         INSERT INTO GoodsReceiptNotes
-          (GRNNo, GRNDate, DocDate, SupplierID, POID, VehicleInOutID, GRNItems, Status, Remarks,
+          (GRNNo, GRNDate, DocDate, SupplierID, POID, VehicleInOutID, DirectEntryReason, GRNItems, Status, Remarks,
            DocTypeId, DocNo, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
            TotalAmount, GodownID, CreatedDate)
         OUTPUT INSERTED.GRNID
         VALUES
-          (@GRNNo, @GRNDate, @DocDate, @SupplierID, @POID, @VehicleInOutID, @GRNItems, @Status, @Remarks,
+          (@GRNNo, @GRNDate, @DocDate, @SupplierID, @POID, @VehicleInOutID, @DirectEntryReason, @GRNItems, @Status, @Remarks,
            @DocTypeId, @DocNo, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
            @TotalAmount, @GodownID, @CreatedDate)
       `);
@@ -1060,6 +1080,18 @@ router.put(
         "grn-master",
       );
       await guardEdit("goods-receipt", req.params.id, { allowPostApproval });
+
+      // Chain guard: an Expense Booking already raised against this GRN
+      // (directly, or as one of a multi-GRN combined invoice) must be
+      // deleted first — editing received quantities after invoicing would
+      // silently drift the GRN out of sync with what was already billed.
+      const blockedBy = await downstreamOfGRN(getPool(), req.params.id);
+      if (blockedBy) {
+        return res.status(409).json({
+          error: `Cannot edit: this GRN has ${blockedBy}. Delete them first, then edit the GRN.`,
+        });
+      }
+
       wasApproved = currentStatus === "Approved";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.GoodsReceiptNotes", "GRNID", req.params.id);
@@ -1249,11 +1281,21 @@ router.get("/:id/can-delete", async (req, res) => {
     const pool = getPool();
 
     // ── 1. Linked expense bookings ────────────────────────────────────────────
+    // A multi-GRN combined invoice (see migration 194) only stores its
+    // PRIMARY (first) GRN as ESourceId — the rest live only in the JSON
+    // ELinkedGrnIds array. Checking ESourceId alone let a non-primary GRN
+    // in a combined invoice be deleted even though the invoice was still
+    // active against it (the actual bug this fixes).
     const expCheck = await pool.request().input("GRNID", sql.Int, grnId).query(`
         SELECT eb.Eid, eb.EDocNo, eb.EStatus
         FROM dbo.ExpenseBooking eb
-        WHERE eb.ESourceType = 'GRN' AND eb.ESourceId = @GRNID
-          AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+        WHERE ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+          AND (
+            (eb.ESourceType = 'GRN' AND eb.ESourceId = @GRNID)
+            OR (eb.ELinkedGrnIds IS NOT NULL AND EXISTS (
+                  SELECT 1 FROM OPENJSON(eb.ELinkedGrnIds) WHERE TRY_CAST(value AS INT) = @GRNID
+                ))
+          )
       `);
 
     if (expCheck.recordset.length === 0) return res.json({ deletable: true });
@@ -1344,11 +1386,19 @@ router.delete(
     const pool = getPool();
 
     // ── Guard: linked expense bookings ────────────────────────────────────────
+    // Same OPENJSON expansion as GET /:id/can-delete above — a non-primary
+    // GRN in a multi-GRN combined invoice (migration 194's ELinkedGrnIds)
+    // only appears there, not in ESourceId, so it must be checked too.
     const expGuard = await pool.request().input("GRNID", sql.Int, grnId).query(`
       SELECT COUNT(*) AS cnt
       FROM dbo.ExpenseBooking eb
-      WHERE eb.ESourceType = 'GRN' AND eb.ESourceId = @GRNID
-        AND ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+      WHERE ISNULL(eb.EStatus, '') NOT IN ('Deleted', 'Draft')
+        AND (
+          (eb.ESourceType = 'GRN' AND eb.ESourceId = @GRNID)
+          OR (eb.ELinkedGrnIds IS NOT NULL AND EXISTS (
+                SELECT 1 FROM OPENJSON(eb.ELinkedGrnIds) WHERE TRY_CAST(value AS INT) = @GRNID
+              ))
+        )
     `);
     if (Number(expGuard.recordset[0]?.cnt) > 0) {
       return res.status(409).json({
@@ -1488,7 +1538,7 @@ router.put(
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
 router.put(
   "/:id/approve",
-  requirePageRight("grns", "edit"),
+  requirePageRight("grn-master", "edit"),
   async (req, res) => {
     const id = parseInt(req.params.id, 10);
     try {
@@ -1520,7 +1570,7 @@ router.put(
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
 router.put(
   "/:id/reject",
-  requirePageRight("grns", "edit"),
+  requirePageRight("grn-master", "edit"),
   async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const { note } = req.body;
@@ -1762,6 +1812,27 @@ router.get("/:id/posting", async (req, res) => {
         const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100), M_Id) IN (${ph})`);
         for (const row of mRes.recordset) masterMap[row.M_Id] = { cgstRate: parseFloat(row.M_CGST) || 0, sgstRate: parseFloat(row.M_SGST) || 0 };
       }
+      // Per-item Cost Centre — Cost Centre now lives on the PO's own line
+      // item (migration 365), not the PO header, since one PO/GRN can mix
+      // e.g. a fixed-asset item with a consumption item. Resolve each
+      // received item's cost centre by matching ItemId back to the same
+      // PO's PurchaseOrderItems row.
+      let itemCostCentreMap = {};
+      if (grn.POID && itemIds.length > 0) {
+        const ccReq = pool.request().input("POID", sql.Int, grn.POID);
+        const ph2 = itemIds.map((id, i) => { ccReq.input(`ccid${i}`, sql.NVarChar(100), id); return `@ccid${i}`; }).join(",");
+        const ccRes = await ccReq.query(`
+          SELECT CONVERT(NVARCHAR(100), poi.ItemId) AS ItemId, poi.CostCenterId, cc.Name AS CostCenterName, cc.Code AS CostCenterCode
+          FROM dbo.PurchaseOrderItems poi
+          LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = poi.CostCenterId
+          WHERE poi.PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), poi.ItemId) IN (${ph2})
+        `);
+        for (const row of ccRes.recordset) {
+          itemCostCentreMap[row.ItemId] = row.CostCenterId
+            ? { id: row.CostCenterId, name: row.CostCenterName, code: row.CostCenterCode }
+            : null;
+        }
+      }
       for (const it of receivedItems) {
         const itemId = String(it.itemId || it.ItemId || "");
         const receivedQty = Number(it.receivedQty || it.ReceivedQty || 0);
@@ -1782,9 +1853,36 @@ router.get("/:id/posting", async (req, res) => {
           rate,
           baseAmount: Math.round(baseAmount * 100) / 100,
           gstAmount,
+          costCentre: itemCostCentreMap[itemId] ?? null,
         });
       }
     }
+
+    // Cost-centre-wise money breakdown — same base+GST totals as above,
+    // regrouped by each item's own cost centre instead of by item, so the
+    // Posting tab can show e.g. "Fixed Asset: ₹X · Consumption: ₹Y" instead
+    // of forcing the reviewer to add up items manually.
+    const costCentreBreakdownMap = new Map();
+    for (const row of itemBreakdown) {
+      const key = row.costCentre?.id ?? "unassigned";
+      const existing = costCentreBreakdownMap.get(key);
+      if (existing) {
+        existing.baseAmount += row.baseAmount;
+        existing.gstAmount += row.gstAmount;
+      } else {
+        costCentreBreakdownMap.set(key, {
+          costCentre: row.costCentre ?? null,
+          baseAmount: row.baseAmount,
+          gstAmount: row.gstAmount,
+        });
+      }
+    }
+    const costCentreBreakdown = [...costCentreBreakdownMap.values()].map((r) => ({
+      ...r,
+      baseAmount: Math.round(r.baseAmount * 100) / 100,
+      gstAmount: Math.round(r.gstAmount * 100) / 100,
+      totalAmount: Math.round((r.baseAmount + r.gstAmount) * 100) / 100,
+    }));
     totalBase = Math.round(totalBase * 100) / 100;
     totalGST = Math.round(totalGST * 100) / 100;
     const totalInclGST = Math.round((totalBase + totalGST) * 100) / 100;
@@ -1813,7 +1911,11 @@ router.get("/:id/posting", async (req, res) => {
       taxAmount: totalGST,
       totalAmount: totalInclGST,
       items: itemBreakdown,
+      // Legacy single flat cost centre (PO header) — kept for any old
+      // caller, but the Posting tab now uses costCentreBreakdown / each
+      // item's own costCentre instead of this.
       costCentre: grn.CostCenterName ? { id: grn.CostCenterId, name: grn.CostCenterName, code: grn.CostCenterCode } : null,
+      costCentreBreakdown,
       accounts: { purchase: purchaseLed, pgrn: pgrnLed, provisional: provisionalLed },
       isPosted: !!existingPost,
       jvNo: existingPost?.VoucherNo ?? null,
@@ -1836,7 +1938,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     // Fetch posting preview (reuse endpoint logic via internal call)
     const grnRes = await pool.request().input("GRNID", sql.Int, grnId).query(`
-      SELECT g.GRNID, g.GRNNo, g.GRNItems, g.POID,
+      SELECT g.GRNID, g.GRNNo, g.GRNDate, g.GRNItems, g.POID,
              po.CompanyId, po.ProjectId, po.CostCenterId
       FROM dbo.GoodsReceiptNotes g
       LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = g.POID
@@ -1851,10 +1953,16 @@ router.post("/:id/post-to-gl", async (req, res) => {
     `);
     if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This GRN has already been posted to GL." });
 
-    // Recompute totals
+    // Recompute totals — and each item's own Cost Centre (migration 365:
+    // Cost Centre lives on the PO's line item now, not the PO header, since
+    // one PO/GRN can mix e.g. a fixed-asset item with a consumption item).
+    // Grouping the JV legs by cost centre (instead of one flat Purchase/
+    // PGRN pair for the whole GRN) is what makes the Posting tab's
+    // cost-centre-wise breakdown actually true to what's posted in GL.
     const rawItems = parseGRNItems(grn.GRNItems);
     const receivedItems = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
     let totalBase = 0, totalGST = 0;
+    const costCentreBuckets = new Map(); // key: CostCenterId ?? "unassigned" -> { costCenterId, base, gst }
     if (receivedItems.length > 0) {
       const itemIds = receivedItems.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
       let masterMap = {};
@@ -1864,6 +1972,17 @@ router.post("/:id/post-to-gl", async (req, res) => {
         const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
         for (const row of mRes.recordset) masterMap[row.M_Id]={ cgstRate:parseFloat(row.M_CGST)||0, sgstRate:parseFloat(row.M_SGST)||0 };
       }
+      let itemCostCentreMap = {};
+      if (grn.POID && itemIds.length > 0) {
+        const ccReq = pool.request().input("POID", sql.Int, grn.POID);
+        const ph2 = itemIds.map((id,i)=>{ ccReq.input(`ccid${i}`,sql.NVarChar(100),id); return `@ccid${i}`; }).join(",");
+        const ccRes = await ccReq.query(`
+          SELECT CONVERT(NVARCHAR(100), ItemId) AS ItemId, CostCenterId
+          FROM dbo.PurchaseOrderItems
+          WHERE PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), ItemId) IN (${ph2})
+        `);
+        for (const row of ccRes.recordset) itemCostCentreMap[row.ItemId] = row.CostCenterId ?? null;
+      }
       for (const it of receivedItems) {
         const itemId = String(it.itemId||it.ItemId||"");
         const receivedQty = Number(it.receivedQty||it.ReceivedQty||0);
@@ -1872,8 +1991,16 @@ router.post("/:id/post-to-gl", async (req, res) => {
         const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
         const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
         const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+        const gstAmount = baseAmount*(totalGSTRate/100);
         totalBase += baseAmount;
-        totalGST += baseAmount*(totalGSTRate/100);
+        totalGST += gstAmount;
+
+        const costCenterId = itemCostCentreMap[itemId] ?? null;
+        const bucketKey = costCenterId ?? "unassigned";
+        const bucket = costCentreBuckets.get(bucketKey) ?? { costCenterId, base: 0, gst: 0 };
+        bucket.base += baseAmount;
+        bucket.gst += gstAmount;
+        costCentreBuckets.set(bucketKey, bucket);
       }
     }
     totalBase = Math.round(totalBase*100)/100;
@@ -1898,16 +2025,28 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // (once as the base-amount debit, once as the tax-amount credit) rather
     // than crediting PGRN with the GST-inclusive total, so PGRN only ever
     // reflects the base receivable and the ITC leg nets against Purchase.
-    const lines = [
-      { LHeadId: purchaseId,    DebitAmount: totalBase,    CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (base)` },
-      { LHeadId: pgrnId,        DebitAmount: 0,             CreditAmount: totalBase, Narration: `GRN Posting: ${grn.GRNNo} — Provision for Pending GRN` },
-      ...(totalGST > 0
-        ? [
-            { LHeadId: provisionalId, DebitAmount: totalGST, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Provisional ITC` },
-            { LHeadId: purchaseId,    DebitAmount: 0, CreditAmount: totalGST, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (tax offset)` },
-          ]
-        : []),
-    ];
+    //
+    // Repeated once per Cost Centre bucket (instead of once for the whole
+    // GRN) so each leg is tagged with the cost centre that actually earned
+    // it — a GRN mixing a fixed-asset item and a consumption item posts two
+    // separate Purchase/PGRN pairs, not one pair with an arbitrary single
+    // cost centre stamped on the whole thing.
+    const lines = [];
+    for (const { costCenterId, base, gst } of costCentreBuckets.values()) {
+      const roundedBase = Math.round(base * 100) / 100;
+      const roundedGst = Math.round(gst * 100) / 100;
+      if (roundedBase <= 0) continue;
+      lines.push(
+        { LHeadId: purchaseId, DebitAmount: roundedBase, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (base)`, CostCenterId: costCenterId },
+        { LHeadId: pgrnId,     DebitAmount: 0, CreditAmount: roundedBase, Narration: `GRN Posting: ${grn.GRNNo} — Provision for Pending GRN`, CostCenterId: costCenterId },
+      );
+      if (roundedGst > 0) {
+        lines.push(
+          { LHeadId: provisionalId, DebitAmount: roundedGst, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Provisional ITC`, CostCenterId: costCenterId },
+          { LHeadId: purchaseId,    DebitAmount: 0, CreditAmount: roundedGst, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (tax offset)`, CostCenterId: costCenterId },
+        );
+      }
+    }
 
     // Voucher number only — GL posting is independent of the Journal
     // Voucher module. This used to ALSO insert a dbo.JournalVoucher header +
@@ -1936,14 +2075,16 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const { postVoucher } = require("../services/generalLedger");
     await postVoucher(pool, {
       voucherNo: finalDocNo || `JV-GRN${grnId}`,
-      voucherDate: new Date(),
+      // The GRN's own date, not the date it happened to get posted — same
+      // fix as Invoice/Loan posting below.
+      voucherDate: grn.GRNDate,
       sourceType: "GRNPosting",
       sourceId: grnId,
       companyId: grn.CompanyId ?? null,
       projectId: grn.ProjectId ?? null,
       costCenterId: grn.CostCenterId ?? null,
       createdBy: userEmail,
-      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
+      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration, costCenterId: l.CostCenterId ?? null })),
     });
 
     await bumpCacheVersion("journal-voucher");
@@ -2515,3 +2656,4 @@ router.delete(
 
 module.exports = router;
 module.exports.createGRNInternal = createGRNInternal;
+module.exports.syncPOItemReceivedQty = syncPOItemReceivedQty;

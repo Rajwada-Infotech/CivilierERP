@@ -23,6 +23,11 @@ export interface LoanSanction {
   BorrowerCustomerName?: string | null;
   BorrowerBankAccountId?: number | null;
   BorrowerBankAccountName?: string | null;
+  // Customer Loan's "Customer to Company" direction (migration 402).
+  LenderCustomerId?: number | null;
+  LenderCustomerSource?: "AH" | "CRM" | null;
+  LenderCustomerName?: string | null;
+  LenderCustomerBankName?: string | null;
   LoanDate: string;
   Amount: number;
   HasInterest?: boolean;
@@ -41,10 +46,14 @@ export interface LoanSanction {
   ChequeDate?: string | null;
   IsPostDated?: boolean;
   DigitalRefNumber?: string | null;
+  DemandDraftNo?: string | null;
+  DemandDraftDate?: string | null;
   CreatedBy?: string | null;
   CreatedAt?: string | null;
   TotalEMIs?: number;
   PaidEMIs?: number;
+  TotalScheduledAmount?: number;
+  TotalPaidAmount?: number;
   LenderLHeadCode?: string | null;
   LenderGroupName?: string | null;
   LenderParentGroupName?: string | null;
@@ -75,7 +84,19 @@ export interface LoanSanctionPayload {
   loanType: LoanType;
   loanDocNo?: string | null;
   lenderCompanyId?: number | string | null;
-  lenderBankId?: number | string | null;
+  // Bank Loan only — the external lending bank's name, free-typed or picked
+  // from the Major/Minor list (BankNamePicker). Not an AccountHeadMaster id
+  // — the backend get-or-creates that bank's own shadow ledger head from
+  // this name (see ensureBankLoanLenderHead), since the lender isn't
+  // necessarily one of our own registered bank accounts.
+  lenderBankName?: string | null;
+  // Customer Loan's "Customer to Company" direction (migration 402) — a
+  // customer as LENDER instead of borrower. lenderCustomerBankName is
+  // descriptive only (which bank the money came from), same role as
+  // lenderBankName above.
+  lenderCustomerId?: number | string | null;
+  lenderCustomerSource?: "AH" | "CRM" | null;
+  lenderCustomerBankName?: string | null;
   lenderBankAccountId?: number | string | null;
   borrowerCompanyId?: number | string | null;
   borrowerCustomerId?: number | string | null;
@@ -100,6 +121,10 @@ export interface LoanSanctionPayload {
   chequeDate?: string | null;
   isPostDated?: boolean;
   digitalRefNumber?: string | null;
+  // Demand Draft carries its own ref number + date, same as Cheque has
+  // chequeNo/chequeDate, rather than sharing digitalRefNumber.
+  demandDraftNo?: string | null;
+  demandDraftDate?: string | null;
 }
 
 export interface LoanEMI {
@@ -155,6 +180,10 @@ export interface LoanPayment {
   // The real dbo.NewPayment record this settlement was made through (see
   // migration 340) — null for older rows recorded before this link existed.
   NewPaymentId?: number | null;
+  // Or, for a Customer Loan repayment settled via Received Payment instead
+  // (money coming IN — see migration 356), the dbo.ReceivedPayment record.
+  // Exactly one of NewPaymentId/ReceivedPaymentId is set, never both.
+  ReceivedPaymentId?: number | null;
   PaymentMode?: string | null;
   ChequeNo?: string | null;
   ChequeDate?: string | null;
@@ -172,10 +201,14 @@ export interface PayLoanPayload {
   lateFee?: number | string;
   paymentDate: string;
   notes?: string;
-  // The dbo.NewPayment row Payment.tsx just created for this settlement —
-  // links the loan's own payment record back to the one that actually
-  // carries mode/cheque/bank details (see migration 340).
+  // Exactly one of these two — whichever page this settlement was actually
+  // recorded from. The dbo.NewPayment row Payment.tsx just created (money
+  // going OUT, migration 340), or the dbo.ReceivedPayment row Received
+  // Payment just created (money coming IN — a Customer Loan repayment,
+  // migration 356). Links the loan's own payment record back to the one
+  // that actually carries mode/cheque/bank details.
   newPaymentId?: number;
+  receivedPaymentId?: number;
 }
 
 export interface PayLoanResponse {
@@ -225,7 +258,7 @@ export const createLoanSanction = (payload: LoanSanctionPayload) =>
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  }).then((r) => handle<{ loanId: number; loanNo: string }>(r));
+  }).then((r) => handle<{ loanId: number; loanNo: string; glPosted?: boolean; glError?: string | null }>(r));
 
 export const toggleEmiPaid = (loanId: number, emiId: number, paid: boolean) =>
   fetchWithAuth(`${BASE}/${loanId}/emi/${emiId}/pay`, {
@@ -265,11 +298,88 @@ export const updateLoanSanction = (id: number, payload: LoanEditPayload) =>
     body: JSON.stringify(payload),
   }).then((r) => handle(r));
 
-// Scoped to the company the payment is being made from — a loan's EMI is
-// only "payable" from the company that is its lender or borrower, same
-// scoping the backend enforces (400s without a companyId).
+// Scoped to the company the repayment is being settled for — a loan's EMI
+// is only "payable" from the company that is its lender (Inter-Company /
+// Customer Loan) or borrower (Bank Loan), same scoping the backend
+// enforces (400s without a companyId). Repayment of every loan type is
+// recorded through Received Payment only — see ReceivedPayment.tsx's Loan
+// Repayment picker; there is no repayment flow on the Payment page.
 export const getPayableEmis = (companyId: number) =>
   fetchWithAuth(`${BASE}/emi-payable?companyId=${companyId}`).then((r) => handle<PayableEmi[]>(r));
+
+export interface UndisbursedLoan {
+  LoanId: number;
+  LoanNo: string;
+  LoanType: "Inter-Company" | "Customer Loan";
+  LoanDate: string;
+  Amount: number;
+  LenderBankAccountId: number | null;
+  BorrowerBankAccountId: number | null;
+  BorrowerCustomerId: number | null;
+  BorrowerCustomerSource: "CRM" | "AH" | null;
+  BorrowerCompanyName: string | null;
+  BorrowerCustomerName: string | null;
+  // Captured on the loan itself at sanction time — carried onto the Payment
+  // form when this loan is picked for disbursement, so the bank/cheque
+  // don't have to be re-entered (and re-deducted from a different lot).
+  PaymentMode: string | null;
+  ChequeLotId: number | null;
+  ChequeLotNumber: string | null;
+  ChequeNo: string | null;
+  ChequeDate: string | null;
+  IsPostDated: boolean | null;
+  DigitalRefNumber: string | null;
+}
+
+export interface UndisbursedIncomingLoan {
+  LoanId: number;
+  LoanNo: string;
+  // Bank Loan, or a Customer Loan sanctioned in the "Customer to Company"
+  // direction (migration 402) — both are "external lender, money comes IN".
+  LoanType: "Bank Loan" | "Customer Loan";
+  LoanDate: string;
+  Amount: number;
+  LenderBankId: number | null;
+  LenderBankName: string | null;
+  LenderCustomerId: number | null;
+  LenderCustomerSource: "AH" | "CRM" | null;
+  // The lender's display name regardless of loan type — bank name for a
+  // Bank Loan, customer name for a Customer-to-Company Customer Loan.
+  LenderName: string | null;
+}
+
+// Sanctioned loans this (lender) company hasn't disbursed yet — Inter-
+// Company and Customer Loan, both "money OUT of our bank". Feeds Finance >
+// Payment's "Loan Disbursement" picker.
+export const getUndisbursedLoans = (companyId: number) =>
+  fetchWithAuth(`${BASE}/undisbursed?companyId=${companyId}`).then((r) => handle<UndisbursedLoan[]>(r));
+
+// Sanctioned Bank Loans this (borrower) company hasn't disbursed yet —
+// "money IN from an external bank". Feeds Received Payment's "Disburse a
+// Bank Loan" picker.
+export const getUndisbursedIncomingLoans = (companyId: number) =>
+  fetchWithAuth(`${BASE}/undisbursed-incoming?companyId=${companyId}`).then((r) => handle<UndisbursedIncomingLoan[]>(r));
+
+// Posts a Sanctioned Inter-Company loan's disbursement to GL — the
+// deliberate action that used to happen automatically at sanction time
+// (see POST / above). Same endpoint the loan's own "Post to GL" action
+// already used.
+export const postLoanToGL = (loanId: number) =>
+  fetchWithAuth(`${BASE}/${loanId}/post-to-gl`, { method: "POST" }).then((r) =>
+    handle<{ voucherNo: string; message: string }>(r),
+  );
+
+// Links a Bank Loan/Customer Loan's disbursement to a real payment already
+// created through the normal Payment/Received Payment form (so a real
+// bank/cheque/reference gets captured), then posts the loan-ledger side.
+// Customer Loan (money out) passes newPaymentId; Bank Loan (money in)
+// passes receivedPaymentId.
+export const disburseLoan = (loanId: number, payload: { newPaymentId?: number; receivedPaymentId?: number }) =>
+  fetchWithAuth(`${BASE}/${loanId}/disburse`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  }).then((r) => handle<{ voucherNo: string; message: string }>(r));
 
 export const getLoanPayments = (loanId: number) =>
   fetchWithAuth(`${BASE}/${loanId}/payments`).then((r) => handle<LoanPayment[]>(r));

@@ -104,7 +104,7 @@ const TypeToggle: React.FC<{
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const PaymentPlanMaster: React.FC = () => {
-  usePageRights("payment-plan-master");
+  const rights = usePageRights("payment-plan-master");
   const queryClient = useQueryClient();
 
   const [showAddRow, setShowAddRow] = useState(false);
@@ -419,7 +419,7 @@ const PaymentPlanMaster: React.FC = () => {
               <div className="flex gap-2">
                 <button
                   onClick={handleAdd}
-                  disabled={saving}
+                  disabled={saving || !rights.canCreate}
                   className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50"
                 >
                   {saving ? (
@@ -509,7 +509,7 @@ const PaymentPlanMaster: React.FC = () => {
                       <div className="flex gap-2">
                         <button
                           onClick={handleEdit}
-                          disabled={saving}
+                          disabled={saving || !rights.canEdit}
                           className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50"
                         >
                           {saving ? (
@@ -550,28 +550,34 @@ const PaymentPlanMaster: React.FC = () => {
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        <button
-                          onClick={() => handleToggle(term)}
-                          className="text-muted-foreground hover:text-primary transition-colors"
-                        >
-                          {term.IsActive ? (
-                            <ToggleRight size={22} className="text-primary" />
-                          ) : (
-                            <ToggleLeft size={22} />
-                          )}
-                        </button>
-                        <button
-                          onClick={() => startEdit(term)}
-                          className="w-8 h-8 flex items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:text-primary hover:border-primary/40 transition-all"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(term)}
-                          className="w-8 h-8 flex items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:text-red-400 hover:border-red-400/40 transition-all"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        {rights.canEdit && (
+                          <button
+                            onClick={() => handleToggle(term)}
+                            className="text-muted-foreground hover:text-primary transition-colors"
+                          >
+                            {term.IsActive ? (
+                              <ToggleRight size={22} className="text-primary" />
+                            ) : (
+                              <ToggleLeft size={22} />
+                            )}
+                          </button>
+                        )}
+                        {rights.canEdit && (
+                          <button
+                            onClick={() => startEdit(term)}
+                            className="w-8 h-8 flex items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:text-primary hover:border-primary/40 transition-all"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                        )}
+                        {rights.canDelete && (
+                          <button
+                            onClick={() => handleDelete(term)}
+                            className="w-8 h-8 flex items-center justify-center rounded-lg border border-border bg-muted text-muted-foreground hover:text-red-400 hover:border-red-400/40 transition-all"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </div>
                     </div>
                   )}
@@ -674,7 +680,7 @@ const PaymentPlanMaster: React.FC = () => {
                     <div className="flex items-center justify-center gap-1.5">
                       <button
                         onClick={handleAdd}
-                        disabled={saving}
+                        disabled={saving || !rights.canCreate}
                         className="w-7 h-7 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-all"
                       >
                         {saving ? (

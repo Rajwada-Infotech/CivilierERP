@@ -320,7 +320,7 @@ function buildDocColumns(
 
 const TypeOfDocMaster: React.FC = () => {
   const queryClient = useQueryClient();
-  const rights = usePageRights("document-type");
+  const rights = usePageRights("type-of-doc");
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);

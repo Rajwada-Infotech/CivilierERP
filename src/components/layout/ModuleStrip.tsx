@@ -17,7 +17,7 @@ import {
   Shield,
   MoneyRecive,
 } from "iconsax-react";
-import { HardHat } from "lucide-react";
+import { HardHat, Wrench } from "lucide-react";
 import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES, Module } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -36,6 +36,11 @@ const HardHatIcon: React.FC<{ size?: number; variant?: string; className?: strin
   variant,
   ...rest
 }) => <HardHat {...rest} />;
+
+const WrenchIcon: React.FC<{ size?: number; variant?: string; className?: string; style?: React.CSSProperties }> = ({
+  variant,
+  ...rest
+}) => <Wrench {...rest} />;
 
 const MODULES = [
   {
@@ -137,6 +142,15 @@ const MODULES = [
     bg: "rgba(14,165,233,0.22)",
     ringRgb: "14,165,233",
   },
+  {
+    id: "maintenance" as Module,
+    icon: WrenchIcon,
+    label: "Maintenance",
+    desc: "Upkeep, repairs & servicing",
+    color: "#65a30d",
+    bg: "rgba(101,163,13,0.22)",
+    ringRgb: "101,163,13",
+  },
   // Records is always last — new modules get inserted above this entry
   {
     id: "records" as Module,
@@ -207,13 +221,14 @@ export const ModuleStrip: React.FC = () => {
   const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
     finance:     ["finance-dashboard", "new-payment", "received-payment", "brs", "transactions", "expense-booking"],
     material:    ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "stock-ledger"],
-    "fixed-asset": ["fixed-asset-dashboard", "fixed-asset-record", "fixed-asset-tagging", "asset-transfer", "depreciation-setup"],
+    "fixed-asset": ["fixed-asset-dashboard", "fixed-asset-record", "fixed-asset-tagging", "asset-transfer", "depreciation-setup", "id-template-master"],
     followup:    ["followup-dashboard", "followup-applications", "followup-bookings", "followup-agreements", "followup-demands"],
     engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
     ticket:      ["ticket-dashboard", "tickets"],
     sales:       ["sale-order", "sale-invoice", "sales-payment"],
     civilworkdpr: ["civilworkdpr-dashboard"],
     "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
+    maintenance: ["maintenance-dashboard"],
   };
 
   const userHasModuleAccess = (moduleId: string): boolean => {
@@ -337,7 +352,7 @@ export const ModuleStrip: React.FC = () => {
               className="cursor-pointer rounded-full"
             >
               <img
-                src="/loader.gif"
+                src="/loader.webp"
                 alt="Refresh"
                 width={56}
                 height={56}

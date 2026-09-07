@@ -183,6 +183,122 @@ router.get("/:id", authenticateToken, async (req, res) => {
   }
 });
 
+// ── GET /:id/posting — GL posting preview / actual entries ──────────────────
+// Mirrors the Posting tab already shown on GRN/Invoice/Received Payment.
+// Intra-company posts one Dr/Cr pair; Inter-company posts TWO separate
+// vouchers (one per company's own books, via the auto-created/reused
+// per-company Loan ledger head — see postFundTransferApproval /
+// ensureLoanLedgerHead) — so unlike those single-voucher modules, this can
+// return more than one already-posted voucher for the same transfer.
+router.get("/:id/posting", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const ftRes = await pool.request().input("id", sql.Int, id).query(`
+      SELECT ft.FTId, ft.DocNo, ft.TransferDate, ft.TransferType, ft.Amount, ft.Narration,
+             ft.SourceCompanyId, sc.name AS SourceCompanyName,
+             ft.DestinationCompanyId, dc.name AS DestinationCompanyName,
+             ft.SourceBankId, sb.LHeadName AS SourceBankName,
+             ft.DestinationBankId, db.LHeadName AS DestinationBankName,
+             ft.LinkedLoanId, ls.LoanNo AS LinkedLoanNo
+      FROM dbo.FundTransfer ft
+      LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
+      LEFT JOIN dbo.enterprise dc ON dc.id = ft.DestinationCompanyId
+      LEFT JOIN dbo.AccountHeadMaster sb ON sb.LHeadId = ft.SourceBankId
+      LEFT JOIN dbo.AccountHeadMaster db ON db.LHeadId = ft.DestinationBankId
+      LEFT JOIN dbo.LoanSanction ls ON ls.LoanId = ft.LinkedLoanId
+      WHERE ft.FTId = @id
+    `);
+    if (!ftRes.recordset.length) return res.status(404).json({ error: "Fund Transfer not found" });
+    const ft = ftRes.recordset[0];
+    const amount = Number(ft.Amount) || 0;
+    const docNo = ft.DocNo || `FT-${id}`;
+
+    // Real posted entries, if any — grouped into voucher(s) by VoucherNo,
+    // since Inter-company posts two.
+    const postedRes = await pool.request().input("id", sql.Int, id).query(`
+      SELECT gle.EntryId, gle.VoucherNo, gle.CompanyId, gle.DebitAmount, gle.CreditAmount, gle.Narration,
+             ah.LHeadId, ah.LHeadName
+      FROM dbo.GeneralLedgerEntry gle
+      JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = gle.LHeadId
+      WHERE gle.SourceType = 'FundTransfer' AND gle.SourceId = @id AND gle.IsReversed = 0
+      ORDER BY gle.EntryId
+    `);
+    const isPosted = postedRes.recordset.length > 0;
+
+    let vouchers;
+    if (isPosted) {
+      // Real entries — one voucher group per CompanyId (Inter posts one set
+      // per side; Intra posts a single set under the source company).
+      const byCompany = new Map();
+      for (const row of postedRes.recordset) {
+        const key = row.CompanyId ?? "none";
+        if (!byCompany.has(key)) byCompany.set(key, { jvNo: row.VoucherNo, rows: [] });
+        byCompany.get(key).rows.push({
+          label: row.LHeadName,
+          side: Number(row.DebitAmount) > 0 ? "debit" : "credit",
+          amount: Number(row.DebitAmount) > 0 ? Number(row.DebitAmount) : Number(row.CreditAmount),
+        });
+      }
+      vouchers = [...byCompany.values()];
+    } else if (ft.TransferType === "Intra") {
+      vouchers = [{
+        jvNo: null,
+        rows: [
+          { label: ft.DestinationBankName || "Destination Bank", side: "debit", amount },
+          { label: ft.SourceBankName || "Source Bank", side: "credit", amount },
+        ],
+      }];
+    } else {
+      // Inter-company preview — look up (never create) the per-company Loan
+      // ledger head so the preview shows the real name whenever it already
+      // exists from an earlier loan/transfer with that same company.
+      const findLoanHead = async (companyId) => {
+        if (!companyId) return null;
+        const r = await pool.request().input("code", sql.NVarChar(20), `LOAN-C-${companyId}`)
+          .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = @code");
+        return r.recordset[0]?.LHeadName ?? null;
+      };
+      const lenderLoanName = (await findLoanHead(ft.SourceCompanyId)) || `Loan — ${ft.SourceCompanyName || "Source Company"} (auto-created on approval)`;
+      const borrowerLoanName = (await findLoanHead(ft.DestinationCompanyId)) || `Loan — ${ft.DestinationCompanyName || "Destination Company"} (auto-created on approval)`;
+      vouchers = [
+        {
+          jvNo: null,
+          companyName: ft.SourceCompanyName,
+          rows: [
+            { label: lenderLoanName, side: "debit", amount },
+            { label: ft.SourceBankName || "Source Bank", side: "credit", amount },
+          ],
+        },
+        {
+          jvNo: null,
+          companyName: ft.DestinationCompanyName,
+          rows: [
+            { label: ft.DestinationBankName || "Destination Bank", side: "debit", amount },
+            { label: borrowerLoanName, side: "credit", amount },
+          ],
+        },
+      ];
+    }
+
+    res.json({
+      docNo,
+      transferType: ft.TransferType,
+      amount,
+      sourceCompanyName: ft.SourceCompanyName,
+      destinationCompanyName: ft.DestinationCompanyName,
+      linkedLoanNo: ft.LinkedLoanNo,
+      isPosted,
+      vouchers,
+    });
+  } catch (err) {
+    console.error("Fund Transfer posting preview error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST / — create (Draft, auto-submitted to Pending) ──────────────────────
 router.post("/", authenticateToken, requirePageRight("fund-transfer", "create"), async (req, res) => {
   const user = requireUser(req, res);

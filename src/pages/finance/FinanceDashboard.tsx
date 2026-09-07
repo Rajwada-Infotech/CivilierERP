@@ -444,7 +444,7 @@ const FinanceDashboard = () => {
 
         {/* ── Primary stat cards ────────────────────────────────────────────── */}
         <GlassSection
-          title="Today's Activity"
+          title="Cumulative Transfers"
           icon={Receipt}
           accentColor="#6366f1"
         >
@@ -455,18 +455,18 @@ const FinanceDashboard = () => {
                 ))
               : [
                   {
-                    label: "Payments Made Today",
-                    value: data?.paymentsMade.todayCount.toString() ?? "0",
-                    sub: `${fmt(data?.paymentsMade.todayAmount ?? 0)} paid today · ${data?.paymentsMade.totalCount ?? 0} total`,
+                    label: "Total Payments Made",
+                    value: fmt(data?.paymentsMade.totalAmount ?? 0),
+                    sub: `${data?.paymentsMade.totalCount ?? 0} transfers · all-time`,
                     icon: Receipt,
                     accentColor: "#f43f5e",
                     onClick: () => navigate("/payments"),
                     trend: "up" as const,
                   },
                   {
-                    label: "Received Today",
-                    value: data?.receivedPayments.todayCount.toString() ?? "0",
-                    sub: `${fmt(data?.receivedPayments.todayAmount ?? 0)} received · ${data?.receivedPayments.totalCount ?? 0} total`,
+                    label: "Total Received",
+                    value: fmt(data?.receivedPayments.totalAmount ?? 0),
+                    sub: `${data?.receivedPayments.totalCount ?? 0} receipts · all-time`,
                     icon: BadgeDollarSign,
                     accentColor: "#10b981",
                     onClick: () => navigate("/received-payments"),
@@ -785,51 +785,6 @@ const FinanceDashboard = () => {
                 </div>
               )}
             </div>
-          </div>
-        </GlassSection>
-
-        {/* ── Cheque Summary ───────────────────────────────────────────── */}
-        <GlassSection
-          title="Cheque Summary"
-          icon={BookOpen}
-          accentColor="#f59e0b"
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {isLoading ? (
-              Array.from({ length: 4 }).map((_, i) => (
-                <StatCardSkeleton key={i} />
-              ))
-            ) : (
-              <>
-                <FinanceGlassCard
-                  label="Total Cheque Lots"
-                  value={(data?.cheques.totalCount ?? 0).toString()}
-                  sub="All cheque lots registered"
-                  icon={BookOpen}
-                  accentColor="#6366f1"
-                  onClick={() => navigate("/masters/cheque")}
-                />
-                <FinanceGlassCard
-                  label="Active Lots"
-                  value={(data?.cheques.activeCount ?? 0).toString()}
-                  sub={`${data?.cheques.totalCount ?? 0} total registered`}
-                  icon={Clock}
-                  accentColor="#f59e0b"
-                  trend={
-                    (data?.cheques.activeCount ?? 0) > 0 ? "up" : "neutral"
-                  }
-                  onClick={() => navigate("/masters/cheque")}
-                />
-                <FinanceGlassCard
-                  label="Inactive Lots"
-                  value={(data?.cheques.inactiveCount ?? 0).toString()}
-                  sub="Deactivated cheque lots"
-                  icon={CheckCircle2}
-                  accentColor="#10b981"
-                  onClick={() => navigate("/masters/cheque")}
-                />
-              </>
-            )}
           </div>
         </GlassSection>
 

@@ -368,10 +368,11 @@ function DateStep({
 }
 
 // ── Deed details collapsible ──────────────────────────────────────────────────
-function DeedDetailsSection({ detail, onSave, saving }: {
+function DeedDetailsSection({ detail, onSave, saving, canEdit }: {
   detail: any;
   onSave: (fields: Record<string, string>) => void;
   saving: boolean;
+  canEdit: boolean;
 }) {
   const [open, setOpen] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -465,7 +466,7 @@ function DeedDetailsSection({ detail, onSave, saving }: {
                   <p className="text-xs text-muted-foreground pt-1 italic">{detail.Notes}</p>
                 )}
               </div>
-              {!locked && (
+              {canEdit && !locked && (
                 <div className="flex justify-end pt-1">
                   <button onClick={() => setEditing(true)} className="flex items-center gap-1 text-[11px] text-primary hover:underline">
                     <Pencil size={10} /> Edit
@@ -507,6 +508,7 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 }
 
 const CrmSalesDeed: React.FC = () => {
+  const rights = usePageRights("crm-sales-deed");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
@@ -626,7 +628,7 @@ const CrmSalesDeed: React.FC = () => {
   const progressLocked = registered || cancelled;
 
   useEffect(() => {
-    if (!deepLinkBookingId || dialogOpen) return;
+    if (!rights.canCreate || !deepLinkBookingId || dialogOpen) return;
     if ((deeds as any[]).some((d: any) => String(d.BookingId) === deepLinkBookingId)) return;
     if ((eligible as any[]).some((b: any) => String(b.Id) === deepLinkBookingId)) {
       setForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
@@ -950,10 +952,12 @@ const CrmSalesDeed: React.FC = () => {
         action={
           <div className="flex items-center gap-3">
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-            <button onClick={() => setDialogOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
-              <Plus size={14} /> New Deed
-            </button>
+            {rights.canCreate && (
+              <button onClick={() => setDialogOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+                <Plus size={14} /> New Deed
+              </button>
+            )}
           </div>
         }
       >
@@ -1187,7 +1191,7 @@ const CrmSalesDeed: React.FC = () => {
                 </div>
 
                 {/* Tab content renders below */}
-                  
+
                   {activeTab === 'Overview' && (
                     <div className="space-y-4">
                       {/* Read-only overview stats mirroring CrmAgreement */}
@@ -1241,7 +1245,7 @@ const CrmSalesDeed: React.FC = () => {
                         </div>
                       </div>
 
-                      <DeedDetailsSection detail={detail} onSave={handleSaveDeedDetails} saving={deedDetailSaving} />
+                      <DeedDetailsSection detail={detail} onSave={handleSaveDeedDetails} saving={deedDetailSaving} canEdit={rights.canEdit} />
                     </div>
                   )}
 

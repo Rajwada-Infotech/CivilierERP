@@ -51,6 +51,11 @@ export interface BankOption {
   ifscCode?: string | null;
   branch?: string | null;
   accountType?: string | null;
+  // Which company this bank is tagged to (AccountHeadMaster.BCompanyName) —
+  // null/empty means shared across every company. Used to scope the Bank
+  // dropdown to the payment's selected company, same convention
+  // ReceivedPayment.tsx already uses.
+  companyName?: string | null;
 }
 
 export interface CardOption {

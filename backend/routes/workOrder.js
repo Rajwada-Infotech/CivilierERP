@@ -377,7 +377,7 @@ router.get(
   },
 );
 
-router.post("/", requirePageRight("work-order-master", "create"), async (req, res) => {
+router.post("/", requirePageRight("engineering-work-order", "create"), async (req, res) => {
   const {
     CompanyId,
     ProjectId,
@@ -520,7 +520,7 @@ router.post("/", requirePageRight("work-order-master", "create"), async (req, re
   }
 });
 
-router.put("/:id", requirePageRight("work-order-master", "edit"), async (req, res) => {
+router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
 
@@ -661,7 +661,7 @@ router.put("/:id", requirePageRight("work-order-master", "edit"), async (req, re
   }
 });
 
-router.delete("/:id", requirePageRight("work-order-master", "delete"), async (req, res) => {
+router.delete("/:id", requirePageRight("engineering-work-order", "delete"), async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;
@@ -789,7 +789,7 @@ router.get("/:id/activities", async (req, res) => {
   }
 });
 
-router.post("/:id/activities", requirePageRight("work-order-master", "edit"), async (req, res) => {
+router.post("/:id/activities", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
 
@@ -846,7 +846,7 @@ router.post("/:id/activities", requirePageRight("work-order-master", "edit"), as
   }
 });
 
-router.put("/:id/activities/:activityId", requirePageRight("work-order-master", "edit"), async (req, res) => {
+router.put("/:id/activities/:activityId", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
   if (!requireValidId(req, res)) return;
 
   const {
@@ -889,7 +889,7 @@ router.put("/:id/activities/:activityId", requirePageRight("work-order-master", 
   }
 });
 
-router.delete("/:id/activities/:activityId", requirePageRight("work-order-master", "edit"), async (req, res) => {
+router.delete("/:id/activities/:activityId", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
   try {
     if (!requireValidId(req, res)) return;
     const pool = getPool();
@@ -948,7 +948,7 @@ router.get(
  * POST material — now includes DocNo FK (required by FK_WorkOrderActivityMaterials_DocNo)
  * DocNo is fetched from the WorkOrderHeader via the activity's WorkOrderHeaderId
  */
-router.post("/:id/activities/:activityId/materials", requirePageRight("work-order-master", "edit"), async (req, res) => {
+router.post("/:id/activities/:activityId/materials", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
   if (!requireValidId(req, res)) return;
 
   const { ItemId, UOMId, Quantity, Rate, Remarks, SupplierIdPerLine } =
@@ -1010,7 +1010,7 @@ router.post("/:id/activities/:activityId/materials", requirePageRight("work-orde
 
 router.put(
   "/:id/activities/:activityId/materials/:materialId",
-  requirePageRight("work-order-master", "edit"),
+  requirePageRight("engineering-work-order", "edit"),
   async (req, res) => {
     if (!requireValidId(req, res)) return;
 
@@ -1051,7 +1051,7 @@ router.put(
 
 router.delete(
   "/:id/activities/:activityId/materials/:materialId",
-  requirePageRight("work-order-master", "delete"),
+  requirePageRight("engineering-work-order", "delete"),
   async (req, res) => {
     try {
       if (!requireValidId(req, res)) return;
@@ -1073,7 +1073,7 @@ router.delete(
 // =============================================
 //  BULK SAVE  —  POST /api/work-orders/:id/save-full
 // =============================================
-router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), async (req, res) => {
+router.post("/:id/save-full", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
   const headerId = requireValidId(req, res);
   if (!headerId) return;
   const { header, activities } = req.body;
@@ -1610,7 +1610,7 @@ router.post("/:id/save-full", requirePageRight("work-order-master", "edit"), asy
 
 // ── Approval transitions ──────────────────────────────────────────────────────
 
-router.put("/:id/submit", requirePageRight("work-order-master", "edit"), async (req, res) => {
+router.put("/:id/submit", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   try {
@@ -1758,7 +1758,7 @@ router.get("/:id/create-po-prefill", async (req, res) => {
 // Materials without a SupplierIdPerLine are grouped under supplierId = null
 // (they produce one combined WO-PO with no supplier set).
 //
-router.post("/:id/confirm", requirePageRight("work-order-master", "edit"), async (req, res) => {
+router.post("/:id/confirm", requirePageRight("engineering-work-order", "edit"), async (req, res) => {
   const headerId = requireValidId(req, res);
   if (!headerId) return;
   const userEmail = requireUserName(req, res);

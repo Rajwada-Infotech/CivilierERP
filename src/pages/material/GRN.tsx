@@ -373,6 +373,7 @@ const inp =
 const inpSel =
   "w-full px-3 py-2 pr-8 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-emerald-500 text-foreground appearance-none";
 
+
 // ─── Linked Expense Bookings ──────────────────────────────────────────────────
 interface LinkedBooking {
   Eid: number;
@@ -541,7 +542,11 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-violet-500/10 text-violet-600 dark:text-violet-400 border border-violet-400/20 w-fit">
               <ArrowLeftRight size={8} /> Transfer GRN
             </span>
-          ) : grn.POType ? (
+          ) : grn.POType && grn.POType !== "Direct" ? (
+            // POType "Direct" is skipped here — a GRN off a Direct PO
+            // already gets the "Direct Entry" badge below whenever it also
+            // has no Vehicle In/Out (the common case), and the two badges
+            // read as the same thing side by side.
             <span
               className={`inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold border w-fit ${
                 grn.POType === "Normal"
@@ -554,6 +559,19 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
               {grn.POType}
             </span>
           ) : null}
+          {/* Entry Mode — a GRN with no Vehicle In/Out skipped the gate
+              control (raised via "remaining PO items" instead); worth
+              flagging at a glance for audit/reporting. Transfer GRNs never
+              have a vehicle either, but that's expected for that path, not
+              an exception worth badging. */}
+          {!isTRF && !grn.VehicleInOutID && (
+            <span
+              title={grn.DirectEntryReason || undefined}
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-400/20 w-fit"
+            >
+              Direct Entry
+            </span>
+          )}
         </div>
       );
     },
@@ -988,6 +1006,9 @@ export default function GRN() {
     // specific Vehicle In/Out lot, or a direct "remaining items on this
     // PO" quick-fill. Empty until the user picks one.
     grnSourceMode: "" as "" | "vehicleInOut" | "remaining",
+    // Why the vehicle gate was skipped — only shown/sent when
+    // grnSourceMode === "remaining" (no Vehicle In/Out on this GRN).
+    directEntryReason: "" as string,
     poTotalAmount: 0 as number,
     poSubtotalAmount: 0 as number,
     poReceivedAmount: 0 as number,
@@ -1078,22 +1099,6 @@ export default function GRN() {
     queryFn: () => getProjects(formData.companyId || null),
   });
 
-  // POs eligible for a GRN must have at least one Vehicle In/Out already
-  // logged against them — goods can't be receipted before a vehicle's
-  // actually brought them in.
-  const { data: poIdsWithVio = [] } = useQuery({
-    queryKey: ["po-ids-with-vio"],
-    queryFn: () =>
-      fetchWithAuth("/api/vehicle-in-out/po-ids-with-vio")
-        .then((r) => r.json())
-        .then((d) => (Array.isArray(d) ? d.map(Number) : [])),
-    staleTime: 60_000,
-  });
-  const poIdsWithVioSet = useMemo(
-    () => new Set(poIdsWithVio as number[]),
-    [poIdsWithVio],
-  );
-
   const { data: companiesData = [] } = useQuery({
     queryKey: ["grn-companies"],
     queryFn: getCompanies,
@@ -1126,10 +1131,6 @@ export default function GRN() {
             if (String((po as any).ProjectId ?? "") !== formData.projectId)
               return false;
           }
-          // A GRN can only be raised once a vehicle's actually brought the
-          // goods in — a PO with no Vehicle In/Out logged against it yet
-          // has nothing to receipt.
-          if (!poIdsWithVioSet.has(Number(po.PurchaseOrderID))) return false;
           return true;
         })
         .map((po) => {
@@ -1152,7 +1153,6 @@ export default function GRN() {
       formData.projectId,
       formData.poId,
       editingId,
-      poIdsWithVioSet,
     ],
   );
 
@@ -1431,6 +1431,10 @@ export default function GRN() {
         vehicleInOutId,
         vehicleInOutDocNo: vio?.DocNo ?? "",
         grnSourceMode: "vehicleInOut",
+        // Switching to a Vehicle In/Out lot means this is a Gate Inward
+        // GRN — any Direct Entry reason left over from a prior "remaining
+        // items" pick no longer applies.
+        directEntryReason: "",
         // GRN Date now tracks the linked Vehicle In/Out document's own
         // date — the goods were received on that date, not today.
         grnDate: vio?.DocDate
@@ -1589,6 +1593,9 @@ export default function GRN() {
       vehicleInOutId: formData.vehicleInOutId
         ? Number(formData.vehicleInOutId)
         : null,
+      directEntryReason: !formData.vehicleInOutId && formData.directEntryReason
+        ? formData.directEntryReason
+        : null,
       grnItems: formData.items,
       status: "Draft",
       remarks: formData.remarks,
@@ -1690,6 +1697,7 @@ export default function GRN() {
         : "",
       vehicleInOutDocNo: fullGrn.documentChain?.vehicleInOut?.docNo || "",
       grnSourceMode: fullGrn.VehicleInOutID ? "vehicleInOut" : "remaining",
+      directEntryReason: fullGrn.DirectEntryReason || "",
       poTotalAmount: Number(fullGrn.POTotalAmount ?? 0),
       poSubtotalAmount: Number(fullGrn.POSubtotalAmount ?? 0),
       poReceivedAmount: Number(fullGrn.POTotalReceived ?? 0),
@@ -3240,6 +3248,17 @@ export default function GRN() {
                                 color: "text-sky-600 dark:text-sky-400",
                               },
                             ]
+                          : !isTransferGRN(viewingGrn)
+                            ? [
+                                {
+                                  label: "Entry Mode",
+                                  value: "Direct Entry (no vehicle gate)",
+                                  color: "text-amber-600 dark:text-amber-400",
+                                },
+                              ]
+                            : []),
+                        ...(viewingGrn.DirectEntryReason
+                          ? [{ label: "Direct Entry Reason", value: viewingGrn.DirectEntryReason }]
                           : []),
                       ].map(({ label, value, mono, color }: any) => (
                         <div
@@ -3636,7 +3655,7 @@ export default function GRN() {
                         Could not load posting data.
                       </div>
                     ) : (() => {
-                      const { baseAmount, taxAmount, costCentre, accounts, items } = grnPostingData;
+                      const { baseAmount, taxAmount, costCentreBreakdown, accounts, items } = grnPostingData;
                       const fmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                       type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit"; amount: number };
                       const purchaseLabel = accounts?.purchase?.name ?? accounts?.purchase?.label ?? "Purchase A/c";
@@ -3666,7 +3685,7 @@ export default function GRN() {
                           : []),
                       ];
 
-                      type ItemGroup = { key: string; itemName: string | null; qty: number | null; rate: number | null; uom: string | null; rows: PostRow[] };
+                      type ItemGroup = { key: string; itemName: string | null; qty: number | null; rate: number | null; uom: string | null; costCentre: { id: number; name: string; code: string | null } | null; rows: PostRow[] };
                       const itemGroups: ItemGroup[] =
                         Array.isArray(items) && items.length > 0
                           ? items.map((it: any, idx: number) => ({
@@ -3675,9 +3694,10 @@ export default function GRN() {
                               qty: it.qty ?? null,
                               rate: it.rate ?? null,
                               uom: it.uom ?? null,
+                              costCentre: it.costCentre ?? null,
                               rows: buildRows(String(it.itemId ?? idx), Number(it.baseAmount) || 0, Number(it.gstAmount) || 0),
                             }))
-                          : [{ key: "lumped", itemName: null, qty: null, rate: null, uom: null, rows: buildRows("lumped", baseAmount, taxAmount) }];
+                          : [{ key: "lumped", itemName: null, qty: null, rate: null, uom: null, costCentre: null, rows: buildRows("lumped", baseAmount, taxAmount) }];
 
                       const allRows = itemGroups.flatMap((g) => g.rows);
                       const totalDebit = allRows.filter(r => r.side === "debit").reduce((s, r) => s + r.amount, 0);
@@ -3685,7 +3705,30 @@ export default function GRN() {
 
                       const gridCols = "grid-cols-[minmax(0,2.5fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] sm:grid-cols-[minmax(0,2.2fr)_1fr_1fr_1fr]";
 
+                      // Cost-centre-wise money breakdown — same totals as
+                      // the table above, regrouped by cost centre instead
+                      // of by item, so a reviewer can see e.g. "Fixed
+                      // Asset: ₹X · Consumption: ₹Y" at a glance.
+                      const ccBreakdown: Array<{ costCentre: { id: number; name: string; code: string | null } | null; baseAmount: number; gstAmount: number; totalAmount: number }> =
+                        Array.isArray(costCentreBreakdown) ? costCentreBreakdown : [];
+
                       return (
+                        <div className="space-y-3">
+                        {ccBreakdown.length > 1 && (
+                          <div className="rounded-xl border border-border overflow-hidden">
+                            <div className="px-3 sm:px-4 py-2 bg-muted/40 border-b border-border text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+                              Cost Centre — Money Breakdown
+                            </div>
+                            <div className="divide-y divide-border/50">
+                              {ccBreakdown.map((b, i) => (
+                                <div key={b.costCentre?.id ?? `unassigned-${i}`} className="flex items-center justify-between px-3 sm:px-4 py-2.5 text-xs">
+                                  <span className="text-foreground font-medium">{b.costCentre?.name || "Unassigned"}</span>
+                                  <span className="font-mono text-muted-foreground">₹{fmt(b.totalAmount)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         <div className="rounded-xl border border-border overflow-hidden">
                           <div className={`grid ${gridCols} bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2`}>
                             <span>Account</span>
@@ -3718,7 +3761,7 @@ export default function GRN() {
                                       {row.label}{row.code ? ` (${row.code})` : ""}
                                     </span>
                                   </div>
-                                  <span className="text-[11px] text-muted-foreground text-center truncate">{costCentre?.name || "—"}</span>
+                                  <span className="text-[11px] text-muted-foreground text-center truncate">{group.costCentre?.name || "Unassigned"}</span>
                                   <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
                                     {row.side === "debit" ? fmt(row.amount) : ""}
                                   </span>
@@ -3735,6 +3778,7 @@ export default function GRN() {
                             <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(totalDebit)}</span>
                             <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(totalCredit)}</span>
                           </div>
+                        </div>
                         </div>
                       );
                     })()}

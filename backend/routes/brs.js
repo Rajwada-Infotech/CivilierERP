@@ -12,6 +12,18 @@ const { checkPermissionForMethod } = require("../middleware/routePermission");
 
 router.use(checkPermissionForMethod("Finance", "BRS"));
 
+// Every SourceType the unified BRS view (GET /) can produce — the /clear,
+// /unclear, /bounce actions below all validate against this same list.
+const RECONCILABLE_SOURCE_TYPES = [
+  "PAYMENT",
+  "RECEIVED",
+  "CRM_RECEIVED",
+  "FUND_TRANSFER_OUT",
+  "FUND_TRANSFER_IN",
+  "LOAN_DISBURSED",
+  "LOAN_RECEIVED",
+];
+
 // Bust cache on startup so the unmatched-payments filter fix above takes
 // effect immediately instead of waiting out the 60s TTL on stale entries.
 bumpCacheVersion("brs").catch(() => {});
@@ -74,7 +86,8 @@ router.get("/filters", cache("brs-filters", 300), async (req, res) => {
         ahm.LHeadId            AS BId,
         ahm.LHeadName          AS BName,
         ahm.${companyCol}      AS CompanyName,
-        ent.id                 AS CompanyId
+        ent.id                 AS CompanyId,
+        RIGHT(ahm.LAccountNo, 4) AS AccountNoLast4
       FROM dbo.AccountHeadMaster ahm
       LEFT JOIN dbo.enterprise ent
         ON  ent.business_type = 'C'
@@ -84,11 +97,16 @@ router.get("/filters", cache("brs-filters", 300), async (req, res) => {
       ORDER BY ahm.LHeadName
     `);
 
+    // Same bank can have several ledger heads (e.g. two branches/accounts
+    // both named "HDFC Bank") — the dropdown otherwise shows indistinguishable
+    // duplicate labels, same fix already applied to Journal Voucher's account
+    // picker.
     const banks = bankResult.recordset.map((b) => ({
       id: b.BId,
       name: b.BName,
       companyId: b.CompanyId ?? null,
       companyName: b.CompanyName ?? null,
+      accountNoLast4: b.AccountNoLast4 || null,
     }));
 
     res.json({ companies: companyResult.recordset, banks });
@@ -154,7 +172,21 @@ router.get("/", cache("brs", 60), async (req, res) => {
         SELECT
           np.PPaymentID            AS SourceID,
           'PAYMENT'                AS SourceType,
-          np.PPaymentName          AS PaymentName,
+          -- Party/payee name — NOT np.PPaymentName, which is the free-text
+          -- "Payment Purpose"/reason field (e.g. "Material Purchase"), not
+          -- who the payment was made to. Same resolution chain newPayment.js
+          -- itself uses for its own party column (GRN/PO-linked invoice ->
+          -- supplier head, else the direct party picked on the payment).
+          -- Using PPaymentName here showed the payment's reason instead of
+          -- its party in this report.
+          COALESCE(
+            CASE
+              WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
+              WHEN eb.ESourceType = 'PO'  THEN po_sup.LHeadName
+              ELSE grn2_sup.LHeadName
+            END,
+            party_head.LHeadName
+          )                         AS PaymentName,
           ISNULL(ent.name, np.PCompany) AS CompanyName,
           ent.id                   AS CompanyID,
           np.PBankID               AS BankID,
@@ -186,6 +218,8 @@ router.get("/", cache("brs", 60), async (req, res) => {
           -- Clearing timestamp: FORMAT() returns a plain string so mssql does not
           -- reinterpret the IST DATETIME2 value as UTC (which would add +5:30 in the browser).
           CASE WHEN brc.IsMatched = 1 THEN FORMAT(brc.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
+          brc.BankClearingDate     AS BankClearingDate,
+          brc.ClearedBy            AS ClearedBy,
           -- Re-issue chain: DocNo of the payment that replaced this one (if any)
           repl.DocNo               AS ReplacementDocNo,
           repl.PPaymentID          AS ReplacementPaymentId,
@@ -198,6 +232,18 @@ router.get("/", cache("brs", 60), async (req, res) => {
           AND repl.Status NOT IN ('Draft', 'Rejected')
         LEFT JOIN dbo.NewPayment orig
           ON  orig.PPaymentID = np.ReplacesPaymentId
+        -- Party resolution chain — mirrors newPayment.js's own PSupplierName join exactly.
+        LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+        LEFT JOIN dbo.PurchaseOrders po
+          ON eb.ESourceType = 'PO' AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.GoodsReceiptNotes grn_eb
+          ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster grn_sup ON grn_sup.LHeadId = grn_eb.SupplierID
+        LEFT JOIN dbo.AccountHeadMaster po_sup  ON po_sup.LHeadId  = po.SupplierID
+        LEFT JOIN dbo.GoodsReceiptNotes grn2
+          ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
+        LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
+        LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
         LEFT JOIN dbo.enterprise ent
           ON  ent.business_type = 'C'
           AND (
@@ -253,6 +299,8 @@ router.get("/", cache("brs", 60), async (req, res) => {
           brc2.BounceRemarks       AS BounceRemarks,
           brc2.BRSID               AS BRSID,
           CASE WHEN brc2.IsMatched = 1 THEN FORMAT(brc2.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
+          brc2.BankClearingDate    AS BankClearingDate,
+          brc2.ClearedBy           AS ClearedBy,
           CAST(NULL AS NVARCHAR(100)) AS ReplacementDocNo,
           CAST(NULL AS INT)           AS ReplacementPaymentId,
           CAST(NULL AS NVARCHAR(100)) AS OriginalDocNo,
@@ -302,6 +350,8 @@ router.get("/", cache("brs", 60), async (req, res) => {
           brc3.BounceRemarks       AS BounceRemarks,
           brc3.BRSID               AS BRSID,
           CASE WHEN brc3.IsMatched = 1 THEN FORMAT(brc3.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
+          brc3.BankClearingDate    AS BankClearingDate,
+          brc3.ClearedBy           AS ClearedBy,
           CAST(NULL AS NVARCHAR(100)) AS ReplacementDocNo,
           CAST(NULL AS INT)           AS ReplacementPaymentId,
           CAST(NULL AS NVARCHAR(100)) AS OriginalDocNo,
@@ -322,6 +372,202 @@ router.get("/", cache("brs", 60), async (req, res) => {
         -- receipt with no deposit bank on file has nothing to reconcile against.
         WHERE ISNULL(cr.PaymentMode, '') <> 'Cash'
           AND (cr.DepositBankId IS NOT NULL OR cr.DepositBankName IS NOT NULL)
+
+        UNION ALL
+
+        -- Fund Transfer — outgoing leg (SourceBankId). Every FundTransfer
+        -- (Intra or Inter) posts a real credit against SourceBankId at
+        -- approval time (see generalLedger.js's postFundTransferApproval),
+        -- so both bank legs need their own independently-reconcilable BRS
+        -- row — same reason PAYMENT/RECEIVED are two separate rows for one
+        -- underlying movement of money, not one.
+        SELECT
+          ft.FTId                  AS SourceID,
+          'FUND_TRANSFER_OUT'      AS SourceType,
+          dco.name                 AS PaymentName,
+          sco.name                 AS CompanyName,
+          sco.id                   AS CompanyID,
+          ft.SourceBankId          AS BankID,
+          sbk.LHeadName            AS BankName,
+          ft.Amount                AS Amount,
+          ft.TransferDate          AS PayDate,
+          'Fund Transfer'          AS Mode,
+          ft.DocNo                 AS DocNo,
+          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          ft.Status                AS PayStatus,
+          CAST(0 AS BIT)           AS IsChequeCancelled,
+          ft.CreatedAt             AS CreatedAt,
+          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
+          CAST(NULL AS NVARCHAR(200)) AS ProjectName,
+          COALESCE(brc4.IsMatched, 0)  AS IsMatched,
+          COALESCE(brc4.IsBounced, 0)  AS IsBounced,
+          brc4.BounceDate          AS BounceDate,
+          brc4.BounceReason        AS BounceReason,
+          brc4.BounceRemarks       AS BounceRemarks,
+          brc4.BRSID               AS BRSID,
+          CASE WHEN brc4.IsMatched = 1 THEN FORMAT(brc4.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
+          brc4.BankClearingDate    AS BankClearingDate,
+          brc4.ClearedBy           AS ClearedBy,
+          CAST(NULL AS NVARCHAR(100)) AS ReplacementDocNo,
+          CAST(NULL AS INT)           AS ReplacementPaymentId,
+          CAST(NULL AS NVARCHAR(100)) AS OriginalDocNo,
+          CAST(NULL AS INT)           AS OriginalPaymentId
+        FROM dbo.FundTransfer ft
+        LEFT JOIN dbo.enterprise sco ON sco.business_type = 'C' AND sco.id = ft.SourceCompanyId
+        LEFT JOIN dbo.enterprise dco ON dco.business_type = 'C' AND dco.id = ft.DestinationCompanyId
+        LEFT JOIN dbo.AccountHeadMaster sbk ON sbk.LHeadId = ft.SourceBankId
+        LEFT JOIN BankReconciliation brc4
+          ON  brc4.SourceType = 'FUND_TRANSFER_OUT'
+          AND brc4.SourceID   = ft.FTId
+        WHERE ISNULL(ft.Status, 'Draft') NOT IN ('Draft', 'Rejected')
+
+        UNION ALL
+
+        -- Fund Transfer — incoming leg (DestinationBankId).
+        SELECT
+          ft2.FTId                 AS SourceID,
+          'FUND_TRANSFER_IN'       AS SourceType,
+          sco2.name                AS PaymentName,
+          dco2.name                AS CompanyName,
+          dco2.id                  AS CompanyID,
+          ft2.DestinationBankId    AS BankID,
+          dbk.LHeadName            AS BankName,
+          ft2.Amount               AS Amount,
+          ft2.TransferDate         AS PayDate,
+          'Fund Transfer'          AS Mode,
+          ft2.DocNo                AS DocNo,
+          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          ft2.Status                AS PayStatus,
+          CAST(0 AS BIT)           AS IsChequeCancelled,
+          ft2.CreatedAt            AS CreatedAt,
+          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
+          CAST(NULL AS NVARCHAR(200)) AS ProjectName,
+          COALESCE(brc5.IsMatched, 0)  AS IsMatched,
+          COALESCE(brc5.IsBounced, 0)  AS IsBounced,
+          brc5.BounceDate          AS BounceDate,
+          brc5.BounceReason        AS BounceReason,
+          brc5.BounceRemarks       AS BounceRemarks,
+          brc5.BRSID               AS BRSID,
+          CASE WHEN brc5.IsMatched = 1 THEN FORMAT(brc5.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
+          brc5.BankClearingDate    AS BankClearingDate,
+          brc5.ClearedBy           AS ClearedBy,
+          CAST(NULL AS NVARCHAR(100)) AS ReplacementDocNo,
+          CAST(NULL AS INT)           AS ReplacementPaymentId,
+          CAST(NULL AS NVARCHAR(100)) AS OriginalDocNo,
+          CAST(NULL AS INT)           AS OriginalPaymentId
+        FROM dbo.FundTransfer ft2
+        LEFT JOIN dbo.enterprise sco2 ON sco2.business_type = 'C' AND sco2.id = ft2.SourceCompanyId
+        LEFT JOIN dbo.enterprise dco2 ON dco2.business_type = 'C' AND dco2.id = ft2.DestinationCompanyId
+        LEFT JOIN dbo.AccountHeadMaster dbk ON dbk.LHeadId = ft2.DestinationBankId
+        LEFT JOIN BankReconciliation brc5
+          ON  brc5.SourceType = 'FUND_TRANSFER_IN'
+          AND brc5.SourceID   = ft2.FTId
+        WHERE ISNULL(ft2.Status, 'Draft') NOT IN ('Draft', 'Rejected')
+
+        UNION ALL
+
+        -- Inter-Company Loan disbursement — lender's outgoing bank leg.
+        -- Bank Loan/Customer Loan never touch a real bank account directly
+        -- in their own LoanPosting entry (see postLoanToGLInternal — they
+        -- post against Loan ledger heads, not a bank head); the actual cash
+        -- movement for those types already flows through NewPayment/
+        -- ReceivedPayment, already covered above. Only Inter-Company posts
+        -- LenderBankAccountId/BorrowerBankAccountId directly, and only once
+        -- disbursed. Fund-Transfer-originated Inter-Company loans are
+        -- excluded — their bank legs are the FUND_TRANSFER_* rows above,
+        -- posting them again here would double-count the same money.
+        SELECT
+          ls.LoanId                AS SourceID,
+          'LOAN_DISBURSED'         AS SourceType,
+          bco.name                 AS PaymentName,
+          lco.name                 AS CompanyName,
+          lco.id                   AS CompanyID,
+          ls.LenderBankAccountId   AS BankID,
+          lbk.LHeadName            AS BankName,
+          ls.Amount                AS Amount,
+          ls.LoanDate              AS PayDate,
+          'Loan Disbursement'      AS Mode,
+          ls.LoanNo                AS DocNo,
+          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          'Approved'                AS PayStatus,
+          CAST(0 AS BIT)           AS IsChequeCancelled,
+          ls.LoanDate              AS CreatedAt,
+          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
+          CAST(NULL AS NVARCHAR(200)) AS ProjectName,
+          COALESCE(brc6.IsMatched, 0)  AS IsMatched,
+          COALESCE(brc6.IsBounced, 0)  AS IsBounced,
+          brc6.BounceDate          AS BounceDate,
+          brc6.BounceReason        AS BounceReason,
+          brc6.BounceRemarks       AS BounceRemarks,
+          brc6.BRSID               AS BRSID,
+          CASE WHEN brc6.IsMatched = 1 THEN FORMAT(brc6.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
+          brc6.BankClearingDate    AS BankClearingDate,
+          brc6.ClearedBy           AS ClearedBy,
+          CAST(NULL AS NVARCHAR(100)) AS ReplacementDocNo,
+          CAST(NULL AS INT)           AS ReplacementPaymentId,
+          CAST(NULL AS NVARCHAR(100)) AS OriginalDocNo,
+          CAST(NULL AS INT)           AS OriginalPaymentId
+        FROM dbo.LoanSanction ls
+        LEFT JOIN dbo.enterprise lco ON lco.business_type = 'C' AND lco.id = ls.LenderCompanyId
+        LEFT JOIN dbo.enterprise bco ON bco.business_type = 'C' AND bco.id = ls.BorrowerCompanyId
+        LEFT JOIN dbo.AccountHeadMaster lbk ON lbk.LHeadId = ls.LenderBankAccountId
+        LEFT JOIN BankReconciliation brc6
+          ON  brc6.SourceType = 'LOAN_DISBURSED'
+          AND brc6.SourceID   = ls.LoanId
+        WHERE ls.LoanType = 'Inter-Company'
+          AND ls.DisbursedAt IS NOT NULL
+          AND ls.LenderBankAccountId IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM dbo.FundTransfer ft3 WHERE ft3.LinkedLoanId = ls.LoanId)
+
+        UNION ALL
+
+        -- Inter-Company Loan disbursement — borrower's incoming bank leg.
+        SELECT
+          ls2.LoanId               AS SourceID,
+          'LOAN_RECEIVED'          AS SourceType,
+          lco2.name                AS PaymentName,
+          bco2.name                AS CompanyName,
+          bco2.id                  AS CompanyID,
+          ls2.BorrowerBankAccountId AS BankID,
+          bbk.LHeadName            AS BankName,
+          ls2.Amount               AS Amount,
+          ls2.LoanDate             AS PayDate,
+          'Loan Receipt'           AS Mode,
+          ls2.LoanNo               AS DocNo,
+          CAST(NULL AS NVARCHAR(100)) AS TxnId,
+          'Approved'                AS PayStatus,
+          CAST(0 AS BIT)           AS IsChequeCancelled,
+          ls2.LoanDate             AS CreatedAt,
+          CAST(NULL AS NVARCHAR(50)) AS ChequeNo,
+          CAST(NULL AS NVARCHAR(100)) AS ChequeLotNumber,
+          CAST(NULL AS NVARCHAR(200)) AS ProjectName,
+          COALESCE(brc7.IsMatched, 0)  AS IsMatched,
+          COALESCE(brc7.IsBounced, 0)  AS IsBounced,
+          brc7.BounceDate          AS BounceDate,
+          brc7.BounceReason        AS BounceReason,
+          brc7.BounceRemarks       AS BounceRemarks,
+          brc7.BRSID               AS BRSID,
+          CASE WHEN brc7.IsMatched = 1 THEN FORMAT(brc7.UpdatedAt, 'yyyy-MM-ddTHH:mm:ss') ELSE NULL END AS ClearingDate,
+          brc7.BankClearingDate    AS BankClearingDate,
+          brc7.ClearedBy           AS ClearedBy,
+          CAST(NULL AS NVARCHAR(100)) AS ReplacementDocNo,
+          CAST(NULL AS INT)           AS ReplacementPaymentId,
+          CAST(NULL AS NVARCHAR(100)) AS OriginalDocNo,
+          CAST(NULL AS INT)           AS OriginalPaymentId
+        FROM dbo.LoanSanction ls2
+        LEFT JOIN dbo.enterprise lco2 ON lco2.business_type = 'C' AND lco2.id = ls2.LenderCompanyId
+        LEFT JOIN dbo.enterprise bco2 ON bco2.business_type = 'C' AND bco2.id = ls2.BorrowerCompanyId
+        LEFT JOIN dbo.AccountHeadMaster bbk ON bbk.LHeadId = ls2.BorrowerBankAccountId
+        LEFT JOIN BankReconciliation brc7
+          ON  brc7.SourceType = 'LOAN_RECEIVED'
+          AND brc7.SourceID   = ls2.LoanId
+        WHERE ls2.LoanType = 'Inter-Company'
+          AND ls2.DisbursedAt IS NOT NULL
+          AND ls2.BorrowerBankAccountId IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM dbo.FundTransfer ft4 WHERE ft4.LinkedLoanId = ls2.LoanId)
       )
     `;
 
@@ -383,6 +629,8 @@ router.get("/", cache("brs", 60), async (req, res) => {
         u.OriginalDocNo,
         u.OriginalPaymentId,
         u.ClearingDate,
+        u.BankClearingDate,
+        u.ClearedBy,
         u.CreatedAt
       FROM UnifiedPayments u
       ${where}
@@ -420,27 +668,41 @@ router.get("/", cache("brs", 60), async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.put("/:sourceType/:sourceId/clear", async (req, res) => {
   const { sourceType, sourceId } = req.params;
-  if (!["PAYMENT", "RECEIVED", "CRM_RECEIVED"].includes(sourceType))
+  if (!RECONCILABLE_SOURCE_TYPES.includes(sourceType))
     return res.status(400).json({ error: "Invalid sourceType" });
+
+  const { bankClearingDate } = req.body;
+  if (!bankClearingDate)
+    return res.status(400).json({ error: "bankClearingDate is required" });
+
+  const clearedBy = req.user?.email || null;
 
   try {
     const pool = getPool();
 
-    // Upsert into BankReconciliation
+    // Upsert into BankReconciliation — BankClearingDate/ClearedBy/ClearedAt
+    // describe the CURRENT clear state and get overwritten on every
+    // clear/unclear cycle (unclear nulls them back out below), same
+    // convention BounceDate/BounceReason already use.
     await pool
       .request()
       .input("SourceType", sql.NVarChar(20), sourceType)
-      .input("SourceID", sql.Int, parseInt(sourceId)).query(`
+      .input("SourceID", sql.Int, parseInt(sourceId))
+      .input("BankClearingDate", sql.Date, bankClearingDate)
+      .input("ClearedBy", sql.NVarChar(150), clearedBy).query(`
         IF EXISTS (
           SELECT 1 FROM BankReconciliation
           WHERE SourceType = @SourceType AND SourceID = @SourceID
         )
           UPDATE BankReconciliation
-          SET IsMatched = 1, UpdatedAt = GETDATE()
+          SET IsMatched = 1, BankClearingDate = @BankClearingDate,
+              ClearedBy = @ClearedBy, ClearedAt = GETDATE(), UpdatedAt = GETDATE()
           WHERE SourceType = @SourceType AND SourceID = @SourceID
         ELSE
-          INSERT INTO BankReconciliation (SourceType, SourceID, IsMatched, CreatedAt, UpdatedAt)
-          VALUES (@SourceType, @SourceID, 1, GETDATE(), GETDATE())
+          INSERT INTO BankReconciliation
+            (SourceType, SourceID, IsMatched, BankClearingDate, ClearedBy, ClearedAt, CreatedAt, UpdatedAt)
+          VALUES
+            (@SourceType, @SourceID, 1, @BankClearingDate, @ClearedBy, GETDATE(), GETDATE(), GETDATE())
       `);
 
     await bumpCacheVersion("brs");
@@ -472,18 +734,24 @@ router.put("/:sourceType/:sourceId/clear", async (req, res) => {
 
 router.put("/:sourceType/:sourceId/unclear", async (req, res) => {
   const { sourceType, sourceId } = req.params;
-  if (!["PAYMENT", "RECEIVED", "CRM_RECEIVED"].includes(sourceType))
+  if (!RECONCILABLE_SOURCE_TYPES.includes(sourceType))
     return res.status(400).json({ error: "Invalid sourceType" });
 
   try {
     const pool = getPool();
 
+    // Un-clearing used to be blocked server-side once IsMatched=1 (a
+    // mis-tick was permanent). That's been relaxed: an operator can revert
+    // a Clear back to Unclear to correct a mistake. BankClearingDate/
+    // ClearedBy/ClearedAt describe the CURRENT clear state, so they're
+    // nulled out here rather than left stale/misleading.
     await pool
       .request()
       .input("SourceType", sql.NVarChar(20), sourceType)
       .input("SourceID", sql.Int, parseInt(sourceId)).query(`
         UPDATE BankReconciliation
-        SET IsMatched = 0, UpdatedAt = GETDATE()
+        SET IsMatched = 0, BankClearingDate = NULL, ClearedBy = NULL, ClearedAt = NULL,
+            UpdatedAt = GETDATE()
         WHERE SourceType = @SourceType AND SourceID = @SourceID
       `);
 
@@ -502,7 +770,7 @@ router.put("/:sourceType/:sourceId/unclear", async (req, res) => {
 // ─────────────────────────────────────────────────────────────────────────────
 router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
   const { sourceType, sourceId } = req.params;
-  if (!["PAYMENT", "RECEIVED", "CRM_RECEIVED"].includes(sourceType))
+  if (!RECONCILABLE_SOURCE_TYPES.includes(sourceType))
     return res.status(400).json({ error: "Invalid sourceType" });
 
   const { bounceDate, bounceReason, bounceRemarks } = req.body;

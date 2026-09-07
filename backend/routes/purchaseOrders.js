@@ -12,6 +12,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
+const { downstreamOfPO } = require("../utils/materialChainGuard");
 const { getDocumentChainForPO } = require("../services/poVehicleGrnChain");
 const { getServicePurchaseOrders } = require("../services/invoiceLinking");
 const {
@@ -227,13 +228,14 @@ const syncLineItems = async (
       .input("Sort", sqlRef.Int, i)
       .input("ReceivedQty", sqlRef.Decimal(18, 4), 0)
       .input("MRItemId", sqlRef.Int, it.mrItemId ? parseInt(it.mrItemId, 10) : null)
+      .input("CostCenterId", sqlRef.Int, it.costCenterId ? parseInt(it.costCenterId, 10) : null)
       .input("Now", sqlRef.DateTime2, new Date()).query(`
         INSERT INTO dbo.PurchaseOrderItems
           (PurchaseOrderID, ItemId, ItemName, ItemCode, Description,
-           Quantity, ReceivedQty, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder, MRItemId, CreatedAt)
+           Quantity, ReceivedQty, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder, MRItemId, CostCenterId, CreatedAt)
         VALUES
           (@POID, @ItemId, @ItemName, @ItemCode, @Desc,
-           @Qty, @ReceivedQty, @UomId, @UomName, @Rate, @TaxPct, @LineAmt, @Sort, @MRItemId, @Now)
+           @Qty, @ReceivedQty, @UomId, @UomName, @Rate, @TaxPct, @LineAmt, @Sort, @MRItemId, @CostCenterId, @Now)
       `);
   }
 };
@@ -825,12 +827,14 @@ router.get("/:id", async (req, res) => {
     // Also return normalised line items for the new form
     const lineItems = await pool.request().input("POID", sql.Int, id).query(`
         SELECT
-          Id, PurchaseOrderID, ItemId, ItemName, ItemCode, Description,
-          Quantity, ReceivedQty, UomId, UomName, Rate, Discount, TaxPct,
-          LineAmount, SortOrder
-        FROM dbo.PurchaseOrderItems
-        WHERE PurchaseOrderID = @POID
-        ORDER BY SortOrder
+          poi.Id, poi.PurchaseOrderID, poi.ItemId, poi.ItemName, poi.ItemCode, poi.Description,
+          poi.Quantity, poi.ReceivedQty, poi.UomId, poi.UomName, poi.Rate, poi.Discount, poi.TaxPct,
+          poi.LineAmount, poi.SortOrder, poi.CostCenterId,
+          cc.Name AS CostCenterName, cc.Code AS CostCenterCode
+        FROM dbo.PurchaseOrderItems poi
+        LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = poi.CostCenterId
+        WHERE poi.PurchaseOrderID = @POID
+        ORDER BY poi.SortOrder
       `);
 
     // Sum of all non-rejected GRNs already submitted against this PO.
@@ -1012,6 +1016,15 @@ router.put(
       const wasApproved = currentStatus === "Approved";
 
       const pool = getPool();
+
+      // Chain guard: nothing downstream (Vehicle In/Out, GRN, or a direct
+      // Expense Booking) may exist yet — those already locked in quantities
+      // derived from this PO, so it must stay frozen until they're deleted.
+      const blockedBy = await downstreamOfPO(pool, id);
+      if (blockedBy)
+        return res.status(409).json({
+          error: `Cannot edit: this Purchase Order has ${blockedBy}. Delete them first, then edit the PO.`,
+        });
       const beforeSnapshot = wasApproved
         ? await snapshotRow(pool, "dbo.PurchaseOrders", "PurchaseOrderID", id)
         : null;

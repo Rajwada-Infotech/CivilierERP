@@ -1727,6 +1727,7 @@ interface DetailModalProps {
   onRefresh: () => void;
   canDelete: boolean;
   canPrint: boolean;
+  canEdit: boolean;
 }
 
 const DetailModal: React.FC<DetailModalProps> = ({
@@ -1738,6 +1739,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
   onRefresh,
   canDelete,
   canPrint,
+  canEdit,
 }) => {
   const [lineTab, setLineTab] = useState<"items" | "activities">("items");
   const [acting, setActing] = useState(false);
@@ -1841,7 +1843,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
                 <Trash2 size={13} className="mr-1.5" /> Delete
               </Button>
             )}
-            {(record.Status === "Draft" || record.Status === "Approved") && (
+            {canEdit && (record.Status === "Draft" || record.Status === "Approved") && (
               <Button
                 variant="secondary"
                 size="sm"
@@ -1989,11 +1991,13 @@ const DetailModal: React.FC<DetailModalProps> = ({
             <Button variant="outline" onClick={onClose}>
               Close
             </Button>
+            {canEdit && canEditBoq(record.Status) && (
+              <Button variant="secondary" disabled={acting} onClick={onEdit}>
+                <Edit3 size={14} className="mr-1.5" /> Edit
+              </Button>
+            )}
             {canEditBoq(record.Status) && (
               <>
-                <Button variant="secondary" disabled={acting} onClick={onEdit}>
-                  <Edit3 size={14} className="mr-1.5" /> Edit
-                </Button>
                 <ApprovalActions
                   status={record.Status}
                   recordId={record.BoqID}
@@ -2003,7 +2007,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
                 />
               </>
             )}
-            {record.Status === "Approved" && (
+            {canEdit && record.Status === "Approved" && (
               <Button variant="secondary" disabled={acting} onClick={onEdit}>
                 <Edit3 size={14} className="mr-1.5" /> Edit
               </Button>
@@ -2462,7 +2466,7 @@ export default function BOQ() {
               <Printer size={14} />
             </Button>
           )}
-          {canEditBoq(row.original.Status) && (
+          {rights.canEdit && canEditBoq(row.original.Status) && (
             <Button
               variant="ghost"
               size="sm"
@@ -2539,6 +2543,7 @@ export default function BOQ() {
           }}
           canDelete={rights.canDelete}
           canPrint={rights.canPrint}
+          canEdit={rights.canEdit}
         />
       )}
 

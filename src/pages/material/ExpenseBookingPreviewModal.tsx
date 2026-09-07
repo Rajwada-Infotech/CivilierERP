@@ -50,12 +50,17 @@ interface ExpenseBookingPreviewModalProps {
   previewRecord: ExpenseRecord | null;
   onClose: () => void;
   onEdit: (record: ExpenseRecord) => void;
+  /** Gates the Edit button — defaults to true so existing callers that
+   *  don't pass this (yet) keep their current behavior; the real
+   *  MaterialExpenseBooking.tsx caller now passes rights.canEdit. */
+  canEdit?: boolean;
 }
 
 export function ExpenseBookingPreviewModal({
   previewRecord,
   onClose,
   onEdit,
+  canEdit = true,
 }: ExpenseBookingPreviewModalProps) {
   // GRN item-level GST breakdown (fetched when eSourceType === 'GRN')
   const [grnBreakdown, setGrnBreakdown] = useState<{
@@ -479,12 +484,14 @@ export function ExpenseBookingPreviewModal({
               >
                 <Printer size={13} /><span className="hidden sm:inline">Print</span>
               </button>
-              <button
-                onClick={() => { onClose(); onEdit(previewRecord); }}
-                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
-              >
-                <Edit size={13} /><span className="hidden sm:inline">Edit</span>
-              </button>
+              {canEdit && (
+                <button
+                  onClick={() => { onClose(); onEdit(previewRecord); }}
+                  className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
+                >
+                  <Edit size={13} /><span className="hidden sm:inline">Edit</span>
+                </button>
+              )}
               <button
                 onClick={onClose}
                 className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
@@ -703,6 +710,22 @@ export function ExpenseBookingPreviewModal({
                     <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
                       Direct booking — debited to <span className="font-medium text-foreground">{purchaseLabel}</span>{purchaseCode ? ` (${purchaseCode})` : ""}; Supplier is credited.
                       {hasDirectItems && " Broken down by line item below."}
+                    </div>
+                  )}
+
+                  {isGrnLinked && Array.isArray(invPostingData.costCentreBreakdown) && invPostingData.costCentreBreakdown.length > 1 && (
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      <div className="px-3 sm:px-4 py-2 bg-muted/40 border-b border-border text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+                        Cost Centre — Money Breakdown
+                      </div>
+                      <div className="divide-y divide-border/50">
+                        {invPostingData.costCentreBreakdown.map((b: any, i: number) => (
+                          <div key={b.costCentre?.id ?? `unassigned-${i}`} className="flex items-center justify-between px-3 sm:px-4 py-2.5 text-xs">
+                            <span className="text-foreground font-medium">{b.costCentre?.name || "Unassigned"}</span>
+                            <span className="font-mono text-muted-foreground">₹{fmtAmt(b.totalAmount)}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 

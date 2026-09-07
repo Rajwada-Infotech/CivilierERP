@@ -31,6 +31,7 @@ const {
 const { transition } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { poExistsForMR } = require("../utils/materialChainGuard");
 const {
   getMRItemFulfillment,
   summarize,
@@ -221,6 +222,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
     const result = await pool.request().query(`
       SELECT  img.M_Id,
               img.M_Name,
+              img.M_Type,
               grp.M_Name AS M_Group,
               ${hasUOM ? "img.M_UOM AS DefaultUOM," : "NULL AS DefaultUOM,"}
               uom.UOMName  AS DefaultUOMName,
@@ -236,7 +238,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
         ${godownFilter}
       ${hasUOM ? "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = img.M_UOM" : "LEFT JOIN dbo.UOMMaster uom ON 1=0"}
       WHERE (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
-      GROUP BY img.M_Id, img.M_Name, grp.M_Name
+      GROUP BY img.M_Id, img.M_Name, img.M_Type, grp.M_Name
                ${hasUOM ? ", img.M_UOM" : ""},
                uom.UOMName, uom.Symbol
       ORDER BY img.M_Name
@@ -849,6 +851,15 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialRequests", "MRId", id)
       : null;
+
+    // Chain guard: a Purchase Order already raised against this MR must be
+    // deleted first — editing quantities/items here after a PO exists would
+    // silently drift the MR out of sync with what the PO already locked in.
+    const blockingPO = await poExistsForMR(pool, id);
+    if (blockingPO)
+      return res.status(409).json({
+        error: `Cannot edit: ${blockingPO} is linked to this Material Request. Delete it first, then edit the request.`,
+      });
 
     // Header update + item replacement must be one atomic unit — previously
     // each ran on the plain pool (auto-committing individually). The item

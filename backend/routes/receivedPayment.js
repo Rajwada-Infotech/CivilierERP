@@ -47,6 +47,27 @@ async function invalidateReceivedPaymentWorkflowCaches() {
   await Promise.all(MUTATION_CACHE_KEYS.map((key) => bumpCacheVersion(key)));
 }
 
+// System-generated Received Payment rows (CRM Money Receipt sync, CRM
+// Booking token-payment capture, Inter-Company Transfer's Dummy Bank auto
+// receipt, Contract advance auto-adjustment — see crmPayments.js,
+// crmMoneyReceiptWorkflow.js, interCompanyTransfer.js, saleInvoices.js)
+// never passed RPFinYear through their payload, so every auto-created row
+// landed with a NULL Fin Year — the Fin Year column in the Received
+// Payments table looked "not working" for these, even though the column
+// itself and the manual Add Received Payment form were both correct.
+// Falling back here to the currently active, unlocked Financial Year
+// covers every caller without threading it through each one individually.
+async function getActiveFinYearName(pool) {
+  try {
+    const r = await pool.request().query(
+      "SELECT TOP 1 FName FROM dbo.FinYear WHERE FStatus = 1 AND FisLocked = 0 ORDER BY FStartDate DESC",
+    );
+    return r.recordset[0]?.FName ?? null;
+  } catch {
+    return null;
+  }
+}
+
 // ── GET / ─────────────────────────────────────────────────────────────────────
 router.get("/", cache("received-payment", 300), async (req, res) => {
   try {
@@ -112,6 +133,143 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
   }
 });
 
+// ── GET /:id — single record, for deep links (Trial Balance's ledger
+// drill-down navigates here as /received-payments?view=<id>) ────────────────
+router.get("/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("id", sql.Int, id).query(`
+        SELECT
+          RPPaymentID, RPCompanyName, RPReceivedFrom, RPProjectName,
+          RPDocDate, RPMode, RPAmount, RPBankName, RPTransactionID, RPCheckNumber,
+          RPChequeDate, RPIsPostDated, RPRemarks, RPIsEmi, RPEmiTotal, RPEmiMonths, RPEmiStartDate,
+          RPEmiSchedule, RPEmiPaying, RPStatus, RPCreatedBy, RPCreatedAt,
+          RPUpdatedBy, RPUpdatedAt, RPApprovedBy, RPApprovedAt,
+          RPRejectedBy, RPRejectedAt, RPRejectionNote,
+          RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
+          RPCustomerName, RPDepositBankId, RPDepositBankName,
+          SourceSaleInvoiceId, SourceSaleInvoiceDocNo
+        FROM dbo.ReceivedPayment
+        WHERE RPPaymentID = @id
+      `);
+    if (!result.recordset.length) return res.status(404).json({ error: "Received payment not found" });
+    res.json(result.recordset[0]);
+  } catch (err) {
+    console.error("GET /received-payment/:id error:", err);
+    res.status(500).json({ error: "Failed to fetch received payment" });
+  }
+});
+
+// ── GET /:id/posting — GL posting preview for the page's Posting tab ────────
+// Received Payment posts on approval via postReceivedPaymentApproval in
+// generalLedger.js (Dr the deposit Bank / Cr the Customer — money arrives in
+// the company's bank, reduces what the customer owes). This mirrors that
+// same resolution read-only so the tab can show the voucher whether or not
+// it has actually posted yet (e.g. still Pending, or approved but the GL
+// posting attempt failed — see dbo.GLPostingLog).
+router.get("/:id/posting", async (req, res) => {
+  const rpId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(rpId)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const { getHeadIdByName } = require("../services/generalLedger");
+
+    const result = await pool.request().input("id", sql.Int, rpId).query(`
+      SELECT RPPaymentID, RPDocNo, RPDocDate, RPAmount, RPMode, RPStatus,
+             RPDepositBankId, RPDepositBankName, RPCustomerName, RPReceivedFrom,
+             SourceSaleInvoiceId, CrmMilestoneId, CrmBookingId
+      FROM dbo.ReceivedPayment
+      WHERE RPPaymentID = @id
+    `);
+    const rp = result.recordset[0];
+    if (!rp) return res.status(404).json({ error: "Received payment not found" });
+
+    let customerHeadId = null;
+    let customerName = rp.RPCustomerName || rp.RPReceivedFrom || null;
+    if (rp.SourceSaleInvoiceId) {
+      const siResult = await pool.request().input("SaleInvoiceID", sql.Int, rp.SourceSaleInvoiceId)
+        .query(`
+          SELECT si.CustomerID, ah.LHeadName AS CustomerName
+          FROM dbo.SaleInvoices si
+          LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = si.CustomerID
+          WHERE si.SaleInvoiceID = @SaleInvoiceID
+        `);
+      if (siResult.recordset.length) {
+        customerHeadId = siResult.recordset[0].CustomerID ?? null;
+        customerName = siResult.recordset[0].CustomerName || customerName;
+      }
+    }
+    if (!customerHeadId) customerHeadId = await getHeadIdByName(pool, customerName);
+
+    const accounts = {
+      bank: rp.RPDepositBankId ? { id: rp.RPDepositBankId, label: rp.RPDepositBankName || "Bank A/c", code: null } : null,
+      customer: customerHeadId
+        ? { id: customerHeadId, label: customerName ? `Customer — ${customerName}` : "Customer A/c", code: null }
+        : null,
+    };
+
+    // CRM-linked receipts (CrmMilestoneId/CrmBookingId set) never post GL
+    // under SourceType='ReceivedPayment' — applyCrmMilestonePaymentApproval /
+    // applyCrmOnAccountPaymentApproval post via postCrmReceiptToGL /
+    // postCrmOnAccountToGL instead, under SourceType='CrmPaymentReceipt' /
+    // 'CrmOnAccountPayment' keyed by the CrmPaymentReceipt/CrmOnAccountPayment
+    // row's own id (see crmLedger.js). Checking only 'ReceivedPayment' left
+    // every CRM-linked receipt showing "Not yet posted" even once approved
+    // and actually posted — same join trialBalance.js already uses.
+    const postedRes = (rp.CrmMilestoneId || rp.CrmBookingId)
+      ? await pool.request().input("SrcId", sql.Int, rpId).query(`
+          SELECT TOP 1 gle.VoucherNo
+          FROM dbo.GeneralLedgerEntry gle
+          WHERE gle.IsReversed = 0
+            AND (
+              (gle.SourceType = 'CrmPaymentReceipt' AND gle.SourceId IN (
+                SELECT Id FROM dbo.CrmPaymentReceipt WHERE SourceReceivedPaymentId = @SrcId
+              ))
+              OR (gle.SourceType = 'CrmOnAccountPayment' AND gle.SourceId IN (
+                SELECT Id FROM dbo.CrmOnAccountPayment WHERE SourceReceivedPaymentId = @SrcId
+              ))
+            )
+          ORDER BY gle.EntryId DESC
+        `)
+      : await pool.request().input("SrcId", sql.Int, rpId).query(
+          `SELECT TOP 1 VoucherNo FROM dbo.GeneralLedgerEntry WHERE SourceType='ReceivedPayment' AND SourceId=@SrcId AND IsReversed=0`
+        );
+    const isPosted = postedRes.recordset.length > 0;
+
+    const toDateStr = (v) => (v ? (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10)) : null);
+
+    res.json({
+      amount: parseFloat(rp.RPAmount) || 0,
+      mode: rp.RPMode,
+      status: rp.RPStatus,
+      accounts,
+      isPosted,
+      jvNo: isPosted ? postedRes.recordset[0].VoucherNo : null,
+      // Same entries[] shape Payment.tsx's Posting tab already renders off
+      // (see routes/newPayment.js GET /:id/posting) — one Dr/Cr row here
+      // since a Received Payment is always a single voucher, no chain.
+      entries: [
+        {
+          date: toDateStr(rp.RPDocDate),
+          docNo: rp.RPDocNo || `RCV-${rpId}`,
+          pmtId: rp.RPPaymentID,
+          type: "receipt",
+          amount: parseFloat(rp.RPAmount) || 0,
+          mode: rp.RPMode,
+          accounts,
+          isPosted,
+          jvNo: isPosted ? postedRes.recordset[0].VoucherNo : null,
+        },
+      ],
+    });
+  } catch (err) {
+    console.error("GET /received-payment/:id/posting error:", err);
+    res.status(500).json({ error: "Failed to fetch posting details" });
+  }
+});
+
 // ── POST / ────────────────────────────────────────────────────────────────────
 // ─── Internal creation function ──────────────────────────────────────────────
 // Extracted from POST / so other server-side callers (the Inter-Company
@@ -158,11 +316,12 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
       CrmApplicationId,
     } = payload;
     const body = { ...payload };
+    const effectiveFinYear = RPFinYear || (await getActiveFinYearName(pool));
     let finalDocNo = null;
     if (RPDocTypeId) {
       finalDocNo = await lockNextDocNumber(pool, sql, {
         docTypeId: Number(RPDocTypeId),
-        finYear: RPFinYear || null,
+        finYear: effectiveFinYear || null,
         tableName: "ReceivedPayment",
         docNoColumn: "RPDocNo",
         parentDocNo: null,
@@ -302,7 +461,7 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
       )
       .input("RPCreatedBy", sql.NVarChar(100), createdBy)
       .input("RPDocNo", sql.NVarChar(100), finalDocNo || null)
-      .input("RPFinYear", sql.NVarChar(20), RPFinYear || null)
+      .input("RPFinYear", sql.NVarChar(20), effectiveFinYear || null)
       .input("RPDocTypeId", sql.Int, RPDocTypeId || null)
       .input("RPCompanyId", sql.Int, RPCompanyId || null)
       .input("RPProjectId", sql.Int, RPProjectId || null)
@@ -357,6 +516,21 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
     `);
 
     const row = result.recordset[0];
+
+    // Auto-submit: Draft -> Pending immediately, same pattern every other
+    // module in this codebase uses (Material Requests, Vehicle In/Out,
+    // Debit Note, …) — no manual "Submit for Approval" step required after
+    // creation. Harmless no-op for callers that promote/approve the row
+    // themselves right after (crmPayments.js's own Draft->Pending, or
+    // interCompanyTransfer.js's straight-to-Approved auto-receipt) — the
+    // WHERE RPStatus='Draft' guard means only the first transition sticks.
+    if (row?.RPPaymentID) {
+      await pool
+        .request()
+        .input("rpid", sql.Int, row.RPPaymentID)
+        .query("UPDATE dbo.ReceivedPayment SET RPStatus = 'Pending' WHERE RPPaymentID = @rpid AND RPStatus = 'Draft'");
+      row.RPStatus = "Pending";
+    }
 
     if (finalDocNo && row?.RPPaymentID) {
       await backPatchRecordId(pool, sql, finalDocNo, "ReceivedPayment", row.RPPaymentID);
@@ -566,6 +740,15 @@ router.delete("/:id", requirePageRight("received-payment", "delete"), async (req
     }
 
     const linkedSIId = existing.recordset[0].SourceSaleInvoiceId;
+
+    // Reverse whatever GL this payment posted at approval (SourceType
+    // 'ReceivedPayment', SourceId = RPPaymentID — see generalLedger.js's
+    // postReceivedPaymentApproval) before hard-deleting it. Previously
+    // skipped, so a deleted receipt's GeneralLedgerEntry rows survived with
+    // IsReversed=0 forever, inflating every ledger/report reading off that
+    // table. Same fix already applied to loanSanction.js's DELETE.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(tx, "ReceivedPayment", id);
 
     await new sql.Request(tx).input("id", sql.Int, id).query(`
       DELETE FROM dbo.BankReconciliation
@@ -853,3 +1036,4 @@ router.put("/:id/reject", allowRoles(...APPROVER_ROLES), async (req, res) => {
 module.exports = router;
 module.exports.createReceivedPaymentInternal = createReceivedPaymentInternal;
 module.exports.invalidateReceivedPaymentWorkflowCaches = invalidateReceivedPaymentWorkflowCaches;
+module.exports.getActiveFinYearName = getActiveFinYearName;

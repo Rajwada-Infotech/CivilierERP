@@ -186,6 +186,7 @@ interface POLineItem {
   uomLocked?: boolean; // true for quotation-sourced lines — UOM must match what was quoted
   mrItemId?: number | null; // source MaterialRequestItems row, when this line came from an MR
   mrPendingQty?: number | null; // cap for this line's quantity — remaining balance on that MR item
+  costCenterId?: string; // from the selected item's own Item Master tag — persisted per-line (not per-PO), since one PO can mix e.g. a fixed-asset item with a consumption item
 }
 
 interface POForm {
@@ -682,14 +683,6 @@ const PurchaseOrderMaster: React.FC = () => {
   const { data: enterprisesRaw = [] } = useQuery({
     queryKey: ["enterprises"],
     queryFn: getEnterprises,
-  });
-
-  const { data: costCenters = [] } = useQuery<{ id: number; label: string }[]>({
-    queryKey: ["cost-centers-po"],
-    queryFn: () =>
-      fetchWithAuth("/api/cost-center/options").then((r) =>
-        r.json().catch(() => ({})),
-      ),
   });
 
   const { data: paymentTerms = [] } = useQuery<{ id: number; label: string; days: number }[]>({
@@ -1631,16 +1624,18 @@ const PurchaseOrderMaster: React.FC = () => {
       sgstRate,
       igstRate,
       gstRate,
+      // Cost Centre is per-line, not per-PO — a single PO can legitimately
+      // mix a fixed-asset item with a consumption item, each keeping its
+      // own Item Master cost centre tag. GRN/Invoice GL posting resolves
+      // this per line (by ItemId) to build a cost-centre-wise breakdown.
+      costCenterId: item.costCenterId || "",
     });
 
-    // Auto-fill the PO's Cost Centre from the item's own Item Master tag —
-    // only when the PO doesn't already have one set (first-tagged-item-wins;
-    // never silently overrides a Cost Centre the user already picked). A
-    // later item tagged with a *different* centre just gets left alone
-    // rather than fought over — the user can always change it manually.
+    // Also mirror it onto the legacy PO-header field (first-tagged-item-
+    // wins) purely for old code paths that still read form.costCenterId —
+    // the real per-line value above is what GL posting actually uses now.
     if (item.costCenterId && !form.costCenterId) {
       setField("costCenterId", item.costCenterId);
-      toast.info("Cost Centre auto-filled from this item's Item Master tag.");
     }
   };
 
@@ -1659,7 +1654,6 @@ const PurchaseOrderMaster: React.FC = () => {
     if (!form.supplierId) e.supplierId = true;
     if (!form.companyId) e.companyId = true;
     if (!form.projectId) e.projectId = true;
-    if (!form.costCenterId) e.costCenterId = true;
     if (lineItems.every((li) => !li.itemName && !li.quantity))
       e.lineItems = true;
     setErrors(e);
@@ -1739,6 +1733,7 @@ const PurchaseOrderMaster: React.FC = () => {
         gstType: li.igstRate > 0 ? "igst" : "cgst_sgst",
         amount: li.amount,
         mrItemId: li.mrItemId ?? null,
+        costCenterId: li.costCenterId || null,
       })),
       PaymentTerms:
         selectedTCs.length > 0
@@ -2310,6 +2305,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
             gstRate,
             taxAmount,
             amount: qty * rate + taxAmount,
+            costCenterId: pi.costCenterId ? String(pi.costCenterId) : (pi.CostCenterId ? String(pi.CostCenterId) : ""),
           };
         }),
       );
@@ -2527,7 +2523,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "poNumber",
                     accessorFn: (row: any) => row.poNumber || row.docNo,
                     header: "PO No",
-                    size: 150,
+                    size: 130,
                     cell: ({ row }: any) => {
                       const item = row.original;
                       return (
@@ -2553,7 +2549,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "poDate",
                     accessorKey: "poDate",
                     header: "Date",
-                    size: 110,
+                    size: 90,
                     meta: { className: "hidden sm:table-cell" },
                     cell: ({ getValue }: any) => (
                       <span className="text-sm text-muted-foreground">{fmtDate(getValue() as string)}</span>
@@ -2563,7 +2559,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "supplierName",
                     accessorKey: "supplierName",
                     header: "Supplier",
-                    size: 160,
+                    size: 130,
                     meta: { className: "hidden sm:table-cell" },
                     cell: ({ getValue }: any) => (
                       <span className="text-sm font-medium">{String(getValue() || "—")}</span>
@@ -2573,7 +2569,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "companyName",
                     accessorKey: "companyName",
                     header: "Company",
-                    size: 150,
+                    size: 120,
                     meta: { className: "hidden md:table-cell" },
                     cell: ({ getValue }: any) => (
                       <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
@@ -2583,7 +2579,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "projectName",
                     accessorKey: "projectName",
                     header: "Project / Site",
-                    size: 150,
+                    size: 130,
                     meta: { className: "hidden lg:table-cell" },
                     cell: ({ getValue }: any) => (
                       <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
@@ -2593,7 +2589,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "effectiveMRDocNo",
                     accessorKey: "effectiveMRDocNo",
                     header: "MR Ref",
-                    size: 130,
+                    size: 100,
                     meta: { className: "hidden lg:table-cell" },
                     cell: ({ getValue }: any) => {
                       const v = getValue() as string | null;
@@ -2610,7 +2606,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "totalAmount",
                     accessorKey: "totalAmount",
                     header: "Amount",
-                    size: 110,
+                    size: 100,
                     meta: { className: "hidden sm:table-cell" },
                     cell: ({ getValue }: any) => (
                       <span className="text-sm font-semibold">{fmt(getValue() as number)}</span>
@@ -2620,7 +2616,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     id: "status",
                     accessorKey: "status",
                     header: "Status",
-                    size: 180,
+                    size: 140,
                     meta: { className: "hidden sm:table-cell" },
                     cell: ({ row }: any) => (
                       <div className="flex flex-col items-start gap-1">
@@ -4105,29 +4101,6 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
                   />
                 </div>
-              </div>
-
-              {/* Cost Center */}
-              <div>
-                <FieldLabel required>Cost Center</FieldLabel>
-                <select
-                  value={form.costCenterId}
-                  onChange={(e) => setField("costCenterId", e.target.value)}
-                  disabled={isReadOnly}
-                  className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} ${errors.costCenterId ? "border-red-400" : ""}`}
-                >
-                  <option value="">— Select Cost Center —</option>
-                  {costCenters.map((cc) => (
-                    <option key={cc.id} value={cc.id}>
-                      {cc.label}
-                    </option>
-                  ))}
-                </select>
-                {errors.costCenterId && (
-                  <p className="text-xs text-destructive mt-1">
-                    Cost Center is required
-                  </p>
-                )}
               </div>
 
               {/* Payment Terms — Invoice computes its Due Date from Vendor

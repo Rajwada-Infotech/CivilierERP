@@ -731,10 +731,12 @@ function RecordsFolderBrowser({
   records,
   searchActive,
   onChanged,
+  canDelete,
 }: {
   records: UnifiedRecord[];
   searchActive: boolean;
   onChanged?: () => void;
+  canDelete: boolean;
 }) {
   const [moduleKey, setModuleKey] = useState<string | null>(null);
   const [docRefKey, setDocRefKey] = useState<string | null>(null);
@@ -972,7 +974,7 @@ function RecordsFolderBrowser({
                   <KeyRound size={13} />
                   {vaultMeta?.HasPassword ? "Change Password" : "Set Password"}
                 </button>
-                {selectedIds.size > 0 && (
+                {canDelete && selectedIds.size > 0 && (
                   <button
                     onClick={handleBulkDelete}
                     disabled={bulkDeleting}
@@ -1161,7 +1163,7 @@ function NewFolderDialog({
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function Records() {
-  usePageRights("records");
+  const rights = usePageRights("records");
   const { records, loading, error, refreshRecords } = useRecords();
   const [moduleFilter, setModuleFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -1231,14 +1233,16 @@ export default function Records() {
         subtitle="Every attachment across the ERP — Tickets, Vehicle In/Out, Contract, and your own Personal Vault — in one searchable place"
         action={
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setNewFolderOpen(true)}
-              className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-orange-500/30 hover:bg-orange-500/10 transition-colors"
-              style={{ color: "#f97316" }}
-            >
-              <FolderPlus size={13} />
-              New Folder
-            </button>
+            {rights.canCreate && (
+              <button
+                onClick={() => setNewFolderOpen(true)}
+                className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-orange-500/30 hover:bg-orange-500/10 transition-colors"
+                style={{ color: "#f97316" }}
+              >
+                <FolderPlus size={13} />
+                New Folder
+              </button>
+            )}
             <button
               onClick={refreshRecords}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-amber-500/30 hover:bg-amber-500/10 transition-colors"
@@ -1356,7 +1360,7 @@ export default function Records() {
                   : "No attachments match your search."}
               </div>
             ) : (
-              <RecordsFolderBrowser records={searched} searchActive={search.trim().length > 0} onChanged={refreshRecords} />
+              <RecordsFolderBrowser records={searched} searchActive={search.trim().length > 0} onChanged={refreshRecords} canDelete={rights.canDelete} />
             )}
           </div>
         </GlassSection>

@@ -135,7 +135,7 @@ const SpecPanel: React.FC<{ blocks: RecordWithId[] }> = ({ blocks }) => {
           <option value="">— choose a block —</option>
           {activeBlocks.map((b) => (
             <option key={b._id} value={b._id}>
-              {b.projectName} / {b.blockName}
+              {String(b.projectName ?? "")} / {String(b.blockName ?? "")}
             </option>
           ))}
         </select>
@@ -336,7 +336,7 @@ const exportColumns: ExportColumn[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 const BlockMaster: React.FC = () => {
-  usePageRights("block-master");
+  const rights = usePageRights("followup-block-master");
   const queryClient = useQueryClient();
 
   const {
@@ -466,8 +466,10 @@ const BlockMaster: React.FC = () => {
       <FollowupShell title="Block Master">
       <SpecPanel blocks={mappedData} />
       <MasterPage
-
         title="Block"
+        canCreate={rights.canCreate}
+        canEdit={rights.canEdit}
+        canDelete={rights.canDelete}
         fields={fields}
         columns={columns}
         initialData={mappedData}

@@ -16,6 +16,7 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getRolesList } from "@/api/roleApi";
+import { getDepartmentOptions } from "@/api/departmentMasterApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -29,6 +30,8 @@ interface User {
   created_datetime: string;
   discontinue: boolean;
   can_accept_tickets?: boolean;
+  DepartmentId?: number | null;
+  DepartmentName?: string | null;
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
@@ -51,6 +54,7 @@ const addUserApi = async (user: {
   RoleId: number;
   password: string;
   can_accept_tickets?: boolean;
+  DepartmentId?: number | null;
 }) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
@@ -177,6 +181,15 @@ function buildUserColumns(
       ),
     },
     {
+      accessorKey: "DepartmentName",
+      header: "Department",
+      cell: ({ row }) => (
+        <span className="text-sm text-foreground">
+          {row.original.DepartmentName ?? "—"}
+        </span>
+      ),
+    },
+    {
       accessorKey: "can_accept_tickets",
       header: "Ticket Access",
       cell: ({ row }) => {
@@ -273,6 +286,11 @@ const Users = () => {
     queryFn: getRolesList,
   });
 
+  const { data: departments = [] } = useQuery({
+    queryKey: ["department-master"],
+    queryFn: getDepartmentOptions,
+  });
+
   const addMutation = useMutation({
     mutationFn: addUserApi,
     onSuccess: () => {
@@ -320,6 +338,7 @@ const Users = () => {
     name: "",
     email: "",
     RoleId: 0,
+    DepartmentId: 0,
     password: "",
     isActive: true,
     canAcceptTickets: false,
@@ -344,6 +363,7 @@ const Users = () => {
           name: user.name,
           email: user.email,
           RoleId: user.RoleId ?? 0,
+          DepartmentId: user.DepartmentId ?? 0,
           password: "",
           isActive: !user.discontinue,
           canAcceptTickets: !!user.can_accept_tickets,
@@ -384,6 +404,7 @@ const Users = () => {
           name: form.name.trim(),
           email: form.email.trim(),
           RoleId: form.RoleId,
+          DepartmentId: form.DepartmentId || null,
           discontinue: !form.isActive,
           can_accept_tickets: form.canAcceptTickets,
         },
@@ -393,6 +414,7 @@ const Users = () => {
         name: form.name.trim(),
         email: form.email.trim(),
         RoleId: form.RoleId,
+        DepartmentId: form.DepartmentId || null,
         password: form.password,
         can_accept_tickets: form.canAcceptTickets,
       });
@@ -404,6 +426,7 @@ const Users = () => {
       name: "",
       email: "",
       RoleId: 0,
+      DepartmentId: 0,
       password: "",
       isActive: true,
       canAcceptTickets: false,
@@ -631,6 +654,36 @@ const Users = () => {
                 </div>
               </div>
 
+              <div>
+                <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+                  Department
+                </label>
+                <div className="relative">
+                  <select
+                    name="DepartmentId"
+                    value={form.DepartmentId}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        DepartmentId: Number(e.target.value),
+                      }))
+                    }
+                    className="w-full h-10 px-3 pr-9 bg-input/70 border border-border rounded-lg focus:ring-1 focus:ring-primary focus:border-primary outline-none appearance-none text-sm text-foreground"
+                  >
+                    <option value={0}>Select a department…</option>
+                    {departments.map((d) => (
+                      <option key={d.Id} value={d.Id}>
+                        {d.DepartmentName}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    size={14}
+                    className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  />
+                </div>
+              </div>
+
               {editUserId === null && (
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
@@ -781,6 +834,12 @@ const Users = () => {
                   {viewedUser.roleName ??
                     roles.find((r) => r.RId === viewedUser.RoleId)?.RName ??
                     "—"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Department</span>
+                <span className="font-medium text-foreground">
+                  {viewedUser.DepartmentName ?? "—"}
                 </span>
               </div>
               <div className="flex justify-between">

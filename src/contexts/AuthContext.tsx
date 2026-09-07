@@ -5,6 +5,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -152,10 +153,27 @@ export const AuthProvider = ({
   // ── HYDRATE AVATAR ─────────────────────────────────────────────────────────
   // After login or page reload, fetch avatar_url from the profile API and
   // patch it into currentUser so the navbar shows it immediately.
+  //
+  // BUG (fixed): this used to skip fetching whenever currentUser.avatarUrl
+  // was already !== undefined — but avatarUrl is persisted to localStorage,
+  // so once it had been hydrated as `null` (no avatar yet, the very first
+  // time this ever ran for a user with none), every later page load loaded
+  // that stale `null` straight from localStorage and the guard skipped
+  // re-fetching forever. If the user then uploaded an avatar somewhere that
+  // didn't also call updateCurrentUserAvatar() in the current tab (a
+  // different device/session, or this same tab after a reload wiped its
+  // in-memory optimistic update), the navbar's cached `null` was never
+  // refreshed even though the server had a real avatar_url — while the
+  // Profile page kept showing it correctly because it always fetches fresh
+  // via its own react-query call. Track "already ran this mount" with a
+  // ref instead of trusting the cached value, so it always re-syncs with
+  // the server once per session load; updateCurrentUserAvatar() below still
+  // updates it instantly and optimistically after a live upload.
+  const avatarHydratedRef = useRef<string | null>(null);
   useEffect(() => {
     if (!currentUser?.id) return;
-    // Skip if we already have it (e.g. after updateCurrentUserAvatar was called)
-    if (currentUser.avatarUrl !== undefined) return;
+    if (avatarHydratedRef.current === currentUser.id) return;
+    avatarHydratedRef.current = currentUser.id;
 
     const token = localStorage.getItem("token");
     if (!token) return;

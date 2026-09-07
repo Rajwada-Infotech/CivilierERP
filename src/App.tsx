@@ -18,8 +18,13 @@ import Landing from "./pages/Landing";
 import NotFound from "./pages/NotFound";
 import Maintenance from "./pages/Maintenance";
 
-// Layout
-import { AppLayout } from "./components/layout/AppLayout";
+// Layout — lazy-loaded so its own dependencies (notification dropdowns,
+// widgets, etc. — pulling in radix/charts/jspdf-adjacent code) aren't part
+// of the eager entry bundle every route pays for, including public routes
+// like Landing/Login that never render it at all.
+const AppLayout = lazy(() =>
+  import("./components/layout/AppLayout").then((m) => ({ default: m.AppLayout })),
+);
 
 // Contexts
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
@@ -117,6 +122,11 @@ const ChequeCancellation = lazy(() => import("./pages/finance/ChequeCancellation
 const Records = lazy(() => import("./pages/records/Records"));
 const LoanDashboard = lazy(() => import("./pages/loan/LoanDashboard"));
 const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
+const MaintenanceDashboard = lazy(() => import("./pages/maintenance/MaintenanceDashboard"));
+const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceDirectory"));
+const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/CustomerMaintenanceProfile"));
+const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
+const ChargeHeadMaster = lazy(() => import("./pages/masters/ChargeHeadMaster"));
 const CivilWorkDprDashboard = lazy(
   () => import("./pages/civilworkdpr/CivilWorkDprDashboard"),
 );
@@ -132,6 +142,7 @@ const RoomCategoryMaster = lazy(
 const RoomCompositionBuilder = lazy(
   () => import("./pages/civilworkdpr/RoomCompositionBuilder"),
 );
+const RoomMaster = lazy(() => import("./pages/civilworkdpr/RoomMaster"));
 const WorkCheckpointMaster = lazy(
   () => import("./pages/civilworkdpr/WorkCheckpointMaster"),
 );
@@ -147,6 +158,7 @@ const BalanceSheet = lazy(() => import("./pages/finance/BalanceSheet"));
 const ProfitAndLoss = lazy(() => import("./pages/finance/ProfitAndLoss"));
 const YearEndClose = lazy(() => import("./pages/finance/YearEndClose"));
 const BalanceEnquiry = lazy(() => import("./pages/finance/BalanceEnquiry"));
+const VendorLedgerReport = lazy(() => import("./pages/finance/VendorLedgerReport"));
 const JournalVoucher = lazy(() => import("./pages/finance/JournalVoucher"));
 const FinanceAmendment = lazy(() => import("./pages/finance/FinanceAmendment"));
 const FundTransfer = lazy(() => import("./pages/finance/FundTransfer"));
@@ -164,7 +176,6 @@ const CustomerMaster = lazy(() => import("./pages/masters/CustomerMaster"));
 const DependencyMaster = lazy(() => import("./pages/masters/DependencyMaster/DependencyMasterPage"));
 const DependencyMasterFormPage = lazy(() => import("./pages/masters/DependencyMaster/DependencyMasterFormPage"));
 const UnitMaster = lazy(() => import("./pages/admin/masters/UnitMaster"));
-const RoomMaster = lazy(() => import("./pages/admin/masters/RoomMaster"));
 const BlockMaster = lazy(() => import("./pages/admin/masters/BlockMaster"));
 const PaymentPlanMaster = lazy(
   () => import("./pages/admin/masters/PaymentPlanMaster"),
@@ -202,7 +213,13 @@ const GRN = lazy(() => import("./pages/material/GRN"));
 const FixedAssetDashboard = lazy(() => import("./pages/fixedAsset/FixedAssetDashboard"));
 const FixedAssetRecord = lazy(() => import("./pages/fixedAsset/FixedAssetRecord"));
 const FixedAssetTagging = lazy(() => import("./pages/fixedAsset/FixedAssetTagging"));
+const FixedAssetDepreciationTagStickers = lazy(() => import("./pages/fixedAsset/FixedAssetDepreciationTagStickers"));
+const FixedAssetInventoryImport = lazy(() => import("./pages/fixedAsset/FixedAssetInventoryImport"));
+const FixedAssetAssignment = lazy(() => import("./pages/fixedAsset/FixedAssetAssignment"));
 const AssetTransfer = lazy(() => import("./pages/fixedAsset/AssetTransfer"));
+const FixedAssetQualityCheck = lazy(() => import("./pages/fixedAsset/FixedAssetQualityCheck"));
+const FixedAssetMaintenance = lazy(() => import("./pages/fixedAsset/FixedAssetMaintenance"));
+const IDTemplateMaster = lazy(() => import("./pages/fixedAsset/IDTemplateMaster"));
 const ShortClose = lazy(() => import("./pages/material/ShortClose"));
 const DepreciationSetup = lazy(() => import("./pages/fixedAsset/DepreciationSetup"));
 const VehicleInOut = lazy(() => import("./pages/material/VehicleInOut"));
@@ -504,11 +521,13 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
     <RequireAuth>
       <RequireRole allowed={[...ADMIN_ROLES]}>
         <ProtectedProviders>
-          <AppLayout>
-            <RouteErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-            </RouteErrorBoundary>
-          </AppLayout>
+          <Suspense fallback={<PageSkeleton />}>
+            <AppLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+              </RouteErrorBoundary>
+            </AppLayout>
+          </Suspense>
         </ProtectedProviders>
       </RequireRole>
     </RequireAuth>
@@ -528,11 +547,13 @@ function ApprovalInboxRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <ProtectedProviders>
-        <AppLayout>
-          <RouteErrorBoundary>
-            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-          </RouteErrorBoundary>
-        </AppLayout>
+        <Suspense fallback={<PageSkeleton />}>
+          <AppLayout>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+            </RouteErrorBoundary>
+          </AppLayout>
+        </Suspense>
       </ProtectedProviders>
     </RequireAuth>
   );
@@ -544,11 +565,13 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
     <RequireAuth>
       <RequireRole allowed={["super_admin"]}>
         <ProtectedProviders>
-          <AppLayout>
-            <RouteErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-            </RouteErrorBoundary>
-          </AppLayout>
+          <Suspense fallback={<PageSkeleton />}>
+            <AppLayout>
+              <RouteErrorBoundary>
+                <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+              </RouteErrorBoundary>
+            </AppLayout>
+          </Suspense>
         </ProtectedProviders>
       </RequireRole>
     </RequireAuth>
@@ -586,17 +609,19 @@ function ProtectedRoute({
   return (
     <RequireAuth>
       <ProtectedProviders>
-        <AppLayout>
-          <RouteErrorBoundary>
-            <Suspense fallback={<PageSkeleton />}>
-              {pageKey ? (
-                <PageGuard pageKey={pageKey}>{children}</PageGuard>
-              ) : (
-                children
-              )}
-            </Suspense>
-          </RouteErrorBoundary>
-        </AppLayout>
+        <Suspense fallback={<PageSkeleton />}>
+          <AppLayout>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageSkeleton />}>
+                {pageKey ? (
+                  <PageGuard pageKey={pageKey}>{children}</PageGuard>
+                ) : (
+                  children
+                )}
+              </Suspense>
+            </RouteErrorBoundary>
+          </AppLayout>
+        </Suspense>
       </ProtectedProviders>
     </RequireAuth>
   );
@@ -718,6 +743,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="balance-enquiry">
             <BalanceEnquiry />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/finance/vendor-ledger"
+        element={
+          <ProtectedRoute pageKey="vendor-ledger">
+            <VendorLedgerReport />
           </ProtectedRoute>
         }
       />
@@ -874,6 +907,46 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/maintenance"
+        element={
+          <ProtectedRoute pageKey="maintenance-dashboard">
+            <MaintenanceDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/directory"
+        element={
+          <ProtectedRoute pageKey="maintenance-directory">
+            <MaintenanceDirectory />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/customer/:bookingId"
+        element={
+          <ProtectedRoute pageKey="maintenance-directory">
+            <CustomerMaintenanceProfile />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/bills"
+        element={
+          <ProtectedRoute pageKey="maintenance-bills">
+            <MaintenanceBills />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/charge-head"
+        element={
+          <ProtectedRoute pageKey="charge-head-master">
+            <ChargeHeadMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/civilworkdpr"
         element={
           <ProtectedRoute pageKey="civilworkdpr-dashboard">
@@ -910,6 +983,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="room-composition-builder">
             <RoomCompositionBuilder />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/room-master"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-room-master">
+            <RoomMaster />
           </ProtectedRoute>
         }
       />
@@ -1140,10 +1221,58 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/fixed-asset/depreciation-tag-stickers"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-tagging">
+            <FixedAssetDepreciationTagStickers />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/fixed-asset/transfer"
         element={
           <ProtectedRoute pageKey="asset-transfer">
             <AssetTransfer />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/inventory-import"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-inventory-import">
+            <FixedAssetInventoryImport />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/assignment"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-assignment">
+            <FixedAssetAssignment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/quality-check"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-quality-check">
+            <FixedAssetQualityCheck />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/maintenance"
+        element={
+          <ProtectedRoute pageKey="fixed-asset-maintenance">
+            <FixedAssetMaintenance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/fixed-asset/id-template-master"
+        element={
+          <ProtectedRoute pageKey="id-template-master">
+            <IDTemplateMaster />
           </ProtectedRoute>
         }
       />
@@ -2130,7 +2259,6 @@ function AppRoutes() {
           project's history for the original version of this bug). */}
       <Route path="/crm/setup/unit-master"         element={<ProtectedRoute pageKey="followup-unit-master"><UnitMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/block-master"        element={<ProtectedRoute pageKey="followup-block-master"><BlockMaster /></ProtectedRoute>} />
-      <Route path="/crm/setup/room-master"         element={<ProtectedRoute pageKey="followup-room-master"><RoomMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/payment-plan-master" element={<ProtectedRoute pageKey="payment-plan-master"><PaymentPlanMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/parking-master"      element={<ProtectedRoute pageKey="followup-parking-master"><ParkingMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/parking-slot-master" element={<ProtectedRoute pageKey="followup-parking-slot-master"><ParkingSlotMaster /></ProtectedRoute>} />

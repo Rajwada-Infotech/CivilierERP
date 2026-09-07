@@ -120,7 +120,7 @@ function StatusPill({ status }: { status: string }) {
 // ── Main component ────────────────────────────────────────────────────────────
 const CrmLoanTracking: React.FC = () => {
   const qc = useQueryClient();
-  const { rights } = usePageRights("crm-loan-details");
+  const rights = usePageRights("crm-loan-details");
   const [sp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
 
@@ -349,7 +349,7 @@ const CrmLoanTracking: React.FC = () => {
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
               <span className="flex items-center gap-2"><Landmark size={16} /> Home Loan Details</span>
-              {editingRow?.LoanId && locked && rights?.edit && (
+              {editingRow?.LoanId && locked && rights.canEdit && (
                 <button
                   onClick={() => setLocked(false)}
                   className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0"

@@ -126,7 +126,7 @@ function computeStatus(item: {
 }
 
 const ParkingSlotMaster: React.FC = () => {
-  usePageRights("parking-slot-master");
+  const rights = usePageRights("followup-parking-slot-master");
   const queryClient = useQueryClient();
 
   const { data: slots, isLoading, error } = useQuery({
@@ -245,6 +245,9 @@ const ParkingSlotMaster: React.FC = () => {
       <FollowupShell title="Parking Slot Master">
         <MasterPage
           title="Parking Slot"
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
           fields={fields}
           columns={columns}
           columnRenderers={{

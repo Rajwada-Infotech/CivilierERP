@@ -21,7 +21,6 @@ const DEPRECIATION_TYPES = [
   { value: "WDV", label: "WDV — Written Down Value" },
 ];
 
-const GOVT_RATES = [5, 10, 15, 20, 25, 30, 33.33, 40, 50, 60, 100];
 
 const STATUS_COLORS: Record<string, string> = {
   Active:   "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
@@ -319,11 +318,10 @@ export default function DepreciationSetupPage() {
               <div>
                 <label className={labelCls}>Asset Category *</label>
                 <div className="relative">
-                  <select value={form.assetCategory} onChange={(e) => setForm((p) => ({ ...p, assetCategory: e.target.value }))}
-                    className={`${inputCls} ${form.assetCategory ? "pl-9" : ""}`}>
-                    <option value="">Select category…</option>
-                    {ASSET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <input type="text" value={form.assetCategory}
+                    onChange={(e) => setForm((p) => ({ ...p, assetCategory: e.target.value }))}
+                    placeholder="Enter asset category…"
+                    className={`${inputCls} ${form.assetCategory ? "pl-9" : ""}`} />
                   {form.assetCategory && (
                     <span className={`absolute left-2 top-1/2 -translate-y-1/2 inline-flex h-5 w-5 items-center justify-center rounded ${CATEGORY_COLORS[form.assetCategory] || ""}`}>
                       {React.createElement(CATEGORY_ICONS[form.assetCategory] || Package, { size: 11 })}
@@ -342,10 +340,11 @@ export default function DepreciationSetupPage() {
 
               <div>
                 <label className={labelCls}>Depreciation Rate (% per year) *</label>
-                <select value={String(form.depreciationRate)} onChange={(e) => setForm((p) => ({ ...p, depreciationRate: parseFloat(e.target.value) }))}
-                  className={inputCls}>
-                  {GOVT_RATES.map((r) => <option key={r} value={r}>{r}%</option>)}
-                </select>
+                <input type="number" min="0" step="0.01" inputMode="decimal"
+                  value={form.depreciationRate === 0 ? "" : String(form.depreciationRate)}
+                  onChange={(e) => setForm((p) => ({ ...p, depreciationRate: e.target.value === "" ? 0 : parseFloat(e.target.value) }))}
+                  placeholder="Enter rate, e.g. 12.5"
+                  className={inputCls} />
               </div>
 
               <div>

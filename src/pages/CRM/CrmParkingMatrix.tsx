@@ -120,6 +120,7 @@ function ActionChoiceDialog({
 function BookParkingDialog({
   slot, projectId, onClose,
 }: { slot: MatrixSlot; projectId: string; onClose: () => void }) {
+  const rights = usePageRights("crm-parking-matrix");
   const qc = useQueryClient();
   const [applicationId, setApplicationId] = useState("");
   const [quantity, setQuantity] = useState("1");
@@ -212,10 +213,12 @@ function BookParkingDialog({
         </div>
         <div className="flex justify-end gap-2 pt-3 border-t border-border">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-          <button onClick={handleBook} disabled={saving}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-            {saving ? "Booking..." : "Book Slot"}
-          </button>
+          {rights.canCreate && (
+            <button onClick={handleBook} disabled={saving}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Booking..." : "Book Slot"}
+            </button>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -223,6 +226,7 @@ function BookParkingDialog({
 }
 
 function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; projectId: string; onClose: () => void }) {
+  const rights = usePageRights("crm-parking-matrix");
   const qc = useQueryClient();
   const [applicationId, setApplicationId] = useState("");
   const [holdDays, setHoldDays] = useState("3");
@@ -293,10 +297,12 @@ function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; proje
         </div>
         <div className="flex justify-end gap-2 pt-3 border-t border-border">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-          <button onClick={handlePlace} disabled={saving}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-            {saving ? "Placing..." : "Place Hold"}
-          </button>
+          {rights.canCreate && (
+            <button onClick={handlePlace} disabled={saving}
+              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              {saving ? "Placing..." : "Place Hold"}
+            </button>
+          )}
         </div>
       </DialogContent>
     </Dialog>
@@ -314,6 +320,7 @@ function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; proje
 // amendment-queue rules as any other post-booking edit), so this dialog
 // doesn't shortcut around that — it links out instead.
 function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => void }) {
+  const rights = usePageRights("crm-parking-matrix");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [releasing, setReleasing] = useState(false);
@@ -446,10 +453,12 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
               <input type="number" min={1} max={90} value={extendDays} onChange={(e) => setExtendDays(e.target.value)}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
-            <button onClick={handleExtend} disabled={extending}
-              className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {extending ? "Extending..." : "Confirm"}
-            </button>
+            {rights.canEdit && (
+              <button onClick={handleExtend} disabled={extending}
+                className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                {extending ? "Extending..." : "Confirm"}
+              </button>
+            )}
           </div>
         )}
 
@@ -457,7 +466,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
           {hasUnpaidAllotment ? (
             <>
-              {slot.HoldId && (
+              {rights.canEdit && slot.HoldId && (
                 <button onClick={() => setShowExtend((s) => !s)}
                   className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted">
                   Extend Hold
@@ -469,10 +478,12 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
               </button>
             </>
           ) : isHold ? (
-            <button onClick={handleRelease} disabled={releasing}
-              className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
-              {releasing ? "Releasing..." : "Release Hold"}
-            </button>
+            rights.canEdit && (
+              <button onClick={handleRelease} disabled={releasing}
+                className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700 disabled:opacity-40">
+                {releasing ? "Releasing..." : "Release Hold"}
+              </button>
+            )
           ) : slot.BookingId ? (
             <button onClick={() => navigate(`/crm/bookings?applicationId=${slot.ApplicationId}`)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">

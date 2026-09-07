@@ -79,7 +79,8 @@ router.get("/units", async (req, res) => {
         u.UnitName AS Name,
         u.ProjectId,
         u.BlockId,
-        b.BlockName
+        b.BlockName,
+        u.UnitType
       FROM dbo.UnitMaster u
       LEFT JOIN dbo.BlockMaster b ON b.Id = u.BlockId
       WHERE u.IsActive = 1
@@ -308,6 +309,89 @@ router.get("/:id/blueprint", async (req, res) => {
     });
   } catch (err) {
     console.error("[room-master] GET /:id/blueprint error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /generate/:unitId — bulk-creates real dbo.RoomMaster rows from the
+// unit's own BHK layout: UnitMaster.UnitType (set during the auto project
+// setup flow's Unit Type template, e.g. "2 BHK") resolves to the matching
+// RoomLayoutType/UnitRoomConfig template (see unitBhkConfig.js's own
+// GET /room-instances/:unitId, which drives Work Reporting's synthetic Room
+// dropdown) and each active RoomCategory x Quantity becomes a real
+// "{Alias} {index}" row here. Room Master needs real rows — unlike Work
+// Reporting's on-the-fly instances — because blueprints and Dependency
+// Master scope attach to a specific RoomMaster.Id.
+// Idempotent/additive, same convention as generate-units/generate-parking-
+// slots: an existing active RoomName for this unit is left untouched, so
+// re-running after growing the unit's template only fills in the gap.
+router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  const unitId = parseInt(req.params.unitId, 10);
+  if (!Number.isFinite(unitId) || unitId <= 0) return res.status(400).json({ error: "Invalid unitId" });
+  const createdBy = req.user?.userId || null;
+  try {
+    const pool = getPool();
+    const unitRes = await pool.request().input("UnitId", sql.Int, unitId).query(`
+      SELECT Id, ProjectId, BlockId, UnitType FROM dbo.UnitMaster WHERE Id = @UnitId AND IsActive = 1
+    `);
+    if (!unitRes.recordset.length) return res.status(404).json({ error: "Unit not found" });
+    const unit = unitRes.recordset[0];
+    const typeKey = String(unit.UnitType || "").toUpperCase().replace(/\s+/g, "");
+    if (!typeKey) {
+      return res.status(400).json({
+        error: "This unit has no Unit Type set — set one in Unit Master (or the auto project setup's Unit Type template) first.",
+      });
+    }
+
+    const compRes = await pool.request().input("typeKey", sql.NVarChar(20), typeKey).query(`
+      SELECT rc.Quantity AS quantity, cat.Alias AS alias
+      FROM dbo.UnitRoomConfig cfg
+      JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id
+      JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId
+      WHERE cfg.BhkType = @typeKey AND cfg.IsActive = 1 AND cat.IsActive = 1 AND rc.Quantity > 0
+      ORDER BY cat.SortOrder ASC, cat.Alias ASC
+    `);
+    if (!compRes.recordset.length) {
+      return res.status(400).json({
+        error: `No room composition template set up for "${unit.UnitType}" yet — set one in Room Composition Builder first.`,
+      });
+    }
+
+    const names = [];
+    for (const row of compRes.recordset) {
+      for (let i = 1; i <= row.quantity; i++) names.push(row.quantity > 1 ? `${row.alias} ${i}` : row.alias);
+    }
+
+    const existing = await pool.request().input("UnitId", sql.Int, unitId).query(`
+      SELECT RoomName FROM dbo.RoomMaster WHERE UnitId = @UnitId AND IsActive = 1
+    `);
+    const existingLower = new Set(existing.recordset.map((r) => String(r.RoomName).toLowerCase()));
+
+    let created = 0;
+    for (const name of names) {
+      if (existingLower.has(name.toLowerCase())) continue;
+      await pool.request()
+        .input("ProjectId", sql.Int, unit.ProjectId)
+        .input("BlockId", sql.Int, unit.BlockId)
+        .input("UnitId", sql.Int, unitId)
+        .input("RoomName", sql.NVarChar(100), name)
+        .input("CreatedBy", sql.Int, createdBy)
+        .input("CreatedAt", sql.DateTime2(3), new Date())
+        .query(`
+          INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, IsActive, CreatedBy, CreatedAt)
+          VALUES (@ProjectId, @BlockId, @UnitId, @RoomName, 1, @CreatedBy, @CreatedAt)
+        `);
+      created++;
+    }
+
+    if (created > 0) await bumpCacheVersion("room-master");
+    res.json({
+      message: created > 0 ? `${created} room(s) generated from ${unit.UnitType} layout` : "Every room from this layout already exists",
+      createdCount: created,
+      total: names.length,
+    });
+  } catch (err) {
+    console.error("[room-master] POST /generate/:unitId error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

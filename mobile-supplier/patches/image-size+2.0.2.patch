@@ -1,0 +1,30 @@
+diff --git a/node_modules/image-size/dist/index.cjs b/node_modules/image-size/dist/index.cjs
+index bde0210..961af33 100644
+--- a/node_modules/image-size/dist/index.cjs
++++ b/node_modules/image-size/dist/index.cjs
+@@ -4,9 +4,15 @@ Object.defineProperty(exports, '__esModule', { value: true });
+ 
+ // lib/types/utils.ts
+ var decoder = new TextDecoder();
+-var toUTF8String = (input, start = 0, end = input.length) => decoder.decode(input.slice(start, end));
++var toUTF8String = (input, start = 0, end = input.length) => {
++  const slice = input.slice(start, end);
++  return decoder.decode(ArrayBuffer.isView(slice) ? slice : new Uint8Array(slice));
++};
+ var toHexString = (input, start = 0, end = input.length) => input.slice(start, end).reduce((memo, i) => memo + `0${i.toString(16)}`.slice(-2), "");
+-var getView = (input, offset) => new DataView(input.buffer, input.byteOffset + offset);
++var getView = (input, offset) => {
++  const view = ArrayBuffer.isView(input) ? input : Uint8Array.from(input);
++  return new DataView(view.buffer, view.byteOffset + offset);
++};
+ var readInt16LE = (input, offset = 0) => getView(input, offset).getInt16(0, true);
+ var readUInt16BE = (input, offset = 0) => getView(input, offset).getUint16(0, false);
+ var readUInt16LE = (input, offset = 0) => getView(input, offset).getUint16(0, true);
+@@ -968,6 +974,7 @@ var globalOptions = {
+   disabledTypes: []
+ };
+ function imageSize(input) {
++  if (!ArrayBuffer.isView(input)) input = Uint8Array.from(input);
+   const type = detector(input);
+   if (typeof type !== "undefined") {
+     if (globalOptions.disabledTypes.indexOf(type) > -1) {

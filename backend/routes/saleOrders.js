@@ -252,6 +252,9 @@ router.post("/", requirePageRight("sale-order", "create"), async (req, res) => {
         rate,
         amount: Math.round(qty * rate * 100) / 100,
         remarks: it.remarks || "",
+        // Revenue GL Head this item posts to once invoiced — see
+        // createSaleInvoiceInternal's GL posting in saleInvoices.js.
+        glHeadId: it.glHeadId ? parseInt(it.glHeadId, 10) : null,
       };
     });
     const totalAmount =

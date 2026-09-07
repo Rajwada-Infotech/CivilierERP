@@ -200,6 +200,7 @@ const EMPTY_FORM = {
 };
 
 const CrmNoc: React.FC = () => {
+  const rights = usePageRights("crm-noc");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
@@ -220,8 +221,6 @@ const CrmNoc: React.FC = () => {
   const [detailId, setDetailId] = useState<number | null>(null);
   const [markingIssued, setMarkingIssued] = useState(false);
   const [editNoc, setEditNoc] = useState<any>(null);
-
-  usePageRights("crm-noc");
 
   // Data
   const { data: nocs = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
@@ -264,7 +263,7 @@ const CrmNoc: React.FC = () => {
     );
     if (existing) {
       setDetailId(existing.Id);
-    } else {
+    } else if (rights.canCreate) {
       setForm((f) => ({ ...f, BookingId: deepLinkBookingId, NocType: type }));
       setDialogOpen(true);
     }
@@ -413,12 +412,14 @@ const CrmNoc: React.FC = () => {
         action={
           <div className="flex items-center gap-3">
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
-            <button
-              onClick={() => setDialogOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90"
-            >
-              <Plus size={14} /> Request NOC
-            </button>
+            {rights.canCreate && (
+              <button
+                onClick={() => setDialogOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90"
+              >
+                <Plus size={14} /> Request NOC
+              </button>
+            )}
           </div>
         }
       >
@@ -556,7 +557,7 @@ const CrmNoc: React.FC = () => {
             <div className="flex justify-end gap-2 pt-4 border-t border-border mt-2">
               <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }}
                 className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleCreate} disabled={!canRequest}
+              <button onClick={handleCreate} disabled={!canRequest || !rights.canCreate}
                 title={!agreementRegistered && form.BookingId ? "AFS must be Registered first" : undefined}
                 className="px-5 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                 {saving ? "Requesting…" : "Request NOC"}
@@ -632,7 +633,7 @@ const CrmNoc: React.FC = () => {
                         <CheckCircle2 size={16} />
                         Issued {fmtDate(detail.IssuedDate)} — no further action required
                       </div>
-                    ) : detail.Status === CrmStatus.APPROVED ? (
+                    ) : detail.Status === CrmStatus.APPROVED && rights.canEdit ? (
                       <button onClick={handleMarkIssued} disabled={markingIssued}
                         className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors">
                         <ArrowRight size={14} />

@@ -67,6 +67,12 @@ function sanitizeForPdf(value: string): string {
   return value
     .replace(/₹/g, "Rs.")
     .replace(/[\u2500-\u257F]/g, "-")
+    // Em/en dash and the masked-account bullet (the near-universal "empty
+    // value" placeholder throughout this app) sit outside Latin-1, so every
+    // blank exported cell fell through to the catch-all "?" below. Give
+    // them a real Latin-1 equivalent first.
+    .replace(/[\u2010-\u2015]/g, "-")
+    .replace(/\u2022/g, "*")
     .replace(/[^\u0020-\u00FF]/g, "?");
 }
 
@@ -437,6 +443,21 @@ export async function exportToPdf(
   const head = [columns.map((c) => c.header)];
   const body = rows.map((row) => columns.map((c) => getPdfCell(row, c)));
 
+  // Per-column width floor sized off real content, not just the header —
+  // a short header like "Bank" or "Type" previously left columns narrow
+  // enough that ordinary body words ("Received", "Union Bank of India")
+  // got hard-wrapped mid-word once a wide table (many columns) outgrew the
+  // page. Capped so one outlier long value (a free-text remark) doesn't
+  // blow the column out — typical short values still get room to sit on
+  // one line; long ones still wrap normally, just word-by-word.
+  const CONTENT_WIDTH_CAP = 18;
+  const columnMaxLen = columns.map((c, i) =>
+    Math.max(
+      c.header.length,
+      ...body.map((r) => Math.min(String(r[i] ?? "").length, CONTENT_WIDTH_CAP)),
+    ),
+  );
+
   autoTable(doc, {
     head,
     body,
@@ -444,6 +465,17 @@ export async function exportToPdf(
     margin: { left: marginX, right: marginX },
     tableLineColor: [226, 232, 240],
     tableLineWidth: 0.3,
+    // A wide table (many columns, each with a real content-based minCellWidth
+    // now) can exceed the page width even in landscape. Without this,
+    // autoTable's default 'auto' overflow mode just clips whatever doesn't
+    // fit off the right edge of the page — the columns are still "there",
+    // just invisible. 'general' lets excess columns spill onto as many
+    // continuation pages as needed instead of being silently cut off.
+    horizontalPageBreak: true,
+    // Repeat the first column (usually a Type/Doc No/Name-type identifier)
+    // on every continuation page, so a row split across pages is still
+    // identifiable on the second page instead of just being a bare number.
+    horizontalPageBreakRepeat: 0,
     styles: {
       fontSize: 7.5,
       cellPadding: { top: 5, bottom: 5, left: 6, right: 6 },
@@ -470,7 +502,7 @@ export async function exportToPdf(
       // outgrow the page. This is a floor, not a fixed width — columns with
       // wider body content still grow past it.
       ...Object.fromEntries(
-        columns.map((c, i) => [i, { minCellWidth: c.header.length * 4.6 + 16 }]),
+        columns.map((c, i) => [i, { minCellWidth: columnMaxLen[i] * 4.6 + 16 }]),
       ),
       // Right-align numeric columns heuristically — columns whose header contains
       // "Amount", "No", "Count" get right alignment
@@ -478,7 +510,7 @@ export async function exportToPdf(
         columns
           .map((c, i) =>
             /amount|count|qty|no\.?$/i.test(c.header)
-              ? [i, { minCellWidth: c.header.length * 4.6 + 16, halign: "right" as const }]
+              ? [i, { minCellWidth: columnMaxLen[i] * 4.6 + 16, halign: "right" as const }]
               : null,
           )
           .filter(Boolean) as [number, { minCellWidth: number; halign: "right" }][],

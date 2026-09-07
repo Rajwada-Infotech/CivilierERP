@@ -322,6 +322,7 @@ function RoleRightsTab({ roles }: { roles: any[] }) {
 // TAB 2 — User Permissions (custom overrides + import/export CSV)
 // ════════════════════════════════════════════════════════════════════════════
 function UserPermissionsTab({ users }: { users: any[] }) {
+  const rights           = usePageRights("sa-role-master");
   const qc              = useQueryClient();
   const importRef       = useRef<HTMLInputElement>(null);
   const [selectedUser, setSelectedUser] = useState<any | null>(null);
@@ -500,13 +501,15 @@ function UserPermissionsTab({ users }: { users: any[] }) {
                 >
                   <Download size={11} /> Export CSV
                 </button>
-                <button
-                  onClick={() => savePerms.mutate()}
-                  disabled={!dirty || savePerms.isPending}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors"
-                >
-                  <Save size={11} /> {savePerms.isPending ? "Saving…" : "Save"}
-                </button>
+                {rights.canEdit && (
+                  <button
+                    onClick={() => savePerms.mutate()}
+                    disabled={!dirty || savePerms.isPending}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors"
+                  >
+                    <Save size={11} /> {savePerms.isPending ? "Saving…" : "Save"}
+                  </button>
+                )}
               </div>
             </div>
 

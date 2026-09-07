@@ -668,6 +668,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
 }
 
 const CrmInvoices: React.FC = () => {
+  const rights = usePageRights("crm-invoices");
   const qc = useQueryClient();
   const { currentUser } = useAuth();
   const canVoid = !!currentUser?.role && INVOICE_VOID_ROLES.includes(currentUser.role);
@@ -688,7 +689,7 @@ const CrmInvoices: React.FC = () => {
   // making staff search for the booking they just came from.
   useEffect(() => {
     const bid = searchParams.get("bookingId");
-    if (bid) {
+    if (bid && rights.canCreate) {
       setGenBookingId(parseInt(bid, 10));
       const next = new URLSearchParams(searchParams);
       next.delete("bookingId");
@@ -756,8 +757,6 @@ const CrmInvoices: React.FC = () => {
     qc.invalidateQueries({ queryKey: ["crm-invoices"] });
   }
 
-  usePageRights("crm-invoices");
-
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Invoices"]} />
@@ -784,10 +783,12 @@ const CrmInvoices: React.FC = () => {
           <button onClick={() => { setType(""); setSearch(""); setSearchInput(""); }}
             className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Clear filters</button>
         )}
-        <button onClick={() => setGenBookingId(null)}
-          className="ml-auto flex items-center gap-1.5 px-3 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
-          <Plus className="w-4 h-4" /> Generate Invoice
-        </button>
+        {rights.canCreate && (
+          <button onClick={() => setGenBookingId(null)}
+            className="ml-auto flex items-center gap-1.5 px-3 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+            <Plus className="w-4 h-4" /> Generate Invoice
+          </button>
+        )}
       </div>
 
       {isLoading ? (
@@ -818,11 +819,13 @@ const CrmInvoices: React.FC = () => {
                       {activeInvoices.length} invoice{activeInvoices.length !== 1 ? "s" : ""} · {fmtMoney(total)}
                       {invoices.length > activeInvoices.length && ` (+${invoices.length - activeInvoices.length} void)`}
                     </span>
-                    <span
-                      onClick={(e) => { e.stopPropagation(); setGenBookingId(booking.BookingId); }}
-                      className="flex items-center gap-1 px-2 py-1 border border-border rounded-md font-medium hover:bg-muted">
-                      <Plus size={12} /> Add
-                    </span>
+                    {rights.canCreate && (
+                      <span
+                        onClick={(e) => { e.stopPropagation(); setGenBookingId(booking.BookingId); }}
+                        className="flex items-center gap-1 px-2 py-1 border border-border rounded-md font-medium hover:bg-muted">
+                        <Plus size={12} /> Add
+                      </span>
+                    )}
                     <a href={`/crm/bookings?view=${booking.BookingId}`} onClick={(e) => e.stopPropagation()}
                       className="flex items-center gap-1 px-2 py-1 border border-border rounded-md font-medium hover:bg-muted">
                       <ExternalLink size={12} /> Booking

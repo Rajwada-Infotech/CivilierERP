@@ -501,7 +501,7 @@ function PaymentHistoryTable({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function Payment() {
-  usePageRights("sales-payment");
+  const rights = usePageRights("sales-payment");
   const qc = useQueryClient();
   const { finYears } = useFinYear();
 
@@ -598,6 +598,7 @@ export default function Payment() {
   });
 
   const canSubmit =
+    rights.canCreate &&
     !!selectedOrder &&
     !!bankId &&
     !!mode &&
@@ -866,16 +867,16 @@ export default function Payment() {
                 <button
                   onClick={handleSubmit}
                   disabled={!canSubmit}
-                  className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
                 >
                   {mutation.isPending ? (
                     <>
-                      <RefreshCw size={14} className="animate-spin" />{" "}
+                      <RefreshCw size={13} className="animate-spin" />{" "}
                       Recording…
                     </>
                   ) : (
                     <>
-                      <Send size={14} /> Record Payment
+                      <Send size={13} /> Record Payment
                     </>
                   )}
                 </button>

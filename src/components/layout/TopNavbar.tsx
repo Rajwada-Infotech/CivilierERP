@@ -120,6 +120,7 @@ const Dropdown = ({
 const MODULE_GLOW_RGB: Record<string, string> = {
   finance: "99,102,241",
   material: "16,185,129",
+  "fixed-asset": "234,179,8",
   followup: "129,140,248",
   engineering: "249,115,22",
   ticket: "236,72,153",
@@ -134,6 +135,7 @@ const MODULE_GLOW_RGB: Record<string, string> = {
 const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   finance: { h: 239, s: 84, l: 67 }, // #6366f1 indigo
   material: { h: 160, s: 84, l: 39 }, // #10b981 emerald
+  "fixed-asset": { h: 45, s: 93, l: 47 }, // #eab308 yellow
   followup: { h: 174, s: 82, l: 31 }, // #0d9488 teal
   engineering: { h: 25, s: 95, l: 53 }, // #f97316 orange
   ticket: { h: 330, s: 81, l: 60 }, // #ec4899 pink
@@ -142,6 +144,7 @@ const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   civilworkdpr: { h: 192, s: 91, l: 36 }, // #0891b2 cyan/teal
   admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
   crm: { h: 199, s: 89, l: 48 }, // #0ea5e9 sky
+  maintenance: { h: 85, s: 85, l: 35 }, // #65a30d lime
 };
 
 function moduleColorVars(id: string): React.CSSProperties {
@@ -264,6 +267,16 @@ const financeSetupItems = [
   },
 ];
 
+const maintenanceSetupItems = [
+  {
+    icon: Receipt,
+    label: "Charge Head",
+    path: "/masters/charge-head",
+    color: "text-slate-500",
+    pageKey: "charge-head-master",
+  },
+];
+
 const materialSetupItems = [
   {
     icon: Package,
@@ -320,6 +333,23 @@ const materialSetupItems = [
     path: "/material/inventory-master",
     color: "text-sky-400",
     pageKey: "inventory-master",
+  },
+];
+
+const fixedAssetSetupItems = [
+  {
+    icon: Percent,
+    label: "Depreciation Setup",
+    path: "/fixed-asset/depreciation-setup",
+    color: "text-yellow-500",
+    pageKey: "depreciation-setup",
+  },
+  {
+    icon: Hash,
+    label: "ID Template Master",
+    path: "/fixed-asset/id-template-master",
+    color: "text-yellow-500",
+    pageKey: "id-template-master",
   },
 ];
 
@@ -396,6 +426,13 @@ const civilWorkDprSetupItems = [
     pageKey: "room-category-master",
   },
   {
+    icon: DoorOpen,
+    label: "Room Master",
+    path: "/civilworkdpr/room-master",
+    color: "text-cyan-500",
+    pageKey: "civilworkdpr-room-master",
+  },
+  {
     icon: ClipboardCheck,
     label: "Work Checkpoints",
     path: "/civilworkdpr/work-checkpoint-master",
@@ -464,13 +501,6 @@ const crmSetupItems = [
     path: "/crm/setup/block-master",
     color: "text-cyan-500",
     pageKey: "followup-block-master",
-  },
-  {
-    icon: DoorOpen,
-    label: "Room Master",
-    path: "/crm/setup/room-master",
-    color: "text-teal-500",
-    pageKey: "followup-room-master",
   },
   {
     icon: HardHat,
@@ -1018,6 +1048,13 @@ export const TopNavbar = () => {
         colorStyle: makeColorStyle("material"),
         available: true,
       };
+    if (activeModule === "fixed-asset")
+      return {
+        items: filterSetupItems(fixedAssetSetupItems),
+        label: "Fixed Asset",
+        colorStyle: makeColorStyle("fixed-asset"),
+        available: true,
+      };
     if (activeModule === "followup")
       return {
         items: filterSetupItems(followupSetupItems),
@@ -1058,6 +1095,13 @@ export const TopNavbar = () => {
         items: filterSetupItems(crmSetupItems),
         label: "CRM",
         colorStyle: makeColorStyle("crm"),
+        available: true,
+      };
+    if (activeModule === "maintenance")
+      return {
+        items: filterSetupItems(maintenanceSetupItems),
+        label: "Maintenance",
+        colorStyle: makeColorStyle("maintenance"),
         available: true,
       };
     return {

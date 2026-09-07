@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import { createPortal } from "react-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -9,20 +9,68 @@ import {
   ColumnDef,
   RecordWithId,
 } from "@/components/MasterPage";
-import type { ExportColumn } from "@/lib/export";
 import {
   FileWarning,
-  Percent,
-  IndianRupee,
-  Receipt,
-  CheckCircle2,
   ChevronDown,
+  Users,
+  Receipt,
+  IndianRupee,
   Plus,
   Trash2,
 } from "lucide-react";
 import { MaterialShell } from "@/components/material/MaterialShell";
+import { ApprovalActions } from "@/components/ApprovalActions";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  getDebitNotes,
+  addDebitNote,
+  updateDebitNote,
+  deleteDebitNote,
+  getDebitNotePartyOptions,
+  getInvoicesForParty,
+  type DebitNoteInvoiceOption,
+} from "@/api/debitNoteApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { toast } from "sonner";
+import { getQualityDebitNotes, type QualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
+import { AlertTriangle, Eye, X } from "lucide-react";
+import { useState } from "react";
 
-// ─── Line Item types & renderer ───────────────────────────────────────────────
+// ─── Party Type → AccountHeadMaster.LHeadType (see accountHeadMaster.js) ─────
+const PARTY_TYPES: { code: string; label: string }[] = [
+  { code: "S", label: "Supplier" },
+  { code: "C", label: "Contractor" },
+  { code: "A", label: "Customer" },
+  { code: "BR", label: "Broker" },
+];
+const PARTY_TYPE_LABEL: Record<string, string> = Object.fromEntries(
+  PARTY_TYPES.map((p) => [p.code, p.label]),
+);
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function labelById(options: { id: number; label: string }[], id: number | null) {
+  return options.find((o) => o.id === id)?.label ?? "—";
+}
+
+function idByLabel(options: { id: number; label: string }[], label: string) {
+  return options.find((o) => o.label === label)?.id ?? null;
+}
+
+function formatINR(amount: number | null | undefined): string {
+  if (amount == null || !Number.isFinite(amount)) return "—";
+  return "₹" + amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Invoices that came through Material Request -> PO -> GRN, or Work Order ->
+// PO, keep the line-item picker (same as the pre-rewrite Debit Note form);
+// a direct/TOD invoice (no PO/GRN/WO behind it) gets the value-only amount
+// adjuster instead. Mirrors ITEM_MODE_SOURCE_TYPES in backend/routes/debitNote.js.
+const ITEM_MODE_SOURCE_TYPES = new Set(["GRN", "PO", "WO_PO", "WORK_DONE", "WO"]);
+function isItemModeInvoice(sourceType: string | null | undefined): boolean {
+  return !!sourceType && ITEM_MODE_SOURCE_TYPES.has(sourceType);
+}
+
+// ─── Line item picker (restored from the pre-rewrite form, unchanged) ───────
 interface DebitNoteItem {
   Description: string;
   Quantity: string;
@@ -115,7 +163,7 @@ function ItemsRenderer({ value, onChange }: { value: DebitNoteItem[]; onChange: 
               <td colSpan={4} className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Total</td>
               <td className="hidden sm:table-cell" />
               <td className="px-2 py-1.5 text-right text-xs font-bold text-foreground">
-                ₹{total.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatINR(total)}
               </td>
               <td />
             </tr>
@@ -128,340 +176,202 @@ function ItemsRenderer({ value, onChange }: { value: DebitNoteItem[]; onChange: 
     </div>
   );
 }
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  getDebitNotes,
-  addDebitNote,
-  updateDebitNote,
-  deleteDebitNote,
-} from "@/api/debitNoteApi";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { toast } from "sonner";
-import { useFinYear } from "@/contexts/FinYearContext";
-import { getQualityDebitNotes, type QualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
-import { AlertTriangle, Eye, X } from "lucide-react";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface DbDebitNote {
-  id: number;
-  company_id: number | null;
-  project_id: number | null;
-  supplier_id: number | null;
-  bill_id: number | null;
-  is_active: boolean | null;
+// ─── Party → Invoice compound field ──────────────────────────────────────────
+// One cohesive block (Party Type → Party → Invoice, plus the read-only
+// Invoice Value / Previous Debit / Adjusted Value it resolves) — same
+// "compound custom field carrying its own related state" convention this
+// form already used for the old bill/discount picker, kept as a *stable*
+// top-level component (not a per-render factory) so its own useQuery hooks
+// for Party/Invoice options don't get torn down and refetched on every
+// keystroke elsewhere in the form.
+export interface PartyInvoiceGroup {
+  partyType: string;
+  partyId: number | null;
+  partyLabel: string;
+  billId: number | null;
+  invoiceDocNo: string;
+  /** ExpenseBooking.ESourceType for the selected invoice — drives the
+   * item-picker-vs-amount-adjuster split (see isItemModeInvoice above). */
+  sourceType: string | null;
+  companyId: number | null;
+  projectId: number | null;
+  /** Set only while editing an existing debit note — its own amount must be
+   * excluded from "Previous Debit" (the server's per-invoice sum otherwise
+   * double-counts the note being edited against itself). */
+  originalDebitAmount?: number;
 }
 
-interface BillDiscountGroup {
-  billNumber: string;
-  billAmount: number | null;
-  discMode: "percent" | "amount";
-  discPercent: string;
-  discAmount: string;
-  finalAmount: number | null;
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function labelById(
-  options: { id: number; label: string }[],
-  id: number | null,
-) {
-  return options.find((o) => o.id === id)?.label ?? "—";
-}
-
-function idByLabel(options: { id: number; label: string }[], label: string) {
-  return options.find((o) => o.label === label)?.id ?? null;
-}
-
-function formatINR(amount: number): string {
-  return amount.toLocaleString("en-IN", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-// ─── Bill & Discount Renderer ─────────────────────────────────────────────────
-const EMPTY_GROUP: BillDiscountGroup = {
-  billNumber: "",
-  billAmount: null,
-  discMode: "percent",
-  discPercent: "",
-  discAmount: "",
-  finalAmount: null,
+const EMPTY_PARTY_INVOICE_GROUP: PartyInvoiceGroup = {
+  partyType: "",
+  partyId: null,
+  partyLabel: "",
+  billId: null,
+  invoiceDocNo: "",
+  sourceType: null,
+  companyId: null,
+  projectId: null,
 };
 
-function computeFinal(g: BillDiscountGroup): number | null {
-  if (g.billAmount === null) return null;
-  let disc = 0;
-  if (g.discMode === "percent") {
-    const pct = parseFloat(g.discPercent);
-    if (!isNaN(pct) && pct >= 0) disc = (g.billAmount * pct) / 100;
-  } else {
-    const amt = parseFloat(g.discAmount);
-    if (!isNaN(amt) && amt >= 0) disc = amt;
-  }
-  return Math.max(0, g.billAmount - disc);
-}
+function PartyInvoiceRenderer({
+  value,
+  onChange,
+  error,
+  formData,
+  onInvoiceResolved,
+}: {
+  value: unknown;
+  onChange: (v: PartyInvoiceGroup) => void;
+  error: boolean;
+  formData: Record<string, unknown>;
+  onInvoiceResolved: (opt: DebitNoteInvoiceOption | null) => void;
+}) {
+  const g: PartyInvoiceGroup = value && typeof value === "object" ? (value as PartyInvoiceGroup) : { ...EMPTY_PARTY_INVOICE_GROUP };
 
-function makeBillRenderer(
-  billOptions: any[],
-  onOptionSelect?: (opt: any) => void,
-) {
-  const regularOptions = billOptions.filter((b) => b.type !== "emi");
-  const emiOptions = billOptions.filter((b) => b.type === "emi");
+  const { data: partyOptions = [], isFetching: loadingParties } = useQuery({
+    queryKey: ["debit-note-party-options", g.partyType],
+    queryFn: () => getDebitNotePartyOptions(g.partyType),
+    enabled: !!g.partyType,
+    staleTime: 60 * 1000,
+  });
 
-  return function BillDiscountRenderer({ value, onChange, error }: any) {
-    const group: BillDiscountGroup =
-      value && typeof value === "object"
-        ? (value as BillDiscountGroup)
-        : { ...EMPTY_GROUP };
+  const { data: invoiceOptions = [], isFetching: loadingInvoices } = useQuery({
+    queryKey: ["debit-note-invoices-for-party", g.partyId],
+    queryFn: () => getInvoicesForParty(g.partyId as number),
+    enabled: !!g.partyId,
+    staleTime: 30 * 1000,
+  });
 
-    const selectedOption = billOptions.find(
-      (b) => b.value === group.billNumber || b.id === group.billNumber,
-    );
+  const selectedInvoice = invoiceOptions.find((o) => o.billId === g.billId) ?? null;
+  const isItemMode = isItemModeInvoice(g.sourceType);
+  const itemsTotal = (Array.isArray(formData.items) ? (formData.items as DebitNoteItem[]) : []).reduce((s, it) => s + (parseFloat(it.Amount) || 0), 0);
+  const enteredAmount = isItemMode ? itemsTotal : parseFloat(String(formData.debitAmount ?? "")) || 0;
+  const previousDebit = selectedInvoice
+    ? Math.max(0, selectedInvoice.previousDebitAmount - (g.originalDebitAmount ?? 0))
+    : 0;
+  const invoiceValue = selectedInvoice?.invoiceAmount ?? null;
+  const adjustedValue = invoiceValue != null ? invoiceValue + previousDebit + enteredAmount : null;
 
-    const update = (patch: Partial<BillDiscountGroup>) => {
-      const next = { ...group, ...patch };
-      next.finalAmount = computeFinal(next);
-      onChange(next);
-    };
+  const selectCls = "w-full appearance-none pl-9 pr-8 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground disabled:opacity-50 disabled:cursor-not-allowed";
 
-    const handleBillSelect = (billValue: string) => {
-      if (!billValue) {
-        update({
-          billNumber: "",
-          billAmount: null,
-          discPercent: "",
-          discAmount: "",
-          finalAmount: null,
-        });
-        onOptionSelect?.(null);
-        return;
-      }
-      const opt = billOptions.find(
-        (b) => b.value === billValue || b.id === billValue,
-      );
-      update({
-        billNumber: billValue,
-        billAmount: opt?.amount ?? null,
-        discPercent: "",
-        discAmount: "",
-        finalAmount: opt?.amount ?? null,
-      });
-      onOptionSelect?.(opt ?? null);
-    };
-
-    const hasBill = !!group.billNumber;
-    const discountValue =
-      group.discMode === "percent" && group.discPercent && group.billAmount
-        ? (group.billAmount * parseFloat(group.discPercent)) / 100
-        : group.discMode === "amount" && group.discAmount
-          ? parseFloat(group.discAmount)
-          : 0;
-
-    const hasDiscount =
-      hasBill && discountValue > 0 && group.billAmount !== null;
-
-    return (
-      <div className="space-y-4">
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
+          <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            Party Type <span className="text-destructive">*</span>
+          </label>
           <div className="relative">
-            <Receipt
-              size={13}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-            />
+            <Users size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
             <select
-              value={group.billNumber}
-              onChange={(e) => handleBillSelect(e.target.value)}
-              className={`w-full appearance-none pl-8 pr-8 py-2 rounded-lg text-sm font-body bg-muted border transition-all
-                focus:outline-none focus:ring-2 focus:ring-primary text-foreground
-                ${error && !group.billNumber ? "border-destructive" : "border-border"}`}
+              value={g.partyType}
+              onChange={(e) => onChange({ ...EMPTY_PARTY_INVOICE_GROUP, partyType: e.target.value })}
+              className={`${selectCls} ${error && !g.partyType ? "border-destructive" : ""}`}
             >
-              <option value="">Select expense document…</option>
-
-              {regularOptions.length > 0 && (
-                <optgroup label="── Expense Bookings (unpaid)">
-                  {regularOptions.map((b: any) => (
-                    <option key={b.id} value={b.value || b.id}>
-                      {b.label}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-
-              {emiOptions.length > 0 && (
-                <optgroup label="── EMI Installments (pending)">
-                  {emiOptions.map((b: any) => (
-                    <option key={b.id} value={b.value || b.id}>
-                      {b.label}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-
-              {billOptions.length === 0 && (
-                <option disabled value="">
-                  No unpaid expense bookings found
-                </option>
-              )}
+              <option value="">Select party type…</option>
+              {PARTY_TYPES.map((p) => (
+                <option key={p.code} value={p.code}>{p.label}</option>
+              ))}
             </select>
-            <ChevronDown
-              size={14}
-              className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
+            <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           </div>
-
-          {/* Show selected option details */}
-          {selectedOption && (
-            <p className="text-[11px] text-muted-foreground mt-1 pl-1">
-              {selectedOption.type === "emi"
-                ? `EMI Installment #${selectedOption.installmentNo} · Parent: ${selectedOption.parentDocNo} · Due: ${selectedOption.dueDate ?? "—"}`
-                : `Doc: ${selectedOption.docNo} · Project: ${selectedOption.projectName}`}
-            </p>
-          )}
         </div>
 
-        {hasBill && (
-          <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-4">
-            <div>
-              <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-2">
-                Apply Discount
-              </p>
-              <div className="flex gap-2 mb-3">
-                {(["percent", "amount"] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() =>
-                      update({ discMode: m, discPercent: "", discAmount: "" })
-                    }
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border transition-all ${
-                      group.discMode === m
-                        ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                        : "bg-card text-muted-foreground border-border hover:border-primary/50"
-                    }`}
-                  >
-                    {m === "percent" ? (
-                      <>
-                        <Percent size={11} /> By Percentage
-                      </>
-                    ) : (
-                      <>
-                        <IndianRupee size={11} /> By Amount
-                      </>
-                    )}
-                  </button>
-                ))}
-              </div>
-
-              {group.discMode === "percent" ? (
-                <div className="relative">
-                  <Percent
-                    size={13}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    max="100"
-                    step="0.01"
-                    value={group.discPercent}
-                    onChange={(e) =>
-                      update({
-                        discMode: "percent",
-                        discPercent: e.target.value,
-                        discAmount: "",
-                      })
-                    }
-                    placeholder="Enter discount %"
-                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm font-body bg-card border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground transition-all"
-                  />
-                </div>
-              ) : (
-                <div className="relative">
-                  <IndianRupee
-                    size={13}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={group.discAmount}
-                    onChange={(e) =>
-                      update({
-                        discMode: "amount",
-                        discAmount: e.target.value,
-                        discPercent: "",
-                      })
-                    }
-                    placeholder="Enter discount amount"
-                    className="w-full pl-8 pr-3 py-2 rounded-lg text-sm font-body bg-card border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground transition-all"
-                  />
-                </div>
-              )}
-
-              {hasDiscount && (
-                <div className="flex items-center justify-between mt-2 px-1">
-                  <span className="text-[11px] text-muted-foreground">
-                    Discount applied
-                  </span>
-                  <span className="text-[12px] font-mono text-destructive font-semibold">
-                    − ₹{formatINR(discountValue)}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {group.finalAmount !== null && (
-              <div className="border-t border-border/60 pt-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 size={15} className="text-primary" />
-                    <span className="text-[11px] uppercase tracking-widest font-heading text-primary font-semibold">
-                      Final Amount
-                    </span>
-                  </div>
-                  <span className="text-xl font-heading font-bold flex items-center gap-1 text-primary">
-                    <IndianRupee size={16} />
-                    {formatINR(group.finalAmount)}
-                  </span>
-                </div>
-              </div>
-            )}
+        <div>
+          <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+            Party <span className="text-destructive">*</span>
+          </label>
+          <div className="relative">
+            <Users size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <select
+              value={g.partyId ?? ""}
+              disabled={!g.partyType}
+              onChange={(e) => {
+                const id = e.target.value ? Number(e.target.value) : null;
+                const opt = partyOptions.find((p) => p.id === id);
+                onChange({ ...g, partyId: id, partyLabel: opt?.label ?? "", billId: null, invoiceDocNo: "", sourceType: null, companyId: null, projectId: null });
+                onInvoiceResolved(null);
+              }}
+              className={`${selectCls} ${error && g.partyType && !g.partyId ? "border-destructive" : ""}`}
+            >
+              <option value="">{loadingParties ? "Loading…" : `Select ${PARTY_TYPE_LABEL[g.partyType] ?? "party"}…`}</option>
+              {partyOptions.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
+            <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           </div>
-        )}
+        </div>
       </div>
-    );
-  };
+
+      <div>
+        <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+          Invoice <span className="text-destructive">*</span>
+        </label>
+        <div className="relative">
+          <Receipt size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <select
+            value={g.billId ?? ""}
+            disabled={!g.partyId}
+            onChange={(e) => {
+              const id = e.target.value ? Number(e.target.value) : null;
+              const opt = invoiceOptions.find((o) => o.billId === id) ?? null;
+              onChange({
+                ...g,
+                billId: id,
+                invoiceDocNo: opt?.docNo ?? "",
+                sourceType: opt?.sourceType ?? null,
+                companyId: opt?.companyId ?? null,
+                projectId: opt?.projectId ?? null,
+              });
+              onInvoiceResolved(opt);
+            }}
+            className={`${selectCls} ${error && g.partyId && !g.billId ? "border-destructive" : ""}`}
+          >
+            <option value="">{loadingInvoices ? "Loading…" : "Select invoice…"}</option>
+            {invoiceOptions.map((o) => (
+              <option key={o.billId} value={o.billId}>
+                {o.docNo} — {formatINR(o.invoiceAmount)} ({o.billStatus ?? "—"})
+              </option>
+            ))}
+            {g.partyId && !loadingInvoices && invoiceOptions.length === 0 && (
+              <option disabled value="">No approved invoices found for this party</option>
+            )}
+          </select>
+          <ChevronDown size={14} className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        </div>
+      </div>
+
+      {selectedInvoice && (
+        <div className="rounded-xl border border-border bg-muted/40 p-4 grid grid-cols-3 gap-3">
+          <div>
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">Invoice Value</p>
+            <p className="text-sm font-mono font-semibold text-foreground">{formatINR(invoiceValue)}</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-0.5">Previous Debit</p>
+            <p className="text-sm font-mono font-semibold text-foreground">{formatINR(previousDebit)}</p>
+          </div>
+          <div className="rounded-lg bg-primary/5 -m-1 p-1">
+            <p className="text-[10px] uppercase tracking-widest text-primary/80 mb-0.5 flex items-center gap-1">
+              <IndianRupee size={9} /> Adjusted Value
+            </p>
+            <p className="text-sm font-mono font-bold text-primary">{formatINR(adjustedValue)}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 const DebitNoteMaster: React.FC = () => {
   const rights = usePageRights("debit-note");
   const queryClient = useQueryClient();
-  const { finYears } = useFinYear();
-  const activeFinYear =
-    finYears.find((fy) => fy.status === "Active")?.year || undefined;
-  const [selectedFinYear, setSelectedFinYear] = useState<string | null>(null);
-  const [autoFillPatch, setAutoFillPatch] = useState<Record<
-    string,
-    unknown
-  > | null>(null);
+  const [autoFillPatch, setAutoFillPatch] = useState<Record<string, unknown> | null>(null);
   const [autoFillPatchKey, setAutoFillPatchKey] = useState(0);
 
-  // Only auto-set once on first load, never override user's explicit selection
-  useEffect(() => {
-    if (selectedFinYear === null && activeFinYear) {
-      setSelectedFinYear(activeFinYear);
-    }
-  }, [activeFinYear]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Data Queries
-  const {
-    data: dbData,
-    isLoading,
-    error,
-  } = useQuery({
+  const { data: dbData, isLoading, error } = useQuery({
     queryKey: ["debit-notes"],
     queryFn: getDebitNotes,
     staleTime: 5 * 60 * 1000,
@@ -485,115 +395,47 @@ const DebitNoteMaster: React.FC = () => {
 
   const { data: companyData } = useQuery({
     queryKey: ["enterprises-companies"],
-    queryFn: () =>
-      fetchWithAuth("/api/enterprises/options?business_type=C").then((r) =>
-        r.json().catch(() => ({})),
-      ),
+    queryFn: () => fetchWithAuth("/api/enterprises/options?business_type=C").then((r) => r.json().catch(() => ({}))),
     staleTime: 5 * 60 * 1000,
   });
 
   const { data: projectData } = useQuery({
     queryKey: ["enterprises-projects"],
-    queryFn: () =>
-      fetchWithAuth("/api/enterprises/options?business_type=P").then((r) =>
-        r.json().catch(() => ({})),
-      ),
+    queryFn: () => fetchWithAuth("/api/enterprises/options?business_type=P").then((r) => r.json().catch(() => ({}))),
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: accountHeadData } = useQuery({
-    queryKey: ["supplier-head-options"],
-    queryFn: () =>
-      fetchWithAuth("/api/account-head/options?type=S").then((r) => r.json().catch(() => ({}))),
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const {
-    data: expenseData,
-    refetch: refetchExpenses,
-    error: expenseError,
-  } = useQuery({
-    queryKey: ["expense-booking-options", selectedFinYear ?? ""],
-    queryFn: async () => {
-      const url = selectedFinYear
-        ? `/api/expense-booking/options?finYear=${encodeURIComponent(selectedFinYear)}`
-        : "/api/expense-booking/options";
-      const r = await fetchWithAuth(url);
-      if (!r.ok) {
-        const body = await r.json().catch(() => ({}));
-        throw new Error(
-          body.error || `Failed to load expense options (${r.status})`,
-        );
-      }
-      return r.json().catch(() => ({}));
-    },
-    enabled: selectedFinYear !== null,
-    staleTime: 0,
-    refetchOnMount: true,
-  });
-
-  // Options
-  const COMPANY_OPTIONS: { id: number; label: string }[] = Array.isArray(
-    companyData,
-  )
-    ? companyData
-        .map((o: any) => ({ id: o.id, label: o.label ?? o.name ?? "" }))
-        .filter((o) => o.label)
+  const COMPANY_OPTIONS: { id: number; label: string }[] = Array.isArray(companyData)
+    ? companyData.map((o: any) => ({ id: o.id, label: o.label ?? o.name ?? "" })).filter((o) => o.label)
     : [];
 
-  const PROJECT_OPTIONS: { id: number; label: string; companyId: number | null }[] =
-    Array.isArray(projectData)
-      ? projectData
-          .map((o: any) => ({
-            id: o.id,
-            label: o.label ?? o.name ?? "",
-            companyId: o.company_id != null ? Number(o.company_id) : null,
-          }))
-          .filter((o) => o.label)
-      : [];
-
-  const SUPPLIER_OPTIONS: { id: number; label: string }[] = Array.isArray(
-    accountHeadData,
-  )
-    ? accountHeadData
+  const PROJECT_OPTIONS: { id: number; label: string; companyId: number | null }[] = Array.isArray(projectData)
+    ? projectData.map((o: any) => ({
+        id: o.id,
+        label: o.label ?? o.name ?? "",
+        companyId: o.company_id != null ? Number(o.company_id) : null,
+      })).filter((o) => o.label)
     : [];
 
-  // Normalise each expense option so auto-fill works regardless of whether the
-  // backend returns camelCase (supplierId) or snake_case (supplier_id) fields.
-  const BILL_OPTIONS: any[] = Array.isArray(expenseData)
-    ? expenseData.map((b: any) => ({
-        ...b,
-        supplierId: b.supplierId ?? b.supplier_id ?? null,
-        projectId: b.projectId ?? b.project_id ?? null,
-        companyId: b.companyId ?? b.company_id ?? null,
-      }))
-    : [];
-
-  // Lookup Function
-  const billIdByValue = (selectedValue: string) =>
-    BILL_OPTIONS.find(
-      (b: any) => b.value === selectedValue || String(b.id) === selectedValue,
-    )?.id ?? null;
-
-  // Map DB data to UI
+  // Map DB rows to UI form state
   const mappedData: RecordWithId[] = Array.isArray(dbData)
     ? dbData.map((item: any) => ({
         _id: String(item.id),
+        docNo: item.DocNo ?? "",
         company: labelById(COMPANY_OPTIONS, item.company_id),
         project: labelById(PROJECT_OPTIONS, item.project_id),
-        supplier: labelById(SUPPLIER_OPTIONS, item.supplier_id),
-        billDiscountGroup: {
-          billNumber: (() => {
-            const found = BILL_OPTIONS.find((b: any) => b.id === item.bill_id);
-            return found ? (found.value ?? String(found.id)) : "";
-          })(),
-          billAmount: null,
-          discMode: "percent",
-          discPercent: "",
-          discAmount: "",
-          finalAmount: null,
-        } as BillDiscountGroup,
-        status: Boolean(item.is_active),
+        partyInvoiceGroup: {
+          partyType: item.party_type ?? "",
+          partyId: item.party_id ?? null,
+          partyLabel: item.party_name ?? "",
+          billId: item.bill_id ?? null,
+          invoiceDocNo: item.invoice_doc_no ?? "",
+          sourceType: item.invoice_source_type ?? null,
+          companyId: item.company_id ?? null,
+          projectId: item.project_id ?? null,
+          originalDebitAmount: item.TotalAmount != null ? Number(item.TotalAmount) : 0,
+        } as PartyInvoiceGroup,
+        debitAmount: item.TotalAmount != null ? Number(item.TotalAmount) : null,
         items: Array.isArray(item.items)
           ? item.items.map((i: any) => ({
               Description: i.Description || "",
@@ -603,50 +445,56 @@ const DebitNoteMaster: React.FC = () => {
               Amount: String(i.Amount ?? ""),
             }))
           : [],
-        docTypeId: item.doc_type_id ?? null,
-        docNo: item.doc_no ?? "",
-        docTypePrefix: item.doc_type_prefix ?? "",
-        createdBy: (() => {
-          const name = item.created_by_name ?? null;
-          const role = item.created_by_role ?? null;
-          if (!name) return null;
-          return role ? `${name} (${role})` : name;
-        })(),
-        updatedBy: item.updated_by_name ?? item.updated_by ?? null,
+        debitDate: item.DebitDate ? String(item.DebitDate).slice(0, 10) : "",
+        reason: item.Reason ?? "",
+        status: Boolean(item.is_active),
+        // Approval workflow state (Draft/Pending/Approved/Rejected/Cancelled)
+        // — separate from `status`/is_active, which only tracks whether the
+        // record has been soft-cancelled. Drives both the grid badge and
+        // <ApprovalActions> below.
+        approvalStatus: item.Status ?? "Draft",
+        createdBy: item.created_by_name ?? null,
         createdAt: item.created_at ?? null,
       }))
     : [];
 
-  // Convert form to payload
   const toPayload = (formData: Record<string, unknown>) => {
-    const g = formData.billDiscountGroup as BillDiscountGroup | undefined;
-    const rawItems = formData.items as DebitNoteItem[] | undefined;
-    const items = (rawItems ?? []).filter((it) => it.Description.trim());
+    const g = formData.partyInvoiceGroup as PartyInvoiceGroup | undefined;
+    const isItemMode = isItemModeInvoice(g?.sourceType);
+    const rawItems = Array.isArray(formData.items) ? (formData.items as DebitNoteItem[]) : [];
     return {
       company_id: idByLabel(COMPANY_OPTIONS, formData.company as string),
       project_id: idByLabel(PROJECT_OPTIONS, formData.project as string),
-      supplier_id: idByLabel(SUPPLIER_OPTIONS, formData.supplier as string),
-      bill_id: g?.billNumber ? billIdByValue(g.billNumber) : null,
-      is_active: formData.status !== false,
-      finYear: selectedFinYear || null,
-      items,
+      party_id: g?.partyId ?? null,
+      party_type: g?.partyType ?? null,
+      bill_id: g?.billId ?? null,
+      DebitDate: formData.debitDate as string,
+      Reason: formData.reason as string,
+      DebitAmount: isItemMode ? undefined : (parseFloat(String(formData.debitAmount ?? "")) || 0),
+      items: isItemMode ? rawItems.filter((it) => it.Description.trim()) : [],
     };
   };
 
   const handleCustomSave = (formData: Record<string, unknown>) => {
-    const g = formData.billDiscountGroup as BillDiscountGroup | undefined;
-    if (!g?.billNumber) return null;
+    const g = formData.partyInvoiceGroup as PartyInvoiceGroup | undefined;
+    if (!g?.partyType || !g?.partyId || !g?.billId) return null;
+    if (isItemModeInvoice(g.sourceType)) {
+      const items = Array.isArray(formData.items) ? (formData.items as DebitNoteItem[]) : [];
+      const valid = items.filter((it) => it.Description.trim() && Number.isFinite(parseFloat(it.Amount)) && parseFloat(it.Amount) >= 0);
+      if (!valid.length) return null;
+    } else {
+      const amt = parseFloat(String(formData.debitAmount ?? ""));
+      if (!Number.isFinite(amt) || amt <= 0) return null;
+    }
     return { ...formData, status: formData.status ?? true };
   };
 
-  // Handle Add/Update/Delete
   const handleDataEvent = async (event: any) => {
     if (event.action === "add") {
       try {
         await addDebitNote(toPayload(event.record));
         await queryClient.invalidateQueries({ queryKey: ["debit-notes"] });
         toast.success("Debit note saved!");
-        await refetchExpenses();
       } catch (err: any) {
         toast.error("Save failed: " + err.message);
         throw err;
@@ -656,7 +504,6 @@ const DebitNoteMaster: React.FC = () => {
       try {
         await updateDebitNote(Number(event.id), toPayload(event.record));
         toast.success("Debit note updated!");
-        await refetchExpenses();
         await queryClient.invalidateQueries({ queryKey: ["debit-notes"] });
       } catch (err: any) {
         toast.error("Update failed: " + err.message);
@@ -666,90 +513,38 @@ const DebitNoteMaster: React.FC = () => {
     if (event.action === "delete") {
       try {
         await deleteDebitNote(Number(event.id));
-        toast.success("Debit note deleted!");
+        toast.success("Debit note cancelled!");
         await queryClient.invalidateQueries({ queryKey: ["debit-notes"] });
       } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
+        toast.error("Cancel failed: " + err.message);
         throw err;
       }
     }
     return undefined;
   };
 
-  const handleBillOptionSelect = (opt: any) => {
+  // When an invoice resolves, auto-fill Company/Project from it — same
+  // externalFormPatch mechanism the old bill picker used.
+  const handleInvoiceResolved = (opt: DebitNoteInvoiceOption | null) => {
     if (!opt) {
-      setAutoFillPatch({ company: "", project: "", supplier: "" });
+      setAutoFillPatch({ company: "", project: "" });
       setAutoFillPatchKey((k) => k + 1);
       return;
     }
-
     const patch: Record<string, unknown> = {};
-
-    if (opt.companyId != null) {
-      const matched = COMPANY_OPTIONS.find(
-        (c) => c.id === Number(opt.companyId),
-      );
-      patch.company = matched ? matched.label : "";
-    }
-
-    if (opt.projectId != null) {
-      const matched = PROJECT_OPTIONS.find(
-        (p) => p.id === Number(opt.projectId),
-      );
-      patch.project = matched ? matched.label : "";
-    } else if (opt.projectName) {
-      const matched = PROJECT_OPTIONS.find(
-        (p) =>
-          p.label.toLowerCase() === (opt.projectName as string).toLowerCase(),
-      );
-      patch.project = matched ? matched.label : "";
-    } else {
-      patch.project = "";
-    }
-
-    if (opt.supplierId != null) {
-      const matched = SUPPLIER_OPTIONS.find(
-        (s) => s.id === Number(opt.supplierId),
-      );
-      patch.supplier = matched ? matched.label : "";
-    } else {
-      patch.supplier = "";
-    }
-
+    const matchedCompany = opt.companyId != null ? COMPANY_OPTIONS.find((c) => c.id === opt.companyId) : null;
+    patch.company = matchedCompany ? matchedCompany.label : "";
+    const matchedProject = opt.projectId != null ? PROJECT_OPTIONS.find((p) => p.id === opt.projectId) : null;
+    patch.project = matchedProject ? matchedProject.label : "";
     setAutoFillPatch(patch);
     setAutoFillPatchKey((k) => k + 1);
   };
 
-  const BillDiscountRenderer = makeBillRenderer(
-    BILL_OPTIONS,
-    handleBillOptionSelect,
-  );
-
   const fields: FieldDef[] = [
     {
-      name: "referenceSection",
-      label: "Reference",
-      type: "section",
-    },
-    {
-      name: "billDiscountGroup",
-      label: "Expense Booking / Bill",
-      type: "custom",
-      required: true,
-      fullWidth: true,
-      render: BillDiscountRenderer as FieldDef["render"],
-    },
-    {
       name: "partiesSection",
-      label: "Company, Project & Supplier",
+      label: "Company & Project",
       type: "section",
-    },
-    {
-      name: "supplier",
-      label: "Supplier",
-      type: "select",
-      required: true,
-      options: SUPPLIER_OPTIONS.map((o) => o.label),
     },
     {
       name: "company",
@@ -763,47 +558,102 @@ const DebitNoteMaster: React.FC = () => {
       label: "Project",
       type: "select",
       required: true,
-      // Scoped to the selected Company — a project belongs to exactly one
-      // company, so showing every project regardless of company invited
-      // mismatched selections. Projects with no company_id (data gaps)
-      // stay visible so nothing silently disappears.
       optionsProvider: (_data, _currentId, form) => {
-        const companyOpt = COMPANY_OPTIONS.find(
-          (c) => c.label === (form?.company as string),
-        );
+        const companyOpt = COMPANY_OPTIONS.find((c) => c.label === (form?.company as string));
         const list = companyOpt
-          ? PROJECT_OPTIONS.filter(
-              (p) => p.companyId == null || p.companyId === companyOpt.id,
-            )
+          ? PROJECT_OPTIONS.filter((p) => p.companyId == null || p.companyId === companyOpt.id)
           : PROJECT_OPTIONS;
         return list.map((p) => ({ value: p.label, label: p.label }));
       },
     },
     {
-      name: "itemsSection",
-      label: "Line Items",
+      name: "referenceSection",
+      label: "Reference",
       type: "section",
     },
     {
+      name: "debitDate",
+      label: "Date",
+      type: "date",
+      required: true,
+      defaultValue: new Date().toISOString().slice(0, 10),
+    },
+    {
+      name: "partyInvoiceGroup",
+      label: "Party & Invoice",
+      type: "custom",
+      required: true,
+      fullWidth: true,
+      render: (({ value, onChange, error, formData }) => (
+        <PartyInvoiceRenderer
+          value={value}
+          onChange={onChange}
+          error={error}
+          formData={formData}
+          onInvoiceResolved={handleInvoiceResolved}
+        />
+      )) as FieldDef["render"],
+    },
+    {
+      // Amount mode only (direct/TOD invoice) — for a GRN/PO/WO-sourced
+      // invoice the total instead comes from the "items" field below, so
+      // this renders nothing and toPayload ignores it.
+      name: "debitAmount",
+      label: "Debit Note Amount",
+      type: "custom",
+      required: true,
+      render: (({ value, onChange, error, formData }) => {
+        const g = formData.partyInvoiceGroup as PartyInvoiceGroup | undefined;
+        if (isItemModeInvoice(g?.sourceType)) return null;
+        return (
+          <input
+            type="number"
+            value={value != null ? (value as string | number) : ""}
+            onChange={(e) => onChange(e.target.value)}
+            className={`w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${error ? "border-destructive" : "border-border"}`}
+          />
+        );
+      }) as FieldDef["render"],
+    },
+    {
+      // Item mode only (Material Request -> PO -> GRN, or Work Order -> PO
+      // invoice) — the pre-rewrite line-item picker, restored side-by-side
+      // with the amount adjuster above rather than replacing it.
       name: "items",
-      label: "",
+      label: "Items",
       type: "custom",
       fullWidth: true,
-      render: ({ value, onChange }: any) => (
-        <ItemsRenderer value={value as DebitNoteItem[]} onChange={onChange} />
-      ),
+      render: (({ value, onChange, formData }) => {
+        const g = formData.partyInvoiceGroup as PartyInvoiceGroup | undefined;
+        if (!isItemModeInvoice(g?.sourceType)) return null;
+        return <ItemsRenderer value={Array.isArray(value) ? (value as DebitNoteItem[]) : []} onChange={onChange} />;
+      }) as FieldDef["render"],
+    },
+    {
+      name: "reason",
+      label: "Remarks",
+      type: "textarea",
     },
   ];
 
   const columns: ColumnDef[] = [
-    { key: "supplier", label: "Supplier" },
+    { key: "docNo", label: "Doc No" },
+    { key: "partyInvoiceGroup", label: "Party" },
+    { key: "invoiceDisplay", label: "Invoice", hideOnMobile: true },
+    { key: "debitAmount", label: "Debit Amount" },
     { key: "company", label: "Company", hideOnMobile: true },
     { key: "project", label: "Project", hideOnMobile: true },
-    { key: "billDiscountGroup", label: "Bill / Doc", hideOnMobile: true },
-    { key: "discountDisplay", label: "Discount", hideOnMobile: true },
     { key: "createdBy", label: "Created By", hideOnMobile: true },
-    { key: "status", label: "Status" },
+    { key: "approvalStatus", label: "Status" },
   ];
+
+  const APPROVAL_STATUS_BADGE: Record<string, string> = {
+    Draft: "bg-muted text-muted-foreground border-border",
+    Pending: "bg-amber-500/10 border-amber-500/20 text-amber-600",
+    Approved: "bg-green-500/10 border-green-500/20 text-green-600",
+    Rejected: "bg-red-500/10 border-red-500/20 text-red-600",
+    Cancelled: "bg-muted text-muted-foreground border-border line-through",
+  };
 
   const columnRenderers: Record<string, any> = {
     docNo: (value: unknown) =>
@@ -812,63 +662,40 @@ const DebitNoteMaster: React.FC = () => {
       ) : (
         <span className="text-muted-foreground text-xs">—</span>
       ),
-    billDiscountGroup: billDiscountColumnRenderer,
-    createdBy: (value: unknown) =>
-      value ? (
-        <span className="text-xs text-foreground font-body">
-          {String(value)}
-        </span>
+    partyInvoiceGroup: (value: unknown) => {
+      const g = value as PartyInvoiceGroup | undefined;
+      if (!g?.partyLabel) return <span className="text-muted-foreground text-xs">—</span>;
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs font-medium text-foreground">{g.partyLabel}</span>
+          <span className="text-[10px] text-muted-foreground">{PARTY_TYPE_LABEL[g.partyType] ?? g.partyType}</span>
+        </div>
+      );
+    },
+    invoiceDisplay: (_value: unknown, row: RecordWithId) => {
+      const g = row.partyInvoiceGroup as PartyInvoiceGroup | undefined;
+      return g?.invoiceDocNo ? (
+        <span className="text-xs font-mono text-foreground">{g.invoiceDocNo}</span>
       ) : (
         <span className="text-muted-foreground text-xs">—</span>
-      ),
-    discountDisplay: (_value: unknown, row: RecordWithId) =>
-      discountSummaryRenderer(row.billDiscountGroup),
-    status: (value: boolean) => (
-      <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
-          value
-            ? "bg-green-500/10 border-green-500/20 text-green-600"
-            : "bg-red-500/10 border-red-500/20 text-red-600"
-        }`}
-      >
-        {value ? "Active" : "Inactive"}
-      </span>
+      );
+    },
+    debitAmount: (value: unknown) => (
+      <span className="text-xs font-mono font-semibold text-foreground">{formatINR(value as number)}</span>
     ),
+    createdBy: (value: unknown) =>
+      value ? <span className="text-xs text-foreground font-body">{String(value)}</span> : <span className="text-muted-foreground text-xs">—</span>,
+    approvalStatus: (value: unknown, row: RecordWithId) => {
+      const status = row.status === false ? "Cancelled" : String(value ?? "Draft");
+      return (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${APPROVAL_STATUS_BADGE[status] ?? APPROVAL_STATUS_BADGE.Draft}`}>
+          {status}
+        </span>
+      );
+    },
   };
 
-  function billDiscountColumnRenderer(value: unknown) {
-    const g = value as BillDiscountGroup | undefined;
-    if (!g?.billNumber)
-      return <span className="text-muted-foreground text-xs">—</span>;
-    const opt = BILL_OPTIONS.find(
-      (b: any) => b.value === g.billNumber || String(b.id) === g.billNumber,
-    );
-    const displayLabel = opt?.label ?? g.billNumber;
-    return (
-      <div className="flex flex-col gap-0.5">
-        <span className="text-xs font-mono text-foreground">
-          {displayLabel}
-        </span>
-        {opt?.projectName && (
-          <span className="text-[10px] text-muted-foreground">
-            {opt.projectName}
-          </span>
-        )}
-      </div>
-    );
-  }
-
-  function discountSummaryRenderer(value: unknown) {
-    const g = value as BillDiscountGroup | undefined;
-    if (!g?.billNumber)
-      return <span className="text-muted-foreground text-xs">—</span>;
-    return (
-      <span className="text-xs text-muted-foreground">Discount Applied</span>
-    );
-  }
-
-  if (isLoading)
-    return <div className="p-6 text-muted-foreground">Loading...</div>;
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>;
   if (error)
     return (
       <div className="p-6 text-red-500">
@@ -878,83 +705,29 @@ const DebitNoteMaster: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs
-        items={["Dashboard", "Finance Module", "Debit Note Master"]}
-      />
-      <MaterialShell
-        title="Debit Note Master"
-        subtitle="Manage debit notes against expense bookings"
-        icon={FileWarning}
-      >
-      {expenseError && (
-        <div className="px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm">
-          ⚠️ Could not load expense documents: {(expenseError as Error).message}
-          . Bill dropdown will be empty.
-        </div>
-      )}
-      <div className="rounded-xl bg-card border border-border p-4">
-        <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
-          Financial Year
-        </label>
-        <div className="relative">
-          <select
-            value={selectedFinYear ?? ""}
-            onChange={(e) => setSelectedFinYear(e.target.value || "")}
-            className="w-full appearance-none rounded-lg border border-border bg-muted px-3 py-2 pr-8 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-          >
-            <option value="">— All Years —</option>
-            {finYears
-              .filter((fy) => fy.status === "Active" && !fy.locked)
-              .sort((a, b) => b.year.localeCompare(a.year))
-              .map((fy) => (
-              <option key={fy.id} value={fy.year}>
-                {fy.year}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            size={14}
-            className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-          />
-        </div>
-        {selectedFinYear ? (
-          <p className="text-[11px] text-muted-foreground mt-1.5">
-            Showing unpaid expense bookings for{" "}
-            <span className="font-semibold text-foreground">
-              {selectedFinYear}
-            </span>
-          </p>
-        ) : (
-          <p className="text-[11px] text-muted-foreground mt-1.5">
-            Showing unpaid expense bookings across{" "}
-            <span className="font-semibold text-foreground">all years</span>
-          </p>
-        )}
-      </div>
+      <Breadcrumbs items={["Dashboard", "Finance Module", "Debit Note"]} />
+      <MaterialShell title="Debit Note" subtitle="Value adjustments against Supplier, Contractor, Customer & Broker invoices" icon={FileWarning}>
       <MasterPage
         title="Debit Note"
-        gridCols={3}
+        gridCols={2}
         fields={fields}
         columns={columns}
         columnRenderers={columnRenderers}
         initialData={mappedData}
+        rowActions={(row) => (
+          <ApprovalActions
+            status={row.status === false ? null : (row.approvalStatus as string)}
+            recordId={row._id}
+            endpoint="/api/debit-note"
+            onSuccess={() => queryClient.invalidateQueries({ queryKey: ["debit-notes"] })}
+          />
+        )}
         onCustomSave={handleCustomSave}
         onFieldChange={(form, fieldName) => {
-          // Switching Company invalidates a previously-selected Project
-          // that belongs to a different company.
           if (fieldName === "company") {
-            const companyOpt = COMPANY_OPTIONS.find(
-              (c) => c.label === (form.company as string),
-            );
-            const projectOpt = PROJECT_OPTIONS.find(
-              (p) => p.label === (form.project as string),
-            );
-            if (
-              companyOpt &&
-              projectOpt &&
-              projectOpt.companyId != null &&
-              projectOpt.companyId !== companyOpt.id
-            ) {
+            const companyOpt = COMPANY_OPTIONS.find((c) => c.label === (form.company as string));
+            const projectOpt = PROJECT_OPTIONS.find((p) => p.label === (form.project as string));
+            if (companyOpt && projectOpt && projectOpt.companyId != null && projectOpt.companyId !== companyOpt.id) {
               return { ...form, project: "" };
             }
           }
@@ -964,46 +737,47 @@ const DebitNoteMaster: React.FC = () => {
         externalFormPatch={autoFillPatch}
         externalFormPatchKey={autoFillPatchKey}
         exportConfig={rights.canExport ? {
-          title: "Debit Note Master",
-          filename: "debit-note-master",
+          title: "Debit Note",
+          filename: "debit-note",
           columns: [
+            { header: "Doc No", accessor: "docNo" },
             { header: "Company", accessor: "company" },
             { header: "Project", accessor: "project" },
-            { header: "Supplier", accessor: "supplier" },
-            { header: "Bill/Doc", accessor: "billDiscountGroup" },
-            { header: "Discount", accessor: "discountDisplay" },
+            { header: "Debit Amount", accessor: "debitAmount" },
             { header: "Created By", accessor: "createdBy" },
-            { header: "Status", accessor: "status" },
+            { header: "Status", accessor: "approvalStatus" },
           ],
         } : undefined}
         viewConfig={{
           title: "Debit Note Details",
           fields: [
+            { key: "docNo", label: "Doc No" },
             { key: "company", label: "Company" },
             { key: "project", label: "Project" },
-            { key: "supplier", label: "Supplier" },
-            { key: "billDiscountGroup", label: "Bill / Doc" },
-            { key: "discountDisplay", label: "Discount" },
+            { key: "debitAmount", label: "Debit Amount" },
+            { key: "reason", label: "Remarks" },
             { key: "createdBy", label: "Created By" },
-            { key: "status", label: "Status" },
+            { key: "approvalStatus", label: "Status" },
           ],
         }}
         onPrint={(row) => {
           const win = window.open("", "_blank", "width=700,height=550");
           if (!win) return;
+          const g = row.partyInvoiceGroup as PartyInvoiceGroup | undefined;
           win.document.write(safeHtml`
             <html><head><title>Debit Note</title>
             <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
             </head><body>
-            <h2>Debit Note</h2>
+            <h2>Debit Note ${row.docNo || ""}</h2>
             <table>
+              <tr><td>Party Type</td><td>${g ? (PARTY_TYPE_LABEL[g.partyType] ?? g.partyType) : "—"}</td></tr>
+              <tr><td>Party</td><td>${g?.partyLabel || "—"}</td></tr>
+              <tr><td>Invoice</td><td>${g?.invoiceDocNo || "—"}</td></tr>
               <tr><td>Company</td><td>${row.company || "—"}</td></tr>
               <tr><td>Project</td><td>${row.project || "—"}</td></tr>
-              <tr><td>Supplier</td><td>${row.supplier || "—"}</td></tr>
-              <tr><td>Bill / Doc</td><td>${row.billDiscountGroup || "—"}</td></tr>
-              <tr><td>Discount</td><td>${row.discountDisplay || "—"}</td></tr>
-              <tr><td>Created By</td><td>${row.createdBy || "—"}</td></tr>
-              <tr><td>Status</td><td>${row.status ? "Active" : "Inactive"}</td></tr>
+              <tr><td>Debit Amount</td><td>${formatINR(row.debitAmount as number)}</td></tr>
+              <tr><td>Remarks</td><td>${row.reason || "—"}</td></tr>
+              <tr><td>Status</td><td>${row.status === false ? "Cancelled" : String(row.approvalStatus ?? "Draft")}</td></tr>
             </table>
             </body></html>
           `);

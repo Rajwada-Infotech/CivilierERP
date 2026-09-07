@@ -29,6 +29,40 @@ const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier")
 const { buildDirectExpenseBooking } = require("../services/directExpenseBooking");
 const { computeMultiGRNInvoice } = require("../services/invoiceLinking");
 const { syncBillStatus } = require("../utils/syncBillStatus");
+const { downstreamOfExpenseBooking } = require("../utils/materialChainGuard");
+
+// Defends against a corrupted EEmiData blob perpetuating itself. A legit EMI
+// config's own keys are always named fields (enabled, installmentCount, ...)
+// — never a numeric string like "0". A "0" key means this JSON was, at some
+// point, produced by spreading a STRING instead of an object (JS spreads a
+// string into {"0":"c","1":"h",...}), which then got parsed-merged-and-saved
+// right back through one of this route's own read-modify-write paths
+// (EMI-pay, EMI-toggle), re-corrupting it every cycle. Every JSON.parse of a
+// stored EEmiData value in this file goes through here so a corrupted blob
+// gets its real fields recovered (they're usually still sitting after the
+// garbage keys, since the write paths only ever add/overwrite named fields)
+// and the garbage keys dropped, instead of being merged forward again.
+function sanitizeEmiJson(raw) {
+  if (!raw) return null;
+  let parsed;
+  try {
+    parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return null;
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+  if (Object.prototype.hasOwnProperty.call(parsed, "0")) {
+    const { enabled, installmentCount, emiAmount, startDate, schedule } = parsed;
+    return {
+      enabled: !!enabled,
+      installmentCount: installmentCount || 0,
+      emiAmount: emiAmount || 0,
+      startDate: startDate || "",
+      schedule: Array.isArray(schedule) ? schedule : [],
+    };
+  }
+  return parsed;
+}
 
 // Base/GST for a single GRN's item lines.
 async function computeSingleGrnBaseTax(pool, grnId) {
@@ -90,6 +124,97 @@ async function computeGrnBaseTax(pool, grnIds) {
     totalAmount: Math.round((baseAmount+taxAmount)*100)/100,
     perGrn,
   };
+}
+
+// Cost-centre-wise base/GST breakdown for a SINGLE GRN's item lines —
+// mirrors computeSingleGrnBaseTax's per-item math but groups by each item's
+// own Cost Centre (migration 365) instead of summing into one flat total.
+// Used both by the multi-GRN summary breakdown below and by post-to-gl to
+// split each GRN's PGRN-reversal/GST-Credit legs per cost centre.
+async function computeSingleGrnCostCentreBuckets(pool, grnId) {
+  const grnRes = await pool.request().input("GRNID", sql.Int, grnId)
+    .query(`SELECT GRNItems, POID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`);
+  const row = grnRes.recordset[0];
+  if (!row) return [];
+  const rawItems = JSON.parse(row.GRNItems || "[]");
+  const received = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
+  if (!received.length) return [];
+
+  const itemIds = received.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
+  let masterMap = {}, ccMap = {};
+  if (itemIds.length) {
+    const mReq = pool.request();
+    const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
+    const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
+    for (const r of mRes.recordset) masterMap[r.M_Id]={cgstRate:parseFloat(r.M_CGST)||0,sgstRate:parseFloat(r.M_SGST)||0};
+
+    if (row.POID) {
+      const ccReq = pool.request().input("POID", sql.Int, row.POID);
+      const ph2 = itemIds.map((id,i)=>{ ccReq.input(`ccid${i}`,sql.NVarChar(100),id); return `@ccid${i}`; }).join(",");
+      const ccRes = await ccReq.query(`
+        SELECT CONVERT(NVARCHAR(100), poi.ItemId) AS ItemId, poi.CostCenterId, cc.Name AS CostCenterName, cc.Code AS CostCenterCode
+        FROM dbo.PurchaseOrderItems poi
+        LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = poi.CostCenterId
+        WHERE poi.PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), poi.ItemId) IN (${ph2})
+      `);
+      for (const r of ccRes.recordset) {
+        ccMap[r.ItemId] = r.CostCenterId ? { id: r.CostCenterId, name: r.CostCenterName, code: r.CostCenterCode } : null;
+      }
+    }
+  }
+
+  const buckets = new Map();
+  for (const it of received) {
+    const itemId = String(it.itemId||it.ItemId||"");
+    const qty = Number(it.receivedQty||it.ReceivedQty||0);
+    const rate = Number(it.rate||it.Rate||0);
+    const base = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||qty||0);
+    const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
+    const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
+    const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+    const gst = base*(totalGSTRate/100);
+
+    const costCentre = ccMap[itemId] ?? null;
+    const key = costCentre?.id ?? "unassigned";
+    const bucket = buckets.get(key) ?? { costCentre, base: 0, gst: 0 };
+    bucket.base += base;
+    bucket.gst += gst;
+    buckets.set(key, bucket);
+  }
+  return [...buckets.values()].map((b) => ({
+    costCentre: b.costCentre,
+    baseAmount: Math.round(b.base * 100) / 100,
+    gstAmount: Math.round(b.gst * 100) / 100,
+  }));
+}
+
+// Cost-centre-wise base/GST breakdown across every GRN feeding an invoice —
+// mirrors computeSingleGrnBaseTax's per-item math but groups by each item's
+// own Cost Centre (migration 365: lives on the PO's line item, not the PO
+// header, since one PO/GRN can mix e.g. a fixed-asset item with a
+// consumption item) instead of summing into one flat total. Used so a
+// GRN-linked invoice's Posting tab can show the same cost-centre-wise money
+// breakdown as the GRN it was raised from.
+async function computeGrnCostCentreBreakdown(pool, grnIds) {
+  const buckets = new Map(); // key: CostCenterId ?? "unassigned" -> { costCentre, base, gst }
+  for (const grnId of grnIds) {
+    const grnBuckets = await computeSingleGrnCostCentreBuckets(pool, grnId);
+    for (const b of grnBuckets) {
+      const key = b.costCentre?.id ?? "unassigned";
+      const bucket = buckets.get(key) ?? { costCentre: b.costCentre, base: 0, gst: 0 };
+      bucket.base += b.baseAmount;
+      bucket.gst += b.gstAmount;
+      buckets.set(key, bucket);
+    }
+  }
+  return [...buckets.values()]
+    .filter((b) => Math.round(b.base * 100) / 100 > 0)
+    .map((b) => ({
+      costCentre: b.costCentre,
+      baseAmount: Math.round(b.base * 100) / 100,
+      gstAmount: Math.round(b.gst * 100) / 100,
+      totalAmount: Math.round((b.base + b.gst) * 100) / 100,
+    }));
 }
 
 // Resolves every GRN id feeding an invoice — the primary eb.ESourceId, plus
@@ -958,7 +1083,11 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           AND (@DateFrom IS NULL OR eb.EDocDate >= @DateFrom)
           AND (@DateTo IS NULL OR eb.EDocDate <= @DateTo)
           AND (@CompanyId IS NULL OR eb.ECompanyId = @CompanyId)
-          AND (@ProjectName IS NULL OR eb.EProjectName = @ProjectName)
+          -- EProjectName is a misnomer — it stores the enterprise ID as text,
+          -- not the name (see ExpenseBooking/helpers.ts). The frontend filter
+          -- sends the project's actual name, so this has to match against the
+          -- already-joined ep.name, not the raw id column.
+          AND (@ProjectName IS NULL OR ep.name = @ProjectName)
           AND (@DocNo IS NULL OR eb.EDocNo LIKE @DocNo)
           AND (@SupplierId IS NULL OR (${ebSupplierList.idExpr}) = @SupplierId)
         ORDER BY eb.Eid DESC
@@ -977,8 +1106,20 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
       totalBookedAmount += parseFloat(row.totalAmount) || 0;
     }
 
+    // Direct/DINV bookings record their Expense Head(s) via the multi-head
+    // ExpenseHeadAllocation table (migration 303), not the legacy single
+    // EGLAccountId column — this list route never attached that data before,
+    // so every row's "Expense Head" always came back empty even for bookings
+    // that do have one. Batch-fetched (one query for the whole page) rather
+    // than per-row to avoid an N+1.
+    const allocMap = await getAllocationsForMany(pool, sql, "ExpenseBooking", rows.map((r) => r.Eid));
+    const rowsWithExpenseHead = rows.map((r) => ({
+      ...r,
+      EExpenseHeadNames: (allocMap.get(r.Eid) || []).map((a) => a.lHeadName).join(", ") || null,
+    }));
+
     res.json({
-      data: rows.map(({ _total, ...r }) => r),
+      data: rowsWithExpenseHead.map(({ _total, ...r }) => r),
       page,
       limit,
       total,
@@ -2670,14 +2811,8 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
     }
 
     if (EEmiPayment && EEmiData && newExpenseId) {
-      let schedule = [];
-      try {
-        const parsed =
-          typeof EEmiData === "string" ? JSON.parse(EEmiData) : EEmiData;
-        schedule = parsed?.schedule ?? [];
-      } catch (e) {
-        console.warn("Failed to parse EMI data");
-      }
+      const parsed = sanitizeEmiJson(EEmiData);
+      const schedule = parsed?.schedule ?? [];
 
       for (const row of schedule) {
         try {
@@ -2811,10 +2946,7 @@ router.put(
         .input("Eid", sql.Int, id)
         .query("SELECT EEmiData FROM dbo.ExpenseBooking WHERE Eid = @Eid");
 
-      let emiData = {};
-      try {
-        emiData = JSON.parse(existing.recordset[0]?.EEmiData || "{}");
-      } catch {}
+      const emiData = sanitizeEmiJson(existing.recordset[0]?.EEmiData) || {};
 
       emiData.schedule = schedule;
 
@@ -2887,10 +3019,7 @@ router.put(
           FROM dbo.ExpenseBooking WHERE Eid = @Eid
         `);
         const parentRow = existingRes.recordset[0] || {};
-        let emiData = {};
-        try {
-          emiData = JSON.parse(parentRow.EEmiData || "{}");
-        } catch {}
+        const emiData = sanitizeEmiJson(parentRow.EEmiData) || {};
         emiData.enabled = false;
         if (deleteUnpaid && Array.isArray(emiData.schedule)) {
           emiData.schedule = emiData.schedule.filter(
@@ -3122,13 +3251,24 @@ router.put(
     let wasApproved = false;
     let beforeSnapshot = null;
     try {
+      // A Pending record is freely editable — it hasn't been approved yet,
+      // so there's nothing for an edit to conflict with. Only an Approved
+      // record's edits need to be tracked, which is what the amendment log
+      // below is for; Pending never reaches that path.
       const currentStatus = await getRecordStatus("expense-booking", numericId);
-      if (currentStatus === "Pending") {
-        return res.status(400).json({ error: "Cannot edit a record that is pending approval. Reject it first." });
-      }
       wasApproved = currentStatus === "Approved";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.ExpenseBooking", "Eid", numericId);
+      }
+
+      // Chain guard: a Payment already recorded against this invoice must
+      // be deleted first — editing amounts after payment would silently
+      // drift the invoice out of sync with what was already paid.
+      const blockedBy = await downstreamOfExpenseBooking(getPool(), numericId);
+      if (blockedBy) {
+        return res.status(409).json({
+          error: `Cannot edit: this expense booking has ${blockedBy}. Delete them first, then edit the invoice.`,
+        });
       }
     } catch (err) {
       return res.status(400).json({ error: err.message });
@@ -3424,14 +3564,8 @@ router.put(
       // If EMI is being enabled and a schedule is provided, sync EmiInstallments.
       // Only insert rows that don't already exist (idempotent — safe to call on re-save).
       if (EEmiPayment && EEmiData) {
-        let schedule = [];
-        try {
-          const parsed =
-            typeof EEmiData === "string" ? JSON.parse(EEmiData) : EEmiData;
-          schedule = parsed?.schedule ?? [];
-        } catch (e) {
-          console.warn("Failed to parse EMI data on update");
-        }
+        const parsed = sanitizeEmiJson(EEmiData);
+        const schedule = parsed?.schedule ?? [];
 
         for (const row of schedule) {
           try {
@@ -3472,11 +3606,24 @@ router.put(
       if (wasApproved && beforeSnapshot) {
         try {
           const afterSnapshot = await snapshotRow(pool, "dbo.ExpenseBooking", "Eid", numericId);
+          // EProjectName is a misnomer — it actually stores the enterprise
+          // ID as text (see ExpenseBooking/helpers.ts), resolved to a real
+          // name via a JOIN everywhere else this booking is displayed. The
+          // Amendment log's "Project" field needs the same resolution,
+          // otherwise it shows the raw id (e.g. "1023") instead of the
+          // project's actual name.
+          const rawProjectId = afterSnapshot?.EProjectName || beforeSnapshot.EProjectName;
+          let projectName = rawProjectId;
+          if (rawProjectId) {
+            const projRes = await pool.request().input("pid", sql.NVarChar(50), rawProjectId)
+              .query("SELECT name FROM dbo.enterprise WHERE id = TRY_CAST(@pid AS INT)");
+            if (projRes.recordset.length) projectName = projRes.recordset[0].name;
+          }
           await recordAmendment({
             refDocType: "expense-booking",
             refDocId: numericId,
             refDocNo: afterSnapshot?.EDocNo || beforeSnapshot.EDocNo,
-            projectName: afterSnapshot?.EProjectName || beforeSnapshot.EProjectName,
+            projectName,
             companyName: null,
             changedBy: req.user?.email || req.user?.name || null,
             before: beforeSnapshot,
@@ -3565,6 +3712,16 @@ router.delete("/:id", requirePageRight("expense-booking", "delete"), async (req,
           "This expense booking has linked payment records. Delete the payment records first.",
       });
     }
+
+    // Reverse whatever GL this invoice posted at approval (SourceType
+    // 'ExpenseBooking', SourceId = Eid — see generalLedger.js's
+    // postExpenseBookingApproval) before hard-deleting it. Previously
+    // skipped, so a deleted invoice's GeneralLedgerEntry rows survived with
+    // IsReversed=0 forever — Vendor Ledger Report and every other report
+    // reading off that table kept counting an invoice that no longer
+    // existed. Same fix already applied to loanSanction.js's DELETE.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(pool, "ExpenseBooking", numericId);
 
     await pool
       .request()
@@ -3927,10 +4084,12 @@ router.get("/:id/posting", async (req, res) => {
 
     // Determine if GRN-linked
     const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
-    let baseAmount = 0, taxAmount = 0, totalAmount = 0, perGrn = null;
+    let baseAmount = 0, taxAmount = 0, totalAmount = 0, perGrn = null, costCentreBreakdown = [];
 
     if (isGrnLinked) {
-      ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, resolveGrnIds(eb)));
+      const grnIds = resolveGrnIds(eb);
+      ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, grnIds));
+      costCentreBreakdown = await computeGrnCostCentreBreakdown(pool, grnIds);
     } else {
       // Direct (non-GRN) booking: back-derive base/tax from the invoice's
       // own GST rates against the GST-inclusive ENetAmount — MUST exactly
@@ -3995,6 +4154,7 @@ router.get("/:id/posting", async (req, res) => {
       // multi-row for a combined invoice; a single-GRN invoice still gets
       // a 1-row array so the frontend can render one consistent shape.
       grnBreakdown: perGrn,
+      costCentreBreakdown,
       supplierName: eb.SupplierName,
       accounts,
       expenseHeadAllocations,
@@ -4020,7 +4180,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     const ebSupplierPost2 = expenseBookingSupplierSql("eb", "postgl");
     const ebRes = await pool.request().input("Eid", sql.Int, ebId).query(`
-      SELECT eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
+      SELECT eb.Eid, eb.EDocNo, eb.EDocDate, eb.ENetAmount, eb.EAmount, eb.ESourceType, eb.ESourceId,
              eb.ELinkedGrnIds, eb.EGLAccountId, eb.TDSAmount, eb.TDSId,
              eb.ECgstRate, eb.ESgstRate, eb.EIgstRate,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
@@ -4045,6 +4205,18 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const alreadyPosted = await pool.request().input("SrcId", sql.Int, ebId)
       .query(`SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType='InvoicePosting' AND SourceId=@SrcId AND IsReversed=0`);
     if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This invoice has already been posted to GL." });
+
+    // This route (SourceType='InvoicePosting') is the authoritative posting
+    // path for an invoice — postExpenseBookingApproval (SourceType=
+    // 'ExpenseBooking', fires automatically on approval) independently
+    // guards against re-entry the same way, but neither ever checked for
+    // the OTHER's posting, so an approved-then-manually-posted invoice got
+    // double-credited to the vendor under two different accounting
+    // treatments (see migration 409's cleanup of the historical cases).
+    // Reverse any stale ExpenseBooking posting for this invoice before
+    // superseding it here, so InvoicePosting always wins going forward.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(pool, "ExpenseBooking", ebId);
 
     const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
     let baseAmount = 0, taxAmount = 0, totalAmount = 0;
@@ -4177,19 +4349,41 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const tdsShareOf = (fullAmount) =>
       tdsAmount <= 0 ? 0 : fullAmount >= totalAmount - 0.5 ? tdsAmount : Math.round((fullAmount / totalAmount) * tdsAmount * 100) / 100;
 
+    const grnGroups = perGrn && perGrn.length > 1 ? perGrn : [{ grnId: isGrnLinked ? parseInt(eb.ESourceId, 10) : null, docNo: eb.EDocNo, date: null, baseAmount, taxAmount, totalAmount }];
+    // Cost-centre buckets per GRN group — Cost Centre now lives on the PO's
+    // own line item (migration 365), not the PO header, since one GRN can
+    // mix e.g. a fixed-asset item with a consumption item. Splitting the
+    // PGRN-reversal/GST-Credit legs per bucket (instead of one flat pair
+    // per GRN) is what makes this invoice's Posting tab breakdown true to
+    // what's actually posted in GL — mirrors the same split already done
+    // for the GRN's own post-to-gl route.
+    const grnGroupBuckets = isGrnLinked
+      ? await Promise.all(grnGroups.map((g) => g.grnId ? computeSingleGrnCostCentreBuckets(pool, g.grnId) : []))
+      : [];
+
     const lines = isGrnLinked
       ? [
-          ...(perGrn && perGrn.length > 1 ? perGrn : [{ docNo: eb.EDocNo, date: null, baseAmount, taxAmount, totalAmount }])
-            .flatMap((g) => {
-              const gTdsShare = tdsShareOf(g.totalAmount);
+          ...grnGroups.flatMap((g, gi) => {
+            const gTdsShare = tdsShareOf(g.totalAmount);
+            const suffix = ` — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}`;
+            const buckets = grnGroupBuckets[gi] && grnGroupBuckets[gi].length > 0
+              ? grnGroupBuckets[gi]
+              : [{ costCentre: null, baseAmount: g.baseAmount, gstAmount: g.taxAmount }];
+            // TDS is deducted off the GRN group's total base, proportionally
+            // across its cost-centre buckets by each bucket's own share of
+            // that base — same spirit as tdsShareOf, just one level deeper.
+            return buckets.flatMap((b) => {
+              const bTdsShare = g.baseAmount > 0 ? Math.round((b.baseAmount / g.baseAmount) * gTdsShare * 100) / 100 : 0;
+              const ccSuffix = b.costCentre?.name ? ` [${b.costCentre.name}]` : "";
               return [
-                { LHeadId: pgrnId, DebitAmount: Math.round((g.baseAmount - gTdsShare) * 100) / 100, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal) — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` },
-                ...(g.taxAmount > 0
-                  ? [{ LHeadId: gstCreditId, DebitAmount: g.taxAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}` }]
+                { LHeadId: pgrnId, DebitAmount: Math.round((b.baseAmount - bTdsShare) * 100) / 100, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — Provision for Pending GRN (reversal)${ccSuffix}${suffix}`, CostCenterId: b.costCentre?.id ?? null },
+                ...(b.gstAmount > 0
+                  ? [{ LHeadId: gstCreditId, DebitAmount: b.gstAmount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available${ccSuffix}${suffix}`, CostCenterId: b.costCentre?.id ?? null }]
                   : []),
-                ...creditLegs(g.totalAmount, ` — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}`),
               ];
-            }),
+            });
+          }),
+          ...grnGroups.flatMap((g) => creditLegs(g.totalAmount, ` — ${g.docNo}${g.date ? ` (${fmtGrnDate(g.date)})` : ""}`)),
           ...tdsNatureLeg,
         ]
       : expenseHeadAllocations.length > 0
@@ -4274,14 +4468,18 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     await postVoucher(pool, {
       voucherNo: finalDocNo || `GL-EXB${ebId}`,
-      voucherDate: new Date(),
+      // The invoice's own document date, not the date it happened to get
+      // posted to GL — an invoice dated 8 June logged/posted on 10 Aug must
+      // still show 8 June in the ledger and Trial Balance, not the posting
+      // date.
+      voucherDate: eb.EDocDate,
       sourceType: "InvoicePosting",
       sourceId: ebId,
       companyId: eb.CompanyId ?? null,
       projectId: eb.ProjectId ?? null,
       costCenterId,
       createdBy: userEmail,
-      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration })),
+      legs: lines.map((l) => ({ lHeadId: l.LHeadId, debit: l.DebitAmount, credit: l.CreditAmount, narration: l.Narration, costCenterId: l.CostCenterId ?? null })),
     });
 
     res.json({ jvNo: finalDocNo, message: "Posted successfully." });

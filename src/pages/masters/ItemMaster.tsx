@@ -46,6 +46,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlternateUomTagger,
   type AlternateUomRow,
@@ -466,6 +467,13 @@ const ItemMaster: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [viewRow, setViewRow] = useState<Item | null>(null);
 
+  // Bulk selection — cleared whenever the search filter changes so a
+  // selection never silently carries over onto rows that are no longer
+  // visible (deleting something you can't currently see would be surprising).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmingBulkDelete, setConfirmingBulkDelete] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+
   // Alternate UOMs — entered inline on the form itself (create or edit) via
   // the "+" beside the UOM select, not gated behind a saved itemId. Kept
   // outside the Item/EMPTY_FORM shape since it isn't a Item_Master_Group
@@ -614,6 +622,62 @@ const ItemMaster: React.FC = () => {
       toast.error("Delete failed: " + err.message);
     }
     setDeleteConfirmId(null);
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSearchChange = (value: string) => {
+    setSearch(value);
+    setSelectedIds(new Set());
+  };
+
+  // Sequential, not Promise.all — same reasoning as the CSV importer above:
+  // keeps failures attributable to a specific item and avoids hammering the
+  // API with N parallel deletes. An item still referenced elsewhere (a PO
+  // line, a GRN, etc.) fails its own delete without blocking the rest.
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    setBulkDeleting(true);
+    let successCount = 0;
+    const failures: { itemName: string; message: string }[] = [];
+    for (const id of ids) {
+      try {
+        await deleteItem(id);
+        successCount++;
+        if (editingId === id) {
+          setEditingId(null);
+          setFormState(EMPTY_FORM);
+          setAlternateUoms([]);
+          setShowAlternateUoms(false);
+        }
+      } catch (err: any) {
+        const itemName = data.find((r) => r._id === id)?.itemName || id;
+        failures.push({ itemName, message: err?.message || "Delete failed" });
+      }
+    }
+    if (successCount > 0) {
+      await queryClient.invalidateQueries({ queryKey: ["item-master"] });
+    }
+    if (failures.length === 0) {
+      toast.success(`Deleted ${successCount} item${successCount === 1 ? "" : "s"} ✓`);
+    } else if (successCount === 0) {
+      toast.error(`Delete failed for all ${failures.length} item${failures.length === 1 ? "" : "s"} — ${failures[0].message}`);
+    } else {
+      toast.warning(
+        `Deleted ${successCount} of ${ids.length} items — ${failures.length} failed (${failures.map((f) => f.itemName).join(", ")}).`,
+      );
+    }
+    setSelectedIds(new Set());
+    setConfirmingBulkDelete(false);
+    setBulkDeleting(false);
   };
 
   const handleReset = () => {
@@ -874,6 +938,38 @@ const ItemMaster: React.FC = () => {
   // ── Column Definitions ────────────────────────────────────────────────────
   // Defined inside the component so handlers and itemGroups are in scope
   const ITEM_COLUMNS: ColumnDef<Item>[] = [
+    ...(rights.canDelete
+      ? [
+          {
+            id: "select",
+            header: () => {
+              const allSelected =
+                filtered.length > 0 && filtered.every((r) => selectedIds.has(r._id));
+              return (
+                <Checkbox
+                  checked={allSelected}
+                  onCheckedChange={(checked) => {
+                    setSelectedIds(
+                      checked ? new Set(filtered.map((r) => r._id)) : new Set(),
+                    );
+                  }}
+                  aria-label="Select all"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              );
+            },
+            size: 36,
+            cell: ({ row }: { row: { original: Item } }) => (
+              <Checkbox
+                checked={selectedIds.has(row.original._id)}
+                onCheckedChange={() => toggleSelected(row.original._id)}
+                aria-label={`Select ${row.original.itemName}`}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ),
+          } as ColumnDef<Item>,
+        ]
+      : []),
     {
       accessorKey: "shortCode",
       header: "Short Code",
@@ -1453,10 +1549,63 @@ const ItemMaster: React.FC = () => {
               type="text"
               placeholder="Search items..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => handleSearchChange(e.target.value)}
               className="w-full pl-9 pr-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
+
+          {/* Bulk actions — only appears once something's checked */}
+          {rights.canDelete && selectedIds.size > 0 && (
+            <div className="flex items-center gap-3 mb-4 px-3 py-2 rounded-lg border border-destructive/30 bg-destructive/5">
+              <span className="text-xs font-heading font-medium text-foreground">
+                {selectedIds.size} item{selectedIds.size === 1 ? "" : "s"} selected
+              </span>
+              <div className="flex items-center gap-2 ml-auto">
+                {confirmingBulkDelete ? (
+                  <>
+                    <span className="text-xs text-destructive">
+                      Delete {selectedIds.size} item{selectedIds.size === 1 ? "" : "s"}?
+                    </span>
+                    <button
+                      onClick={handleBulkDelete}
+                      disabled={bulkDeleting}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors disabled:opacity-50"
+                    >
+                      {bulkDeleting ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <Check size={12} />
+                      )}
+                      Confirm
+                    </button>
+                    <button
+                      onClick={() => setConfirmingBulkDelete(false)}
+                      disabled={bulkDeleting}
+                      className="px-3 py-1.5 rounded-lg text-xs font-heading text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => setSelectedIds(new Set())}
+                      className="px-3 py-1.5 rounded-lg text-xs font-heading text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    >
+                      Clear
+                    </button>
+                    <button
+                      onClick={() => setConfirmingBulkDelete(true)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors"
+                    >
+                      <Trash2 size={12} /> Delete Selected
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           <DataTable
             data={filtered}
             columns={ITEM_COLUMNS}

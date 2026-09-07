@@ -24,6 +24,7 @@ export interface FixedAssetListItem {
   DepreciationRate: number | null;
   AssetStatus: "Pending" | "Active" | "Sold" | "Scrapped" | "Under Maintenance";
   SellingPrice: number | null;
+  RepairType: string | null;   // SAC code (dbo.HSN.HCode where HIsSAC = 1)
   Status: string;
   CompanyId: number | null;
   CompanyName: string | null;
@@ -31,6 +32,10 @@ export interface FixedAssetListItem {
   ProjectName: string | null;
   SupplierId: number | null;
   SupplierName: string | null;
+  GodownID: number | null;
+  GodownName: string | null;
+  SourceTagId: number | null;
+  FAItemCode: string | null;
 }
 
 export interface FixedAssetDetail extends FixedAssetListItem {
@@ -42,6 +47,7 @@ export interface FixedAssetDetail extends FixedAssetListItem {
   SaleRemarks: string | null;
   Remarks: string | null;
   PurchaseInvoiceRef: string | null;
+  PictureBase64: string | null;
   SupplierCode: string | null;
   CreatedBy: string | null;
   CreatedAt: string;
@@ -52,8 +58,9 @@ export interface FixedAssetPayload {
   companyId?: number | null;
   projectId?: number | null;
   finYear?: string;
-  assetName: string;
+  assetName?: string;
   assetCategory: string;
+  sourceTagId?: number | null;
   brand?: string;
   model?: string;
   serialNumber?: string;
@@ -77,6 +84,8 @@ export interface FixedAssetPayload {
   saleRemarks?: string;
   remarks?: string;
   status?: string;
+  pictureBase64?: string | null;
+  repairType?: string | null;
 }
 
 async function handleError(res: Response, fallback: string) {
@@ -112,6 +121,75 @@ export const getFixedAsset = async (id: number): Promise<FixedAssetDetail> => {
   return res.json();
 };
 
+// ── Depreciation posting ────────────────────────────────────────────────────
+export interface DepreciationEntry {
+  EntryId: number;
+  PeriodYear: number;
+  PeriodMonth: number;
+  FinYear: string | null;
+  Method: string;
+  RatePct: number;
+  OpeningBookValue: number;
+  DepreciationAmount: number;
+  ClosingBookValue: number;
+  AccumulatedDepreciation: number;
+  Status: "Posted" | "Reversed";
+  VoucherNo: string | null;
+  PostedBy: string | null;
+  PostedAt: string | null;
+}
+
+export interface DepreciationPlan {
+  isPosted: boolean;
+  voucherRef: string | null;
+  error?: string;
+  depreciation?: {
+    method: string;
+    ratePct: number;
+    cost: number;
+    openingBookValue: number;
+    depreciationAmount: number;
+    closingBookValue: number;
+    accumulatedDepreciation: number;
+    finYear: string;
+  };
+  entries?: { account: string; debit: number; credit: number }[];
+}
+
+export interface DepreciationResponse {
+  year: number;
+  month: number;
+  plan: DepreciationPlan | null;
+  history: DepreciationEntry[];
+}
+
+export const getAssetDepreciation = async (
+  id: number, year: number, month: number,
+): Promise<DepreciationResponse> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/depreciation?year=${year}&month=${month}`);
+  if (!res.ok) await handleError(res, "Failed to fetch depreciation");
+  return res.json();
+};
+
+export const postAssetDepreciation = async (
+  id: number, year: number, month: number,
+): Promise<{ ok: true; voucherNo: string; entryId: number }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/depreciation/post`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ year, month }),
+  });
+  if (!res.ok) await handleError(res, "Failed to post depreciation");
+  return res.json();
+};
+
+export const reverseAssetDepreciation = async (
+  id: number, entryId: number,
+): Promise<{ ok: true }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/depreciation/${entryId}/reverse`, { method: "POST" });
+  if (!res.ok) await handleError(res, "Failed to reverse depreciation");
+  return res.json();
+};
+
 export const createFixedAsset = async (data: FixedAssetPayload): Promise<{ assetId: number; docNo: string; assetCode: string }> => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
@@ -134,4 +212,44 @@ export const updateFixedAsset = async (id: number, data: Partial<FixedAssetPaylo
 export const deleteFixedAsset = async (id: number): Promise<void> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   if (!res.ok) await handleError(res, "Failed to delete fixed asset");
+};
+
+// ── Delete & Reverse GRN ────────────────────────────────────────────────────
+// A distinct, more destructive action from deleteFixedAsset above — see
+// backend/services/fixedAssetReversal.js for exactly what it does.
+export interface ReversalPlan {
+  reversible: boolean;
+  reason?: "not_source_linked" | "already_deleted" | "disposed" | "transferred" | "has_expense" | "grn_missing";
+  message: string;
+  sourceType?: "GRN" | "IMPORT";
+  sourceId?: number;
+  batchAssetId?: number;
+  batchAssetName?: string;
+  grnDocNo?: string | null;
+  unitCount?: number;
+  taggedCount?: number;
+  units?: { assetId: number; assetName: string; faItemCode: string | null }[];
+  blockedAssetIds?: number[];
+}
+
+export interface ReversalResult {
+  ok: true;
+  sourceType: "GRN" | "IMPORT";
+  sourceId: number;
+  grnDeleted: boolean;
+  linkedPOId: number | null;
+  unitsRemoved: number;
+  tagsRemoved: number;
+}
+
+export const getFixedAssetReversalPlan = async (id: number): Promise<ReversalPlan> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/can-reverse`);
+  if (!res.ok) await handleError(res, "Failed to check reversal eligibility");
+  return res.json();
+};
+
+export const reverseFixedAsset = async (id: number): Promise<ReversalResult> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/reverse`, { method: "POST" });
+  if (!res.ok) await handleError(res, "Failed to reverse this asset");
+  return res.json();
 };

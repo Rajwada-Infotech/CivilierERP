@@ -1,11 +1,11 @@
 # CivilierERP Admin (mobile)
 
 React Native (Expo, TypeScript) client for the Admin module — a separate app
-from `mobile/` (Finance + Material), same backend, same conventions. No
-backend changes — just another REST/Socket.IO client, same as `mobile/` and
+from `mobile-finance-material/` (Finance + Material), same backend, same conventions. No
+backend changes — just another REST/Socket.IO client, same as `mobile-finance-material/` and
 the web app.
 
-Scaffolded from `mobile/`: auth, theme, navigation shell, and shared
+Scaffolded from `mobile-finance-material/`: auth, theme, navigation shell, and shared
 components are ported as-is; Finance/Material screens and APIs were
 stripped, and the module switcher in `NavSheet.tsx` was replaced with a
 single `ADMIN_NAV_TREE` (RN port of
@@ -55,7 +55,7 @@ role count, recently-added users), notifications, profile, and the nav
 sheet are wired up and working. Every other admin section (Manage Users,
 Approval Inbox, Masters, Rights, Communicator, etc.) is listed in
 `adminNav.ts` but not built yet — tapping those alerts "not built yet, use
-the web app for now", same convention `mobile/`'s NavSheet uses for its own
+the web app for now", same convention `mobile-finance-material/`'s NavSheet uses for its own
 unbuilt leaves.
 
 ## Porting an admin screen from web

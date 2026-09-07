@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { ChevronRight, Pencil, Trash2, Loader2, Link2, GitBranch } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { DependencyMasterDetail, DependencyMasterListRow } from "@/api/dependencyMasterApi";
+import type { DependencyMasterDetail, DependencyMasterListRow, LadderActivity } from "@/api/dependencyMasterApi";
 import { ActivityChainPreview } from "./ActivityChainPreview";
+import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
 
 interface Props {
   row: DependencyMasterListRow;
@@ -33,6 +35,12 @@ export function DependencyMasterListItem({
   const isInternal = row.workType === "INTERNAL";
   const accent = isInternal ? "#f97316" : "#0ea5e9";
   const dotCount = Math.min(row.activityCount, 6);
+
+  // Clicking an activity chip opens the same assign-engineer-&-material
+  // modal Work Allocation uses for a rung — it fetches and pre-fills
+  // whatever's already been assigned (workers, material, labour source) for
+  // that specific activity, or lets one be created if nothing exists yet.
+  const [activeRung, setActiveRung] = useState<LadderActivity | null>(null);
 
   return (
     <div
@@ -121,12 +129,16 @@ export function DependencyMasterListItem({
               <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-2 flex items-center gap-1">
                 <GitBranch size={9} /> Activity Chain
               </p>
-              <ActivityChainPreview rungs={cached.activities} />
+              <ActivityChainPreview rungs={cached.activities} onRungClick={setActiveRung} />
             </>
           ) : (
             <p className="py-4 text-xs text-destructive italic">Failed to load this chain — try expanding again.</p>
           )}
         </div>
+      )}
+
+      {activeRung && (
+        <RungAssignmentModal rung={activeRung} chain={row} onClose={() => setActiveRung(null)} />
       )}
     </div>
   );

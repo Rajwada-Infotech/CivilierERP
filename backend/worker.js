@@ -4,13 +4,16 @@ const logger = require("./logger");
 const { getRedis } = require("./redis");
 const { runTicketEscalationJob } = require("./services/ticketEscalationService");
 const { runRecordsRetentionJob } = require("./services/recordsRetentionService");
+const { runWorkerRetentionJob } = require("./services/workerRetentionService");
 
 let workerInterval = null;
 let ticketEscalationInterval = null;
 let recordsRetentionInterval = null;
+let workerRetentionInterval = null;
 let workerRunning = false;
 
 const RECORDS_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000; // once a day is plenty for a 7-day grace window
+const WORKER_RETENTION_INTERVAL_MS = 24 * 60 * 60 * 1000; // once a day is plenty for a 4-month window
 
 function getTicketEscalationIntervalMs() {
   const configured = Number(process.env.TICKET_ESCALATION_INTERVAL_MS);
@@ -103,6 +106,7 @@ async function startWorker() {
     await cleanupInactiveUsers();
     await runTicketEscalationJob();
     await runRecordsRetentionJob();
+    await runWorkerRetentionJob();
     logger.info({ event: "WORKER_INIT_DONE" }, "Initial decay & cleanup complete");
   } catch (err) {
     logger.error({ event: "WORKER_INIT_ERROR", err }, "Worker init failed");
@@ -159,6 +163,17 @@ async function startWorker() {
       );
     }
   }, RECORDS_RETENTION_INTERVAL_MS);
+
+  workerRetentionInterval = setInterval(async () => {
+    try {
+      await runWorkerRetentionJob();
+    } catch (err) {
+      logger.error(
+        { event: "WORKER_LABOUR_RETENTION_ERROR", err },
+        "Labour worker retention interval crashed",
+      );
+    }
+  }, WORKER_RETENTION_INTERVAL_MS);
 }
 
 function stopWorker() {
@@ -166,9 +181,11 @@ function stopWorker() {
   clearInterval(workerInterval);
   clearInterval(ticketEscalationInterval);
   clearInterval(recordsRetentionInterval);
+  clearInterval(workerRetentionInterval);
   workerInterval = null;
   ticketEscalationInterval = null;
   recordsRetentionInterval = null;
+  workerRetentionInterval = null;
   workerRunning = false;
   logger.info({ event: "WORKER_STOPPED" }, "Redis worker stopped");
 }

@@ -266,6 +266,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     bookingDate: new Date().toISOString().slice(0, 10),
     dueDate: "",
     financialYear: "",
+    expenseHeadName: "",
     companyId: null,
     poId: null,
     supplier: "",
@@ -318,10 +319,27 @@ export function dbToRecord(row: any): ExpenseRecord {
   try {
     if (row.EEmiData) {
       const parsed = JSON.parse(row.EEmiData);
+      // A legit EMI config's own keys are always named fields (enabled,
+      // installmentCount, ...) — never a numeric string like "0". A "0" key
+      // means this JSON was, at some point, produced by spreading a STRING
+      // instead of an object (JS spreads a string into {"0":"c","1":"h",...}),
+      // which then got saved right back through this form's own save flow,
+      // re-corrupting itself every edit cycle. Recover the real fields (they
+      // usually still sit after the garbage keys) instead of spreading the
+      // garbage forward again.
+      const clean = Object.prototype.hasOwnProperty.call(parsed, "0")
+        ? {
+            enabled: !!parsed.enabled,
+            installmentCount: parsed.installmentCount || 0,
+            emiAmount: parsed.emiAmount || 0,
+            startDate: parsed.startDate || "",
+            schedule: Array.isArray(parsed.schedule) ? parsed.schedule : [],
+          }
+        : parsed;
       emi = {
         ...defaultEmi(),
-        ...parsed,
-        schedule: Array.isArray(parsed.schedule) ? parsed.schedule : [],
+        ...clean,
+        schedule: Array.isArray(clean.schedule) ? clean.schedule : [],
       };
     } else if (row.EEmiPayment) {
       emi = {
@@ -389,6 +407,7 @@ export function dbToRecord(row: any): ExpenseRecord {
           ? `Draft #${id}`
           : ""),
     docTypeName: row.DocTypeName ?? "",
+    docTypeId: row.EDocTypeId != null ? Number(row.EDocTypeId) : null,
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
     financialYear: row.EFinYear ?? "",
@@ -415,6 +434,11 @@ export function dbToRecord(row: any): ExpenseRecord {
     projectName: row.EProjectDisplayName || row.projectName || "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
+    // Direct/DINV bookings tag their Expense Head(s) via the multi-head
+    // allocation table (EExpenseHeadNames, batch-joined in the list route);
+    // EGLAccountName/EGLAccount are the legacy single-head fields, kept as
+    // a fallback for records saved before that existed.
+    expenseHeadName: row.EExpenseHeadNames ?? row.EGLAccountName ?? row.EGLAccount ?? "",
     // For GRN-linked bookings, basicAmount = qty × rate (no GST) stored in EAmount.
     // EGrnTotalAmount is the incl-GST total used only for netAmount display.
     basicAmount: parseFloat(row.EAmount) || 0,

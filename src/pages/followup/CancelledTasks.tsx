@@ -88,16 +88,20 @@ function useGlass() {
   return { isDark, glassCard };
 }
 
-const CancelledTaskCard: React.FC<{ task: CancelledTask; index: number; onClick: () => void }> = ({
+const TABLE_HEAD_CLS = "px-2 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80 whitespace-nowrap";
+
+// Row-wise replacement for the old CancelledTaskCard — same fields, laid out
+// as a compact <tr> so many cancelled tasks are visible at once instead of
+// one per large card.
+const CancelledTaskRow: React.FC<{ task: CancelledTask; index: number; onClick: () => void }> = ({
   task,
   index,
   onClick,
 }) => {
-  const { glassCard } = useGlass();
   const color = PRIORITY_COLORS[task.Priority as (typeof PRIORITIES)[number]] ?? PRIORITY_COLORS.Normal;
 
   return (
-    <motion.div
+    <motion.tr
       role="button"
       tabIndex={0}
       onClick={onClick}
@@ -107,77 +111,78 @@ const CancelledTaskCard: React.FC<{ task: CancelledTask; index: number; onClick:
           onClick();
         }
       }}
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.25, delay: Math.min(index, 8) * 0.03, ease: "easeOut" }}
-      whileHover={{ y: -2 }}
-      className="relative w-full text-left rounded-xl p-4 space-y-1.5 group overflow-hidden cursor-pointer"
-      style={glassCard}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2, delay: Math.min(index, 10) * 0.02, ease: "easeOut" }}
+      className="group cursor-pointer transition-colors hover:bg-muted/40"
     >
-      <div
-        className="absolute left-0 top-0 bottom-0 w-0.5"
-        style={{ background: `linear-gradient(to bottom, transparent 10%, ${CANCEL_RED} 30%, ${CANCEL_RED} 70%, transparent 90%)` }}
-      />
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest">
+      <td className="pl-3 pr-2 py-2.5 align-top relative">
+        <div
+          className="absolute left-0 top-0 bottom-0 w-0.5"
+          style={{ background: `linear-gradient(to bottom, transparent 10%, ${CANCEL_RED} 30%, ${CANCEL_RED} 70%, transparent 90%)` }}
+        />
+        <span className="font-mono text-[10px] text-muted-foreground uppercase tracking-widest">
           {task.TaskNo || "—"}
         </span>
+        <p className="text-sm font-semibold text-foreground truncate">{task.Subject}</p>
+        {task.ParentTaskNo && (
+          <p className="text-[11px] text-muted-foreground truncate">
+            Subtask of {task.ParentTaskNo}
+            {task.ParentTaskSubject ? ` — ${task.ParentTaskSubject}` : ""}
+          </p>
+        )}
+        {task.CaseProjectName && (
+          <p className="text-[11px] text-muted-foreground truncate">{task.CaseProjectName}</p>
+        )}
+        {task.Tags?.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1">
+            {task.Tags.map((tag) => (
+              <span
+                key={tag.Id}
+                className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-medium truncate max-w-[100px]"
+                style={{ background: "rgba(13,148,136,0.12)", border: "1px solid rgba(13,148,136,0.3)", color: ACCENT }}
+                title={tag.Name}
+              >
+                {tag.Name}
+              </span>
+            ))}
+          </div>
+        )}
+      </td>
+      <td className="px-2 py-2.5 align-top text-xs font-medium text-muted-foreground whitespace-nowrap">
         <span
-          className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md"
+          className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md mb-1"
           style={{ background: "rgba(239,68,68,0.12)", color: CANCEL_RED }}
         >
           <XCircle size={10} /> Cancelled
         </span>
-      </div>
-      <p className="text-sm font-semibold text-foreground truncate">{task.Subject}</p>
-      {task.ParentTaskNo && (
-        <p className="text-[11px] text-muted-foreground truncate">
-          Subtask of {task.ParentTaskNo}
-          {task.ParentTaskSubject ? ` — ${task.ParentTaskSubject}` : ""}
-        </p>
-      )}
-      {task.CaseProjectName && (
-        <p className="text-xs text-muted-foreground truncate">{task.CaseProjectName}</p>
-      )}
-      <p className="text-xs font-medium text-muted-foreground">
-        {task.CancelledAt ? `Cancelled ${formatDate(task.CancelledAt)}` : "Cancelled"}
-        {task.CancelledByName ? ` · ${task.CancelledByName}` : ""}
-      </p>
-      {task.CancelReasonLabel && (
-        <p
-          className="text-[11px] px-2 py-1 rounded-lg"
-          style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)", color: "inherit" }}
-        >
-          <span className="text-muted-foreground">Reason: </span>
-          {task.CancelReasonLabel}
-        </p>
-      )}
-      {task.Tags?.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {task.Tags.map((tag) => (
-            <span
-              key={tag.Id}
-              className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium truncate max-w-[110px]"
-              style={{ background: "rgba(13,148,136,0.12)", border: "1px solid rgba(13,148,136,0.3)", color: ACCENT }}
-              title={tag.Name}
-            >
-              {tag.Name}
-            </span>
-          ))}
-        </div>
-      )}
-      <div className="flex items-center gap-1.5 pt-1">
+        <div>{task.CancelledAt ? formatDate(task.CancelledAt) : "—"}</div>
+        {task.CancelledByName && <div className="text-[11px]">{task.CancelledByName}</div>}
+      </td>
+      <td className="px-2 py-2.5 align-top text-xs max-w-[220px]">
+        {task.CancelReasonLabel ? (
+          <span
+            className="inline-block px-2 py-1 rounded-lg text-[11px]"
+            style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.15)" }}
+          >
+            {task.CancelReasonLabel}
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
+      </td>
+      <td className="px-2 py-2.5 align-top">
         <span
-          className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md border"
+          className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
           style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
         >
           {task.Priority}
         </span>
-        {task.CaseNumber && (
-          <span className="ml-auto text-[11px] text-muted-foreground font-mono">{task.CaseNumber}</span>
-        )}
-      </div>
-    </motion.div>
+      </td>
+      <td className="pl-2 pr-3 py-2.5 align-top text-xs text-muted-foreground font-mono whitespace-nowrap">
+        {task.CaseNumber || "—"}
+      </td>
+    </motion.tr>
   );
 };
 
@@ -313,10 +318,25 @@ const CancelledTasks: React.FC = () => {
             <span className="text-[10px] text-muted-foreground">{filtered.length}</span>
             <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, rgba(239,68,68,0.25), transparent)" }} />
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {filtered.map((t, i) => (
-              <CancelledTaskCard key={t.Id} task={t} index={i} onClick={() => setSelectedTaskId(String(t.Id))} />
-            ))}
+          <div className="rounded-xl overflow-hidden" style={glassCard}>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[820px]">
+                <thead>
+                  <tr className="border-b" style={{ borderColor: "rgba(239,68,68,0.15)" }}>
+                    <th className={`${TABLE_HEAD_CLS} pl-3`}>Task</th>
+                    <th className={TABLE_HEAD_CLS}>Status / Cancelled</th>
+                    <th className={TABLE_HEAD_CLS}>Reason</th>
+                    <th className={TABLE_HEAD_CLS}>Priority</th>
+                    <th className={`${TABLE_HEAD_CLS} pr-3`}>Case No.</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/30">
+                  {filtered.map((t, i) => (
+                    <CancelledTaskRow key={t.Id} task={t} index={i} onClick={() => setSelectedTaskId(String(t.Id))} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

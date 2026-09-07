@@ -69,19 +69,36 @@ async function syncBillStatus(pool, sql, expenseRef) {
         WHERE TxnType = 'DEBIT' AND RefType = 'Invoice' AND RefDocNo = @RefDocNo
       `);
 
+    // Debit Notes raised against this invoice (dbo.DebitNote, see
+    // routes/debitNote.js) are value adjustments that INCREASE what the
+    // invoice is worth (Adjusted Invoice Value = Original + Sum of Debit
+    // Notes) — e.g. an extra charge/escalation billed after the original
+    // invoice, not a return/discount. Cancelled debit notes don't count.
+    const dnRes = await pool
+      .request()
+      .input("EDocNo3", sql.NVarChar(100), expenseRef)
+      .query(`
+        SELECT ISNULL(SUM(dn.TotalAmount), 0) AS TotalDebitNotes
+        FROM dbo.DebitNote dn
+        JOIN dbo.ExpenseBooking eb2 ON eb2.Eid = dn.bill_id
+        WHERE eb2.EDocNo = @EDocNo3 AND dn.is_active = 1
+      `);
+    const totalDebitNotes = parseFloat(dnRes.recordset[0].TotalDebitNotes) || 0;
+    const adjustedPayable = payableAfterTds + totalDebitNotes;
+
     const totalPaid =
       (parseFloat(payRes.recordset[0].TotalPaid) || 0) +
       (parseFloat(oaRes.recordset[0].TotalAdjusted) || 0);
-    // Outstanding balance is against the TDS-net payable, not the full
-    // invoice amount — the TDS portion was never going to be paid out.
-    const remaining = Math.max(0, payableAfterTds - totalPaid);
+    // Outstanding balance is against the TDS-net, debit-note-adjusted
+    // payable — not the raw invoice amount.
+    const remaining = Math.max(0, adjustedPayable - totalPaid);
 
     let billStatus;
     if (totalPaid <= 0) {
       // Fully settled by TDS alone (e.g. 100% TDS on a small bill) even
       // with zero cash paid is still "Paid", not "Payment Due".
-      billStatus = payableAfterTds <= 0 ? "Paid" : "Payment Due";
-    } else if (totalPaid >= payableAfterTds) {
+      billStatus = adjustedPayable <= 0 ? "Paid" : "Payment Due";
+    } else if (totalPaid >= adjustedPayable) {
       billStatus = "Paid";
     } else {
       billStatus = "Partially Paid";

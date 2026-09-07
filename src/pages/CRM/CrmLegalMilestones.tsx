@@ -489,8 +489,8 @@ const StageRow: React.FC<{
 // Always applicable — the Agreement for Sale + AFS Registration is mandatory
 // for every booking, regardless of project type.
 
-const AgreementPhaseCard: React.FC<{ model: WorkflowModel; t: any; onStepUpdate: (step: string, status: string) => void }> =
-  ({ model, t, onStepUpdate }) => {
+const AgreementPhaseCard: React.FC<{ model: WorkflowModel; t: any; onStepUpdate: (step: string, status: string) => void; canEdit: boolean }> =
+  ({ model, t, onStepUpdate, canEdit }) => {
   const { agreementDone } = model;
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -547,7 +547,7 @@ const AgreementPhaseCard: React.FC<{ model: WorkflowModel; t: any; onStepUpdate:
                       : "Not started yet"}
                   </div>
                 </div>
-                {!isDone && MANUAL_STEPS.has(s.key) && isCurrent && (
+                {canEdit && !isDone && MANUAL_STEPS.has(s.key) && isCurrent && (
                   <button
                     onClick={() => onStepUpdate(s.key, "Completed")}
                     className="text-xs px-3 py-1.5 bg-primary text-primary-foreground border border-primary rounded-lg font-semibold hover:bg-primary/90 whitespace-nowrap shrink-0"
@@ -570,6 +570,7 @@ const AgreementPhaseCard: React.FC<{ model: WorkflowModel; t: any; onStepUpdate:
 // ─── Main component ───────────────────────────────────────────────────────────
 
 const CrmLegalMilestones: React.FC = () => {
+  const rights = usePageRights("crm-legal-milestones");
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
@@ -644,8 +645,6 @@ const CrmLegalMilestones: React.FC = () => {
 
   const model = selected ? buildWorkflowModel(selected) : null;
 
-  usePageRights("crm-legal-milestones");
-
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Legal Journey Overview"]} />
@@ -655,12 +654,14 @@ const CrmLegalMilestones: React.FC = () => {
         action={
           <div className="flex items-center gap-3">
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
+            {rights.canCreate && (
             <button
               onClick={() => setNewDialog(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90"
             >
               <Plus size={14} /> Start Workflow
             </button>
+            )}
           </div>
         }
       >
@@ -770,7 +771,7 @@ const CrmLegalMilestones: React.FC = () => {
 
                 {/* Phase 1 — Agreement Signing: the full 8-step tracker,
                     driven by the model. Always applicable. */}
-                <AgreementPhaseCard model={model} t={selected} onStepUpdate={handleStepUpdate} />
+                <AgreementPhaseCard model={model} t={selected} onStepUpdate={handleStepUpdate} canEdit={rights.canEdit} />
 
                 {/* Phase 2 onward */}
                 {!model.agreementDone ? (

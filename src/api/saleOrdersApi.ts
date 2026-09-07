@@ -10,6 +10,7 @@ export interface SaleOrderItem {
   rate: number;
   amount?: number;
   remarks?: string;
+  glHeadId?: number | null;
 }
 
 export interface SaleOrder {
