@@ -1558,7 +1558,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
                     .input("AdjRefDocNo", sql.NVarChar(100), finalDocNo)
                     .input("CompanyId",   sql.Int,           eb.ECompanyId ?? null)
                     .input("ProjectId",   sql.Int,           eb.ProjectId ?? null)
-                    .input("Notes",       sql.NVarChar(500), `OA auto-applied ₹${applyAmt} to ${approvedRef} via ${finalDocNo}`)
+                    .input("Notes",       sql.NVarChar(500), `OA auto-applied ₹${applyAmt.toFixed(2)} to ${approvedRef} via ${finalDocNo}`)
                     .input("CreatedBy",   sql.NVarChar(150), req.user?.email || "system")
                     .query(`
                       INSERT INTO dbo.OnAccountLedger
@@ -1589,7 +1589,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
                   .input("RefId",     sql.Int,           id)
                   .input("CompanyId", sql.Int,           eb.ECompanyId ?? null)
                   .input("ProjectId", sql.Int,           eb.ProjectId ?? null)
-                  .input("Notes",     sql.NVarChar(500), `Excess ₹${excess} from ${finalDocNo} on invoice ${approvedRef}`)
+                  .input("Notes",     sql.NVarChar(500), `Excess ₹${excess.toFixed(2)} from ${finalDocNo} on invoice ${approvedRef}`)
                   .input("CreatedBy", sql.NVarChar(150), req.user?.email || "system")
                   .query(`
                     INSERT INTO dbo.OnAccountLedger
