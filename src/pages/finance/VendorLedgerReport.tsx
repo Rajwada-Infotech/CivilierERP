@@ -547,7 +547,7 @@ export default function VendorLedgerReport() {
       <Breadcrumbs items={["Dashboard", "Reports", "Vendor Ledger Report"]} />
       <FinanceShell
         title="Vendor Ledger Report"
-        subtitle="Every transaction posted against a supplier, customer, contractor, broker or any GL head"
+        subtitle="Every transaction posted against a supplier"
         icon={Users}
       >
         <VendorLedgerReportBody />

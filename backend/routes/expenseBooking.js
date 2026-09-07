@@ -1039,6 +1039,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const projectName = (req.query.projectName || "").toString().trim() || null;
     const docNo = (req.query.docNo || "").toString().trim() || null;
     const supplierId = req.query.supplierId ? parseInt(req.query.supplierId, 10) : null;
+    const expenseHeadId = req.query.expenseHeadId ? parseInt(req.query.expenseHeadId, 10) : null;
 
     const hasPaymentTermId = await ebHasPaymentTermId(pool);
     const hasDirectItemsCol = await ebHasDirectItemsData(pool);
@@ -1066,7 +1067,8 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         .input("CompanyId", sql.Int, companyId)
         .input("ProjectName", sql.NVarChar(255), projectName)
         .input("DocNo", sql.NVarChar(100), docNo ? `%${docNo}%` : null)
-        .input("SupplierId", sql.Int, supplierId).query(`
+        .input("SupplierId", sql.Int, supplierId)
+        .input("ExpenseHeadId", sql.Int, expenseHeadId).query(`
         SELECT
           eb.Eid, eb.Eid AS id,
           eb.EProjectName, eb.EDocumentType, eb.EDocDate,
@@ -1172,6 +1174,14 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           AND (@ProjectName IS NULL OR ep.name = @ProjectName)
           AND (@DocNo IS NULL OR eb.EDocNo LIKE @DocNo)
           AND (@SupplierId IS NULL OR (${ebSupplierList.idExpr}) = @SupplierId)
+          -- Expense Head lives in one of two places: the multi-head
+          -- ExpenseHeadAllocation table (migration 303, direct bookings
+          -- split across several heads) or the legacy single EGLAccountId
+          -- column — match either.
+          AND (@ExpenseHeadId IS NULL OR eb.EGLAccountId = @ExpenseHeadId OR EXISTS (
+            SELECT 1 FROM dbo.ExpenseHeadAllocation eha
+            WHERE eha.SourceType = 'ExpenseBooking' AND eha.SourceId = eb.Eid AND eha.LHeadId = @ExpenseHeadId
+          ))
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `),
