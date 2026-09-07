@@ -217,6 +217,88 @@ async function computeGrnCostCentreBreakdown(pool, grnIds) {
     }));
 }
 
+// Item-wise breakdown (not bucketed) across every GRN feeding an invoice —
+// same source data as computeSingleGrnCostCentreBuckets, kept ungrouped so
+// the invoice's Posting tab can show a per-item row exactly like the GRN's
+// own Posting tab (src/pages/material/GRN.tsx), instead of one lumped PGRN
+// row per GRN. Also carries each item's tagged GL Account for context —
+// the invoice itself still debits PGRN either way (that item-level GL
+// substitution already happened at GRN-posting time), this is display only.
+async function computeGrnItemBreakdown(pool, grnIds) {
+  const { resolveItemGlHeads } = require("../services/itemGlHead");
+  const items = [];
+  for (const grnId of grnIds) {
+    const grnRes = await pool.request().input("GRNID", sql.Int, grnId).query(`SELECT GRNNo, GRNItems, POID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`);
+    const row = grnRes.recordset[0];
+    if (!row) continue;
+    const rawItems = JSON.parse(row.GRNItems || "[]");
+    const received = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
+    if (!received.length) continue;
+
+    const itemIds = received.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
+    let masterMap = {}, ccMap = {};
+    if (itemIds.length) {
+      const mReq = pool.request();
+      const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
+      const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
+      for (const r of mRes.recordset) masterMap[r.M_Id]={cgstRate:parseFloat(r.M_CGST)||0,sgstRate:parseFloat(r.M_SGST)||0};
+
+      if (row.POID) {
+        const ccReq = pool.request().input("POID", sql.Int, row.POID);
+        const ph2 = itemIds.map((id,i)=>{ ccReq.input(`ccid${i}`,sql.NVarChar(100),id); return `@ccid${i}`; }).join(",");
+        const ccRes = await ccReq.query(`
+          SELECT CONVERT(NVARCHAR(100), poi.ItemId) AS ItemId, poi.CostCenterId, cc.Name AS CostCenterName, cc.Code AS CostCenterCode
+          FROM dbo.PurchaseOrderItems poi
+          LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = poi.CostCenterId
+          WHERE poi.PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), poi.ItemId) IN (${ph2})
+        `);
+        for (const r of ccRes.recordset) {
+          ccMap[r.ItemId] = r.CostCenterId ? { id: r.CostCenterId, name: r.CostCenterName, code: r.CostCenterCode } : null;
+        }
+      }
+    }
+    const itemGlMap = await resolveItemGlHeads(pool, sql, itemIds);
+
+    for (const it of received) {
+      const itemId = String(it.itemId||it.ItemId||"");
+      const qty = Number(it.receivedQty||it.ReceivedQty||0) || Number(it.quantity||it.Quantity||0);
+      const rate = Number(it.rate||it.Rate||0);
+      const baseAmount = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*qty;
+      const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
+      const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
+      const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+      const gstAmount = Math.round(baseAmount*(totalGSTRate/100)*100)/100;
+      const glMaster = itemGlMap.get(itemId);
+      items.push({
+        itemId,
+        itemName: it.itemName || it.ItemName || it.description || it.Description || "Item",
+        uom: it.uom || it.UOM || it.uomName || null,
+        qty,
+        rate,
+        baseAmount: Math.round(baseAmount*100)/100,
+        gstAmount,
+        costCentre: ccMap[itemId] ?? null,
+        grnNo: row.GRNNo,
+        glHeadId: glMaster?.glHeadId ?? null,
+      });
+    }
+  }
+
+  const glHeadIds = [...new Set(items.map((it) => it.glHeadId).filter(Boolean))];
+  if (glHeadIds.length) {
+    const req = pool.request();
+    const ph = glHeadIds.map((id, i) => { req.input(`hid${i}`, sql.Int, id); return `@hid${i}`; }).join(",");
+    const res = await req.query(`SELECT LHeadId, LHeadName, LHeadCode FROM dbo.AccountHeadMaster WHERE LHeadId IN (${ph})`);
+    const byId = new Map(res.recordset.map((r) => [r.LHeadId, r]));
+    for (const it of items) {
+      const head = it.glHeadId ? byId.get(it.glHeadId) : null;
+      it.glHeadName = head?.LHeadName ?? null;
+      it.glHeadCode = head?.LHeadCode ?? null;
+    }
+  }
+  return items;
+}
+
 // Resolves every GRN id feeding an invoice — the primary eb.ESourceId, plus
 // every id in eb.ELinkedGrnIds for a multi-GRN combined invoice.
 function resolveGrnIds(eb) {
@@ -4084,12 +4166,13 @@ router.get("/:id/posting", async (req, res) => {
 
     // Determine if GRN-linked
     const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
-    let baseAmount = 0, taxAmount = 0, totalAmount = 0, perGrn = null, costCentreBreakdown = [];
+    let baseAmount = 0, taxAmount = 0, totalAmount = 0, perGrn = null, costCentreBreakdown = [], itemBreakdown = [];
 
     if (isGrnLinked) {
       const grnIds = resolveGrnIds(eb);
       ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, grnIds));
       costCentreBreakdown = await computeGrnCostCentreBreakdown(pool, grnIds);
+      itemBreakdown = await computeGrnItemBreakdown(pool, grnIds);
     } else {
       // Direct (non-GRN) booking: back-derive base/tax from the invoice's
       // own GST rates against the GST-inclusive ENetAmount — MUST exactly
@@ -4155,6 +4238,11 @@ router.get("/:id/posting", async (req, res) => {
       // a 1-row array so the frontend can render one consistent shape.
       grnBreakdown: perGrn,
       costCentreBreakdown,
+      // Per-item rows (itemId, name, qty, rate, base/GST, cost centre, and
+      // the item's own tagged GL Account for context) — lets the Posting
+      // tab show the same item-wise breakdown as the GRN's own Posting tab
+      // instead of one lumped PGRN row per GRN.
+      itemBreakdown,
       supplierName: eb.SupplierName,
       accounts,
       expenseHeadAllocations,
