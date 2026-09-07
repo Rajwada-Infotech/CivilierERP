@@ -291,7 +291,7 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
         ON gle.SourceType = 'FundTransfer' AND ft.FTId = gle.SourceId
       -- Both ExpenseBooking (auto-post-on-approval) AND InvoicePosting (the
       -- authoritative manual "Post to GL" action) share gle.SourceId = the
-      // same ExpenseBooking.Eid — matching only 'ExpenseBooking' here meant
+      -- same ExpenseBooking.Eid — matching only 'ExpenseBooking' here meant
       -- every InvoicePosting-sourced invoice fell through to the JV voucher
       -- number (t.VoucherNo, e.g. "GL-2026-00024") instead of its own real
       -- invoice doc number.
