@@ -1,16 +1,15 @@
 /**
  * VendorLedgerReport.tsx — Reports → Vendor Ledger Report
  *
- * Search any party or GL head by name — supplier, customer, contractor,
- * broker, loan counterparty, bank, whatever — and see every transaction ever
- * posted against it: invoices, payments, loans, journal vouchers, fund
- * transfers, GRNs. Same running-balance passbook pattern as Balance Enquiry,
- * just searched by name across every ledger head instead of picked from a
- * bank-only dropdown. See backend/routes/vendorLedger.js.
+ * Search any Supplier by name and see every transaction ever posted
+ * against it: invoices, payments, journal vouchers, fund transfers. Same
+ * running-balance passbook pattern as Balance Enquiry, just searched by
+ * name instead of picked from a bank-only dropdown. See
+ * backend/routes/vendorLedger.js.
  *
- * Before a party is searched/selected, shows every transaction across every
- * party (newest first) instead of an empty placeholder — the "all" view then
- * narrows to one party's own passbook (with running balance and summary
+ * Before a supplier is searched/selected, shows every supplier transaction
+ * (newest first) instead of an empty placeholder — the "all" view then
+ * narrows to one supplier's own passbook (with running balance and summary
  * tiles) once one is picked. `VendorLedgerReportBody` is the reusable core
  * (no page chrome), embedded directly into Reports.tsx's report catalog;
  * the default export below just wraps it for the standalone route.
@@ -285,7 +284,7 @@ export function VendorLedgerReportBody() {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setShowResults(true); }}
             onFocus={() => setShowResults(true)}
-            placeholder="Type a vendor, customer, contractor, broker, or GL account name…"
+            placeholder="Type a supplier name…"
             className="w-full h-9 pl-8 pr-8 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
           />
           {(query || selectedHead) && (
