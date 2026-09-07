@@ -1,15 +1,14 @@
 /**
  * vendorLedger.js — Finance → Vendor Ledger Report
  *
- * A party "passbook": search any AccountHeadMaster row by name — supplier,
- * customer, contractor, broker, loan counterparty, or any other ledger head —
- * and see every transaction ever posted against it (invoices, payments,
- * loans, journal vouchers, fund transfers, GRNs...), with a running balance.
+ * A supplier's "passbook": search any AccountHeadMaster row of type 'S' by
+ * name and see every transaction ever posted against it (invoices,
+ * payments, journal vouchers, fund transfers...), with a running balance.
  * Same evidence and pattern as balanceEnquiry.js (dbo.GeneralLedgerEntry is
  * the single canonical, provably-complete ledger table — every module that
  * ever posts against a party head goes through services/generalLedger.js's
- * postVoucher()), just not restricted to LHeadType='B' banks and searched by
- * name instead of picked from a company-scoped dropdown.
+ * postVoucher()), just scoped to Suppliers and searched by name instead of
+ * picked from a company-scoped dropdown.
  */
 const express = require("express");
 const router = express.Router();
@@ -41,6 +40,7 @@ router.get("/search", requirePageRight("vendor-ledger", "view"), async (req, res
       SELECT TOP 30 ${HEAD_SELECT}
       FROM dbo.AccountHeadMaster ahm
       WHERE ahm.LHeadStatus = 1
+        AND ahm.LHeadType = 'S'
         AND (ahm.LHeadName LIKE @Q OR ahm.DisplayName LIKE @Q OR ahm.LHeadCode LIKE @Q)
       ORDER BY ISNULL(ahm.DisplayName, ahm.LHeadName)
     `);
@@ -51,25 +51,40 @@ router.get("/search", requirePageRight("vendor-ledger", "view"), async (req, res
   }
 });
 
-// Shared: resolve a head row (404 if not found / inactive).
+// Shared: resolve a head row (404 if not found / inactive / not a Supplier).
 async function loadHead(pool, headId) {
   const result = await pool.request().input("Id", sql.Int, headId).query(`
     SELECT ${HEAD_SELECT}
     FROM dbo.AccountHeadMaster ahm
-    WHERE ahm.LHeadId = @Id AND ahm.LHeadStatus = 1
+    WHERE ahm.LHeadId = @Id AND ahm.LHeadStatus = 1 AND ahm.LHeadType = 'S'
   `);
   return result.recordset[0] || null;
 }
 
-// Opening-balance-equivalent baked into the head itself, same convention
-// financialStatements.js's /balance-sheet uses: BankOpeningBalance for a
-// bank head, OnAccountBalance for a Supplier/Customer head — never both,
-// harmless to always select since the other column is just null/0 for any
-// other type.
-const OPENING_ADJ_SQL = `
-  ISNULL(ahm.BankOpeningBalance, 0)
-  + CASE WHEN ahm.LHeadType IN ('S', 'C') THEN ISNULL(ahm.OnAccountBalance, 0) ELSE 0 END
-`;
+// Bank's own manually-entered opening balance — same convention
+// financialStatements.js's /balance-sheet uses. This is the ONLY flat,
+// non-date-scoped adjustment left here: a Supplier/Contractor's on-account
+// balance (AccountHeadMaster.OnAccountBalance) is deliberately NOT folded
+// in this way anymore — unlike a bank's pre-cutover balance, every rupee of
+// OnAccountBalance IS itemized in dbo.OnAccountLedger, and this report
+// already merges those rows into the transaction list (fetchOnAccountRows
+// below). Adding the flat cached total on top double-counted every advance
+// payment — it showed up once as the "opening balance" and again as its
+// own transaction row. Use onAccountNet() against fetchOnAccountRows()
+// instead, scoped to before the report's own `from` date the same way GL
+// activity is.
+const OPENING_ADJ_SQL = `ISNULL(ahm.BankOpeningBalance, 0)`;
+
+// Net contribution of a set of OnAccountLedger rows, in the same sign
+// convention AccountHeadMaster.OnAccountBalance uses (CREDIT adds, DEBIT
+// subtracts) — mirrors mapOnAccountRow's Debit/Credit mapping below.
+// `beforeDate` scopes to rows strictly before it (for a report's "opening"
+// balance); omit it to sum every row (for "current balance" / no window).
+function onAccountNet(rows, beforeDate) {
+  return rows
+    .filter((r) => !beforeDate || new Date(r.TxnDate) < new Date(beforeDate))
+    .reduce((s, r) => s + (r.TxnType === "CREDIT" ? Number(r.Amount) : -Number(r.Amount)), 0);
+}
 
 // ── GET /:headId/summary — headline figures ─────────────────────────────────
 router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async (req, res) => {
@@ -87,7 +102,7 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
     const openingRes = await pool.request().input("Id", sql.Int, headId).query(`
       SELECT ${OPENING_ADJ_SQL} AS OpeningAdj FROM dbo.AccountHeadMaster ahm WHERE ahm.LHeadId = @Id
     `);
-    const openingAdj = Number(openingRes.recordset[0]?.OpeningAdj || 0);
+    const bankOpening = Number(openingRes.recordset[0]?.OpeningAdj || 0);
 
     const result = await pool
       .request()
@@ -116,18 +131,39 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
     `);
 
     const row = result.recordset[0] || {};
-    const currentBalance = openingAdj + Number(row.AllTimeNet || 0);
-    const windowOpeningBalance = openingAdj + Number(row.PreWindowNet || 0);
+
+    // On-account advances/applications (dbo.OnAccountLedger) never post a
+    // GeneralLedgerEntry leg — merge their own contribution the same way
+    // the transactions list does, instead of the old flat, always-included
+    // AccountHeadMaster.OnAccountBalance (see OPENING_ADJ_SQL's comment).
+    const oaRows = await fetchOnAccountRows(pool, headId);
+    const oaAllTimeNet = onAccountNet(oaRows);
+    const oaPreWindowNet = from ? onAccountNet(oaRows, from) : 0;
+    const oaPeriodRows = oaRows.filter((r) => {
+      const d = new Date(r.TxnDate);
+      if (from && d < new Date(from)) return false;
+      if (to && d > new Date(to)) return false;
+      return true;
+    });
+    // Same sign flip mapOnAccountRow uses — a CREDIT (advance) row counts
+    // toward Period Debit, a DEBIT (applied) row toward Period Credit.
+    const oaPeriodDebit = oaPeriodRows.filter((r) => r.TxnType === "CREDIT").reduce((s, r) => s + Number(r.Amount), 0);
+    const oaPeriodCredit = oaPeriodRows.filter((r) => r.TxnType === "DEBIT").reduce((s, r) => s + Number(r.Amount), 0);
+
+    const currentBalance = bankOpening + Number(row.AllTimeNet || 0) + oaAllTimeNet;
+    const windowOpeningBalance = bankOpening + Number(row.PreWindowNet || 0) + oaPreWindowNet;
+    const lastOaDate = oaPeriodRows.reduce((max, r) => (!max || new Date(r.TxnDate) > new Date(max) ? r.TxnDate : max), null);
+    const lastTransactionDate = [row.LastTransactionDate, lastOaDate].filter(Boolean).sort().pop() || null;
 
     res.json({
       head,
-      openingBalance: openingAdj,
+      openingBalance: from ? windowOpeningBalance : bankOpening,
       currentBalance,
-      windowOpeningBalance: from ? windowOpeningBalance : openingAdj,
-      periodDebit: Number(row.PeriodDebit || 0),
-      periodCredit: Number(row.PeriodCredit || 0),
-      periodTxnCount: Number(row.PeriodTxnCount || 0),
-      lastTransactionDate: row.LastTransactionDate || null,
+      windowOpeningBalance: from ? windowOpeningBalance : bankOpening,
+      periodDebit: Number(row.PeriodDebit || 0) + oaPeriodDebit,
+      periodCredit: Number(row.PeriodCredit || 0) + oaPeriodCredit,
+      periodTxnCount: Number(row.PeriodTxnCount || 0) + oaPeriodRows.length,
+      lastTransactionDate,
     });
   } catch (err) {
     console.error("VENDOR LEDGER SUMMARY ERROR:", err.message);
@@ -158,12 +194,10 @@ async function fetchOnAccountRows(pool, headId) {
   return result.recordset;
 }
 
-// Same sign convention dbo.AccountHeadMaster.OnAccountBalance already uses
-// (CREDIT adds to it, DEBIT subtracts) — and OPENING_ADJ_SQL adds that
-// balance the same direction a Debit contributes to the running balance, so
-// a CREDIT row here becomes a Debit-side amount and a DEBIT row a Credit-
-// side amount, to keep the merged running balance consistent with the
-// head's own maintained OnAccountBalance total.
+// Same sign convention onAccountNet() uses (CREDIT adds, DEBIT subtracts):
+// a CREDIT row becomes a Debit-side amount and a DEBIT row a Credit-side
+// amount here, so merging these rows into the GL-sourced transaction list
+// and summing Debit-Credit produces the same net either way.
 function mapOnAccountRow(r) {
   const amount = Number(r.Amount) || 0;
   const isCredit = r.TxnType === "CREDIT";
@@ -270,10 +304,7 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
     // instead of a second parameterized date-range query.
     const allOaRows = await fetchOnAccountRows(pool, headId);
     if (from) {
-      const preWindowNet = allOaRows
-        .filter((r) => new Date(r.TxnDate) < new Date(from))
-        .reduce((s, r) => s + (r.TxnType === "CREDIT" ? Number(r.Amount) : -Number(r.Amount)), 0);
-      windowOpening = Math.round((windowOpening + preWindowNet) * 100) / 100;
+      windowOpening = Math.round((windowOpening + onAccountNet(allOaRows, from)) * 100) / 100;
     }
     const oaRowsInWindow = allOaRows.filter((r) => {
       const d = new Date(r.TxnDate);
@@ -345,7 +376,7 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
         eb.EDocNo  AS ExpenseBookingDocNo,
         ls.LoanNo  AS LoanDocNo
       FROM dbo.GeneralLedgerEntry gle
-      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = gle.LHeadId
+      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = gle.LHeadId AND ahm.LHeadType = 'S'
       LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = gle.CostCenterId
       LEFT JOIN dbo.NewPayment np
         ON gle.SourceType IN ('NewPayment', 'PaymentPosting', 'BounceChargePosting', 'LoanRepayment')
@@ -377,8 +408,8 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
              oal.CompanyId, oal.ProjectId,
              ISNULL(ahm.DisplayName, ahm.LHeadName) AS PartyName, ahm.LHeadType AS PartyType
       FROM dbo.OnAccountLedger oal
-      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oal.PartyId
-      WHERE oal.PartyType IN ('${ON_ACCOUNT_PARTY_TYPES.join("','")}')
+      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oal.PartyId AND ahm.LHeadType = 'S'
+      WHERE oal.PartyType = 'Supplier'
         AND (@From IS NULL OR oal.TxnDate >= @From)
         AND (@To IS NULL OR oal.TxnDate <= @To)
     `);

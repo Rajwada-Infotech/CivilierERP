@@ -339,7 +339,9 @@ const ALL_REPORTS: ReportDef[] = [
     apiPath: "/api/expense-booking",
     // expenseBooking.js's GET / accepts companyId/projectName(name match)/
     // from/to/finYear(label, not id — skipped here since this catalog's
-    // Financial Year filter sends the numeric FId).
+    // Financial Year filter sends the numeric FId)/expenseHeadId (matches
+    // either the multi-head ExpenseHeadAllocation table or the legacy
+    // single EGLAccountId column).
     filterConfig: {
       companyParam: "companyId",
       finYearParam: null,
@@ -349,27 +351,15 @@ const ALL_REPORTS: ReportDef[] = [
       projectParam: "projectName",
       projectValueType: "name",
     },
+    // Pared down to just Doc No + Amount posted to the Expense Head — an
+    // invoice always debits it (there's no credit-note flow through this
+    // table), so "Amount" here is that debit.
     columns: [
-      { header: "Date", accessor: (r) => (r.EDocDate ? String(r.EDocDate).slice(0, 10) : "—") },
       { header: "Doc No", accessor: (r) => (r.EDocNo ?? "—") as string },
-      { header: "Vendor", accessor: (r) => (r.ESupplierName ?? "—") as string },
-      { header: "Company", accessor: (r) => (r.ECompanyName ?? "—") as string },
-      { header: "Project", accessor: (r) => (r.EProjectDisplayName ?? "—") as string },
-      { header: "Expense Head", accessor: (r) => (r.EExpenseHeadNames ?? r.EGLAccountName ?? "—") as string },
-      { header: "Basic Amount", accessor: (r) => fmt(Number(r.EAmount) || 0) },
       {
-        header: "GST %",
-        accessor: (r) => {
-          const igst = Number(r.EIgstRate) || 0;
-          if (igst > 0) return `${igst}%`;
-          return `${(Number(r.ECgstRate) || 0) + (Number(r.ESgstRate) || 0)}%`;
-        },
-      },
-      {
-        header: "Net Amount",
+        header: "Amount",
         accessor: (r) => fmt(Number(r.ENetAmount ?? r.EGrnTotalAmount ?? r.EAmount) || 0),
       },
-      { header: "Status", accessor: (r) => (r.EStatus ?? "—") as string },
     ],
   },
   {
@@ -2251,6 +2241,24 @@ const ReportTable: React.FC<{
       .catch(() => {});
   }, [isPaymentReasonReport]);
 
+  // ── Expense Head switcher (expense-register only) ────────────────────────
+  const isExpenseRegister = report.id === "expense-register";
+  const [expenseHeadId, setExpenseHeadId] = useState<string>("");
+  const [expenseHeadOptions, setExpenseHeadOptions] = useState<{ id: number; name: string }[]>([]);
+  useEffect(() => {
+    if (!isExpenseRegister) return;
+    fetchWithAuth("/api/journal-voucher/ledger-options")
+      .then((r) => r.json().catch(() => []))
+      .then((list: { id: number; label: string; type: string }[]) =>
+        setExpenseHeadOptions(
+          (Array.isArray(list) ? list : [])
+            .filter((l) => l.type === "GL")
+            .map((l) => ({ id: l.id, name: l.label })),
+        ),
+      )
+      .catch(() => {});
+  }, [isExpenseRegister]);
+
   const buildParams = (): Record<string, string> => {
     const fc = report.filterConfig ?? {};
     const f: Record<string, string> = {};
@@ -2298,6 +2306,9 @@ const ReportTable: React.FC<{
 
     // Stock summary: pass selected godownId to inventory-master
     if (isStockSummary && godownId) f["godownId"] = godownId;
+
+    // Expense Register: pass selected expenseHeadId
+    if (isExpenseRegister && expenseHeadId) f["expenseHeadId"] = expenseHeadId;
 
     // Payment Reason Report: scope to a single reason when selected
     if (isPaymentReasonReport && reasonFilter) f["reason"] = reasonFilter;
@@ -2399,7 +2410,7 @@ const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, rows, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadId, rows, projects]);
 
   const totalPages = Math.ceil(rows.length / PAGE_SIZE);
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -2494,6 +2505,32 @@ const ReportTable: React.FC<{
                 {reasonOptions.map((r) => (
                   <option key={r.id} value={r.name}>
                     {r.name}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={11}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
+          )}
+
+          {/* Expense Head switcher — expense-register only */}
+          {isExpenseRegister && expenseHeadOptions.length > 0 && (
+            <div className="relative flex items-center">
+              <Receipt
+                size={11}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <select
+                value={expenseHeadId}
+                onChange={(e) => setExpenseHeadId(e.target.value)}
+                className="appearance-none pl-7 pr-6 py-1.5 h-[30px] rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              >
+                <option value="">All Expense Heads</option>
+                {expenseHeadOptions.map((h) => (
+                  <option key={h.id} value={String(h.id)}>
+                    {h.name}
                   </option>
                 ))}
               </select>
