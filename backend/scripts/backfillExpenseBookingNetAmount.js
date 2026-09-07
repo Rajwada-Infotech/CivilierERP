@@ -1,15 +1,22 @@
 // One-off backfill for GRN-linked invoices whose auto-post-on-approval
 // GL entry (services/generalLedger.js's postExpenseBookingApproval,
-// SourceType='ExpenseBooking') credited the supplier only the taxable
-// BASE amount instead of the GST-inclusive net payable.
+// SourceType='ExpenseBooking') credited the supplier less than the
+// GST-inclusive net payable. Two root causes, both in the same function:
 //
-// Root cause: `netAmount = eb.ENetAmount ?? eb.EAmount` fell back to
-// eb.EAmount (the base) whenever ENetAmount was unset, instead of the
-// linked GRN's own (incl-GST) TotalAmount — silently understating what
-// the supplier was actually owed in GL by the tax amount. Fixed in
-// postExpenseBookingApproval; this backfill finds every already-posted
-// GRN-linked ExpenseBooking entry whose credited amount doesn't match
-// the correct payable and reposts it.
+// 1. `netAmount = eb.ENetAmount ?? eb.EAmount` fell back to eb.EAmount (the
+//    base) whenever ENetAmount was unset, instead of the linked GRN's own
+//    (incl-GST) TotalAmount.
+// 2. A SET-but-wrong ENetAmount (equal to the base amount, not the net
+//    payable, with no billing terms to justify the difference) hit the
+//    "billing-term adjustment" delta logic instead — the gap between the
+//    wrong ENetAmount and the GRN's real total got silently routed to
+//    Purchase A/c rather than the supplier, since the code trusted any
+//    non-null ENetAmount without checking whether EBillingTermsData
+//    actually had terms recorded to justify a difference.
+//
+// Both fixed in postExpenseBookingApproval; this backfill finds every
+// already-posted GRN-linked ExpenseBooking entry whose supplier-credit leg
+// doesn't match the correct payable and reposts it.
 //
 // GL entries are never edited in place — for every affected invoice this
 // reverses the existing ExpenseBooking-sourced voucher (IsReversed=1) and
@@ -42,7 +49,7 @@ async function main() {
   // the invoice total was a false positive in an earlier version of this
   // script.
   const rowsRes = await pool.request().query(`
-    SELECT eb.Eid, eb.EDocNo, eb.EAmount, eb.ENetAmount, eb.ESourceId,
+    SELECT eb.Eid, eb.EDocNo, eb.EAmount, eb.ENetAmount, eb.ESourceId, eb.EBillingTermsData,
            grn.TotalAmount AS GrnTotal, gle.CreditAmount AS PostedCredit, gle.VoucherNo
     FROM dbo.ExpenseBooking eb
     JOIN dbo.GoodsReceiptNotes grn ON grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
@@ -56,7 +63,22 @@ async function main() {
 
   let changedCount = 0;
   for (const row of rowsRes.recordset) {
-    const correctAmount = row.ENetAmount != null ? Number(row.ENetAmount) : Number(row.GrnTotal) || 0;
+    const grnTotal = Number(row.GrnTotal) || 0;
+    let billingTerms = [];
+    try {
+      const parsed = row.EBillingTermsData ? JSON.parse(row.EBillingTermsData) : [];
+      if (Array.isArray(parsed)) billingTerms = parsed;
+    } catch { /* malformed — treat as no terms */ }
+    const hasBillingTerms = billingTerms.length > 0;
+    // Mirrors postExpenseBookingApproval's own effectiveNetAmount exactly —
+    // ENetAmount only overrides the GRN's total when genuine billing terms
+    // are on record to justify the difference (a discount/freight term
+    // legitimately changes what the supplier's own leg is credited); an
+    // ENetAmount that differs from the GRN total with no terms recorded is
+    // treated as bad data, not a real adjustment.
+    const correctAmount = row.ENetAmount != null && (hasBillingTerms || Number(row.ENetAmount) === grnTotal)
+      ? Number(row.ENetAmount)
+      : grnTotal;
     const postedAmount = Number(row.PostedCredit);
     if (Math.abs(correctAmount - postedAmount) < 0.01) continue;
 

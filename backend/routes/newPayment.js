@@ -2420,6 +2420,19 @@ router.post("/:id/post-to-gl", async (req, res) => {
       .query(`SELECT TOP 1 EntryId FROM dbo.GeneralLedgerEntry WHERE SourceType='PaymentPosting' AND SourceId=@SrcId AND IsReversed=0`);
     if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This payment has already been posted to GL." });
 
+    // This route (SourceType='PaymentPosting') is the authoritative posting
+    // path for a payment — postPaymentApproval (SourceType='NewPayment',
+    // fires automatically on approval) independently guards against
+    // re-entry the same way, but neither ever checked for the OTHER's
+    // posting, so a payment that auto-posted on approval and was later run
+    // through this manual "Post to GL" action got double-posted under two
+    // different accounting treatments (same bug class as GRN/GRNPosting and
+    // ExpenseBooking/InvoicePosting). Reverse any stale NewPayment posting
+    // for this payment before superseding it here, so PaymentPosting always
+    // wins going forward.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(pool, "NewPayment", pmtId);
+
     const amount = parseFloat(pmt.PAmount) || 0;
     if (amount <= 0) return res.status(400).json({ error: "No amount to post." });
     const tdsAmount = parseFloat(pmt.TDSAmount) || 0;
