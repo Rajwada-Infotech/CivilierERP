@@ -204,6 +204,17 @@ async function postGRNApproval(pool, grnId, userEmail) {
   if (await hasPosting(pool, "GRN", grnId))
     return { posted: true, reason: "already posted (idempotent)" };
 
+  // routes/grns.js's POST /:id/post-to-gl (SourceType='GRNPosting') is the
+  // authoritative posting path for a GRN — it independently guards against
+  // re-entry the same way this function does, but neither ever checked for
+  // the OTHER's posting, so a GRN approved (auto-posting here) and later
+  // run through the manual "Post to GL" action got double-posted to GL
+  // under two different accounting treatments (see migration 410's cleanup
+  // of the historical cases this caused). If GRNPosting already handled
+  // this GRN, defer to it entirely.
+  if (await hasPosting(pool, "GRNPosting", grnId))
+    return { posted: true, reason: "already posted via GRNPosting (authoritative)" };
+
   const result = await pool.request().input("GRNID", sql.Int, grnId).query(`
     SELECT grn.GRNID, grn.DocNo, grn.GRNNo, grn.GRNDate, grn.GRNItems,
            grn.TotalAmount, grn.SupplierID, grn.POID, grn.GodownID,
@@ -281,8 +292,15 @@ async function postGRNApproval(pool, grnId, userEmail) {
   // set) instead of falling into Purchase A/c, so a fixed-asset purchase
   // actually shows up under the FIXED ASSETS group in Trial Balance/the
   // Balance Sheet rather than as an ordinary expense.
+  //
+  // Non-fixed-asset items also get this treatment now — any item tagged
+  // with its own GL Account (Item_Master_Group.M_GLHeadId, migration 295)
+  // posts there instead of the shared Purchase A/c. Previously every
+  // ordinary item lumped into Purchase A/c regardless of its own tag, so a
+  // tagged item's GL account never actually appeared in Trial Balance.
   const itemIds = items.map((it) => it.itemId).filter((id) => id != null).map(String);
   const fixedAssetGlHeadByItemId = new Map();
+  const itemGlHeadById = new Map();
   if (itemIds.length) {
     const req = pool.request();
     const placeholders = itemIds
@@ -291,19 +309,22 @@ async function postGRNApproval(pool, grnId, userEmail) {
         return `@iid${i}`;
       })
       .join(",");
-    const faRes = await req.query(`
-      SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, M_GLHeadId
+    const mRes = await req.query(`
+      SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, M_GLHeadId, M_Type
       FROM dbo.Item_Master_Group
-      WHERE CONVERT(NVARCHAR(100), M_Id) IN (${placeholders}) AND M_Type = 'Fixed Asset'
+      WHERE CONVERT(NVARCHAR(100), M_Id) IN (${placeholders})
     `);
-    for (const r of faRes.recordset) fixedAssetGlHeadByItemId.set(r.M_Id, r.M_GLHeadId ?? null);
+    for (const r of mRes.recordset) {
+      if (r.M_Type === "Fixed Asset") fixedAssetGlHeadByItemId.set(r.M_Id, r.M_GLHeadId ?? null);
+      else itemGlHeadById.set(r.M_Id, r.M_GLHeadId ?? null);
+    }
   }
 
   const defaultFixedAssetHeadId = fixedAssetGlHeadByItemId.size
     ? await getGLHeadId(pool, GL_ACCOUNTS.FIXED_ASSET)
     : null;
 
-  let purchaseAmount = 0;
+  const purchaseAmountByHead = new Map(); // lHeadId (null = default Purchase A/c) -> amount
   const fixedAssetAmountByHead = new Map(); // lHeadId -> amount
   for (const it of items) {
     const amt = Number(it.totalAmount) || 0;
@@ -312,7 +333,8 @@ async function postGRNApproval(pool, grnId, userEmail) {
       const headId = fixedAssetGlHeadByItemId.get(itemId) || defaultFixedAssetHeadId;
       fixedAssetAmountByHead.set(headId, (fixedAssetAmountByHead.get(headId) || 0) + amt);
     } else {
-      purchaseAmount += amt;
+      const headId = (itemId && itemGlHeadById.get(itemId)) || null;
+      purchaseAmountByHead.set(headId, (purchaseAmountByHead.get(headId) || 0) + amt);
     }
   }
 
@@ -326,6 +348,11 @@ async function postGRNApproval(pool, grnId, userEmail) {
     GL_ACCOUNTS.PENDING_GRN_PROVISION,
   );
 
+  const purchaseLegs = Array.from(purchaseAmountByHead.entries()).map(([lHeadId, amt]) => ({
+    lHeadId: lHeadId || purchaseHeadId,
+    debit: amt,
+    narration: `GRN ${docNo} — goods received (base)`,
+  }));
   const fixedAssetLegs = Array.from(fixedAssetAmountByHead.entries()).map(([lHeadId, amt]) => ({
     lHeadId,
     debit: amt,
@@ -341,11 +368,7 @@ async function postGRNApproval(pool, grnId, userEmail) {
     projectId: grn.ProjectId ?? null,
     createdBy: userEmail,
     legs: [
-      {
-        lHeadId: purchaseHeadId,
-        debit: purchaseAmount,
-        narration: `GRN ${docNo} — goods received (base)`,
-      },
+      ...purchaseLegs,
       ...fixedAssetLegs,
       {
         lHeadId: provisionalCreditHeadId,
