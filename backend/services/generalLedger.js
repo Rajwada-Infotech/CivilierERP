@@ -405,7 +405,8 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
 
   const result = await pool.request().input("Eid", sql.Int, ebId).query(`
     SELECT eb.Eid, eb.EDocNo, eb.EDocDate, eb.EAmount, eb.ENetAmount,
-           eb.ESourceType, eb.ESourceId, eb.EName, eb.ECompanyId, eb.EProjectName
+           eb.ESourceType, eb.ESourceId, eb.EName, eb.ECompanyId, eb.EProjectName,
+           eb.EBillingTermsData
     FROM dbo.ExpenseBooking eb
     WHERE eb.Eid = @Eid
   `);
@@ -445,7 +446,25 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
     // silently credited the supplier only the base amount instead of the
     // full invoice payable. For a GRN-linked booking the GRN's own
     // (incl-GST) TotalAmount is the correct fallback instead.
-    const effectiveNetAmount = eb.ENetAmount != null ? netAmount : grnTotal;
+    //
+    // A SET-but-wrong ENetAmount hits the exact same problem through a
+    // different door: the (delta = effectiveNetAmount - grnTotal) legs
+    // below exist to route a genuine billing-term adjustment (freight,
+    // discount) to Purchase A/c instead of the supplier — but when
+    // EBillingTermsData has no actual terms recorded, there's no legitimate
+    // reason for ENetAmount to differ from the GRN's own total at all, so a
+    // mismatch there is data corruption, not a real adjustment. Trusting it
+    // anyway silently routed the gap (here, the GST portion) to Purchase
+    // A/c instead of the supplier, understating what they're actually owed.
+    let billingTerms = [];
+    try {
+      const parsed = eb.EBillingTermsData ? JSON.parse(eb.EBillingTermsData) : [];
+      if (Array.isArray(parsed)) billingTerms = parsed;
+    } catch { /* malformed — treat as no terms */ }
+    const hasBillingTerms = billingTerms.length > 0;
+    const effectiveNetAmount = eb.ENetAmount != null && (hasBillingTerms || Number(eb.ENetAmount) === grnTotal)
+      ? netAmount
+      : grnTotal;
     const delta = effectiveNetAmount - grnTotal; // billing-term adjustment, can be negative
 
     const pendingGrnHeadId = await getGLHeadId(

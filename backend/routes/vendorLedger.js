@@ -289,8 +289,14 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
         ON gle.SourceType = 'JournalVoucher' AND jv.JVID = gle.SourceId
       LEFT JOIN dbo.FundTransfer ft
         ON gle.SourceType = 'FundTransfer' AND ft.FTId = gle.SourceId
+      -- Both ExpenseBooking (auto-post-on-approval) AND InvoicePosting (the
+      -- authoritative manual "Post to GL" action) share gle.SourceId = the
+      // same ExpenseBooking.Eid — matching only 'ExpenseBooking' here meant
+      -- every InvoicePosting-sourced invoice fell through to the JV voucher
+      -- number (t.VoucherNo, e.g. "GL-2026-00024") instead of its own real
+      -- invoice doc number.
       LEFT JOIN dbo.ExpenseBooking eb
-        ON gle.SourceType = 'ExpenseBooking' AND eb.Eid = gle.SourceId
+        ON gle.SourceType IN ('ExpenseBooking', 'InvoicePosting') AND eb.Eid = gle.SourceId
       LEFT JOIN dbo.LoanSanction ls
         ON gle.SourceType = 'LoanPosting' AND ls.LoanId = gle.SourceId
       WHERE gle.LHeadId = @Id AND gle.IsReversed = 0
