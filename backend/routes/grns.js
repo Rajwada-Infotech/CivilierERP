@@ -1809,8 +1809,30 @@ router.get("/:id/posting", async (req, res) => {
       if (itemIds.length > 0) {
         const mReq = pool.request();
         const ph = itemIds.map((id, i) => { mReq.input(`iid${i}`, sql.NVarChar(100), id); return `@iid${i}`; }).join(",");
-        const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100), M_Id) IN (${ph})`);
-        for (const row of mRes.recordset) masterMap[row.M_Id] = { cgstRate: parseFloat(row.M_CGST) || 0, sgstRate: parseFloat(row.M_SGST) || 0 };
+        const mRes = await mReq.query(`
+          SELECT CONVERT(NVARCHAR(100), m.M_Id) AS M_Id, ISNULL(m.M_CGST,0) AS M_CGST, ISNULL(m.M_SGST,0) AS M_SGST,
+                 m.M_Type, m.M_GLHeadId, gl.LHeadName AS GLHeadName, gl.LHeadCode AS GLHeadCode
+          FROM dbo.Item_Master_Group m
+          LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = m.M_GLHeadId
+          WHERE CONVERT(NVARCHAR(100), m.M_Id) IN (${ph})
+        `);
+        for (const row of mRes.recordset) masterMap[row.M_Id] = {
+          cgstRate: parseFloat(row.M_CGST) || 0, sgstRate: parseFloat(row.M_SGST) || 0,
+          isFixedAsset: row.M_Type === "Fixed Asset",
+          glHeadId: row.M_GLHeadId ?? null, glHeadName: row.GLHeadName ?? null, glHeadCode: row.GLHeadCode ?? null,
+        };
+      }
+      // Untagged Fixed Asset items fall back to the "Fixed Assets A/c"
+      // capitalization ledger, not the generic "Purchase A/c" — otherwise a
+      // fixed-asset purchase silently posts as an ordinary expense instead
+      // of showing up under FIXED ASSETS in Trial Balance/Balance Sheet.
+      // Mirrors postGRNApproval's (services/generalLedger.js) existing
+      // fixed-asset handling, which the manual "Post to GL" route never had.
+      const needsFixedAssetHead = Object.values(masterMap).some((m) => m.isFixedAsset && !m.glHeadId);
+      let fixedAssetLed = null;
+      if (needsFixedAssetHead) {
+        const faRes = await pool.request().query(`SELECT TOP 1 LHeadId, LHeadName, LHeadCode FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1 AND LHeadName = 'Fixed Assets A/c'`);
+        fixedAssetLed = faRes.recordset[0] ?? null;
       }
       // Per-item Cost Centre — Cost Centre now lives on the PO's own line
       // item (migration 365), not the PO header, since one PO/GRN can mix
@@ -1839,12 +1861,19 @@ router.get("/:id/posting", async (req, res) => {
         const qty = Number(it.quantity || it.Quantity || receivedQty || 0);
         const rate = Number(it.rate || it.Rate || 0);
         const baseAmount = Number(it.totalAmount) > 0 ? Number(it.totalAmount) : rate * qty;
-        const master = masterMap[itemId] || { cgstRate: 0, sgstRate: 0 };
+        const master = masterMap[itemId] || { cgstRate: 0, sgstRate: 0, isFixedAsset: false, glHeadId: null, glHeadName: null, glHeadCode: null };
         const lineGstPct = Number(it.gstPct ?? it.GstPct ?? NaN);
         const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate + master.sgstRate);
         const gstAmount = Math.round(baseAmount * (totalGSTRate / 100) * 100) / 100;
         totalBase += baseAmount;
         totalGST += gstAmount;
+        // Effective posting account: the item's own tagged GL Account
+        // (Item_Master_Group.M_GLHeadId) if set; otherwise "Fixed Assets
+        // A/c" for untagged Fixed Asset items (capitalized, not expensed);
+        // otherwise null, which falls back to the shared "Purchase A/c".
+        const effGlHeadId = master.glHeadId ?? (master.isFixedAsset ? fixedAssetLed?.LHeadId ?? null : null);
+        const effGlHeadName = master.glHeadName ?? (master.isFixedAsset ? fixedAssetLed?.LHeadName ?? null : null);
+        const effGlHeadCode = master.glHeadCode ?? (master.isFixedAsset ? fixedAssetLed?.LHeadCode ?? null : null);
         itemBreakdown.push({
           itemId,
           itemName: it.itemName || it.ItemName || it.description || it.Description || "Item",
@@ -1854,6 +1883,15 @@ router.get("/:id/posting", async (req, res) => {
           baseAmount: Math.round(baseAmount * 100) / 100,
           gstAmount,
           costCentre: itemCostCentreMap[itemId] ?? null,
+          glHeadId: effGlHeadId,
+          glHeadName: effGlHeadName,
+          glHeadCode: effGlHeadCode,
+          // True only when the item itself was explicitly tagged with a GL
+          // Account — false for the Fixed Assets A/c type-based fallback,
+          // which replaces Purchase A/c outright rather than standing
+          // alongside it (a fixed-asset purchase was never a Purchase A/c
+          // candidate to begin with).
+          glHeadIsExplicitTag: !!master.glHeadId,
         });
       }
     }
@@ -1953,58 +1991,28 @@ router.post("/:id/post-to-gl", async (req, res) => {
     `);
     if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This GRN has already been posted to GL." });
 
+    // This route (SourceType='GRNPosting') is the authoritative posting
+    // path for a GRN — postGRNApproval (SourceType='GRN', fires
+    // automatically on approval) independently guards against re-entry the
+    // same way, but neither ever checked for the OTHER's posting, so a GRN
+    // that auto-posted on approval and was later run through this manual
+    // "Post to GL" action got double-posted under two different accounting
+    // treatments (see migration 410's cleanup of the historical cases).
+    // Reverse any stale GRN posting for this GRN before superseding it
+    // here, so GRNPosting always wins going forward.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(pool, "GRN", grnId);
+
     // Recompute totals — and each item's own Cost Centre (migration 365:
     // Cost Centre lives on the PO's line item now, not the PO header, since
     // one PO/GRN can mix e.g. a fixed-asset item with a consumption item).
-    // Grouping the JV legs by cost centre (instead of one flat Purchase/
-    // PGRN pair for the whole GRN) is what makes the Posting tab's
-    // cost-centre-wise breakdown actually true to what's posted in GL.
-    const rawItems = parseGRNItems(grn.GRNItems);
-    const receivedItems = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
-    let totalBase = 0, totalGST = 0;
-    const costCentreBuckets = new Map(); // key: CostCenterId ?? "unassigned" -> { costCenterId, base, gst }
-    if (receivedItems.length > 0) {
-      const itemIds = receivedItems.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
-      let masterMap = {};
-      if (itemIds.length > 0) {
-        const mReq = pool.request();
-        const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
-        const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
-        for (const row of mRes.recordset) masterMap[row.M_Id]={ cgstRate:parseFloat(row.M_CGST)||0, sgstRate:parseFloat(row.M_SGST)||0 };
-      }
-      let itemCostCentreMap = {};
-      if (grn.POID && itemIds.length > 0) {
-        const ccReq = pool.request().input("POID", sql.Int, grn.POID);
-        const ph2 = itemIds.map((id,i)=>{ ccReq.input(`ccid${i}`,sql.NVarChar(100),id); return `@ccid${i}`; }).join(",");
-        const ccRes = await ccReq.query(`
-          SELECT CONVERT(NVARCHAR(100), ItemId) AS ItemId, CostCenterId
-          FROM dbo.PurchaseOrderItems
-          WHERE PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), ItemId) IN (${ph2})
-        `);
-        for (const row of ccRes.recordset) itemCostCentreMap[row.ItemId] = row.CostCenterId ?? null;
-      }
-      for (const it of receivedItems) {
-        const itemId = String(it.itemId||it.ItemId||"");
-        const receivedQty = Number(it.receivedQty||it.ReceivedQty||0);
-        const rate = Number(it.rate||it.Rate||0);
-        const baseAmount = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||receivedQty||0);
-        const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
-        const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
-        const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
-        const gstAmount = baseAmount*(totalGSTRate/100);
-        totalBase += baseAmount;
-        totalGST += gstAmount;
-
-        const costCenterId = itemCostCentreMap[itemId] ?? null;
-        const bucketKey = costCenterId ?? "unassigned";
-        const bucket = costCentreBuckets.get(bucketKey) ?? { costCenterId, base: 0, gst: 0 };
-        bucket.base += baseAmount;
-        bucket.gst += gstAmount;
-        costCentreBuckets.set(bucketKey, bucket);
-      }
-    }
-    totalBase = Math.round(totalBase*100)/100;
-    totalGST = Math.round(totalGST*100)/100;
+    // Grouping the JV legs by cost centre AND by each item's own GL Account
+    // (instead of one flat Purchase/PGRN pair for the whole GRN) is what
+    // makes the Posting tab's breakdown actually true to what's posted in
+    // GL. Shared with scripts/backfillGrnItemGlHeads.js so a retroactive
+    // backfill can never drift from what a live posting produces.
+    const { computeGrnPostingBuckets, buildGrnPostingLines } = require("../services/grnPosting");
+    const { buckets: costCentreBuckets, totalBase, totalGST } = await computeGrnPostingBuckets(pool, sql, grn);
 
     if (totalBase <= 0) return res.status(400).json({ error: "GRN has no receivable amount to post." });
 
@@ -2017,36 +2025,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const provisionalId = findId((l)=>l.LHeadName.toLowerCase().includes("provisional")&&l.LHeadName.toLowerCase().includes("credit"));
     if (!purchaseId || !pgrnId || !provisionalId) return res.status(422).json({ error: "One or more required system ledgers (Purchase, PGRN, Provisional Credit) are not configured." });
 
-    // JV lines: base amount and tax are posted as two separate self-balancing
-    // pairs rather than one lump PGRN credit —
-    //   1. Purchase A/c Dr (base)         = Provision for Pending GRN A/c Cr (base)
-    //   2. Provisional Credit Available Dr (tax) = Purchase A/c Cr (tax)
-    // The second pair is a same-account repetition of the Purchase ledger
-    // (once as the base-amount debit, once as the tax-amount credit) rather
-    // than crediting PGRN with the GST-inclusive total, so PGRN only ever
-    // reflects the base receivable and the ITC leg nets against Purchase.
-    //
-    // Repeated once per Cost Centre bucket (instead of once for the whole
-    // GRN) so each leg is tagged with the cost centre that actually earned
-    // it — a GRN mixing a fixed-asset item and a consumption item posts two
-    // separate Purchase/PGRN pairs, not one pair with an arbitrary single
-    // cost centre stamped on the whole thing.
-    const lines = [];
-    for (const { costCenterId, base, gst } of costCentreBuckets.values()) {
-      const roundedBase = Math.round(base * 100) / 100;
-      const roundedGst = Math.round(gst * 100) / 100;
-      if (roundedBase <= 0) continue;
-      lines.push(
-        { LHeadId: purchaseId, DebitAmount: roundedBase, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (base)`, CostCenterId: costCenterId },
-        { LHeadId: pgrnId,     DebitAmount: 0, CreditAmount: roundedBase, Narration: `GRN Posting: ${grn.GRNNo} — Provision for Pending GRN`, CostCenterId: costCenterId },
-      );
-      if (roundedGst > 0) {
-        lines.push(
-          { LHeadId: provisionalId, DebitAmount: roundedGst, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Provisional ITC`, CostCenterId: costCenterId },
-          { LHeadId: purchaseId,    DebitAmount: 0, CreditAmount: roundedGst, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (tax offset)`, CostCenterId: costCenterId },
-        );
-      }
-    }
+    const lines = buildGrnPostingLines({ buckets: costCentreBuckets, grnNo: grn.GRNNo, purchaseId, pgrnId, provisionalId });
 
     // Voucher number only — GL posting is independent of the Journal
     // Voucher module. This used to ALSO insert a dbo.JournalVoucher header +
