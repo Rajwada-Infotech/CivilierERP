@@ -2357,6 +2357,7 @@ const ReportTable: React.FC<{
     filters.rangeTo,
     godownId,
     reasonFilter,
+    expenseHeadId,
     projects,
   ]);
 
