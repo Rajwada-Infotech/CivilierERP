@@ -522,7 +522,15 @@ export function VendorLedgerReportBody() {
                         </td>
                         <td className="px-3 py-2.5 whitespace-nowrap font-mono text-muted-foreground">{ref ?? "—"}</td>
                         <td className="px-3 py-2.5 text-foreground max-w-[280px] truncate" title={t.Narration ?? ""}>
-                          {t.Narration || "—"}
+                          {/* Normalized "{Type} of ₹X" instead of each
+                              source's own raw narration text (which varied
+                              wildly — "PAY-... — payment made",
+                              "Invoice Posting: ... — Supplier/Cr...",
+                              "Excess ₹X from ... on invoice ..." — same
+                              meaning, different wording depending on which
+                              code path posted it). Full original narration
+                              is still on hover via the title attribute. */}
+                          {m.label} of {formatINR(Number(t.DebitAmount) > 0 ? Number(t.DebitAmount) : Number(t.CreditAmount) || 0)}
                           {t.CostCenterName && <span className="text-muted-foreground"> · {t.CostCenterName}</span>}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">
