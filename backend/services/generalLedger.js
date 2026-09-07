@@ -639,6 +639,17 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   if (await hasPosting(pool, "NewPayment", paymentId))
     return { posted: true, reason: "already posted (idempotent)" };
 
+  // routes/newPayment.js's POST /:id/post-to-gl (SourceType='PaymentPosting')
+  // is the authoritative posting path for a payment — it independently
+  // guards against re-entry the same way this function does, but neither
+  // ever checked for the OTHER's posting, so a payment approved (auto-
+  // posting here) and later run through the manual "Post to GL" action got
+  // double-posted under two different accounting treatments (same bug
+  // class as GRN/GRNPosting and ExpenseBooking/InvoicePosting). If
+  // PaymentPosting already handled this payment, defer to it entirely.
+  if (await hasPosting(pool, "PaymentPosting", paymentId))
+    return { posted: true, reason: "already posted via PaymentPosting (authoritative)" };
+
   const result = await pool
     .request()
     .input("PPaymentID", sql.Int, paymentId)
