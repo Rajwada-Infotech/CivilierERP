@@ -4281,6 +4281,35 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // never tagged anything.
     const expenseHeadAllocations = isGrnLinked ? [] : await getAllocations(pool, sql, "ExpenseBooking", ebId);
     const debitLedgerId = !isGrnLinked && eb.EGLAccountId ? eb.EGLAccountId : purchaseId;
+
+    // PO/WO_PO-sourced invoices with no per-invoice Expense Head allocation
+    // split the base debit across each PO line item's own tagged GL
+    // Account — the "item's GL Account substitutes Purchase A/c" rule,
+    // weighted by each line's own share of the PO's total value — instead
+    // of lumping the whole invoice onto one flat Purchase A/c leg.
+    // Falls through to the plain debitLedgerId leg when the PO has no
+    // resolvable items (nothing to weight by).
+    let poItemGlShares = null; // Map<lHeadId|null, share 0..1>
+    if (!isGrnLinked && expenseHeadAllocations.length === 0 && eb.ESourceId && (eb.ESourceType === "PO" || eb.ESourceType === "WO_PO")) {
+      const poId = parseInt(eb.ESourceId, 10);
+      if (Number.isFinite(poId)) {
+        const { resolveItemGlHeads } = require("../services/itemGlHead");
+        const poItemsRes = await pool.request().input("PoId", sql.Int, poId).query(
+          `SELECT ItemId, LineAmount FROM dbo.PurchaseOrderItems WHERE PurchaseOrderID = @PoId AND ItemId IS NOT NULL`,
+        );
+        const poItems = poItemsRes.recordset.filter((r) => Number(r.LineAmount) > 0);
+        const poTotal = poItems.reduce((s, r) => s + Number(r.LineAmount), 0);
+        if (poItems.length && poTotal > 0) {
+          const itemGlMap = await resolveItemGlHeads(pool, sql, poItems.map((r) => r.ItemId));
+          poItemGlShares = new Map();
+          for (const r of poItems) {
+            const headId = itemGlMap.get(String(r.ItemId))?.glHeadId ?? null;
+            const share = Number(r.LineAmount) / poTotal;
+            poItemGlShares.set(headId, (poItemGlShares.get(headId) || 0) + share);
+          }
+        }
+      }
+    }
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this invoice's supplier account." });
     if (isGrnLinked && !pgrnId) return res.status(422).json({ error: "Provision for Pending GRN system ledger not configured." });
     if (isGrnLinked && taxAmount > 0 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
@@ -4430,8 +4459,26 @@ router.post("/:id/post-to-gl", async (req, res) => {
             ...(() => {
               const baseLeg = Math.round((baseAmount - tdsAmount) * 100) / 100;
               const taxLeg = Math.round((totalAmount - tdsAmount - baseLeg) * 100) / 100;
+              let baseLegs;
+              if (poItemGlShares && poItemGlShares.size > 0) {
+                // Split baseLeg by each GL head's share of the PO value;
+                // any paisa left over from rounding lands on the largest
+                // bucket so the legs still sum exactly to baseLeg.
+                const entries = [...poItemGlShares.entries()];
+                let amounts = entries.map(([headId, share]) => ({ headId, amount: Math.round(baseLeg * share * 100) / 100 }));
+                const shortfall = Math.round((baseLeg - amounts.reduce((s, a) => s + a.amount, 0)) * 100) / 100;
+                if (Math.abs(shortfall) > 0) {
+                  const biggest = amounts.reduce((max, a) => (a.amount > max.amount ? a : max), amounts[0]);
+                  biggest.amount = Math.round((biggest.amount + shortfall) * 100) / 100;
+                }
+                baseLegs = amounts
+                  .filter((a) => a.amount !== 0)
+                  .map((a) => ({ LHeadId: a.headId || debitLedgerId, DebitAmount: a.amount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — ${a.headId ? "GL Account" : "Purchase"}` }));
+              } else {
+                baseLegs = [{ LHeadId: debitLedgerId, DebitAmount: baseLeg, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` }];
+              }
               return [
-                { LHeadId: debitLedgerId, DebitAmount: baseLeg, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` },
+                ...baseLegs,
                 ...(taxLeg > 0
                   ? [{ LHeadId: gstCreditId, DebitAmount: taxLeg, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available` }]
                   : []),

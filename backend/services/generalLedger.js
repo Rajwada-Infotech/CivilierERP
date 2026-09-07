@@ -298,42 +298,20 @@ async function postGRNApproval(pool, grnId, userEmail) {
   // posts there instead of the shared Purchase A/c. Previously every
   // ordinary item lumped into Purchase A/c regardless of its own tag, so a
   // tagged item's GL account never actually appeared in Trial Balance.
+  const { resolveItemGlHeads } = require("./itemGlHead");
   const itemIds = items.map((it) => it.itemId).filter((id) => id != null).map(String);
-  const fixedAssetGlHeadByItemId = new Map();
-  const itemGlHeadById = new Map();
-  if (itemIds.length) {
-    const req = pool.request();
-    const placeholders = itemIds
-      .map((id, i) => {
-        req.input(`iid${i}`, sql.NVarChar(100), id);
-        return `@iid${i}`;
-      })
-      .join(",");
-    const mRes = await req.query(`
-      SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, M_GLHeadId, M_Type
-      FROM dbo.Item_Master_Group
-      WHERE CONVERT(NVARCHAR(100), M_Id) IN (${placeholders})
-    `);
-    for (const r of mRes.recordset) {
-      if (r.M_Type === "Fixed Asset") fixedAssetGlHeadByItemId.set(r.M_Id, r.M_GLHeadId ?? null);
-      else itemGlHeadById.set(r.M_Id, r.M_GLHeadId ?? null);
-    }
-  }
-
-  const defaultFixedAssetHeadId = fixedAssetGlHeadByItemId.size
-    ? await getGLHeadId(pool, GL_ACCOUNTS.FIXED_ASSET)
-    : null;
+  const itemGlMap = await resolveItemGlHeads(pool, sql, itemIds);
 
   const purchaseAmountByHead = new Map(); // lHeadId (null = default Purchase A/c) -> amount
   const fixedAssetAmountByHead = new Map(); // lHeadId -> amount
   for (const it of items) {
     const amt = Number(it.totalAmount) || 0;
     const itemId = it.itemId != null ? String(it.itemId) : null;
-    if (itemId && fixedAssetGlHeadByItemId.has(itemId)) {
-      const headId = fixedAssetGlHeadByItemId.get(itemId) || defaultFixedAssetHeadId;
-      fixedAssetAmountByHead.set(headId, (fixedAssetAmountByHead.get(headId) || 0) + amt);
+    const master = itemId ? itemGlMap.get(itemId) : null;
+    if (master?.isFixedAsset) {
+      fixedAssetAmountByHead.set(master.glHeadId, (fixedAssetAmountByHead.get(master.glHeadId) || 0) + amt);
     } else {
-      const headId = (itemId && itemGlHeadById.get(itemId)) || null;
+      const headId = master?.glHeadId ?? null;
       purchaseAmountByHead.set(headId, (purchaseAmountByHead.get(headId) || 0) + amt);
     }
   }
