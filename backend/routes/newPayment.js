@@ -96,6 +96,40 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     // @docNumber` throws "Ambiguous column name 'DocNo'" the moment the
     // search or docNumber filter is used. The count query below is aliased
     // to match.
+    //
+    // The "Supplier / Contractor / Broker" filter (search) matches this
+    // same resolved-supplier expression the SELECT below exposes as
+    // PSupplierName — np.PPaymentName is just a free-text purpose/remarks
+    // field ("Overhead Expenses", "v2", "test payment"), essentially never
+    // the party's actual name, so a supplier search against it alone
+    // silently found nothing for the vast majority of payments. Both the
+    // count and data queries need the same supplier-resolving joins for
+    // this to work (SUPPLIER_JOINS_SQL below, shared with the data query's
+    // own copy further down).
+    const SUPPLIER_JOINS_SQL = `
+      LEFT JOIN dbo.ExpenseBooking eb_s ON eb_s.EDocNo = np.PExpenseRef
+      LEFT JOIN dbo.PurchaseOrders po_s
+        ON eb_s.ESourceType = 'PO' AND po_s.PurchaseOrderID = TRY_CAST(eb_s.ESourceId AS INT)
+      LEFT JOIN dbo.GoodsReceiptNotes grn_eb_s
+        ON eb_s.ESourceType = 'GRN' AND grn_eb_s.GRNID = TRY_CAST(eb_s.ESourceId AS INT)
+      LEFT JOIN dbo.AccountHeadMaster grn_sup_s ON grn_sup_s.LHeadId = grn_eb_s.SupplierID
+      LEFT JOIN dbo.AccountHeadMaster po_sup_s ON po_sup_s.LHeadId = po_s.SupplierID
+      LEFT JOIN dbo.GoodsReceiptNotes grn2_s
+        ON eb_s.ESourceType NOT IN ('GRN','PO') AND grn2_s.POID = po_s.PurchaseOrderID
+      LEFT JOIN dbo.AccountHeadMaster grn2_sup_s ON grn2_sup_s.LHeadId = grn2_s.SupplierID
+      LEFT JOIN dbo.AccountHeadMaster party_head_s ON party_head_s.LHeadId = np.PPartyId
+    `;
+    const RESOLVED_SUPPLIER_SQL = `
+      COALESCE(
+        CASE
+          WHEN eb_s.ESourceType = 'GRN' THEN grn_sup_s.LHeadName
+          WHEN eb_s.ESourceType = 'PO'  THEN po_sup_s.LHeadName
+          ELSE grn2_sup_s.LHeadName
+        END,
+        party_head_s.LHeadName
+      )
+    `;
+
     const conditions = [];
     if (idFilter) conditions.push(`np.PPaymentID = @idFilter`);
     if (search) {
@@ -104,7 +138,8 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           OR np.PExpenseRef LIKE @search
           OR np.PProject LIKE @search
           OR np.PCompany LIKE @search
-          OR np.PBankName LIKE @search)`);
+          OR np.PBankName LIKE @search
+          OR ${RESOLVED_SUPPLIER_SQL} LIKE @search)`);
     }
     if (companyId) conditions.push(`np.PCompany = @companyId`);
     if (project) conditions.push(`np.PProject LIKE @project`);
@@ -145,7 +180,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (remarks) request.input("remarks", sql.NVarChar(200), `%${remarks}%`);
 
     const countResult = await request.query(
-      `SELECT COUNT(*) AS total FROM dbo.NewPayment np ${whereClause}`,
+      `SELECT COUNT(*) AS total FROM dbo.NewPayment np ${SUPPLIER_JOINS_SQL} ${whereClause}`,
     );
     const total = parseInt(countResult.recordset[0].total);
 
@@ -300,6 +335,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       LEFT JOIN dbo.BankReconciliation brc_list
         ON  brc_list.SourceType = 'PAYMENT'
         AND brc_list.SourceID   = np.PPaymentID
+      ${SUPPLIER_JOINS_SQL}
       ${whereClause}
       ORDER BY np.PPaymentID DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -1522,7 +1558,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
                     .input("AdjRefDocNo", sql.NVarChar(100), finalDocNo)
                     .input("CompanyId",   sql.Int,           eb.ECompanyId ?? null)
                     .input("ProjectId",   sql.Int,           eb.ProjectId ?? null)
-                    .input("Notes",       sql.NVarChar(500), `OA auto-applied ₹${applyAmt} to ${approvedRef} via ${finalDocNo}`)
+                    .input("Notes",       sql.NVarChar(500), `OA auto-applied ₹${applyAmt.toFixed(2)} to ${approvedRef} via ${finalDocNo}`)
                     .input("CreatedBy",   sql.NVarChar(150), req.user?.email || "system")
                     .query(`
                       INSERT INTO dbo.OnAccountLedger
@@ -1553,7 +1589,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
                   .input("RefId",     sql.Int,           id)
                   .input("CompanyId", sql.Int,           eb.ECompanyId ?? null)
                   .input("ProjectId", sql.Int,           eb.ProjectId ?? null)
-                  .input("Notes",     sql.NVarChar(500), `Excess ₹${excess} from ${finalDocNo} on invoice ${approvedRef}`)
+                  .input("Notes",     sql.NVarChar(500), `Excess ₹${excess.toFixed(2)} from ${finalDocNo} on invoice ${approvedRef}`)
                   .input("CreatedBy", sql.NVarChar(150), req.user?.email || "system")
                   .query(`
                     INSERT INTO dbo.OnAccountLedger

@@ -439,7 +439,14 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
       };
 
     const grnTotal = Number(grn.TotalAmount) || 0;
-    const delta = netAmount - grnTotal; // billing-term adjustment, can be negative
+    // eb.ENetAmount is the GST-inclusive payable; when it's unset (older/
+    // incompletely-saved bookings) the module-level `netAmount` above falls
+    // back to eb.EAmount — the taxable BASE amount, not tax-inclusive — which
+    // silently credited the supplier only the base amount instead of the
+    // full invoice payable. For a GRN-linked booking the GRN's own
+    // (incl-GST) TotalAmount is the correct fallback instead.
+    const effectiveNetAmount = eb.ENetAmount != null ? netAmount : grnTotal;
+    const delta = effectiveNetAmount - grnTotal; // billing-term adjustment, can be negative
 
     const pendingGrnHeadId = await getGLHeadId(
       pool,
@@ -455,7 +462,7 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
       },
       {
         lHeadId: grn.SupplierID,
-        credit: netAmount,
+        credit: effectiveNetAmount,
         narration: `${docNo} — supplier liability booked`,
       },
     ];

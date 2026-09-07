@@ -63,6 +63,17 @@ function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+// Balance figures here follow vendorLedger.js's own convention: running
+// balance = Debit − Credit. A supplier's normal balance is a Credit
+// (what we owe them), so a negative running balance is "Cr"; a positive
+// one — e.g. an on-account advance not yet fully applied against an
+// invoice — is "Dr" (they're holding more of our money than we owe them).
+function fmtBalance(n: number): string {
+  const rounded = Math.round(n * 100) / 100;
+  if (rounded === 0) return `${formatINR(0)}`;
+  return `${formatINR(Math.abs(rounded))} ${rounded > 0 ? "Dr" : "Cr"}`;
+}
+
 function datePreset(key: "today" | "week" | "month" | "fy" | "all"): { from: string; to: string } {
   const now = new Date();
   const to = toISODate(now);
@@ -417,10 +428,10 @@ export function VendorLedgerReportBody() {
       {selectedHead && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {[
-            { label: "Opening Balance", value: formatINR(summaryQuery.data?.windowOpeningBalance ?? 0), icon: Wallet, color: "text-primary", bg: "bg-primary/10", ring: "ring-primary/15", borderL: "border-l-primary" },
+            { label: "Opening Balance", value: fmtBalance(summaryQuery.data?.windowOpeningBalance ?? 0), icon: Wallet, color: "text-primary", bg: "bg-primary/10", ring: "ring-primary/15", borderL: "border-l-primary" },
             { label: "Total Debit", value: formatINR(summaryQuery.data?.periodDebit ?? 0), icon: TrendingUp, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/15", borderL: "border-l-emerald-500" },
             { label: "Total Credit", value: formatINR(summaryQuery.data?.periodCredit ?? 0), icon: TrendingDown, color: "text-rose-500", bg: "bg-rose-500/10", ring: "ring-rose-500/15", borderL: "border-l-rose-500" },
-            { label: "Closing Balance", value: formatINR(summaryQuery.data?.currentBalance ?? 0), icon: CircleDollarSign, color: "text-amber-500", bg: "bg-amber-500/10", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
+            { label: "Closing Balance", value: fmtBalance(summaryQuery.data?.currentBalance ?? 0), icon: CircleDollarSign, color: "text-amber-500", bg: "bg-amber-500/10", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
           ].map(({ label, value, icon: Icon, color, bg, ring, borderL }) => (
             <div key={label} className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}>
               <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
@@ -511,7 +522,15 @@ export function VendorLedgerReportBody() {
                         </td>
                         <td className="px-3 py-2.5 whitespace-nowrap font-mono text-muted-foreground">{ref ?? "—"}</td>
                         <td className="px-3 py-2.5 text-foreground max-w-[280px] truncate" title={t.Narration ?? ""}>
-                          {t.Narration || "—"}
+                          {/* Normalized "{Type} of ₹X" instead of each
+                              source's own raw narration text (which varied
+                              wildly — "PAY-... — payment made",
+                              "Invoice Posting: ... — Supplier/Cr...",
+                              "Excess ₹X from ... on invoice ..." — same
+                              meaning, different wording depending on which
+                              code path posted it). Full original narration
+                              is still on hover via the title attribute. */}
+                          {m.label} of {formatINR(Number(t.DebitAmount) > 0 ? Number(t.DebitAmount) : Number(t.CreditAmount) || 0)}
                           {t.CostCenterName && <span className="text-muted-foreground"> · {t.CostCenterName}</span>}
                         </td>
                         <td className="px-3 py-2.5 text-right tabular-nums text-emerald-600 dark:text-emerald-400">
@@ -522,7 +541,7 @@ export function VendorLedgerReportBody() {
                         </td>
                         {!showParty && (
                           <td className="px-4 sm:px-5 py-2.5 text-right tabular-nums font-semibold text-foreground">
-                            {formatINR(Number(t.RunningBalance ?? 0))}
+                            {fmtBalance(Number(t.RunningBalance ?? 0))}
                           </td>
                         )}
                       </tr>
