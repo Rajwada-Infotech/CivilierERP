@@ -1,9 +1,11 @@
 // Shared GRN GL-posting computation — used by routes/grns.js's manual
-// "Post to GL" action AND scripts/backfillGrnItemGlHeads.js (retroactive
+// "Post to GL" action AND scripts/backfillItemGlHeads.js (retroactive
 // reclassification of already-posted GRNs once an item gets tagged with
 // its own GL Account, or turns out to be an untagged Fixed Asset item).
 // Keeping this in one place means the backfill can never drift from what
 // a live posting would actually produce.
+
+const { resolveItemGlHeads } = require("./itemGlHead");
 
 function parseGRNItems(grnItems) {
   if (Array.isArray(grnItems)) return grnItems;
@@ -37,25 +39,7 @@ async function computeGrnPostingBuckets(pool, sql, grn) {
   if (receivedItems.length === 0) return { buckets, totalBase: 0, totalGST: 0 };
 
   const itemIds = receivedItems.map((it) => String(it.itemId || it.ItemId || "").trim()).filter(Boolean);
-  let masterMap = {};
-  if (itemIds.length > 0) {
-    const mReq = pool.request();
-    const ph = itemIds.map((id, i) => { mReq.input(`iid${i}`, sql.NVarChar(100), id); return `@iid${i}`; }).join(",");
-    const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST, M_Type, M_GLHeadId FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
-    for (const row of mRes.recordset) masterMap[row.M_Id] = {
-      cgstRate: parseFloat(row.M_CGST) || 0, sgstRate: parseFloat(row.M_SGST) || 0,
-      isFixedAsset: row.M_Type === "Fixed Asset", glHeadId: row.M_GLHeadId ?? null,
-    };
-  }
-
-  // Untagged Fixed Asset items capitalize onto "Fixed Assets A/c" instead
-  // of falling into the generic "Purchase A/c".
-  const needsFixedAssetHead = Object.values(masterMap).some((m) => m.isFixedAsset && !m.glHeadId);
-  let fixedAssetHeadId = null;
-  if (needsFixedAssetHead) {
-    const faRes = await pool.request().query(`SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1 AND LHeadName = 'Fixed Assets A/c'`);
-    fixedAssetHeadId = faRes.recordset[0]?.LHeadId ?? null;
-  }
+  const masterMap = await resolveItemGlHeads(pool, sql, itemIds);
 
   let itemCostCentreMap = {};
   if (grn.POID && itemIds.length > 0) {
@@ -74,7 +58,7 @@ async function computeGrnPostingBuckets(pool, sql, grn) {
     const receivedQty = Number(it.receivedQty || it.ReceivedQty || 0);
     const rate = Number(it.rate || it.Rate || 0);
     const baseAmount = Number(it.totalAmount) > 0 ? Number(it.totalAmount) : rate * Number(it.quantity || it.Quantity || receivedQty || 0);
-    const master = masterMap[itemId] || { cgstRate: 0, sgstRate: 0 };
+    const master = masterMap.get(itemId) || { cgstRate: 0, sgstRate: 0, glHeadId: null };
     const lineGstPct = Number(it.gstPct ?? it.GstPct ?? NaN);
     const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate + master.sgstRate);
     const gstAmount = baseAmount * (totalGSTRate / 100);
@@ -82,8 +66,7 @@ async function computeGrnPostingBuckets(pool, sql, grn) {
     totalGST += gstAmount;
 
     const costCenterId = itemCostCentreMap[itemId] ?? null;
-    const itemMaster = masterMap[itemId];
-    const glHeadId = itemMaster?.glHeadId || (itemMaster?.isFixedAsset ? fixedAssetHeadId : null);
+    const glHeadId = master.glHeadId ?? null;
     const bucketKey = `${costCenterId ?? "unassigned"}|${glHeadId ?? "default"}`;
     const bucket = buckets.get(bucketKey) ?? { costCenterId, glHeadId, base: 0, gst: 0 };
     bucket.base += baseAmount;
