@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
 import {
   Chart2,
-  Calendar,
+  Grid1,
   ArrowLeft2,
   Crown,
   Data,
@@ -80,7 +80,7 @@ const MODULE_HEADER: Record<
   },
   followup: {
     label: "Follow-Up",
-    icon: Calendar,
+    icon: Grid1,
     color: "#0d9488",
     from: "from-teal-600/30",
     to: "to-teal-600/0",

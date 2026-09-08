@@ -7,7 +7,7 @@ import {
   Bank,
   Box,
   Cpu,
-  Notepad,
+  Grid1,
   Message2,
   ShoppingCart,
   Building3,
@@ -99,7 +99,7 @@ const MODULES = [
   },
   {
     id: "followup" as Module,
-    icon: Notepad,
+    icon: Grid1,
     label: "Follow-Up",
     desc: "Sales, agreements & CRM",
     color: "#0d9488",
