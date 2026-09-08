@@ -551,21 +551,36 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
   const baseAmount = Number(eb.EAmount) || 0;
   const gstAndTerms = Math.max(0, netAmount - baseAmount);
 
-  const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
-  const provisionalCreditHeadId = await getGLHeadId(
-    pool,
-    GL_ACCOUNTS.PROVISIONAL_CREDIT,
-  );
+  // Multi Expense Head tagging (migration 303, dbo.ExpenseHeadAllocation) —
+  // a direct/TOD booking can tag its own Dr leg(s) to specific GL heads
+  // instead of the generic Purchase A/c, e.g. "Director or Partner
+  // Remuneration" rather than every direct payment lumping into Purchase.
+  // routes/expenseBooking.js's create/update handlers already validate that
+  // these rows sum to the booking's own net (GST-inclusive) amount before
+  // saving — see the comment there: "each row is its own future Dr leg...
+  // together they must add up to exactly what's owed to the supplier". This
+  // function used to ignore the table entirely and always debit Purchase
+  // A/c for the base amount, silently discarding the user's chosen head the
+  // moment the booking got approved.
+  const { getAllocations } = require("./expenseHeadAllocation");
+  const allocations = await getAllocations(pool, sql, "ExpenseBooking", ebId);
+  const allocSum = Math.round(allocations.reduce((s, a) => s + a.amount, 0) * 100) / 100;
+  const useAllocations = allocations.length > 0 && Math.abs(allocSum - netAmount) < 0.5;
 
-  await postVoucher(pool, {
-    voucherNo: docNo,
-    voucherDate,
-    sourceType: "ExpenseBooking",
-    sourceId: ebId,
-    companyId,
-    projectId,
-    createdBy: userEmail,
-    legs: [
+  let debitLegs;
+  if (useAllocations) {
+    debitLegs = allocations.map((a) => ({
+      lHeadId: a.lHeadId,
+      debit: a.amount,
+      narration: `${docNo} — ${a.lHeadName || "expense booked"}`,
+    }));
+  } else {
+    const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
+    const provisionalCreditHeadId = await getGLHeadId(
+      pool,
+      GL_ACCOUNTS.PROVISIONAL_CREDIT,
+    );
+    debitLegs = [
       {
         lHeadId: purchaseHeadId,
         debit: baseAmount,
@@ -576,6 +591,19 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
         debit: gstAndTerms,
         narration: `${docNo} — GST / billing terms`,
       },
+    ];
+  }
+
+  await postVoucher(pool, {
+    voucherNo: docNo,
+    voucherDate,
+    sourceType: "ExpenseBooking",
+    sourceId: ebId,
+    companyId,
+    projectId,
+    createdBy: userEmail,
+    legs: [
+      ...debitLegs,
       {
         lHeadId: supplierHeadId,
         credit: netAmount,
