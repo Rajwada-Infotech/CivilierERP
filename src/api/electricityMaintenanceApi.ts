@@ -55,6 +55,16 @@ export interface MeterRow {
   MeterInstallationDate: string | null;
   Status: "Active" | "Inactive" | "Transferred" | "Disconnected";
   Remarks: string | null;
+  // Latest Regular reading + bill status, joined in by GET /meters so the
+  // main table can show them without a per-row round-trip (spec §8).
+  LatestPreviousReading: number | null;
+  LatestCurrentReading: number | null;
+  LatestUnitsConsumed: number | null;
+  LatestReadingDate: string | null;
+  LatestPeriodTo: string | null;
+  LatestBillStatus: BillStatus | null;
+  HandoverStatus: "Not Handed Over" | "Handover Scheduled" | "Handover Completed";
+  HandoverDate: string | null;
 }
 
 export interface NextReadingInfo {
@@ -222,7 +232,10 @@ export const createElectricityTariff = (payload: TariffPayload) => postJson<{ id
 export const updateElectricityTariff = (id: number, payload: TariffPayload) => putJson<{ message: string }>(`/tariffs/${id}`, payload, "Failed to update tariff");
 
 // ── Meters ───────────────────────────────────────────────────────────────
-export interface MeterFilters { search?: string; providerId?: number | string; billingCycle?: string; status?: string; project?: string; tower?: string }
+export interface MeterFilters {
+  search?: string; providerId?: number | string; billingCycle?: string; status?: string;
+  project?: string; tower?: string; handoverStatus?: string; billStatus?: string;
+}
 export const getMeters = (filters: MeterFilters = {}) => getJson<MeterRow[]>(`/meters${qs(filters)}`, "Failed to load meters");
 export const getMeter = (id: number) => getJson<MeterRow>(`/meters/${id}`, "Failed to load meter");
 export interface MeterPayload {

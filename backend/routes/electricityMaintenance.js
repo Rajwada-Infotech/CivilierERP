@@ -281,10 +281,45 @@ const METER_SELECT = `
   ${BOOKING_JOIN}
 `;
 
+// Same as METER_SELECT, plus the latest Regular reading (Previous/Current/
+// Units), the bill status for that latest reading's period, and the raw
+// CrmHandover row — everything the main "Meters & Readings" table (spec
+// §8/§9) needs in one row, without a client round-trip per meter.
+const METER_LIST_SELECT = `
+  SELECT m.*, prov.Name AS ProviderName, ${BOOKING_COLS},
+    lr.PreviousReading AS LatestPreviousReading,
+    lr.CurrentReading  AS LatestCurrentReading,
+    lr.UnitsConsumed   AS LatestUnitsConsumed,
+    lr.ReadingDate     AS LatestReadingDate,
+    lr.BillingPeriodTo AS LatestPeriodTo,
+    lb.BillStatus       AS LatestBillStatus,
+    ho.Status            AS HandoverRawStatus,
+    ho.ActualHandoverDate AS HandoverActualDate,
+    ho.ScheduledDate      AS HandoverScheduledDate
+  FROM dbo.MeterReadingMaster m
+  JOIN dbo.ElectricityProvider prov ON prov.Id = m.ProviderId
+  ${BOOKING_JOIN}
+  OUTER APPLY (
+    SELECT TOP 1 PreviousReading, CurrentReading, UnitsConsumed, ReadingDate, BillingPeriodTo
+    FROM dbo.MeterReading
+    WHERE MeterId = m.Id AND ReadingType = 'Regular' AND IsSuperseded = 0
+    ORDER BY BillingPeriodTo DESC
+  ) lr
+  OUTER APPLY (
+    SELECT TOP 1 BillStatus FROM dbo.ElectricityBill
+    WHERE MeterId = m.Id AND BillStatus <> 'Cancelled'
+    ORDER BY BillingPeriodTo DESC, CreatedAt DESC
+  ) lb
+  OUTER APPLY (
+    SELECT TOP 1 Status, ActualHandoverDate, ScheduledDate FROM dbo.CrmHandover
+    WHERE BookingId = cb.Id ORDER BY CreatedAt DESC
+  ) ho
+`;
+
 router.get("/meters", requirePageRight(METER_PAGE, "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { search, providerId, billingCycle, status, project, tower } = req.query;
+    const { search, providerId, billingCycle, status, project, tower, handoverStatus, billStatus } = req.query;
     const req0 = pool.request();
     const conds = [];
     if (search) {
@@ -296,9 +331,22 @@ router.get("/meters", requirePageRight(METER_PAGE, "view"), async (req, res) => 
     if (status) { req0.input("status", sql.NVarChar, status); conds.push("m.Status = @status"); }
     if (project) { req0.input("project", sql.NVarChar, `%${project}%`); conds.push("COALESCE(proj.name, cb.ProjectName) LIKE @project"); }
     if (tower) { req0.input("tower", sql.NVarChar, `%${tower}%`); conds.push("COALESCE(blk.BlockName, cb.BlockName) LIKE @tower"); }
+    if (billStatus) { req0.input("billStatus", sql.NVarChar, billStatus); conds.push("lb.BillStatus = @billStatus"); }
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-    const result = await req0.query(`${METER_SELECT} ${where} ORDER BY m.CreatedAt DESC`);
-    res.json(result.recordset);
+    const result = await req0.query(`${METER_LIST_SELECT} ${where} ORDER BY m.CreatedAt DESC`);
+
+    // Handover status is derived (resolveHandoverStatus), not a stored
+    // column, so it's filtered in JS after resolution rather than in SQL.
+    let rows = result.recordset.map((r) => {
+      const { status: resolvedHandoverStatus, handoverDate } = resolveHandoverStatus(
+        r.HandoverRawStatus ? { Status: r.HandoverRawStatus, ActualHandoverDate: r.HandoverActualDate, ScheduledDate: r.HandoverScheduledDate } : null,
+      );
+      const { HandoverRawStatus, HandoverActualDate, HandoverScheduledDate, ...rest } = r;
+      return { ...rest, HandoverStatus: resolvedHandoverStatus, HandoverDate: handoverDate };
+    });
+    if (handoverStatus) rows = rows.filter((r) => r.HandoverStatus === handoverStatus);
+
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

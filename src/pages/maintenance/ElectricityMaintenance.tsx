@@ -95,12 +95,22 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
   const [providerId, setProviderId] = useState("");
   const [billingCycle, setBillingCycle] = useState("");
   const [status, setStatus] = useState("");
+  const [project, setProject] = useState("");
+  const [tower, setTower] = useState("");
+  const [handoverStatus, setHandoverStatus] = useState("");
   const [readingFor, setReadingFor] = useState<MeterRow | null>(null);
   const [billingFor, setBillingFor] = useState<MeterRow | null>(null);
   const [historyFor, setHistoryFor] = useState<MeterRow | null>(null);
+  const [auditFor, setAuditFor] = useState<MeterRow | null>(null);
 
   const { data: providers } = useQuery({ queryKey: ["electricity-providers"], queryFn: getElectricityProviders });
-  const filters = useMemo(() => ({ search, providerId: providerId || undefined, billingCycle: billingCycle || undefined, status: status || undefined }), [search, providerId, billingCycle, status]);
+  const filters = useMemo(
+    () => ({
+      search, providerId: providerId || undefined, billingCycle: billingCycle || undefined, status: status || undefined,
+      project: project || undefined, tower: tower || undefined, handoverStatus: handoverStatus || undefined,
+    }),
+    [search, providerId, billingCycle, status, project, tower, handoverStatus],
+  );
   const { data, isLoading, error } = useQuery({ queryKey: ["electricity-meters", filters], queryFn: () => getMeters(filters) });
   const rows = Array.isArray(data) ? data : [];
 
@@ -109,8 +119,10 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search customer, flat, meter, box…" className={`pl-8 pr-3 w-64 ${inputCls}`} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search customer, flat, meter, box…" className={`pl-8 pr-3 w-56 ${inputCls}`} />
         </div>
+        <input value={project} onChange={(e) => setProject(e.target.value)} placeholder="Project" className={`w-32 ${inputCls}`} />
+        <input value={tower} onChange={(e) => setTower(e.target.value)} placeholder="Tower" className={`w-28 ${inputCls}`} />
         <select value={providerId} onChange={(e) => setProviderId(e.target.value)} className={inputCls}>
           <option value="">All Providers</option>
           {(providers || []).map((p) => (<option key={p.Id} value={p.Id}>{p.Name}</option>))}
@@ -119,6 +131,10 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
           <option value="">All Cycles</option>
           <option value="Monthly">Monthly</option>
           <option value="3 Monthly">3 Monthly</option>
+        </select>
+        <select value={handoverStatus} onChange={(e) => setHandoverStatus(e.target.value)} className={inputCls}>
+          <option value="">All Handover Status</option>
+          {["Not Handed Over", "Handover Scheduled", "Handover Completed"].map((s) => (<option key={s} value={s}>{s}</option>))}
         </select>
         <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputCls}>
           <option value="">All Status</option>
@@ -137,6 +153,11 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                 { header: "Meter No.", accessor: "MeterNumber" },
                 { header: "Provider", accessor: "ProviderName" },
                 { header: "Billing Cycle", accessor: "BillingCycle" },
+                { header: "Previous", accessor: "LatestPreviousReading" },
+                { header: "Current", accessor: "LatestCurrentReading" },
+                { header: "Units", accessor: "LatestUnitsConsumed" },
+                { header: "Handover Status", accessor: "HandoverStatus" },
+                { header: "Bill Status", accessor: "LatestBillStatus" },
                 { header: "Status", accessor: "Status" },
               ]}
             />
@@ -162,6 +183,11 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                 <th className="text-left px-4 py-2.5">Meter Box</th>
                 <th className="text-left px-4 py-2.5">Meter No.</th>
                 <th className="text-left px-4 py-2.5">Provider</th>
+                <th className="text-left px-4 py-2.5">Previous</th>
+                <th className="text-left px-4 py-2.5">Current</th>
+                <th className="text-left px-4 py-2.5">Units</th>
+                <th className="text-left px-4 py-2.5">Handover</th>
+                <th className="text-left px-4 py-2.5">Bill Status</th>
                 <th className="text-left px-4 py-2.5">Status</th>
                 <th className="text-right px-4 py-2.5">Actions</th>
               </tr>
@@ -174,6 +200,11 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                   <td className="px-4 py-2.5 font-mono text-xs">{m.MeterBoxNumber || "—"}</td>
                   <td className="px-4 py-2.5 font-mono text-xs">{m.MeterNumber}</td>
                   <td className="px-4 py-2.5 text-muted-foreground">{m.ProviderName}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs">{m.LatestPreviousReading ?? "—"}</td>
+                  <td className="px-4 py-2.5 font-mono text-xs">{m.LatestCurrentReading ?? "—"}</td>
+                  <td className="px-4 py-2.5">{m.LatestUnitsConsumed ?? "—"}</td>
+                  <td className="px-4 py-2.5"><HandoverBadge status={m.HandoverStatus} /></td>
+                  <td className="px-4 py-2.5">{m.LatestBillStatus ? <BillStatusBadge status={m.LatestBillStatus} /> : <span className="text-muted-foreground text-xs">Pending</span>}</td>
                   <td className="px-4 py-2.5">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${m.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>{m.Status}</span>
                   </td>
@@ -192,6 +223,9 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                       <button onClick={() => setHistoryFor(m)} title="View History" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
                         <HistoryIcon size={14} />
                       </button>
+                      <button onClick={() => setAuditFor(m)} title="View Audit Log" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
+                        <ShieldAlert size={14} />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -204,6 +238,7 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       {readingFor && <AddReadingDialog meter={readingFor} onClose={() => setReadingFor(null)} />}
       {billingFor && <GenerateBillDialog meter={billingFor} onClose={() => setBillingFor(null)} />}
       {historyFor && <MeterHistoryDialog meter={historyFor} onClose={() => setHistoryFor(null)} />}
+      {auditFor && <AuditLogModal title={`Audit Log — ${auditFor.MeterNumber}`} filters={{ meterId: auditFor.Id }} onClose={() => setAuditFor(null)} />}
     </div>
   );
 }
@@ -516,6 +551,7 @@ function BillsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
   const [dateTo, setDateTo] = useState("");
   const [addingTo, setAddingTo] = useState<ElectricityBillRow | null>(null);
   const [cancelling, setCancelling] = useState<ElectricityBillRow | null>(null);
+  const [auditFor, setAuditFor] = useState<ElectricityBillRow | null>(null);
 
   const filters = useMemo(() => ({ billStatus: billStatus || undefined, dateFrom: dateFrom || undefined, dateTo: dateTo || undefined }), [billStatus, dateFrom, dateTo]);
   const { data, isLoading, error } = useQuery({ queryKey: ["electricity-bills", filters], queryFn: () => getElectricityBills(filters) });
@@ -611,6 +647,9 @@ function BillsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                           <Ban size={14} />
                         </button>
                       )}
+                      <button onClick={() => setAuditFor(b)} title="View Audit Log" className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted">
+                        <ShieldAlert size={14} />
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -622,6 +661,7 @@ function BillsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
 
       {addingTo && <AddToCustomerBillDialog bill={addingTo} onClose={() => setAddingTo(null)} onDone={() => { setAddingTo(null); invalidate(); }} />}
       {cancelling && <CancelBillDialog bill={cancelling} onClose={() => setCancelling(null)} onDone={() => { setCancelling(null); invalidate(); }} />}
+      {auditFor && <AuditLogModal title={`Audit Log — Bill #${auditFor.Id}`} filters={{ billId: auditFor.Id }} onClose={() => setAuditFor(null)} />}
     </div>
   );
 }
@@ -863,29 +903,50 @@ function ReportsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
 }
 
 // ─── Audit Log ───────────────────────────────────────────────────────────
+function AuditLogList({ rows }: { rows: { Id: number; Action: string; PerformedAt: string; PerformedBy: string | null; Remarks: string | null }[] }) {
+  if (rows.length === 0) {
+    return <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">No audit entries yet.</div>;
+  }
+  return (
+    <div className="space-y-2">
+      {rows.map((l) => (
+        <div key={l.Id} className="rounded-lg border border-border p-3 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="font-heading font-semibold text-foreground">{l.Action}</span>
+            <span className="text-muted-foreground">{fmtDateTime(l.PerformedAt)}</span>
+          </div>
+          <div className="text-muted-foreground mt-0.5">By: {l.PerformedBy || "—"}{l.Remarks ? ` — ${l.Remarks}` : ""}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function AuditTab() {
   const { data, isLoading } = useQuery({ queryKey: ["electricity-audit-log"], queryFn: () => getElectricityAuditLog({}) });
   const rows = Array.isArray(data) ? data : [];
 
   return (
     <div className="pt-1">
-      {isLoading ? (
-        <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : rows.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">No audit entries yet.</div>
-      ) : (
-        <div className="space-y-2">
-          {rows.map((l) => (
-            <div key={l.Id} className="rounded-lg border border-border p-3 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="font-heading font-semibold text-foreground">{l.Action}</span>
-                <span className="text-muted-foreground">{fmtDateTime(l.PerformedAt)}</span>
-              </div>
-              <div className="text-muted-foreground mt-0.5">By: {l.PerformedBy || "—"}{l.Remarks ? ` — ${l.Remarks}` : ""}</div>
-            </div>
-          ))}
-        </div>
-      )}
+      {isLoading ? <div className="text-sm text-muted-foreground">Loading…</div> : <AuditLogList rows={rows} />}
     </div>
+  );
+}
+
+// Reusable "View Audit Log" dialog, opened from a specific meter or bill
+// row so the trail doesn't have to be hunted for in the flat global list.
+function AuditLogModal({ title, filters, onClose }: { title: string; filters: { meterId?: number; billId?: number; readingId?: number }; onClose: () => void }) {
+  const { data, isLoading } = useQuery({ queryKey: ["electricity-audit-log", filters], queryFn: () => getElectricityAuditLog(filters) });
+  const rows = Array.isArray(data) ? data : [];
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-lg max-h-[80vh] overflow-y-auto">
+        <DialogHeader><DialogTitle className="font-heading text-base">{title}</DialogTitle></DialogHeader>
+        <div className="pt-1">
+          {isLoading ? <div className="text-sm text-muted-foreground">Loading…</div> : <AuditLogList rows={rows} />}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
