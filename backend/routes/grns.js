@@ -661,6 +661,239 @@ router.get("/by-po/:poId", async (req, res) => {
   }
 });
 
+// ── GET /register ─────────────────────────────────────────────────────────────
+// Audit-ready GRN Register report. One row per GRN header (never per line item —
+// line-level amounts are aggregated in-query so joins to supplier/company/user/
+// audit tables can't fan a GRN out into duplicate register rows).
+//
+// This is a READ-ONLY reporting endpoint. It does NOT touch GRN creation,
+// posting, accounting, inventory, tax or stock logic, introduces no new
+// columns, and never recomputes a posted GRN's stored total:
+//   • Grand Total      = GoodsReceiptNotes.TotalAmount  (the posted value)
+//   • Taxable Amount   = Σ line base, using the SAME keys/formula computeGRNTotal
+//                        used when that stored total was written (totalAmount>0
+//                        ? totalAmount : rate*quantity)
+//   • Total Tax        = Grand Total − Taxable Amount   (so the identity
+//                        GrandTotal = Taxable + Tax ± RoundOff always holds)
+//   • CGST/SGST vs IGST split follows the same intra-/inter-state rule as
+//     /grn-gst-data (supplier LGSTState vs company enterprise.state). Cess /
+//     Other Tax / Round Off have no stored component in this ERP → returned 0.
+//
+// "Created By" comes from dbo.DocNumberSequence.IssuedBy — the email captured
+// when the GRN's DocNo was locked at creation time (utils/docNumberLock.js) —
+// resolved to a display name via dbo.Users. It is NEVER the report-running user.
+// "Posted By" comes from the ActionStatus='Approved' row of dbo.ApprovalAuditLog
+// (TableName 'GRN'); "Modified By" from the latest dbo.Amendments row for the GRN.
+//
+// Filters (all optional, all applied server-side): companyId, projectId,
+// supplierId, status, grnNo, docNo, createdBy (email/name substring),
+// dateFrom / dateTo (against GRN date). Company scoping mirrors the existing
+// GET / list: a chosen company matches via the linked PO's CompanyId.
+// Must be declared before /:id so the literal path wins over the param route.
+router.get("/register", cache("grns", 300), async (req, res) => {
+  try {
+    const pool = getPool();
+
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 500, 1), 1000);
+    const offset = (page - 1) * limit;
+
+    const companyId = parseInt(req.query.companyId, 10) || null;
+    const projectId = parseInt(req.query.projectId, 10) || null;
+    const supplierId = parseInt(req.query.supplierId, 10) || null;
+    const status = (req.query.status || "").trim() || null;
+    const grnNo = (req.query.grnNo || "").trim() || null;
+    const docNo = (req.query.docNo || "").trim() || null;
+    const createdBy = (req.query.createdBy || "").trim() || null;
+    const dateFrom = (req.query.dateFrom || "").trim() || null;
+    const dateTo = (req.query.dateTo || "").trim() || null;
+
+    const result = await pool
+      .request()
+      .input("offset", sql.Int, offset)
+      .input("limit", sql.Int, limit)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .input("supplierId", sql.Int, supplierId)
+      .input("status", sql.NVarChar(50), status)
+      .input("grnNo", sql.NVarChar(100), grnNo)
+      .input("docNo", sql.NVarChar(100), docNo)
+      .input("createdBy", sql.NVarChar(200), createdBy)
+      .input("dateFrom", sql.Date, dateFrom)
+      .input("dateTo", sql.Date, dateTo).query(`
+      WITH grn_base AS (
+        SELECT
+          grn.GRNID,
+          grn.GRNNo,
+          grn.DocNo,
+          grn.GRNDate,
+          grn.DocDate,
+          grn.Status,
+          grn.Remarks,
+          grn.ParentDocNo,
+          grn.CreatedDate,
+          grn.TotalAmount        AS GrandTotalStored,
+          grn.SupplierID,
+          grn.POID,
+          grn.GodownID,
+          p.PurchaseOrderNo      AS PONumber,
+          p.CompanyId,
+          p.ProjectId,
+          co.name                AS CompanyName,
+          co.short_name          AS CompanyCode,
+          co.state               AS CompanyState,
+          pr.name                AS ProjectName,
+          g.GodownName           AS BranchLocation,
+          s.LHeadName            AS SupplierName,
+          s.LHeadCode            AS SupplierCode,
+          s.LGST                 AS SupplierGSTIN,
+          s.LGSTState            AS SupplierState,
+          s.LHeadAddress         AS SupplierAddress,
+          tax.TaxableAmount,
+          tax.GstFromLines,
+          ds.IssuedBy            AS CreatedByEmail,
+          ds.IssuedAt            AS DocIssuedAt,
+          cu.name                AS CreatedByName,
+          amd.CreatedBy          AS ModifiedByEmail,
+          amd.CreatedAt          AS ModifiedAt,
+          mu.name                AS ModifiedByName,
+          appr.ApproverEmail     AS PostedByEmail,
+          appr.ActionAt          AS PostedAt,
+          pu.name                AS PostedByName
+        FROM dbo.GoodsReceiptNotes grn
+        LEFT JOIN dbo.PurchaseOrders     p  ON p.PurchaseOrderID = grn.POID
+        LEFT JOIN dbo.enterprise         co ON co.id = p.CompanyId
+        LEFT JOIN dbo.enterprise         pr ON pr.id = p.ProjectId
+        LEFT JOIN dbo.Godowns            g  ON g.GodownID = grn.GodownID
+        LEFT JOIN dbo.AccountHeadMaster  s  ON s.LHeadId = grn.SupplierID
+        LEFT JOIN dbo.DocNumberSequence  ds ON ds.TableName = 'GoodsReceiptNotes'
+                                            AND ds.DocNo = COALESCE(grn.DocNo, grn.GRNNo)
+        LEFT JOIN dbo.Users cu ON LOWER(cu.email) = LOWER(ds.IssuedBy)
+        OUTER APPLY (
+          SELECT
+            SUM(base) AS TaxableAmount,
+            SUM(base * gstPct / 100.0) AS GstFromLines
+          FROM (
+            SELECT
+              CASE
+                WHEN TRY_CONVERT(DECIMAL(18,4), JSON_VALUE(j.value, '$.totalAmount')) > 0
+                  THEN TRY_CONVERT(DECIMAL(18,4), JSON_VALUE(j.value, '$.totalAmount'))
+                ELSE COALESCE(TRY_CONVERT(DECIMAL(18,4), JSON_VALUE(j.value, '$.rate')), 0)
+                   * COALESCE(TRY_CONVERT(DECIMAL(18,4), JSON_VALUE(j.value, '$.quantity')), 0)
+              END AS base,
+              COALESCE(TRY_CONVERT(DECIMAL(9,4), JSON_VALUE(j.value, '$.gstPct')), 0) AS gstPct
+            FROM OPENJSON(CASE WHEN ISJSON(grn.GRNItems) = 1 THEN grn.GRNItems ELSE '[]' END) j
+          ) lines
+        ) tax
+        OUTER APPLY (
+          SELECT TOP 1 a.CreatedBy, a.CreatedAt
+          FROM dbo.Amendments a
+          WHERE a.RefDocType = 'grn' AND a.RefDocId = grn.GRNID
+            AND ISNULL(a.IsDeleted, 0) = 0
+          ORDER BY a.CreatedAt DESC
+        ) amd
+        LEFT JOIN dbo.Users mu ON LOWER(mu.email) = LOWER(amd.CreatedBy)
+        OUTER APPLY (
+          SELECT TOP 1 aal.ApproverEmail, aal.ActionAt
+          FROM dbo.ApprovalAuditLog aal
+          WHERE aal.TableName = 'GRN' AND aal.RecordId = grn.GRNID
+            AND aal.ActionStatus = 'Approved'
+          ORDER BY aal.ActionAt DESC
+        ) appr
+        LEFT JOIN dbo.Users pu ON LOWER(pu.email) = LOWER(appr.ApproverEmail)
+        WHERE (@companyId  IS NULL OR p.CompanyId = @companyId)
+          AND (@projectId  IS NULL OR p.ProjectId = @projectId)
+          AND (@supplierId IS NULL OR grn.SupplierID = @supplierId)
+          AND (@status     IS NULL OR grn.Status = @status)
+          AND (@grnNo      IS NULL OR grn.GRNNo LIKE '%' + @grnNo + '%')
+          AND (@docNo      IS NULL OR grn.DocNo LIKE '%' + @docNo + '%')
+          AND (@dateFrom   IS NULL OR grn.GRNDate >= @dateFrom)
+          AND (@dateTo     IS NULL OR grn.GRNDate <= @dateTo)
+          AND (
+            @createdBy IS NULL
+            OR ds.IssuedBy LIKE '%' + @createdBy + '%'
+            OR cu.name     LIKE '%' + @createdBy + '%'
+          )
+      ),
+      grn_calc AS (
+        SELECT *,
+          ROUND(COALESCE(TaxableAmount, 0), 2) AS TaxableAmt,
+          ROUND(
+            COALESCE(GrandTotalStored, COALESCE(TaxableAmount, 0) + COALESCE(GstFromLines, 0)),
+          2) AS GrandTotalAmt
+        FROM grn_base
+      ),
+      grn_final AS (
+        SELECT *,
+          CASE WHEN GrandTotalAmt - TaxableAmt > 0
+               THEN ROUND(GrandTotalAmt - TaxableAmt, 2) ELSE 0 END AS TotalTaxAmt,
+          CASE
+            WHEN LTRIM(RTRIM(LOWER(COALESCE(SupplierState, '')))) <> ''
+             AND LTRIM(RTRIM(LOWER(COALESCE(SupplierState, '')))) =
+                 LTRIM(RTRIM(LOWER(COALESCE(CompanyState, ''))))
+            THEN 1 ELSE 0
+          END AS IsIntraState
+        FROM grn_calc
+      )
+      SELECT
+        GRNID,
+        GRNNo,
+        DocNo,
+        DocDate,
+        GRNDate,
+        COALESCE(PONumber, ParentDocNo)          AS ReferenceNo,
+        Status                                   AS GRNStatus,
+        Remarks,
+        CompanyName,
+        CompanyCode,
+        ProjectName,
+        BranchLocation,
+        SupplierName,
+        SupplierCode,
+        SupplierGSTIN,
+        SupplierAddress,
+        TaxableAmt                               AS TaxableAmount,
+        CASE WHEN IsIntraState = 1 THEN ROUND(TotalTaxAmt / 2, 2) ELSE 0 END AS CGSTAmount,
+        CASE WHEN IsIntraState = 1 THEN ROUND(TotalTaxAmt - ROUND(TotalTaxAmt / 2, 2), 2) ELSE 0 END AS SGSTAmount,
+        CASE WHEN IsIntraState = 1 THEN 0 ELSE TotalTaxAmt END AS IGSTAmount,
+        0                                        AS CessAmount,
+        0                                        AS OtherTaxAmount,
+        TotalTaxAmt                              AS TotalTaxAmount,
+        GrandTotalAmt                            AS GrandTotal,
+        0                                        AS RoundOff,
+        GrandTotalAmt                            AS NetPayable,
+        COALESCE(CreatedByName, CreatedByEmail)  AS CreatedBy,
+        COALESCE(CreatedDate, DocIssuedAt)       AS CreatedDate,
+        COALESCE(ModifiedByName, ModifiedByEmail) AS ModifiedBy,
+        ModifiedAt                               AS ModifiedDate,
+        COALESCE(PostedByName, PostedByEmail)    AS PostedBy,
+        PostedAt                                 AS PostedDate,
+        COUNT(*) OVER() AS _total
+      FROM grn_final
+      ORDER BY GRNID DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
+
+    const total = result.recordset[0]?._total ?? 0;
+    res.json({
+      data: result.recordset.map((r) => {
+        const { _total, ...rest } = r;
+        return rest;
+      }),
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (err) {
+    console.error("GET /grns/register ERROR:", err);
+    res.status(500).json({
+      error: "Failed to fetch GRN Register",
+      message: err.message,
+    });
+  }
+});
+
 // GET single GRN by ID
 // This is the authoritative endpoint used by the expense booking form to load
 // GRN items. GRNItems is normalised to a parsed array before returning so the

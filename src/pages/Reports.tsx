@@ -781,52 +781,106 @@ const ALL_REPORTS: ReportDef[] = [
   {
     id: "grn-register",
     label: "GRN Register",
-    description: "Goods received notes with item details",
+    description:
+      "Audit-ready register of every GRN — document, supplier, tax, amount & created-by details",
     icon: Package,
     color: "#10b981",
-    apiPath: "/api/grns",
-    // GRN accepts companyId ✓ but no date or finYear filters.
+    // Dedicated read-only reporting endpoint (backend/routes/grns.js → GET
+    // /register). One row per GRN header, tax split derived from the posted
+    // total, Created By resolved from the DocNumberSequence audit trail.
+    apiPath: "/api/grns/register",
+    // Company scopes via the linked PO's company (same as the GRN list).
+    // Date From / Date To filter on the GRN date. No financial-year param.
     filterConfig: {
+      companyParam: "companyId",
+      projectParam: "projectId",
       finYearParam: null,
-      singleDateParam: null,
-      dateFromParam: null,
-      dateToParam: null,
+      singleDateParam: "dateFrom",
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
     },
     columns: [
-      { header: "Company", accessor: "CompanyName" },
-      { header: "Project", accessor: "ProjectName" },
-      {
-        header: "Date of GRN",
-        accessor: (r) => (r.GRNDate ? String(r.GRNDate).slice(0, 10) : "—"),
-      },
+      // ── GRN / Document ──────────────────────────────────────────────────
+      { header: "GRN Number", accessor: (r) => (r.GRNNo ?? "—") as string },
       {
         header: "Document Number",
         accessor: (r) => (r.DocNo ?? r.GRNNo ?? "—") as string,
       },
-      { header: "Supplier", accessor: "SupplierName" },
       {
-        header: "Fin Year",
-        accessor: (r) => (r.FinYearName ?? r.FinYear ?? "—") as string,
+        header: "Document Date",
+        accessor: (r) => (r.DocDate ? String(r.DocDate).slice(0, 10) : "—"),
       },
       {
-        header: "Items in the GRN",
+        header: "GRN Date",
+        accessor: (r) => (r.GRNDate ? String(r.GRNDate).slice(0, 10) : "—"),
+      },
+      {
+        header: "Reference No",
+        accessor: (r) => (r.ReferenceNo ?? "—") as string,
+      },
+      { header: "GRN Status", accessor: (r) => (r.GRNStatus ?? "—") as string },
+      { header: "Remarks", accessor: (r) => (r.Remarks ?? "—") as string },
+      // ── Company ─────────────────────────────────────────────────────────
+      { header: "Company", accessor: (r) => (r.CompanyName ?? "—") as string },
+      {
+        header: "Company Code",
+        accessor: (r) => (r.CompanyCode ?? "—") as string,
+      },
+      {
+        header: "Branch/Location",
+        accessor: (r) => (r.BranchLocation ?? "—") as string,
+      },
+      { header: "Project", accessor: (r) => (r.ProjectName ?? "—") as string },
+      // ── Supplier / Vendor ───────────────────────────────────────────────
+      { header: "Supplier", accessor: (r) => (r.SupplierName ?? "—") as string },
+      {
+        header: "Supplier Code",
+        accessor: (r) => (r.SupplierCode ?? "—") as string,
+      },
+      {
+        header: "Supplier GSTIN",
+        accessor: (r) => (r.SupplierGSTIN ?? "—") as string,
+      },
+      {
+        header: "Supplier Address",
+        accessor: (r) => (r.SupplierAddress ?? "—") as string,
+      },
+      // ── Tax ─────────────────────────────────────────────────────────────
+      { header: "Taxable Amount", accessor: (r) => fmt(r.TaxableAmount as number) },
+      { header: "CGST", accessor: (r) => fmt(r.CGSTAmount as number) },
+      { header: "SGST", accessor: (r) => fmt(r.SGSTAmount as number) },
+      { header: "IGST", accessor: (r) => fmt(r.IGSTAmount as number) },
+      { header: "Cess", accessor: (r) => fmt(r.CessAmount as number) },
+      { header: "Other Tax", accessor: (r) => fmt(r.OtherTaxAmount as number) },
+      { header: "Total Tax", accessor: (r) => fmt(r.TotalTaxAmount as number) },
+      // ── Amount ──────────────────────────────────────────────────────────
+      { header: "Round Off", accessor: (r) => fmt(r.RoundOff as number) },
+      { header: "Grand Total", accessor: (r) => fmt(r.GrandTotal as number) },
+      { header: "Net Payable", accessor: (r) => fmt(r.NetPayable as number) },
+      // ── Audit / User ────────────────────────────────────────────────────
+      { header: "Created By", accessor: (r) => (r.CreatedBy ?? "—") as string },
+      {
+        header: "Created Date",
         accessor: (r) =>
-          Array.isArray(r.GRNItems)
-            ? r.GRNItems.map(
-                (it) =>
-                  (it as Record<string, unknown>)?.itemName ??
-                  (it as Record<string, unknown>)?.ItemName ??
-                  (it as Record<string, unknown>)?.name ??
-                  "",
-              )
-                .filter(Boolean)
-                .join(", ")
+          r.CreatedDate
+            ? String(r.CreatedDate).slice(0, 19).replace("T", " ")
             : "—",
       },
-      { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
+      { header: "Modified By", accessor: (r) => (r.ModifiedBy ?? "—") as string },
       {
-        header: "Ref Doc",
-        accessor: (r) => (r.PONumber ?? "—") as string,
+        header: "Modified Date",
+        accessor: (r) =>
+          r.ModifiedDate
+            ? String(r.ModifiedDate).slice(0, 19).replace("T", " ")
+            : "—",
+      },
+      { header: "Posted By", accessor: (r) => (r.PostedBy ?? "—") as string },
+      {
+        header: "Posted Date",
+        accessor: (r) =>
+          r.PostedDate
+            ? String(r.PostedDate).slice(0, 19).replace("T", " ")
+            : "—",
       },
     ],
   },
@@ -2247,6 +2301,7 @@ const ReportTable: React.FC<{
 
   // ── Expense Head switcher (expense-register only) ────────────────────────
   const isExpenseRegister = report.id === "expense-register";
+  const isGrnRegister = report.id === "grn-register";
   const [expenseHeadId, setExpenseHeadId] = useState<string>("");
   const [expenseHeadOptions, setExpenseHeadOptions] = useState<{ id: number; name: string }[]>([]);
   useEffect(() => {
@@ -2589,6 +2644,41 @@ const ReportTable: React.FC<{
           <FileText size={16} />
           <p className="text-sm">No records found</p>
         </div>
+      )}
+
+      {/* GRN Register summary — recomputed from the currently-filtered rows */}
+      {isGrnRegister && !loading && !error && rows.length > 0 && (
+        (() => {
+          const sum = (k: string) =>
+            rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+          const cards: [string, string][] = [
+            ["Total GRNs", String(rows.length)],
+            ["Taxable Amount", fmt(sum("TaxableAmount"))],
+            ["CGST", fmt(sum("CGSTAmount"))],
+            ["SGST", fmt(sum("SGSTAmount"))],
+            ["IGST", fmt(sum("IGSTAmount"))],
+            ["Cess", fmt(sum("CessAmount"))],
+            ["Total Tax", fmt(sum("TotalTaxAmount"))],
+            ["Grand Total", fmt(sum("GrandTotal"))],
+          ];
+          return (
+            <div className="flex flex-wrap gap-2 px-4 py-3 border-b border-border bg-muted/10">
+              {cards.map(([label, value]) => (
+                <div
+                  key={label}
+                  className="flex-1 min-w-[120px] rounded-lg border border-border bg-card px-3 py-2"
+                >
+                  <p className="text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider">
+                    {label}
+                  </p>
+                  <p className="text-sm font-semibold text-foreground tabular-nums mt-0.5">
+                    {value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          );
+        })()
       )}
 
       {/* Table (or, for Worker Attendance, the same grouped/collapsible log
