@@ -351,11 +351,15 @@ const ALL_REPORTS: ReportDef[] = [
       projectParam: "projectName",
       projectValueType: "name",
     },
-    // Pared down to just Doc No + Amount posted to the Expense Head — an
-    // invoice always debits it (there's no credit-note flow through this
-    // table), so "Amount" here is that debit.
+    // Doc No + Paid To (the resolved supplier/contractor, same
+    // ESupplierName expenseBooking.js's GET / already resolves via
+    // expenseBookingSupplierSql — GRN/PO/WO_PO/WORK_DONE -> source doc's
+    // supplier, direct/manual bookings -> eb.LHeadId) + Amount posted to
+    // the Expense Head — an invoice always debits it (there's no
+    // credit-note flow through this table), so "Amount" here is that debit.
     columns: [
       { header: "Doc No", accessor: (r) => (r.EDocNo ?? "—") as string },
+      { header: "Paid To", accessor: (r) => (r.ESupplierName ?? "—") as string },
       {
         header: "Amount",
         accessor: (r) => fmt(Number(r.ENetAmount ?? r.EGrnTotalAmount ?? r.EAmount) || 0),
