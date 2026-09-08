@@ -431,28 +431,37 @@ const ALL_REPORTS: ReportDef[] = [
   {
     id: "ledger-report",
     label: "Ledger Report",
-    description: "General ledger entries by account head",
+    description: "Every debit/credit posting — invoices, payments, journal entries — across every GL head, with Direct/Indirect expense type",
     icon: BookOpen,
     color: "#64748b",
-    apiPath: "/api/general-ledger",
+    // GET /api/general-ledger/transactions — the actual GL transaction
+    // feed (unlike GET /api/general-ledger, which is just the account-head
+    // master list). Scoped to LHeadType='GL' so Supplier/Customer/Bank
+    // postings (Vendor Ledger Report's own territory) don't flood this one.
+    apiPath: "/api/general-ledger/transactions",
     filterConfig: {
       companyParam: null,
       finYearParam: null,
-      singleDateParam: null,
-      dateFromParam: null,
-      dateToParam: null,
+      singleDateParam: "from",
+      dateFromParam: "from",
+      dateToParam: "to",
     },
     columns: [
       {
-        header: "Account",
-        accessor: (r) => (r.LHeadName ?? r.label ?? "—") as string,
+        header: "Date",
+        accessor: (r) => (r.VoucherDate ? String(r.VoucherDate).slice(0, 10) : "—"),
       },
+      { header: "GL Name", accessor: (r) => (r.LHeadName ?? "—") as string },
+      { header: "Group", accessor: (r) => (r.GroupName ?? "—") as string },
       {
-        header: "Code",
-        accessor: (r) => (r.LHeadCode ?? r.code ?? "—") as string,
+        header: "Expense Type",
+        accessor: (r) => (r.ExpenseType ?? "—") as string,
       },
-      { header: "Type", accessor: "LHeadType" },
-      { header: "Group", accessor: "GroupName" },
+      { header: "Source", accessor: (r) => (r.SourceType ?? "—") as string },
+      { header: "Doc No", accessor: (r) => (r.DocNo ?? "—") as string },
+      { header: "Debit", accessor: (r) => fmt(Number(r.DebitAmount) || 0) },
+      { header: "Credit", accessor: (r) => fmt(Number(r.CreditAmount) || 0) },
+      { header: "Narration", accessor: (r) => (r.Narration ?? "—") as string },
     ],
   },
   {

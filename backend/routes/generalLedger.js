@@ -108,6 +108,142 @@ router.get("/system-generated", async (req, res) => {
   }
 });
 
+// Direct/Indirect classification for a GL head's own AccountGroup id —
+// reuses the exact rule financialStatements.js's classifyExpenseBucketName
+// already applies for the P&L (walk up to the nearest ancestor that's a
+// direct child of the EXPENSES root, classify THAT bucket's name: a name
+// matching "direct expense" or "project"/"construction" is Direct,
+// everything else — including heads that aren't under EXPENSES at all,
+// e.g. Assets/Income/Equity — falls back to Indirect/not-applicable).
+// Loads the AccountGroup tree once per request (a few hundred rows at
+// most) instead of a recursive CTE per row, since this report classifies
+// every GL head on the page, not just one.
+async function loadExpenseTypeClassifier(pool) {
+  const rootRes = await pool.request().query(
+    `SELECT AGId FROM dbo.AccountGroup WHERE Name = 'EXPENSES' AND ParentGroupId IS NULL`,
+  );
+  const expensesRootId = rootRes.recordset[0]?.AGId ?? null;
+
+  const groupsRes = await pool.request().query(`SELECT AGId, Name, ParentGroupId FROM dbo.AccountGroup`);
+  const groupMap = new Map(
+    groupsRes.recordset.map((g) => [
+      Number(g.AGId),
+      { id: Number(g.AGId), name: g.Name, parentId: g.ParentGroupId != null ? Number(g.ParentGroupId) : null },
+    ]),
+  );
+
+  function scheduleBucketOf(groupId) {
+    let cur = groupMap.get(Number(groupId));
+    let hops = 0;
+    while (cur && hops < 20) {
+      if (cur.parentId === expensesRootId) return cur;
+      if (cur.parentId == null) return null;
+      cur = groupMap.get(cur.parentId);
+      hops++;
+    }
+    return null;
+  }
+
+  return (groupId) => {
+    if (groupId == null) return null;
+    const bucket = scheduleBucketOf(groupId);
+    if (!bucket) return null;
+    const n = (bucket.name || "").toLowerCase();
+    const isDirect = /\bdirect expense/.test(n) || /project|construction/.test(n);
+    return isDirect ? "Direct Expense" : "Indirect Expense";
+  };
+}
+
+// ── GET /transactions ────────────────────────────────────────────────────────
+// Every posted GL entry (debit/credit — invoice bookings, payments, JVs,
+// GRNs, fund transfers) across every GL-type head at once, for the Ledger
+// Report — unlike GET / (an account-head master list) or Vendor Ledger's
+// /all-transactions (hard-scoped to LHeadType='S' suppliers only), this is
+// the actual General Ledger transaction feed, scoped to LHeadType='GL' so
+// Supplier/Customer/Bank postings don't flood a report about expense/income
+// GL accounts. Each row carries its own Direct/Indirect Expense Type.
+router.get("/transactions", async (req, res) => {
+  try {
+    const pool = getPool();
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 50, 1), 2000);
+    const offset = (page - 1) * limit;
+    const from = req.query.from ? String(req.query.from) : null;
+    const to = req.query.to ? String(req.query.to) : null;
+    const groupId = req.query.groupId ? parseInt(req.query.groupId, 10) : null;
+    const search = req.query.search ? String(req.query.search).trim() : null;
+
+    const result = await pool
+      .request()
+      .input("Offset", sql.Int, offset)
+      .input("Limit", sql.Int, limit)
+      .input("From", sql.Date, from)
+      .input("To", sql.Date, to)
+      .input("GroupId", sql.Int, groupId)
+      .input("Search", sql.NVarChar(200), search ? `%${search}%` : null).query(`
+      SELECT
+        gle.EntryId, gle.VoucherNo, gle.VoucherDate, gle.DebitAmount, gle.CreditAmount,
+        gle.Narration, gle.SourceType, gle.SourceId,
+        ahm.LHeadId, ISNULL(ahm.DisplayName, ahm.LHeadName) AS LHeadName, ahm.LBelongsTo AS GroupId,
+        ag.Name AS GroupName,
+        np.DocNo        AS NewPaymentDocNo,
+        rp.RPDocNo      AS ReceivedPaymentDocNo,
+        jv.JVNo         AS JournalVoucherNo,
+        ft.DocNo        AS FundTransferDocNo,
+        eb.EDocNo       AS ExpenseBookingDocNo,
+        ISNULL(grn.DocNo, grn.GRNNo) AS GrnDocNo,
+        COUNT(*) OVER() AS TotalCount
+      FROM dbo.GeneralLedgerEntry gle
+      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = gle.LHeadId AND ahm.LHeadType = 'GL'
+      LEFT JOIN dbo.AccountGroup ag ON ag.AGId = ahm.LBelongsTo
+      LEFT JOIN dbo.NewPayment np
+        ON gle.SourceType IN ('NewPayment', 'PaymentPosting') AND np.PPaymentID = gle.SourceId
+      LEFT JOIN dbo.ReceivedPayment rp
+        ON gle.SourceType = 'ReceivedPayment' AND rp.RPPaymentID = gle.SourceId
+      LEFT JOIN dbo.JournalVoucher jv
+        ON gle.SourceType = 'JournalVoucher' AND jv.JVID = gle.SourceId
+      LEFT JOIN dbo.FundTransfer ft
+        ON gle.SourceType = 'FundTransfer' AND ft.FTId = gle.SourceId
+      LEFT JOIN dbo.ExpenseBooking eb
+        ON gle.SourceType IN ('ExpenseBooking', 'InvoicePosting') AND eb.Eid = gle.SourceId
+      LEFT JOIN dbo.GoodsReceiptNotes grn
+        ON gle.SourceType IN ('GRN', 'GRNPosting') AND grn.GRNID = gle.SourceId
+      WHERE gle.IsReversed = 0
+        AND (@From IS NULL OR gle.VoucherDate >= @From)
+        AND (@To IS NULL OR gle.VoucherDate <= @To)
+        AND (@GroupId IS NULL OR ahm.LBelongsTo = @GroupId)
+        AND (@Search IS NULL OR ahm.LHeadName LIKE @Search)
+      ORDER BY gle.VoucherDate DESC, gle.EntryId DESC
+      OFFSET @Offset ROWS FETCH NEXT @Limit ROWS ONLY
+    `);
+
+    const classify = await loadExpenseTypeClassifier(pool);
+    const rows = result.recordset;
+    const total = rows.length > 0 ? Number(rows[0].TotalCount) : 0;
+
+    const data = rows.map(({ TotalCount, NewPaymentDocNo, ReceivedPaymentDocNo, JournalVoucherNo, FundTransferDocNo, ExpenseBookingDocNo, GrnDocNo, GroupId: rowGroupId, ...r }) => ({
+      ...r,
+      GroupId: rowGroupId,
+      ExpenseType: classify(rowGroupId),
+      // One resolved doc number, whichever source this leg came from —
+      // same "pick the matching join" pattern as Vendor Ledger's own
+      // all-transactions endpoint, just for the GL side's source types.
+      DocNo: NewPaymentDocNo || ReceivedPaymentDocNo || JournalVoucherNo || FundTransferDocNo || ExpenseBookingDocNo || GrnDocNo || r.VoucherNo || null,
+    }));
+
+    res.json({
+      data,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1,
+    });
+  } catch (err) {
+    console.error("GL TRANSACTIONS ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET / ─────────────────────────────────────────────────────────────────────
 // Returns all GL ledger heads joined with their account group names.
 // Supports optional ?search= and ?groupId= query filters.
