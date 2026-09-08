@@ -82,6 +82,8 @@ interface TBTransaction {
   sourceType: string | null;
   sourceId: number | null;
   invoiceNo: string | null;
+  docNo: string | null;
+  mode: string | null;
   payment: { id: number; docNo: string | null; mode: string | null; status: string | null } | null;
   costCenter: { id: number; code: string | null; name: string | null } | null;
   fixedAsset: {
@@ -472,7 +474,7 @@ function TBRow({
                                   : { label: t.sourceType ?? "Entry", cls: "bg-muted text-muted-foreground" };
 
                       const ref = (t as any).sourceRef as { id: number; docNo: string; type: string } | null;
-                      const displayDoc = (t as any).docNo || t.voucherNo || (ref?.docNo) || "—";
+                      const displayDoc = t.docNo || t.voucherNo || (ref?.docNo) || "—";
                       // Every row with a resolvable source (a linked
                       // payment, or a sourceId) is clickable to open the
                       // GL entry detail dialog — not just payments.
@@ -502,7 +504,7 @@ function TBRow({
                             </span>
                           </td>
                           <td className="px-3 py-1.5 text-[11px]">{t.invoiceNo || "—"}</td>
-                          <td className="px-3 py-1.5 text-[11px]">{(t as any).mode || t.payment?.mode || "—"}</td>
+                          <td className="px-3 py-1.5 text-[11px]">{t.mode || t.payment?.mode || "—"}</td>
                           <td className="px-3 py-1.5 text-[11px] text-muted-foreground">
                             {t.fixedAsset ? (
                               <span
@@ -1756,7 +1758,7 @@ export default function TrialBalance() {
                   { label: "Voucher No.",   value: glEntryDetail.voucherNo || "—" },
                   { label: "Source Type",   value: glEntryDetail.sourceType || "—" },
                   { label: "Invoice No.",   value: glEntryDetail.invoiceNo || "—" },
-                  { label: "Mode",          value: (glEntryDetail as any).mode || glEntryDetail.payment?.mode || "—" },
+                  { label: "Mode",          value: glEntryDetail.mode || glEntryDetail.payment?.mode || "—" },
                   {
                     label: "Cost Centre",
                     value: glEntryDetail.costCenter
