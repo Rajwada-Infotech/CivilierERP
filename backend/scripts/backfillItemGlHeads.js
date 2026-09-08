@@ -69,21 +69,73 @@ function diffLegs(existingRows, newLegs) {
   return changes.length ? changes : null;
 }
 
-async function backfillGrns(pool, headNameById) {
-  const postedRes = await pool.request().query(`
+// Mirrors postGRNApproval's (services/generalLedger.js, SourceType='GRN',
+// the auto-post-on-approval path) exact leg construction — a DIFFERENT
+// shape from buildGrnPostingLines/GRNPosting: GST is a single Provisional
+// Credit leg rather than a per-head tax-offset pair, and there's no cost
+// centre split. Needed because a GRN posted here, before an item got
+// tagged as a Fixed Asset (or got its own GL Account), still has its old
+// Purchase A/c leg — 'GRNPosting' isn't the only live posting path, so
+// backfillGrns() below must check both.
+async function buildGrnApprovalLines(pool, grn, ledgers) {
+  let items = [];
+  try {
+    items = JSON.parse(grn.GRNItems || "[]");
+    if (!Array.isArray(items)) items = [];
+  } catch { items = []; }
+
+  const itemIds = items.map((it) => it.itemId).filter((id) => id != null).map(String);
+  const itemGlMap = await resolveItemGlHeads(pool, sql, itemIds);
+
+  const purchaseAmountByHead = new Map();
+  const fixedAssetAmountByHead = new Map();
+  for (const it of items) {
+    const amt = Number(it.totalAmount) || 0;
+    const itemId = it.itemId != null ? String(it.itemId) : null;
+    const master = itemId ? itemGlMap.get(itemId) : null;
+    const target = master?.isFixedAsset ? fixedAssetAmountByHead : purchaseAmountByHead;
+    const headId = master?.isFixedAsset ? master.glHeadId : (master?.glHeadId ?? null);
+    const bucket = target.get(headId) ?? 0;
+    target.set(headId, bucket + amt);
+  }
+
+  const baseAmount = items.reduce((s, i) => s + (Number(i.totalAmount) || 0), 0);
+  const totalInclGst = Number(grn.TotalAmount) || 0;
+  const gstAmount = Math.max(0, totalInclGst - baseAmount);
+  const docNo = grn.DocNo || grn.GRNNo || `GRN-${grn.GRNID}`;
+
+  const purchaseLegs = Array.from(purchaseAmountByHead.entries()).map(([lHeadId, amount]) => ({
+    LHeadId: lHeadId || ledgers.purchaseId, DebitAmount: Math.round(amount * 100) / 100, CreditAmount: 0,
+    Narration: `GRN ${docNo} — goods received (base)`,
+  }));
+  const fixedAssetLegs = Array.from(fixedAssetAmountByHead.entries()).map(([lHeadId, amount]) => ({
+    LHeadId: lHeadId, DebitAmount: Math.round(amount * 100) / 100, CreditAmount: 0,
+    Narration: `GRN ${docNo} — fixed asset received (capitalized)`,
+  }));
+
+  return [
+    ...purchaseLegs,
+    ...fixedAssetLegs,
+    { LHeadId: ledgers.provisionalId, DebitAmount: Math.round(gstAmount * 100) / 100, CreditAmount: 0, Narration: `GRN ${docNo} — input GST credit (provisional)` },
+    { LHeadId: ledgers.pgrnId, DebitAmount: 0, CreditAmount: Math.round(totalInclGst * 100) / 100, Narration: `GRN ${docNo} — goods received, not yet invoiced` },
+  ];
+}
+
+async function backfillGrnsForSourceType(pool, headNameById, ledgers, sourceType, buildLines) {
+  const postedRes = await pool.request().input("SourceType", sql.NVarChar(30), sourceType).query(`
     SELECT DISTINCT gle.SourceId AS GRNID, gle.VoucherNo
     FROM dbo.GeneralLedgerEntry gle
-    WHERE gle.SourceType = 'GRNPosting' AND gle.IsReversed = 0
+    WHERE gle.SourceType = @SourceType AND gle.IsReversed = 0
     ORDER BY gle.SourceId ASC
   `);
-  console.log(`\n=== GRNs: ${postedRes.recordset.length} posted document(s) to check ===\n`);
+  console.log(`\n=== GRNs (${sourceType}): ${postedRes.recordset.length} posted document(s) to check ===\n`);
 
-  const { purchaseId, pgrnId, provisionalId } = await getSystemLedgers(pool);
+  const { purchaseId, pgrnId, provisionalId } = ledgers;
   let changedCount = 0;
 
   for (const { GRNID: grnId, VoucherNo: oldVoucherNo } of postedRes.recordset) {
     const grnRes = await pool.request().input("GRNID", sql.Int, grnId).query(`
-      SELECT g.GRNID, g.GRNNo, g.GRNDate, g.GRNItems, g.POID,
+      SELECT g.GRNID, g.GRNNo, g.DocNo, g.GRNDate, g.GRNItems, g.TotalAmount, g.POID,
              po.CompanyId, po.ProjectId, po.CostCenterId
       FROM dbo.GoodsReceiptNotes g
       LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = g.POID
@@ -92,30 +144,31 @@ async function backfillGrns(pool, headNameById) {
     const grn = grnRes.recordset[0];
     if (!grn) { console.log(`  ⚠ GRN ${grnId}: no longer exists, skipping`); continue; }
 
-    const existingRowsRes = await pool.request().input("SrcId", sql.Int, grnId).query(`
+    const existingRowsRes = await pool.request().input("SrcId", sql.Int, grnId).input("SourceType", sql.NVarChar(30), sourceType).query(`
       SELECT LHeadId, DebitAmount, CreditAmount FROM dbo.GeneralLedgerEntry
-      WHERE SourceType = 'GRNPosting' AND SourceId = @SrcId AND IsReversed = 0
+      WHERE SourceType = @SourceType AND SourceId = @SrcId AND IsReversed = 0
     `);
 
-    const { buckets, totalBase } = await computeGrnPostingBuckets(pool, sql, grn);
-    if (totalBase <= 0) continue;
     if (!purchaseId || !pgrnId || !provisionalId) { console.log(`  ⚠ GRN ${grnId}: system ledgers not configured, skipping`); continue; }
 
-    const newLines = buildGrnPostingLines({ buckets, grnNo: grn.GRNNo, purchaseId, pgrnId, provisionalId });
+    const newLines = await buildLines(pool, grn, ledgers);
+    const totalNew = newLines.reduce((s, l) => s + l.DebitAmount, 0);
+    if (totalNew <= 0) continue;
+
     const changes = diffLegs(existingRowsRes.recordset, newLines);
     if (!changes) continue;
 
     changedCount++;
-    console.log(`GRN ${grn.GRNNo} (id ${grnId}), currently ${oldVoucherNo}:`);
+    console.log(`GRN ${grn.GRNNo} (id ${grnId}, ${sourceType}), currently ${oldVoucherNo}:`);
     for (const c of changes) console.log(`    ${headNameById.get(c.headId) || `#${c.headId}`}: ${fmt(c.before)} → ${fmt(c.after)}`);
 
     if (APPLY) {
-      await reversePostingBySource(pool, "GRNPosting", grnId);
+      await reversePostingBySource(pool, sourceType, grnId);
       const newVoucherNo = `${oldVoucherNo}-BF`;
       await postVoucher(pool, {
         voucherNo: newVoucherNo,
         voucherDate: grn.GRNDate,
-        sourceType: "GRNPosting",
+        sourceType,
         sourceId: grnId,
         companyId: grn.CompanyId ?? null,
         projectId: grn.ProjectId ?? null,
@@ -127,8 +180,20 @@ async function backfillGrns(pool, headNameById) {
     console.log("");
   }
 
-  console.log(`${changedCount} GRN(s) ${APPLY ? "reclassified" : "would be reclassified"}.`);
+  console.log(`${changedCount} GRN(s) under ${sourceType} ${APPLY ? "reclassified" : "would be reclassified"}.`);
   return changedCount;
+}
+
+async function backfillGrns(pool, headNameById) {
+  const ledgers = await getSystemLedgers(pool);
+  let total = 0;
+  total += await backfillGrnsForSourceType(pool, headNameById, ledgers, "GRNPosting",
+    async (p, grn, l) => {
+      const { buckets } = await computeGrnPostingBuckets(p, sql, grn);
+      return buildGrnPostingLines({ buckets, grnNo: grn.GRNNo, purchaseId: l.purchaseId, pgrnId: l.pgrnId, provisionalId: l.provisionalId });
+    });
+  total += await backfillGrnsForSourceType(pool, headNameById, ledgers, "GRN", buildGrnApprovalLines);
+  return total;
 }
 
 async function backfillInvoices(pool, headNameById) {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -92,6 +92,10 @@ interface TBTransaction {
     faItemCode: string | null;
     finYear: string | null;
   } | null;
+  // GRN-sourced legs only — the items that actually made up this leg's
+  // bucketed total, e.g. "Fixed Assets A/c" broken back down into CP PLUS
+  // DVR 8CH, CP PLUS BULLET CAMERA, etc. with each item's own amount.
+  items: { itemName: string; amount: number }[] | null;
 }
 
 interface TBTransactionsResponse {
@@ -477,10 +481,10 @@ function TBRow({
                       const isClickable = (st === "newpayment" && !!t.payment) || !!t.sourceId;
 
                       return (
+                        <Fragment key={t.entryId ?? `direct-${ti}`}>
                         <tr
-                          key={t.entryId ?? `direct-${ti}`}
                           onClick={(e) => { e.stopPropagation(); if (isClickable) onOpenSource(t); }}
-                          className={`border-b border-border/30 ${isPending ? "opacity-70 bg-muted/20" : ""} ${isClickable ? "cursor-pointer hover:bg-primary/8" : ""}`}
+                          className={`border-b ${t.items && t.items.length > 0 ? "border-border/0" : "border-border/30"} ${isPending ? "opacity-70 bg-muted/20" : ""} ${isClickable ? "cursor-pointer hover:bg-primary/8" : ""}`}
                         >
                           <td className="px-3 py-1.5 font-mono text-[11px]">{t.voucherNo || "—"}</td>
                           <td className="px-3 py-1.5 whitespace-nowrap">{t.date ? fmtDate(t.date) : "—"}</td>
@@ -528,6 +532,29 @@ function TBRow({
                           <td className="px-3 py-1.5 text-right tabular-nums text-emerald-400">{t.credit ? fmt(t.credit) : "—"}</td>
                           <td className="px-3 py-1.5 text-muted-foreground truncate max-w-[160px] text-[11px]">{t.narration || "—"}</td>
                         </tr>
+                        {/* Item-level breakdown — this leg's bucketed total
+                            split back out by the item that actually earned
+                            each share, so e.g. Fixed Assets A/c shows CP
+                            PLUS DVR 8CH / CP PLUS BULLET CAMERA separately
+                            instead of one lumped GRN figure. */}
+                        {t.items && t.items.length > 0 && (
+                          <tr className="border-b border-border/30">
+                            <td colSpan={10} className="px-3 pb-2 pt-0">
+                              <div className="ml-4 rounded-lg border border-border/40 bg-muted/10 overflow-hidden">
+                                {t.items.map((it, ii) => (
+                                  <div
+                                    key={ii}
+                                    className={`flex items-center justify-between px-3 py-1.5 text-[11px] ${ii > 0 ? "border-t border-border/30" : ""}`}
+                                  >
+                                    <span className="text-foreground/80">{it.itemName}</span>
+                                    <span className="font-mono tabular-nums text-muted-foreground">₹{fmt(it.amount)}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </Fragment>
                       );
                     })}
                   </tbody>
