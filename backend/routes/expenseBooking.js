@@ -1020,6 +1020,40 @@ async function ebHasDirectItemsData(pool) {
   return _ebHasDirectItemsData;
 }
 
+// Classifies one Expense Head as "Direct Expense" or "Indirect Expense" for
+// the Expense Register report's per-filter columns — reuses the same rule
+// financialStatements.js's classifyExpenseBucketName() applies for the P&L
+// (a bucket name matching "direct expense" or "project"/"construction" is
+// Direct; everything else, tax included, folds into Indirect there too).
+// Walks the AccountGroup ancestor chain via a recursive CTE to the nearest
+// ancestor that's a direct child of the EXPENSES root, then classifies that
+// bucket's own name — same two-step ("find the Schedule-III bucket, then
+// classify its name") approach, just scoped to one head instead of the
+// whole chart of accounts, since only the currently-filtered head's type
+// is ever needed here.
+async function classifyExpenseHeadType(pool, headId) {
+  const result = await pool.request().input("HeadId", sql.Int, headId).query(`
+    ;WITH grp AS (
+      SELECT AGId, Name, ParentGroupId, 0 AS lvl
+      FROM dbo.AccountGroup
+      WHERE AGId = (SELECT LBelongsTo FROM dbo.AccountHeadMaster WHERE LHeadId = @HeadId)
+      UNION ALL
+      SELECT ag.AGId, ag.Name, ag.ParentGroupId, grp.lvl + 1
+      FROM dbo.AccountGroup ag
+      JOIN grp ON ag.AGId = grp.ParentGroupId
+      WHERE grp.lvl < 20
+    )
+    SELECT TOP 1 g.Name AS BucketName
+    FROM grp g
+    JOIN dbo.AccountGroup rootGrp ON rootGrp.AGId = g.ParentGroupId
+    WHERE rootGrp.Name = 'EXPENSES' AND rootGrp.ParentGroupId IS NULL
+    ORDER BY g.lvl
+  `);
+  const bucketName = (result.recordset[0]?.BucketName || "").toLowerCase();
+  const isDirect = /\bdirect expense/.test(bucketName) || /project|construction/.test(bucketName);
+  return isDirect ? "Direct Expense" : "Indirect Expense";
+}
+
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
   try {
@@ -1205,9 +1239,25 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     // that do have one. Batch-fetched (one query for the whole page) rather
     // than per-row to avoid an N+1.
     const allocMap = await getAllocationsForMany(pool, sql, "ExpenseBooking", rows.map((r) => r.Eid));
+
+    // Expense Register report: once scoped to one Expense Head, the report
+    // adds columns (GL Name, Direct/Indirect type) describing THAT head —
+    // the same value for every row, since every row is already guaranteed
+    // to match it. Resolved once per request, not per row.
+    let filterHeadName = null;
+    let filterExpenseType = null;
+    if (expenseHeadId) {
+      const headRes = await pool.request().input("HeadId", sql.Int, expenseHeadId)
+        .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @HeadId");
+      filterHeadName = headRes.recordset[0]?.LHeadName ?? null;
+      filterExpenseType = await classifyExpenseHeadType(pool, expenseHeadId);
+    }
+
     const rowsWithExpenseHead = rows.map((r) => ({
       ...r,
       EExpenseHeadNames: (allocMap.get(r.Eid) || []).map((a) => a.lHeadName).join(", ") || null,
+      EFilterHeadName: filterHeadName,
+      EFilterExpenseType: filterExpenseType,
     }));
 
     res.json({

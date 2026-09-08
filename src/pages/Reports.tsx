@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -2318,6 +2318,34 @@ const ReportTable: React.FC<{
       .catch(() => {});
   }, [isExpenseRegister]);
 
+  // Once a specific Expense Head is picked, the register adds columns that
+  // only make sense in a filtered view: GL Name + Expense Type describe the
+  // filtered head itself (same value every row — resolved once server-side,
+  // see expenseBooking.js's EFilterHeadName/EFilterExpenseType), and Vendor
+  // Name / Invoice Amt / Invoice Date restate the row's own supplier/amount/
+  // real invoice date (EVendorInvoiceDate, distinct from the booking's own
+  // EDocDate) for this closer, single-head view.
+  const effectiveColumns = useMemo<ExportColumn[]>(() => {
+    if (!isExpenseRegister || !expenseHeadId) return report.columns;
+    return [
+      ...report.columns,
+      { header: "GL Name", accessor: (r) => (r.EFilterHeadName ?? "—") as string },
+      { header: "Expense Type", accessor: (r) => (r.EFilterExpenseType ?? "—") as string },
+      { header: "Vendor Name", accessor: (r) => (r.ESupplierName ?? "—") as string },
+      {
+        header: "Invoice Amt",
+        accessor: (r) => fmt(Number(r.ENetAmount ?? r.EGrnTotalAmount ?? r.EAmount) || 0),
+      },
+      {
+        header: "Invoice Date",
+        accessor: (r) => {
+          const d = r.EVendorInvoiceDate ?? r.EDocDate;
+          return d ? String(d).slice(0, 10) : "—";
+        },
+      },
+    ];
+  }, [isExpenseRegister, expenseHeadId, report.columns]);
+
   const buildParams = (): Record<string, string> => {
     const fc = report.filterConfig ?? {};
     const f: Record<string, string> = {};
@@ -2605,7 +2633,7 @@ const ReportTable: React.FC<{
           <ExportMenu
             data={rows as unknown as Record<string, unknown>[]}
             fetchData={fetchAllForExport}
-            columns={report.columns}
+            columns={effectiveColumns}
             title={report.label}
             filename={report.id}
             disabled={loading || rows.length === 0}
@@ -2695,7 +2723,7 @@ const ReportTable: React.FC<{
                   <th className="px-4 py-2.5 text-left text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider w-8">
                     #
                   </th>
-                  {report.columns.map((col) => (
+                  {effectiveColumns.map((col) => (
                     <th
                       key={col.header}
                       className="px-4 py-2.5 text-left text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"
@@ -2715,7 +2743,7 @@ const ReportTable: React.FC<{
                     <td className="px-4 py-2.5 text-xs text-muted-foreground">
                       {(page - 1) * PAGE_SIZE + i + 1}
                     </td>
-                    {report.columns.map((col) => (
+                    {effectiveColumns.map((col) => (
                       <td
                         key={col.header}
                         className="px-4 py-2.5 text-xs text-foreground whitespace-nowrap max-w-[200px] truncate"
@@ -2775,7 +2803,7 @@ const ReportTable: React.FC<{
         </DialogHeader>
         {selectedRow && (
           <div className="divide-y divide-border">
-            {report.columns.map((col) => {
+            {effectiveColumns.map((col) => {
               const val = cell(selectedRow, col);
               if (!val || val === "—") return null;
               return (
