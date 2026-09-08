@@ -10,6 +10,7 @@ const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { canPerformCrmGatedAction } = require("../services/approvalService");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
 const multer = require("multer");
 
@@ -61,8 +62,8 @@ const MANDATORY_DOC_TEMPLATE = [
   { type: "RegistrationReceipt", label: "Registration Receipt / Challan" },
 ];
 
-async function logRegistryHistory(registryId, action, remarks, actorIdVal, actorType = 'Staff') {
-  const pool = getPool();
+async function logRegistryHistory(registryId, action, remarks, actorIdVal, actorType = 'Staff', executor = null) {
+  const pool = executor || getPool();
   await pool.request()
     .input('rid', sql.Int, registryId)
     .input('act', sql.NVarChar(40), action)
@@ -348,6 +349,8 @@ router.put("/:id/complete", requirePageRight("crm-registry", "edit"), async (req
     }
     const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+    if (!(await canPerformCrmGatedAction("crm-registry-complete", actorId(req), req.user?.role)))
+      return res.status(403).json({ error: "You are not authorised to complete a registry — requires Legal Head or CRM Administrator" });
 
     const docs = await pool.request().input("id", sql.Int, id).query(`
       SELECT COUNT(*) AS Required, SUM(CASE WHEN Status = 'Verified' THEN 1 ELSE 0 END) AS Verified
@@ -361,58 +364,75 @@ router.put("/:id/complete", requirePageRight("crm-registry", "edit"), async (req
     const completedDate = b.CompletedDate || new Date().toISOString().slice(0, 10);
     const regDate = b.RegistrationDate || completedDate;
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("dt", sql.Date, completedDate)
-      .input("regno", sql.NVarChar(100), b.RegistrationNo.trim())
-      .input("bookno", sql.NVarChar(100), b.BookNo || null)
-      .input("partno", sql.NVarChar(100), b.PartNo || null)
-      .input("sro", sql.NVarChar(255), b.SubRegistrarOffice || null)
-      .input("regdt", sql.Date, regDate)
-      .input("wit", sql.NVarChar(500), b.WitnessNames.trim())
-      .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
-      .input("ub", sql.Int, actorId(req))
-      .query(`
-        UPDATE dbo.CrmRegistry SET
-          Status = 'Completed', CompletedDate = @dt,
-          RegistrationNo = @regno, BookNo = @bookno, PartNo = @partno,
-          SubRegistrarOffice = @sro, RegistrationDate = @regdt,
-          WitnessNames = @wit, BuyerAttended = 1, SellerAttended = 1,
-          Remarks = ISNULL(@rem, Remarks), UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-
-    // Mirror onto the Sale Deed, if one is linked — reuses the same
-    // ISNULL-guarded columns crmSalesDeed.js's own PUT /:id writes, so this
-    // never clobbers a value staff already entered there by hand.
-    if (cur.recordset[0].SalesDeedId) {
-      await pool.request()
-        .input("id", sql.Int, cur.recordset[0].SalesDeedId)
+    // Terminal, one-way transition that also mirrors onto CrmSalesDeed and
+    // writes history + communication log — wrapped so a failure partway
+    // through can never leave the Registry Completed while the linked Sale
+    // Deed still shows unregistered, or vice versa.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("dt", sql.Date, completedDate)
         .input("regno", sql.NVarChar(100), b.RegistrationNo.trim())
         .input("bookno", sql.NVarChar(100), b.BookNo || null)
         .input("partno", sql.NVarChar(100), b.PartNo || null)
         .input("sro", sql.NVarChar(255), b.SubRegistrarOffice || null)
         .input("regdt", sql.Date, regDate)
+        .input("wit", sql.NVarChar(500), b.WitnessNames.trim())
+        .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
+        .input("ub", sql.Int, actorId(req))
         .query(`
-          UPDATE dbo.CrmSalesDeed SET
-            RegistrationNo = ISNULL(RegistrationNo, @regno),
-            BookNo = ISNULL(BookNo, @bookno),
-            PartNo = ISNULL(PartNo, @partno),
-            SubRegistrarOffice = ISNULL(SubRegistrarOffice, @sro),
-            RegistrationDate = ISNULL(RegistrationDate, @regdt),
-            Status = 'Registered'
+          UPDATE dbo.CrmRegistry SET
+            Status = 'Completed', CompletedDate = @dt,
+            RegistrationNo = @regno, BookNo = @bookno, PartNo = @partno,
+            SubRegistrarOffice = @sro, RegistrationDate = @regdt,
+            WitnessNames = @wit, BuyerAttended = 1, SellerAttended = 1,
+            Remarks = ISNULL(@rem, Remarks), UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
-        `).catch((e) => console.error("[crm-registry] sales-deed mirror failed:", e.message));
+        `);
+
+      // Mirror onto the Sale Deed, if one is linked — reuses the same
+      // ISNULL-guarded columns crmSalesDeed.js's own PUT /:id writes, so this
+      // never clobbers a value staff already entered there by hand. Kept
+      // best-effort (caught, not rethrown) exactly as before — a mirror
+      // failure shouldn't block the Registry's own completion — but now runs
+      // on the same tx so a genuine deadlock/connection-loss here still rolls
+      // back cleanly instead of leaving a partial transaction dangling.
+      if (cur.recordset[0].SalesDeedId) {
+        await tx.request()
+          .input("id", sql.Int, cur.recordset[0].SalesDeedId)
+          .input("regno", sql.NVarChar(100), b.RegistrationNo.trim())
+          .input("bookno", sql.NVarChar(100), b.BookNo || null)
+          .input("partno", sql.NVarChar(100), b.PartNo || null)
+          .input("sro", sql.NVarChar(255), b.SubRegistrarOffice || null)
+          .input("regdt", sql.Date, regDate)
+          .query(`
+            UPDATE dbo.CrmSalesDeed SET
+              RegistrationNo = ISNULL(RegistrationNo, @regno),
+              BookNo = ISNULL(BookNo, @bookno),
+              PartNo = ISNULL(PartNo, @partno),
+              SubRegistrarOffice = ISNULL(SubRegistrarOffice, @sro),
+              RegistrationDate = ISNULL(RegistrationDate, @regdt),
+              Status = 'Registered'
+            WHERE Id = @id
+          `).catch((e) => console.error("[crm-registry] sales-deed mirror failed:", e.message));
+      }
+
+      await logRegistryHistory(id, 'Completed', `Reg No. ${b.RegistrationNo.trim()}${b.SubRegistrarOffice ? ` at ${b.SubRegistrarOffice}` : ''}`, actorId(req), 'Staff', tx);
+
+      await logCommunication(tx, {
+        bookingId: cur.recordset[0].BookingId, direction: "Outbound",
+        subject: "Deed registered at Sub-Registrar Office",
+        summary: `Registry completed — Reg No. ${b.RegistrationNo.trim()}.`,
+        createdBy: actorId(req),
+      });
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
-
-    await logRegistryHistory(id, 'Completed', `Reg No. ${b.RegistrationNo.trim()}${b.SubRegistrarOffice ? ` at ${b.SubRegistrarOffice}` : ''}`, actorId(req));
-
-    await logCommunication(pool, {
-      bookingId: cur.recordset[0].BookingId, direction: "Outbound",
-      subject: "Deed registered at Sub-Registrar Office",
-      summary: `Registry completed — Reg No. ${b.RegistrationNo.trim()}.`,
-      createdBy: actorId(req),
-    });
 
     res.json({ success: true });
   } catch (e) {
@@ -436,17 +456,27 @@ router.put("/:id/cancel", requirePageRight("crm-registry", "edit"), async (req, 
     if (["Completed", "Cancelled"].includes(cur.recordset[0].Status)) {
       return res.status(400).json({ error: `Cannot cancel a registry that is already ${cur.recordset[0].Status}` });
     }
+    if (!(await canPerformCrmGatedAction("crm-registry-cancel", actorId(req), req.user?.role)))
+      return res.status(403).json({ error: "You are not authorised to cancel a registry" });
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("rea", sql.NVarChar(sql.MAX), reason.trim())
-      .input("ub", sql.Int, actorId(req))
-      .query(`
-        UPDATE dbo.CrmRegistry SET Status = 'Cancelled', CancelledReason = @rea, CancelledAt = SYSDATETIME(),
-          CancelledBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-    await logRegistryHistory(id, 'Cancelled', reason.trim(), actorId(req));
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("rea", sql.NVarChar(sql.MAX), reason.trim())
+        .input("ub", sql.Int, actorId(req))
+        .query(`
+          UPDATE dbo.CrmRegistry SET Status = 'Cancelled', CancelledReason = @rea, CancelledAt = SYSDATETIME(),
+            CancelledBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      await logRegistryHistory(id, 'Cancelled', reason.trim(), actorId(req), 'Staff', tx);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-registry] PUT /:id/cancel error:", e.message);

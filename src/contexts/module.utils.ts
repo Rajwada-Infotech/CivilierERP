@@ -32,7 +32,7 @@ export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   records: "/records",
   civilworkdpr: "/civilworkdpr",
   "sales-automation": "/sales-automation/social-media",
-  crm: "/crm/applications",
+  crm: "/crm/dashboard",
   loan: "/loan",
   maintenance: "/maintenance",
   admin: "/admin/dashboard",

@@ -57,6 +57,17 @@ const statusColor: Record<string, string> = {
   Expired:   "text-slate-500 bg-slate-100 border-slate-200",
 };
 
+// Booking status colours — separate from application status so "Cancelled"
+// on a booking always shows orange-red, not the application's own orange.
+const bookingStatusColor: Record<string, string> = {
+  Pending:   "text-amber-600 bg-amber-50 border-amber-200",
+  Review:    "text-blue-600 bg-blue-50 border-blue-200",
+  Approved:  "text-green-600 bg-green-50 border-green-200",
+  Cancelled: "text-red-600 bg-red-50 border-red-200",
+  Rejected:  "text-red-600 bg-red-50 border-red-200",
+  Expired:   "text-slate-500 bg-slate-100 border-slate-200",
+};
+
 const EMPTY_FORM = {
   CustomerId: "", CompanyId: "",
   ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "",
@@ -919,14 +930,14 @@ const CrmApplication: React.FC = () => {
   // in crmApplications.js) and is the actual source of truth here.
   // Draft (mid-fill, paused before full submission) — no booking yet.
   const isResumable = (app: any) => !!app && app.Stage !== "Converted" && app.Status === CrmStatus.DRAFT;
-  // Submitted (Pending) or reverted (Rejected) — booking may already exist, but
-  // no approval has been granted yet (or it was explicitly reverted for re-work).
-  // Backend PUT /:id allows edits for Draft/Pending/Rejected; Rejected is the
-  // "sent back for correction" state — the verifier flagged something and the
-  // preparer must fix it before resubmitting. Approved/Cancelled/Expired are
-  // terminal and block all edits server-side too.
+  // Submitted (Pending) or reverted (Rejected) — booking may exist but not yet
+  // approved by the next level. Editable until the booking reaches Approved;
+  // if the booking is reverted (Rejected), also editable again.
+  // Backend PUT /:id enforces the same gate server-side.
   const isEditableApplication = (app: any) =>
-    !!app && [CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.Status);
+    !!app &&
+    [CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.Status) &&
+    (app.Stage !== "Converted" || app.BookingStatus !== CrmStatus.APPROVED);
   // Kept for any callers that still reference it (row-level canResume).
   const isResumeEditable = (app: any) => isResumable(app) || isEditableApplication(app);
 
@@ -957,9 +968,11 @@ const CrmApplication: React.FC = () => {
   // Once a Booking is auto-created (Stage=Converted), the only cancel path is the
   // formal Cancellation Request flow — the backend enforces this too.
   const canCancelApplication = (app: any) => !!app && canEditApplications && app.Stage !== "Converted" && !["Approved", "Cancelled", "Expired"].includes(app.Status);
-  // Admin delete is visible for all stages — backend rejects with a clear error
-  // ("Delete the unprogressed booking first") when an active booking exists.
-  const canDeleteApplication = (app: any) => !!app && isAdmin;
+  // Admin delete — only when no live booking exists (Stage !== Converted).
+  // On a Converted application the booking is live and has real financial
+  // history; the backend rejects deletes in that state, so don't offer the
+  // button either (misleading to show a destructive action that will always fail).
+  const canDeleteApplication = (app: any) => !!app && isAdmin && app.Stage !== "Converted";
 
   // Broker Master is the single source of truth for a broker's own identity
   // (name/phone/PAN/RERA) — this app never lets staff retype any of that.
@@ -972,9 +985,20 @@ const CrmApplication: React.FC = () => {
     [brokers, form.BrokerId]
   );
 
+  // Display stage: a Converted application whose booking is not yet Approved
+  // (still Pending/Review) shows in "In Process" — it's still moving through
+  // the approval chain. Only a fully Approved booking is a real conversion.
+  const getDisplayStage = (a: any): Stage => {
+    if (a.Stage === "Converted" && a.BookingStatus !== CrmStatus.APPROVED) return "InProcess";
+    return a.Stage as Stage;
+  };
+
   const stageCounts = useMemo(() => {
     const counts: Record<Stage, number> = { InProcess: 0, Converted: 0, NotConverted: 0 };
-    for (const a of apps as any[]) if (a.Stage in counts) counts[a.Stage as Stage]++;
+    for (const a of apps as any[]) {
+      const ds = getDisplayStage(a);
+      if (ds in counts) counts[ds]++;
+    }
     return counts;
   }, [apps]);
 
@@ -988,7 +1012,7 @@ const CrmApplication: React.FC = () => {
       const s = !search || a.ApplicantName?.toLowerCase().includes(search.toLowerCase())
         || a.Mobile?.includes(search) || a.ApplicationNo?.includes(search);
       const st = statusFilter === "All" || a.Status === statusFilter;
-      const stg = a.Stage === activeStage;
+      const stg = getDisplayStage(a) === activeStage;
       return s && st && stg;
     });
   }, [apps, search, statusFilter, activeStage]);
@@ -1543,7 +1567,7 @@ const CrmApplication: React.FC = () => {
       cell: (i) => (
         <div onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer">
           <div className="font-mono text-xs font-semibold text-foreground">{i.row.original.BookingNo}</div>
-          <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-green-600 bg-green-50 border-green-200">{i.row.original.BookingStatus}</span>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${bookingStatusColor[i.row.original.BookingStatus] || "text-muted-foreground bg-muted/50 border-border"}`}>{i.row.original.BookingStatus}</span>
         </div>
       ) },
     { id: "unitProject", header: "Unit / Project", size: 220, enableSorting: false,
@@ -1577,11 +1601,18 @@ const CrmApplication: React.FC = () => {
               <FileText size={12} /> Form
             </button>
           )}
-          {(canEditApplications || canRequestBookingCancellation) && i.row.original.BookingId && i.row.original.BookingStatus !== CrmStatus.CANCELLED && (
+          {(canEditApplications || canRequestBookingCancellation) && i.row.original.BookingId
+            && i.row.original.BookingStatus !== CrmStatus.CANCELLED
+            && i.row.original.DeedStatus !== "Registered" && (
             <button onClick={() => navigate(`/crm/cancellations?bookingId=${i.row.original.BookingId}`)}
               className="flex items-center gap-1 text-xs text-red-600 hover:underline">
               <Ban size={12} /> Request Cancellation
             </button>
+          )}
+          {i.row.original.DeedStatus === "Registered" && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground" title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
+              <Ban size={12} /> Deed Registered
+            </span>
           )}
         </div>
       ) },
@@ -1634,7 +1665,7 @@ const CrmApplication: React.FC = () => {
       cell: (i) => <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-xs">{i.row.original.RatePerSqFt ? `₹${Number(i.row.original.RatePerSqFt).toLocaleString("en-IN")}/sqft` : "—"}</span> },
     { accessorKey: "AssigneeName", header: "Assigned To", size: 140,
       cell: (i) => <span onClick={() => openApplication(i.row.original.Id)} className="cursor-pointer text-sm">{(i.getValue() as string) || "—"}</span> },
-    { accessorKey: "Status", header: "Status", size: 110,
+    { accessorKey: "Status", header: "Status", size: 130,
       cell: (i) => {
         const r = i.row.original;
         // When a live Booking exists (Stage='Converted'), the Application's
@@ -1644,12 +1675,20 @@ const CrmApplication: React.FC = () => {
         // immediately visible without opening the detail panel.
         const displayStatus = r.Stage === "Converted" ? "Booked" : r.Status;
         return (
-          <span
-            onClick={() => openApplication(r.Id)}
-            className={`cursor-pointer text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[displayStatus] || ""}`}
-          >
-            {displayStatus}
-          </span>
+          <div onClick={() => openApplication(r.Id)} className="cursor-pointer space-y-0.5">
+            <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${statusColor[displayStatus] || ""}`}>
+              {displayStatus}
+            </span>
+            {/* For NotConverted applications that had a booking which was later
+                cancelled/rejected — show the dead booking number so staff know
+                this isn't the same as an application that was simply rejected
+                pre-booking. */}
+            {r.Stage === "NotConverted" && r.BookingNo && (
+              <div className="text-[10px] text-muted-foreground font-mono">
+                {r.BookingNo} · <span className={bookingStatusColor[r.BookingStatus] ? `inline-block px-1 rounded border text-[9px] font-medium ${bookingStatusColor[r.BookingStatus]}` : ""}>{r.BookingStatus}</span>
+              </div>
+            )}
+          </div>
         );
       } },
     { accessorKey: "CreatedAt", header: "Date", size: 110,
@@ -1795,7 +1834,11 @@ const CrmApplication: React.FC = () => {
               </span>
             )}
             {activeStage !== "InProcess" && !canCancelApplication(a) && (
-              <span className="text-[11px] text-muted-foreground">{a.Status} — no further action</span>
+              <span className="text-[11px] text-muted-foreground">
+                {a.BookingNo && a.BookingStatus === CrmStatus.CANCELLED
+                  ? `Booking cancelled — application closed`
+                  : `${a.Status} — no further action`}
+              </span>
             )}
           </div>
         );
@@ -2885,13 +2928,20 @@ const CrmApplication: React.FC = () => {
                 Cancel Application
               </button>
             )}
-            {(canEditApplications || canRequestBookingCancellation) && viewingAppDetail?.application?.BookingId && viewingAppDetail.application.BookingStatus !== CrmStatus.CANCELLED && (
+            {(canEditApplications || canRequestBookingCancellation) && viewingAppDetail?.application?.BookingId
+              && viewingAppDetail.application.BookingStatus !== CrmStatus.CANCELLED
+              && viewingAppDetail.application.DeedStatus !== "Registered" && (
               <button
                 onClick={() => navigate(`/crm/cancellations?bookingId=${viewingAppDetail.application.BookingId}`)}
                 className="px-3 py-1.5 text-sm border border-red-200 text-red-600 rounded-lg font-medium hover:bg-red-50"
               >
                 Request Booking Cancellation
               </button>
+            )}
+            {viewingAppDetail?.application?.DeedStatus === "Registered" && (
+              <span className="px-3 py-1.5 text-sm text-muted-foreground border border-border rounded-lg" title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
+                Deed Registered — cancellation not applicable
+              </span>
             )}
             {viewingAppDetail && canDeleteApplication(viewingAppDetail.application) && (
               <button
@@ -3347,10 +3397,15 @@ const ParkingSelectionStep: React.FC<{
           <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><ParkingSquare size={13} /> Selected Parking</label>
           {!canEdit && (
             <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
-              <Lock size={11} /> Locked ({wizardAppStatus})
+              <Lock size={11} /> {wizardAppStatus === "Approved" ? "Manage from Booking" : `Locked (${wizardAppStatus})`}
             </span>
           )}
         </div>
+        {!canEdit && wizardAppStatus === "Approved" && (
+          <p className="text-[11px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
+            This application has been approved and a Booking has been created. To add, edit, or remove parking slots, open the Booking and go to the <strong>Parking &amp; Extra Charges</strong> tab.
+          </p>
+        )}
         {(allotments as any[]).length > 0 ? (
           <div className="space-y-1.5">
             {(allotments as any[]).map((a: any) => (
@@ -3594,10 +3649,15 @@ const ExtraWorkSelectionStep: React.FC<{
           <label className="text-xs font-semibold text-foreground flex items-center gap-1.5"><Wallet size={13} /> Extra Charges</label>
           {!canEdit && (
             <span className="text-xs text-muted-foreground flex items-center gap-1 shrink-0">
-              <Lock size={11} /> Locked ({wizardAppStatus})
+              <Lock size={11} /> {wizardAppStatus === "Approved" ? "Manage from Booking" : `Locked (${wizardAppStatus})`}
             </span>
           )}
         </div>
+        {!canEdit && wizardAppStatus === "Approved" && (
+          <p className="text-[11px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-2">
+            This application has a Booking — add or edit extra charges from the Booking's <strong>Parking &amp; Extra Charges</strong> tab.
+          </p>
+        )}
         {(charges as any[]).length > 0 ? (
           <div className="space-y-1.5">
             {(charges as any[]).map((c: any) => (
@@ -3782,9 +3842,9 @@ const AttachmentsStep: React.FC<{
                 <span className="truncate">{previewDoc.DocumentType} — {previewDoc.FileName}</span>
               </span>
               <div className="flex items-center gap-2 shrink-0">
-                <a href={previewBlobUrl || `${DOC_API}/file/${previewDoc.Id}`} download={previewDoc.FileName}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted font-medium">
-                  <Download size={13} /> Download
+                <a href={previewBlobUrl || "#"} download={previewDoc.FileName}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs border border-border rounded-lg font-medium ${!previewBlobUrl ? "opacity-50 pointer-events-none" : "hover:bg-muted"}`}>
+                  <Download size={13} /> {previewBlobUrl ? "Download" : "Loading..."}
                 </a>
                 <button onClick={() => setPreviewDoc(null)} className="p-1 rounded-md hover:bg-muted text-muted-foreground"><X size={16} /></button>
               </div>
@@ -3795,7 +3855,7 @@ const AttachmentsStep: React.FC<{
               ) : previewError ? (
                 <div className="text-center space-y-2 px-4">
                   <p className="text-sm text-neutral-100">{previewError}</p>
-                  <a href={`${DOC_API}/file/${previewDoc.Id}`} download={previewDoc.FileName}
+                  <a href={previewBlobUrl || `${DOC_API}/file/${previewDoc.Id}`} download={previewDoc.FileName}
                     className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline">
                     <Download size={13} /> Download file
                   </a>

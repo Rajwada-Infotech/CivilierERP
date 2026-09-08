@@ -630,6 +630,23 @@ const CrmAgreement: React.FC = () => {
     }
   }, [bkgFilter, idFilter, agreements, isLoading]);
 
+  // Auto-fill Legal Name, PAN, Aadhaar, Legal Address from the selected booking's
+  // customer record whenever the user picks a booking in the New Agreement dialog.
+  // Only fills fields that are currently empty so a user who typed something first
+  // doesn't lose their input.
+  useEffect(() => {
+    if (!agrForm.BookingId || !agrDialog) return;
+    const bkg = (bookings as any[]).find((b) => String(b.Id) === String(agrForm.BookingId));
+    if (!bkg) return;
+    setAgrForm((f) => ({
+      ...f,
+      LegalName:    f.LegalName    || bkg.LegalName    || "",
+      PanNo:        f.PanNo        || bkg.PanNo        || "",
+      AadhaarNo:    f.AadhaarNo    || bkg.AadhaarNo    || "",
+      LegalAddress: f.LegalAddress || bkg.LegalAddress || "",
+    }));
+  }, [agrForm.BookingId, agrDialog]);
+
   const handleSaveAgreement = async () => {
     if (!agrForm.BookingId) { toast.error("Booking is required"); return; }
     if (agrForm.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(agrForm.PanNo.trim())) { toast.error("Invalid PAN format (e.g. ABCDE1234F)"); return; }
@@ -2052,7 +2069,11 @@ const CrmAgreement: React.FC = () => {
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={agrForm.BookingId} onChange={(e) => setAgrForm((f) => ({ ...f, BookingId: e.target.value }))}
+              <select value={agrForm.BookingId} onChange={(e) => setAgrForm((f) => ({
+                  ...f,
+                  BookingId: e.target.value,
+                  LegalName: "", PanNo: "", AadhaarNo: "", LegalAddress: "",
+                }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {(bookings as any[]).map((b: any) => (

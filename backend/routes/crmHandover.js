@@ -342,23 +342,38 @@ router.post("/:id/snags", requirePageRight("crm-handover", "create"), async (req
       return res.status(400).json({ error: `Invalid Category. Must be: ${SNAG_CATEGORIES.join(", ")}` });
     if (!b.Description?.trim()) return res.status(400).json({ error: "Description is required" });
 
-    const result = await pool.request()
-      .input("hid",  sql.Int,            handoverId)
-      .input("cat",  sql.NVarChar(50),   b.Category)
-      .input("desc", sql.NVarChar(sql.MAX), b.Description.trim())
-      .input("photo",sql.NVarChar(2000), b.PhotoUrl || null)
-      .input("rb",   sql.Int,            actorId(req))
-      .query(`
-        INSERT INTO dbo.CrmSnagItem (HandoverId, Category, Description, PhotoUrl, Status, RaisedBy, CreatedAt)
-        OUTPUT INSERTED.Id
-        VALUES (@hid, @cat, @desc, @photo, 'Open', @rb, SYSDATETIME())
-      `);
+    // Snag INSERT + the handover's own Status advance to SnagPending — wrapped
+    // so a failure between them can't leave a snag raised while the handover
+    // still reads Scheduled/SnagInspection, which would let it be marked
+    // Completed (gated on "no open snags") without this one ever being seen.
+    const tx = pool.transaction();
+    await tx.begin();
+    let newId;
+    try {
+      const result = await tx.request()
+        .input("hid",  sql.Int,            handoverId)
+        .input("cat",  sql.NVarChar(50),   b.Category)
+        .input("desc", sql.NVarChar(sql.MAX), b.Description.trim())
+        .input("photo",sql.NVarChar(2000), b.PhotoUrl || null)
+        .input("rb",   sql.Int,            actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmSnagItem (HandoverId, Category, Description, PhotoUrl, Status, RaisedBy, CreatedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@hid, @cat, @desc, @photo, 'Open', @rb, SYSDATETIME())
+        `);
+      newId = result.recordset[0].Id;
 
-    // Move handover into SnagPending if it was in inspection
-    await pool.request().input("hid", sql.Int, handoverId)
-      .query(`UPDATE dbo.CrmHandover SET Status = 'SnagPending' WHERE Id = @hid AND Status IN ('Scheduled','SnagInspection')`);
+      // Move handover into SnagPending if it was in inspection
+      await tx.request().input("hid", sql.Int, handoverId)
+        .query(`UPDATE dbo.CrmHandover SET Status = 'SnagPending' WHERE Id = @hid AND Status IN ('Scheduled','SnagInspection')`);
 
-    res.status(201).json({ success: true, id: result.recordset[0].Id });
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.status(201).json({ success: true, id: newId });
   } catch (e) {
     console.error("[crm-handover] POST snags error:", e.message);
     res.status(500).json({ error: e.message });

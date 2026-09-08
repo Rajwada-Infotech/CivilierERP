@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { KeyRound } from "lucide-react";
-import { INK, VIOLET_DEEP, GOLD, GOLD_SOFT, PORCELAIN, serif } from "./portalTheme";
+import { INK, VIOLET_DEEP, GOLD, GOLD_SOFT, PORCELAIN, serif, TEXT, TEXT_FAINT, TEXT_MUTED, SURFACE_ALT, HAIRLINE } from "./portalTheme";
 
 const API = "/api/crm-portal";
 
@@ -48,23 +48,25 @@ const PortalChangePassword: React.FC = () => {
           </div>
           <div className="text-center">
             <h1 className="text-lg font-semibold" style={{ ...serif, color: INK }}>Set Your Password</h1>
-            <p className="text-xs text-slate-400 mt-1">For security, please set a new password for future logins</p>
+            <p className="text-xs mt-1" style={{ color: TEXT_FAINT }}>For security, please set a new password for future logins</p>
           </div>
         </div>
         <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <label className="text-xs text-slate-500 block mb-1">New Password</label>
+            <label className="text-xs block mb-1" style={{ color: TEXT_MUTED }}>New Password</label>
             <input type="password" required value={newPassword} onChange={(e) => setNewPassword(e.target.value)}
-              className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 outline-none transition-colors"
+              className="w-full text-sm rounded-xl px-3 py-2.5 outline-none transition-colors"
+              style={{ border: `1px solid ${HAIRLINE}`, color: TEXT, background: SURFACE_ALT }}
               onFocus={(e) => { e.currentTarget.style.boxShadow = "0 0 0 2px rgba(201,162,39,0.35)"; e.currentTarget.style.borderColor = GOLD; }}
-              onBlur={(e) => { e.currentTarget.style.boxShadow = ""; e.currentTarget.style.borderColor = ""; }} />
+              onBlur={(e) => { e.currentTarget.style.boxShadow = ""; e.currentTarget.style.borderColor = HAIRLINE; }} />
           </div>
           <div>
-            <label className="text-xs text-slate-500 block mb-1">Confirm Password</label>
+            <label className="text-xs block mb-1" style={{ color: TEXT_MUTED }}>Confirm Password</label>
             <input type="password" required value={confirm} onChange={(e) => setConfirm(e.target.value)}
-              className="w-full text-sm border border-slate-200 rounded-xl px-3 py-2.5 outline-none transition-colors"
+              className="w-full text-sm rounded-xl px-3 py-2.5 outline-none transition-colors"
+              style={{ border: `1px solid ${HAIRLINE}`, color: TEXT, background: SURFACE_ALT }}
               onFocus={(e) => { e.currentTarget.style.boxShadow = "0 0 0 2px rgba(201,162,39,0.35)"; e.currentTarget.style.borderColor = GOLD; }}
-              onBlur={(e) => { e.currentTarget.style.boxShadow = ""; e.currentTarget.style.borderColor = ""; }} />
+              onBlur={(e) => { e.currentTarget.style.boxShadow = ""; e.currentTarget.style.borderColor = HAIRLINE; }} />
           </div>
           <button type="submit" disabled={loading}
             className="w-full py-2.5 text-white text-sm font-semibold rounded-xl disabled:opacity-40 transition-opacity"

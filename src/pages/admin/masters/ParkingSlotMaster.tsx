@@ -17,7 +17,6 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/parking-slot-master";
 const DROPDOWN_API = "/api/business/dropdown";
-const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
 
 async function fetchSlots(): Promise<any[]> {
   const res = await fetchWithAuth(API);
@@ -31,7 +30,7 @@ async function fetchSlots(): Promise<any[]> {
 // Company -> Project -> Block, each strictly gated behind its parent
 // (disabledWhen in MasterPage.tsx) so this can never fall back to showing
 // every row unfiltered.
-const fields: FieldDef[] = [
+const FIELDS_SLOT_PREFIX: FieldDef[] = [
   {
     name: "companyId",
     label: "Company",
@@ -79,14 +78,8 @@ const fields: FieldDef[] = [
     type: "text",
     required: true,
   },
-  {
-    name: "parkingType",
-    label: "Parking Type",
-    type: "select",
-    required: true,
-    defaultValue: "Open",
-    options: PARKING_TYPES,
-  },
+];
+const FIELDS_SLOT_SUFFIX: FieldDef[] = [
   {
     name: "isActive",
     label: "Status",
@@ -134,6 +127,28 @@ const ParkingSlotMaster: React.FC = () => {
     queryFn: fetchSlots,
     staleTime: 5 * 60 * 1000,
   });
+
+  const { data: parkingTypes = [] } = useQuery<string[]>({
+    queryKey: ["parking-master-types"],
+    queryFn: async () => {
+      const r = await fetchWithAuth("/api/parking-master/types");
+      return r.ok ? r.json() : [];
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const fields = React.useMemo<FieldDef[]>(() => [
+    ...FIELDS_SLOT_PREFIX,
+    {
+      name: "parkingType",
+      label: "Parking Type",
+      type: "select",
+      required: true,
+      defaultValue: parkingTypes[0] ?? "Open",
+      options: parkingTypes,
+    } as FieldDef,
+    ...FIELDS_SLOT_SUFFIX,
+  ], [parkingTypes]);
 
   const { data: allBlocks = [] } = useQuery<{ Id: number; Name: string; ProjectId: number }[]>({
     queryKey: ["parking-slot-master-blocks"],

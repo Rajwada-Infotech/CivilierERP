@@ -23,13 +23,18 @@ const PP_SELECT = `
     p.Status, p.Notes, p.CreatedAt, p.UpdatedAt,
     b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
     a.ApplicantName, a.Mobile,
-    -- Auto-derived dues status: 1 when no milestone is in Demanded-but-unpaid state
+    -- Auto-derived dues status: 1 when no milestone has an outstanding balance.
+    -- Uses the same AmountDue/AmountPaid check as Handover — consistent source of truth.
     CASE WHEN NOT EXISTS (
       SELECT 1 FROM dbo.CrmPaymentMilestone m
-      WHERE m.BookingId = p.BookingId AND m.DemandStatus = 'Demanded'
+      WHERE m.BookingId = p.BookingId
+        AND m.Status NOT IN ('Paid', 'Waived')
+        AND m.AmountDue > ISNULL(m.AmountPaid, 0)
     ) THEN 1 ELSE 0 END AS DuesClearedCheck,
     (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m
-     WHERE m.BookingId = p.BookingId AND m.DemandStatus = 'Demanded'
+     WHERE m.BookingId = p.BookingId
+       AND m.Status NOT IN ('Paid', 'Waived')
+       AND m.AmountDue > ISNULL(m.AmountPaid, 0)
     ) AS OutstandingDemandCount
   FROM dbo.CrmPrePossession p
   JOIN dbo.CrmBooking b ON b.Id = p.BookingId
@@ -229,10 +234,13 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
         DECLARE @qc_eff   BIT = ISNULL(@qc,   (SELECT QualityInspectionCheck FROM dbo.CrmPrePossession WHERE Id = @id));
         DECLARE @util_eff BIT = ISNULL(@util, (SELECT UtilityReadinessCheck  FROM dbo.CrmPrePossession WHERE Id = @id));
 
-        -- Dues clearance: computed live — true when no milestone has DemandStatus = 'Demanded'
+        -- Dues clearance: computed live — true when no milestone has an outstanding balance.
+        -- Consistent with the Handover payment gate (AmountDue/AmountPaid check).
         DECLARE @dues_cleared BIT = CASE WHEN NOT EXISTS (
           SELECT 1 FROM dbo.CrmPaymentMilestone m
-          WHERE m.BookingId = @bid AND m.DemandStatus = 'Demanded'
+          WHERE m.BookingId = @bid
+            AND m.Status NOT IN ('Paid', 'Waived')
+            AND m.AmountDue > ISNULL(m.AmountPaid, 0)
         ) THEN 1 ELSE 0 END;
 
         DECLARE @new_status NVARCHAR(30) =

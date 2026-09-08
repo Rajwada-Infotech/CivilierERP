@@ -229,6 +229,9 @@ export const ModuleStrip: React.FC = () => {
     civilworkdpr: ["civilworkdpr-dashboard"],
     "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
     maintenance: ["maintenance-dashboard"],
+    loan:        ["loan-dashboard", "loan-sanction"],
+    records:     ["records"],
+    crm:         ["crm-dashboard", "crm-bookings", "crm-applications", "crm-agreements", "crm-sales-deed"],
   };
 
   const userHasModuleAccess = (moduleId: string): boolean => {
