@@ -406,7 +406,7 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
   const result = await pool.request().input("Eid", sql.Int, ebId).query(`
     SELECT eb.Eid, eb.EDocNo, eb.EDocDate, eb.EAmount, eb.ENetAmount,
            eb.ESourceType, eb.ESourceId, eb.EName, eb.ECompanyId, eb.EProjectName,
-           eb.EBillingTermsData
+           eb.EBillingTermsData, eb.LHeadId
     FROM dbo.ExpenseBooking eb
     WHERE eb.Eid = @Eid
   `);
@@ -517,12 +517,22 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
   }
 
   // Non-GRN sourced (PO / WO_PO / WORK_DONE / standalone)
-  const supplierHeadId = await getHeadIdByName(pool, eb.EName);
+  // eb.LHeadId is the actual FK to the chosen party — use it directly.
+  // eb.EName is a free-text purpose/description field on a direct (TOD)
+  // booking ("Payment for Shiv Shakti Building Materials"), NOT
+  // necessarily the party's exact ledger name, despite this function's
+  // old assumption that "EName IS the chosen head's label" — an exact
+  // string match against it silently failed (posted:false, no error
+  // surfaced anywhere) for the vast majority of TOD bookings, leaving
+  // their invoice liability permanently unposted even after a payment
+  // against them was posted. Falls back to the EName match only for
+  // older rows saved before LHeadId existed on this table.
+  const supplierHeadId = eb.LHeadId || (await getHeadIdByName(pool, eb.EName));
   // can't determine counter-account — skip rather than guess wrong
   if (!supplierHeadId)
     return {
       posted: false,
-      reason: `ExpenseBooking ${ebId}: EName "${eb.EName}" did not match any AccountHeadMaster head`,
+      reason: `ExpenseBooking ${ebId}: no LHeadId set and EName "${eb.EName}" did not match any AccountHeadMaster head`,
     };
 
   const baseAmount = Number(eb.EAmount) || 0;
