@@ -33,6 +33,8 @@ import {
   ResponsiveContainer,
   LineChart,
   Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -319,6 +321,139 @@ const TrendCard: React.FC<{
   );
 };
 
+// ─── Monthly Income Growth (Trial Balance-derived) ────────────────────────────
+interface MonthlyIncomePoint {
+  key: string;
+  month: string;
+  year: number;
+  income: number;
+  trend: "growth" | "degrowth" | "neutral";
+}
+
+const INCOME_TREND_COLOR: Record<MonthlyIncomePoint["trend"], string> = {
+  growth: "#10b981",
+  degrowth: "#f43f5e",
+  neutral: "#6366f1",
+};
+
+const MonthlyIncomeCard: React.FC<{
+  data: MonthlyIncomePoint[];
+  isDark: boolean;
+  glassStyle: React.CSSProperties;
+  isLoading: boolean;
+}> = ({ data, isDark, glassStyle, isLoading }) => {
+  const hasData = data.some((d) => Math.abs(d.income) > 0.005);
+  return (
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
+      <div
+        className="flex items-center gap-2 px-4 py-3 border-b"
+        style={{
+          borderColor: isDark ? "rgba(99,102,241,0.15)" : "rgba(99,102,241,0.12)",
+        }}
+      >
+        <div
+          className="w-5 h-5 rounded-md flex items-center justify-center"
+          style={{ background: "rgba(16,185,129,0.15)" }}
+        >
+          <TrendingUp size={11} style={{ color: "#10b981" }} />
+        </div>
+        <span
+          className="text-xs font-heading font-semibold"
+          style={{ color: isDark ? "#e2e8f0" : "#1e1b4b" }}
+        >
+          Monthly Income Growth
+        </span>
+        <span className="text-[10px] text-muted-foreground ml-auto">
+          From Trial Balance · current FY
+        </span>
+      </div>
+      <div className="p-4">
+        {isLoading ? (
+          <Skeleton className="h-[260px] w-full" />
+        ) : !hasData ? (
+          <div className="text-center text-muted-foreground py-10 text-sm">
+            No income posted to the Trial Balance this financial year
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center gap-4 mb-3 flex-wrap">
+              {[
+                { label: "Growth", color: INCOME_TREND_COLOR.growth },
+                { label: "Degrowth", color: INCOME_TREND_COLOR.degrowth },
+                { label: "No change", color: INCOME_TREND_COLOR.neutral },
+              ].map((l) => (
+                <div key={l.label} className="flex items-center gap-1.5">
+                  <div
+                    className="w-2.5 h-2.5 rounded-sm"
+                    style={{ background: l.color }}
+                  />
+                  <span className="text-[10px] text-muted-foreground">{l.label}</span>
+                </div>
+              ))}
+            </div>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={data} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke={isDark ? "rgba(148,163,184,0.12)" : "rgba(100,116,139,0.15)"}
+                  vertical={false}
+                />
+                <XAxis
+                  dataKey="month"
+                  tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={48}
+                  tickFormatter={(v) =>
+                    Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)
+                  }
+                />
+                <Tooltip
+                  cursor={{ fill: isDark ? "rgba(148,163,184,0.08)" : "rgba(100,116,139,0.08)" }}
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0].payload as MonthlyIncomePoint;
+                    const trendLabel =
+                      d.trend === "growth"
+                        ? "Growth"
+                        : d.trend === "degrowth"
+                          ? "Degrowth"
+                          : "No change";
+                    return (
+                      <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
+                        <p className="text-xs font-heading font-semibold text-foreground">
+                          {d.month} {d.year}
+                        </p>
+                        <p className="text-xs text-muted-foreground">{fmt(d.income)}</p>
+                        <p
+                          className="text-[11px] font-medium mt-0.5"
+                          style={{ color: INCOME_TREND_COLOR[d.trend] }}
+                        >
+                          {trendLabel}
+                        </p>
+                      </div>
+                    );
+                  }}
+                />
+                <Bar dataKey="income" radius={[3, 3, 0, 0]} maxBarSize={40}>
+                  {data.map((d) => (
+                    <Cell key={d.key} fill={INCOME_TREND_COLOR[d.trend]} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+
 const StatCardSkeleton = () => (
   <div className="rounded-xl overflow-hidden border border-border/40 bg-card/40 backdrop-blur-sm p-4">
     <div className="flex items-start justify-between mb-3">
@@ -404,6 +539,21 @@ const FinanceDashboard = () => {
   });
 
   const data = rawData ? normalise(rawData) : undefined;
+
+  const { data: monthlyIncome, isLoading: monthlyIncomeLoading } = useQuery<
+    MonthlyIncomePoint[]
+  >({
+    queryKey: ["financeMonthlyIncome"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/financial-statements/monthly-income");
+      if (!res.ok) throw new Error("Failed to fetch monthly income");
+      const json = await res.json().catch(() => ({}));
+      return Array.isArray(json?.months) ? json.months : [];
+    },
+    staleTime: 60_000,
+    refetchInterval: 2 * 60_000,
+    refetchOnWindowFocus: true,
+  });
 
   const tableGlass = {
     background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
@@ -575,6 +725,20 @@ const FinanceDashboard = () => {
               ]}
             />
           </div>
+        </GlassSection>
+
+        {/* ── Monthly Income Growth (Trial Balance) ─────────────────────────── */}
+        <GlassSection
+          title="Monthly Income Growth"
+          icon={TrendingUp}
+          accentColor="#10b981"
+        >
+          <MonthlyIncomeCard
+            data={monthlyIncome ?? []}
+            isDark={isDark}
+            glassStyle={tableGlass}
+            isLoading={monthlyIncomeLoading}
+          />
         </GlassSection>
 
         {/* ── Recent tables ─────────────────────────────────────────────────── */}

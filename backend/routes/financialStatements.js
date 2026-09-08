@@ -816,4 +816,92 @@ router.get("/profit-loss", async (req, res) => {
   }
 });
 
+// ── GET /monthly-income?fyStart=YYYY&companyId=&projectId=&costCenterId= ───
+//
+// Twelve month-wise income figures for the financial year (Apr → Mar), each
+// derived straight off dbo.GeneralLedgerEntry the same way /profit-loss
+// derives "Total Income": a head counts as income when its AccountGroup rolls
+// up under the REVENUE Schedule-III root (see rootOf/resolveRootIds), and a
+// month's income is Σ(credit − debit) across those heads for vouchers dated
+// in that month. No dummy data — if nothing is posted for a month it reads 0.
+//
+// Powers the "Monthly Income Growth" bar chart on the Finance Overview
+// dashboard. Because it reads the live ledger, any change to Trial Balance
+// postings is reflected automatically on the next fetch.
+router.get("/monthly-income", async (req, res) => {
+  try {
+    const pool = getPool();
+    const now = new Date();
+    const defaultFyYear = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1;
+    const fyYear = req.query.fyStart ? parseInt(req.query.fyStart, 10) : defaultFyYear;
+    const from = `${fyYear}-04-01`;
+    const to = `${fyYear + 1}-03-31`;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const costCenterId = req.query.costCenterId ? parseInt(req.query.costCenterId, 10) : null;
+
+    const groupMap = await loadGroups(pool);
+    const rootIds = await resolveRootIds(pool);
+
+    const rowsRes = await pool
+      .request()
+      .input("from", sql.Date, from)
+      .input("to", sql.Date, to)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .input("costCenterId", sql.Int, costCenterId).query(`
+        SELECT
+          YEAR(gle.VoucherDate)  AS y,
+          MONTH(gle.VoucherDate) AS m,
+          ahm.LBelongsTo         AS groupId,
+          ISNULL(SUM(gle.CreditAmount), 0) AS credit,
+          ISNULL(SUM(gle.DebitAmount), 0)  AS debit
+        FROM dbo.GeneralLedgerEntry gle
+        JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = gle.LHeadId
+        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1 AND gle.IsReversed = 0
+          AND gle.VoucherDate BETWEEN @from AND @to
+          AND (@companyId IS NULL OR gle.CompanyId = @companyId)
+          AND (@projectId IS NULL OR gle.ProjectId = @projectId)
+          AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
+        GROUP BY YEAR(gle.VoucherDate), MONTH(gle.VoucherDate), ahm.LBelongsTo
+      `);
+
+    // Accumulate REVENUE-root net (credit − debit) into a "YYYY-MM" bucket.
+    const byMonth = new Map();
+    for (const r of rowsRes.recordset) {
+      if (rootOf(groupMap, r.groupId, rootIds) !== rootIds.REVENUE) continue;
+      const key = `${r.y}-${String(r.m).padStart(2, "0")}`;
+      const net = (Number(r.credit) || 0) - (Number(r.debit) || 0);
+      byMonth.set(key, Math.round(((byMonth.get(key) || 0) + net) * 100) / 100);
+    }
+
+    const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const months = [];
+    for (let i = 0; i < 12; i++) {
+      const monthIdx = (3 + i) % 12; // 0-based, Apr = 3
+      const year = monthIdx >= 3 ? fyYear : fyYear + 1;
+      const key = `${year}-${String(monthIdx + 1).padStart(2, "0")}`;
+      const income = byMonth.get(key) || 0;
+      const prev = i > 0 ? months[i - 1].income : null;
+      let trend = "neutral";
+      if (prev != null) {
+        if (income > prev + 0.005) trend = "growth";
+        else if (income < prev - 0.005) trend = "degrowth";
+      }
+      months.push({
+        key,
+        month: MONTH_NAMES[monthIdx],
+        year,
+        income,
+        trend,
+      });
+    }
+
+    res.json({ fyStart: fyYear, from, to, months });
+  } catch (err) {
+    console.error("[GET /financial-statements/monthly-income]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
