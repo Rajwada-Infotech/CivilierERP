@@ -1,5 +1,4 @@
 import { useState, useCallback, useRef, useEffect, Fragment } from "react";
-import { useNavigate } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
@@ -475,9 +474,8 @@ function TBRow({
                       const ref = (t as any).sourceRef as { id: number; docNo: string; type: string } | null;
                       const displayDoc = (t as any).docNo || t.voucherNo || (ref?.docNo) || "—";
                       // Every row with a resolvable source (a linked
-                      // payment, or a sourceId the switch in openSourceEntry
-                      // knows how to open) drills through — not just
-                      // payments.
+                      // payment, or a sourceId) is clickable to open the
+                      // GL entry detail dialog — not just payments.
                       const isClickable = (st === "newpayment" && !!t.payment) || !!t.sourceId;
 
                       return (
@@ -832,16 +830,19 @@ export default function TrialBalance() {
   const [search, setSearch] = useState("");
   const [hideEmpty, setHideEmpty] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
-  const navigate = useNavigate();
 
   // ── drill-down (Level 2: entity transactions) ───────────────────────────
   const [drillNode, setDrillNode] = useState<TBNode | null>(null);
   const [drillData, setDrillData] = useState<TBTransactionsResponse | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
 
-  // ── Level 3: payment detail dialog ───────────────────────────────────────
-  const [payDetail, setPayDetail] = useState<Record<string, any> | null>(null);
-  const [payDetailLoading, setPayDetailLoading] = useState(false);
+  // ── Level 3: GL entry detail dialog — shows the exact posted leg the user
+  // clicked (voucher no., date, debit/credit, narration, this account) using
+  // only the fields already on the drill-down row itself. Deliberately does
+  // NOT navigate to the source document's own page (Invoice/GRN/JV/Payment
+  // forms) — clicking a Trial Balance row should show what actually posted
+  // to this account, not pull up an unrelated editable form.
+  const [glEntryDetail, setGlEntryDetail] = useState<TBTransaction | null>(null);
 
   // ── Cost Centre view — replaces the account tree when a cost centre is
   // selected, showing individual PO/GRN/Invoice postings instead of an
@@ -1013,56 +1014,16 @@ export default function TrialBalance() {
     [filterMode, from, to, asOn, selCompany, selProject, selCostCenter],
   );
 
-  // Level 3 — open detail dialog for a transaction row.
-  const openSourceEntry = useCallback(async (t: TBTransaction) => {
-    const srcType = (t.sourceType ?? "").toUpperCase();
-    const payId = t.payment?.id ?? (srcType === "NEWPAYMENT" ? t.sourceId : null);
-
-    if (payId) {
-      // Payment: fetch full detail and show inline dialog
-      setPayDetail(null);
-      setPayDetailLoading(true);
-      try {
-        const res = await fetchWithAuth(`/api/new-payment/${payId}`);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        setPayDetail(await res.json());
-      } catch {
-        setPayDetail({ _error: true });
-      } finally {
-        setPayDetailLoading(false);
-      }
-      return;
-    }
-
-    if (!t.sourceId) return;
-
-    // Every source type navigates straight to that document's own real
-    // detail/form view via its ?view= deep link — same pattern across the
-    // board (Invoice/Expense Booking used to open its own inline preview
-    // popup here instead, which was one extra step short of ever reaching
-    // the real form). srcType here is t.sourceType.toUpperCase() straight
-    // from GeneralLedgerEntry.SourceType (see backend/routes/trialBalance.js).
-    switch (srcType) {
-      case "EXPENSEBOOKING":
-      case "INVOICEPOSTING":
-        navigate(`/material/expense-booking?view=${t.sourceId}`); break;
-      case "RECEIVEDPAYMENT":
-      case "RECEIPT":
-        navigate(`/received-payments?view=${t.sourceId}`); break;
-      case "PURCHASE_ORDER":
-      case "PO":
-        navigate(`/material/purchase-order?view=${t.sourceId}`); break;
-      case "GRN":
-      case "GRNPOSTING":
-        navigate(`/material/grn?view=${t.sourceId}`); break;
-      case "JOURNAL":
-      case "JV":
-      case "JOURNALVOUCHER":
-        navigate(`/journal-voucher?view=${t.sourceId}`); break;
-      default:
-        break;
-    }
-  }, [navigate]);
+  // Level 3 — show the exact GL leg the user clicked. Every field needed is
+  // already on the row (see backend/routes/trialBalance.js's transactions
+  // mapping) — no fetch, no navigating away to the source document's own
+  // editable form (Invoice/GRN/JV/Payment). This used to jump straight to
+  // that document's ?view= deep link per SourceType, which answers "what is
+  // this document" rather than "what did this specific entry post" — the
+  // whole point of drilling into an account.
+  const openSourceEntry = useCallback((t: TBTransaction) => {
+    setGlEntryDetail(t);
+  }, []);
 
   // ── export/refresh disabled? ──────────────────────────────────────────────
   const notReady =
@@ -1752,8 +1713,12 @@ export default function TrialBalance() {
         </div>
       </FinanceShell>
 
-      {/* ── Level 3: Payment detail dialog ─────────────────────────────────── */}
-      <Dialog open={!!payDetail || payDetailLoading} onOpenChange={(o) => { if (!o) setPayDetail(null); }}>
+      {/* ── Level 3: GL entry detail dialog ──────────────────────────────────
+          Shows exactly what this leg posted — voucher, date, debit/credit,
+          narration, this account — built entirely from the drill-down row
+          already on screen. Deliberately does not navigate to the source
+          document's own editable form. */}
+      <Dialog open={!!glEntryDetail} onOpenChange={(o) => { if (!o) setGlEntryDetail(null); }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <div className="flex items-center gap-3">
@@ -1762,44 +1727,48 @@ export default function TrialBalance() {
               </div>
               <div>
                 <DialogTitle className="font-heading text-base">
-                  {payDetailLoading ? "Loading…" : payDetail?.DocNo ?? "Payment Detail"}
+                  {glEntryDetail?.voucherNo || glEntryDetail?.docNo || "GL Entry"}
                 </DialogTitle>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {payDetail?.Status ?? ""}
+                  {drillNode?.name ?? ""}
                 </p>
               </div>
             </div>
           </DialogHeader>
 
-          {payDetailLoading ? (
-            <div className="flex items-center justify-center py-12 text-muted-foreground gap-2">
-              <Loader2 size={16} className="animate-spin" /> Fetching payment…
-            </div>
-          ) : payDetail?._error ? (
-            <div className="py-8 text-center text-sm text-muted-foreground">Could not load payment details.</div>
-          ) : payDetail ? (
+          {glEntryDetail && (
             <div className="space-y-4">
               {/* Amount highlight */}
               <div className="rounded-xl bg-primary/5 border border-primary/15 px-4 py-3 flex items-center justify-between">
-                <span className="text-xs text-muted-foreground font-heading uppercase tracking-wide">Amount Paid</span>
-                <span className="text-xl font-bold text-primary font-heading">{formatINR(Number(payDetail.PAmount) || 0)}</span>
+                <span className="text-xs text-muted-foreground font-heading uppercase tracking-wide">
+                  {glEntryDetail.debit > 0 ? "Debit" : "Credit"}
+                </span>
+                <span className="text-xl font-bold text-primary font-heading">
+                  {formatINR(glEntryDetail.debit > 0 ? glEntryDetail.debit : glEntryDetail.credit)}
+                </span>
               </div>
 
               {/* Detail grid */}
               <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-xs">
                 {[
-                  { label: "Payee / Supplier",  value: payDetail.PSupplierName || payDetail.PPaymentName },
-                  { label: "Payment Date",       value: payDetail.PDate ? fmtDate(String(payDetail.PDate).slice(0, 10)) : "—" },
-                  { label: "Mode",               value: payDetail.PMode || "—" },
-                  { label: "Bank",               value: payDetail.BankAccountName || payDetail.PBankName || "—" },
-                  { label: "Cheque / Ref No.",   value: payDetail.PChequeNo || "—" },
-                  { label: "Cheque Date",        value: payDetail.PChequeDate ? fmtDate(String(payDetail.PChequeDate).slice(0, 10)) : "—" },
-                  { label: "Company",            value: payDetail.PCompanyName || "—" },
-                  { label: "Project",            value: payDetail.PProjectName || "—" },
-                  { label: "Expense Booking",    value: payDetail.RefDoc || "—" },
-                  { label: "EB Date",            value: payDetail.EBDocDate ? fmtDate(String(payDetail.EBDocDate).slice(0, 10)) : "—" },
-                  { label: "Taxable Amount",     value: payDetail.TaxableAmount ? formatINR(Number(payDetail.TaxableAmount)) : "—" },
-                  { label: "Tax Amount",         value: payDetail.TaxAmount ? formatINR(Number(payDetail.TaxAmount)) : "—" },
+                  { label: "Account",       value: drillNode?.name },
+                  { label: "Date",          value: glEntryDetail.date ? fmtDate(glEntryDetail.date) : "—" },
+                  { label: "Voucher No.",   value: glEntryDetail.voucherNo || "—" },
+                  { label: "Source Type",   value: glEntryDetail.sourceType || "—" },
+                  { label: "Invoice No.",   value: glEntryDetail.invoiceNo || "—" },
+                  { label: "Mode",          value: (glEntryDetail as any).mode || glEntryDetail.payment?.mode || "—" },
+                  {
+                    label: "Cost Centre",
+                    value: glEntryDetail.costCenter
+                      ? `${glEntryDetail.costCenter.code ?? ""}${glEntryDetail.costCenter.code ? " - " : ""}${glEntryDetail.costCenter.name ?? ""}`
+                      : "—",
+                  },
+                  {
+                    label: "Fixed Asset",
+                    value: glEntryDetail.fixedAsset
+                      ? (glEntryDetail.fixedAsset.faItemCode || glEntryDetail.fixedAsset.assetCode || `Asset #${glEntryDetail.fixedAsset.assetId}`)
+                      : "—",
+                  },
                 ].map(({ label, value }) => (
                   <div key={label}>
                     <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">{label}</p>
@@ -1808,31 +1777,28 @@ export default function TrialBalance() {
                 ))}
               </div>
 
-              {/* Description */}
-              {payDetail.EBDescription && (
+              {/* Narration */}
+              {glEntryDetail.narration && (
                 <div className="rounded-lg bg-muted/30 border border-border px-3 py-2">
-                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Description</p>
-                  <p className="text-xs text-foreground">{payDetail.EBDescription}</p>
+                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Narration</p>
+                  <p className="text-xs text-foreground">{glEntryDetail.narration}</p>
                 </div>
               )}
 
-              {/* Narration / remarks */}
-              {payDetail.PRemarks && (
-                <div className="rounded-lg bg-muted/30 border border-border px-3 py-2">
-                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Remarks</p>
-                  <p className="text-xs text-foreground">{payDetail.PRemarks}</p>
-                </div>
-              )}
-
-              {/* Card info */}
-              {payDetail.PCardNumber && (
-                <div className="rounded-lg bg-muted/30 border border-border px-3 py-2 text-xs">
-                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">Card</p>
-                  <p>{payDetail.PCardHolderName} · {payDetail.PCardNetwork} ···· {String(payDetail.PCardNumber).slice(-4)}</p>
+              {/* Item breakdown, when this leg has one (GRN-sourced) */}
+              {glEntryDetail.items && glEntryDetail.items.length > 0 && (
+                <div className="rounded-lg bg-muted/30 border border-border overflow-hidden">
+                  <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 px-3 pt-2 pb-1">Items</p>
+                  {glEntryDetail.items.map((it, i) => (
+                    <div key={i} className={`flex items-center justify-between px-3 py-1.5 text-xs ${i > 0 ? "border-t border-border/30" : ""}`}>
+                      <span className="text-foreground/80">{it.itemName}</span>
+                      <span className="font-mono tabular-nums text-muted-foreground">{formatINR(it.amount)}</span>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
-          ) : null}
+          )}
         </DialogContent>
       </Dialog>
 
