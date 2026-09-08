@@ -237,10 +237,24 @@ router.put("/:id", requirePageRight("maintenance-bills", "edit"), async (req, re
 
     const { items, subtotal, totalTax, grandTotal } = await resolveBillItems(pool, chargeHeadIds);
 
+    // Electricity lines (ElectricityBillId set, ChargeHeadId NULL) are
+    // never touched by this charge-head-only edit form — they're added
+    // separately via electricityMaintenance.js's add-to-customer-bill
+    // action. Deleting *every* item here would silently wipe them.
+    const electricityItems = await pool
+      .request()
+      .input("BillId", sql.Int, id)
+      .query("SELECT Rate, TaxAmount, TotalAmount FROM dbo.MaintenanceBillItem WHERE BillId = @BillId AND ElectricityBillId IS NOT NULL");
+    const electricitySubtotal = electricityItems.recordset.reduce((s, i) => s + (Number(i.Rate) || 0), 0);
+    const electricityTax = electricityItems.recordset.reduce((s, i) => s + (Number(i.TaxAmount) || 0), 0);
+    const finalSubtotal = subtotal + electricitySubtotal;
+    const finalTotalTax = totalTax + electricityTax;
+    const finalGrandTotal = grandTotal + electricitySubtotal + electricityTax;
+
     const tx = pool.transaction();
     await tx.begin();
     try {
-      await tx.request().input("BillId", sql.Int, id).query("DELETE FROM dbo.MaintenanceBillItem WHERE BillId = @BillId");
+      await tx.request().input("BillId", sql.Int, id).query("DELETE FROM dbo.MaintenanceBillItem WHERE BillId = @BillId AND ElectricityBillId IS NULL");
 
       for (const it of items) {
         await tx
@@ -268,9 +282,9 @@ router.put("/:id", requirePageRight("maintenance-bills", "edit"), async (req, re
         .input("PeriodFrom", sql.Date, periodFrom || null)
         .input("PeriodTo", sql.Date, periodTo || null)
         .input("Notes", sql.NVarChar(1000), notes || null)
-        .input("Subtotal", sql.Decimal(18, 2), subtotal)
-        .input("TotalTax", sql.Decimal(18, 2), totalTax)
-        .input("GrandTotal", sql.Decimal(18, 2), grandTotal)
+        .input("Subtotal", sql.Decimal(18, 2), finalSubtotal)
+        .input("TotalTax", sql.Decimal(18, 2), finalTotalTax)
+        .input("GrandTotal", sql.Decimal(18, 2), finalGrandTotal)
         .input("UpdatedBy", sql.Int, updatedBy)
         .input("UpdatedAt", sql.DateTime, new Date())
         .query(`
