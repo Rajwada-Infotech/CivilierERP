@@ -13,6 +13,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { useTheme } from "@/contexts/ThemeContext";
 import { getMaintenanceDirectory } from "@/api/maintenanceApi";
 import { getActiveChargeHeads } from "@/api/chargeHeadApi";
+import { formatCompactINR } from "@/utils/formatCurrency";
 import { getMaintenanceBills } from "@/api/maintenanceBillApi";
 
 const fmt = (n: number) => `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 0 })}`;
@@ -120,7 +121,7 @@ function TrendCard({
               <YAxis
                 tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
                 axisLine={false} tickLine={false} width={40}
-                tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
+                tickFormatter={formatCompactINR}
               />
               <Tooltip
                 labelFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}

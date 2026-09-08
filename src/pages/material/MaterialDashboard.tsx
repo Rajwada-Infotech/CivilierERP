@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { formatCompactINR } from "@/utils/formatCurrency";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useTheme } from "@/contexts/ThemeContext";
 import { DashboardBackground } from "@/components/DashboardBackground";
@@ -339,7 +340,7 @@ function TrendCard({
               <YAxis
                 tick={{ fontSize: 10, fill: isDark ? "#94a3b8" : "#64748b" }}
                 axisLine={false} tickLine={false} width={40}
-                tickFormatter={(v) => (v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v))}
+                tickFormatter={formatCompactINR}
               />
               <Tooltip
                 labelFormatter={(d) => new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
