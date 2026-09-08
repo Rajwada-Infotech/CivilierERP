@@ -7,6 +7,8 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 router.use(authenticateToken);
 router.use(apiRateLimit);
 const { getPool, sql } = require("../db");
+const { resolveItemGlHeads } = require("../services/itemGlHead");
+const { parseGRNItems } = require("../services/grnPosting");
 
 /**
  * GET /api/trial-balance?from=YYYY-MM-DD&to=YYYY-MM-DD&companyId=&projectId=
@@ -489,6 +491,64 @@ router.get("/:lheadId/transactions", async (req, res) => {
 
     const glRows = entriesRes.recordset;
 
+    // Item-level breakdown for GRN-sourced legs — this GL head's own leg is
+    // a bucketed total (e.g. "Fixed Assets A/c" debited ₹X for however many
+    // Fixed Asset items in the GRN shared that account), so a reviewer
+    // drilling into the head can't see which items actually made it up.
+    // Recompute each item's own base/GST amount (same resolution as
+    // services/grnPosting.js) and attach only the items whose resolved GL
+    // head is THIS head, split by whether the leg is the base-goods debit
+    // or the GST-offset credit — mirrors the item-by-item table already
+    // shown on a GRN's own Posting tab, just scoped to one account here.
+    const grnItemBreakdownByEntryId = new Map();
+    const grnSourceIds = [...new Set(
+      glRows.filter((r) => r.SourceType === "GRN" || r.SourceType === "GRNPosting").map((r) => r.SourceId)
+    )];
+    if (grnSourceIds.length > 0) {
+      const purchaseRes = await pool.request().query(
+        `SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1 AND LHeadName='Purchase A/c'`,
+      );
+      const purchaseId = purchaseRes.recordset[0]?.LHeadId ?? null;
+
+      const grnReq = pool.request();
+      const grnPh = grnSourceIds.map((id, i) => { grnReq.input(`gid${i}`, sql.Int, id); return `@gid${i}`; }).join(",");
+      const grnItemsRes = await grnReq.query(
+        `SELECT GRNID, GRNItems FROM dbo.GoodsReceiptNotes WHERE GRNID IN (${grnPh})`,
+      );
+
+      for (const grnRow of grnItemsRes.recordset) {
+        let items = [];
+        try { items = parseGRNItems(grnRow.GRNItems); } catch { items = []; }
+        if (!items.length) continue;
+
+        const itemIds = items.map((it) => String(it.itemId || it.ItemId || "").trim()).filter(Boolean);
+        const itemGlMap = await resolveItemGlHeads(pool, sql, itemIds);
+
+        const baseForHead = [];
+        const gstForHead = [];
+        for (const it of items) {
+          const itemId = String(it.itemId || it.ItemId || "").trim();
+          const master = itemGlMap.get(itemId) || { glHeadId: null, cgstRate: 0, sgstRate: 0 };
+          const resolvedHeadId = master.glHeadId || purchaseId;
+          if (resolvedHeadId !== lheadId) continue;
+
+          const itemName = it.itemName || it.ItemName || it.description || it.Description || null;
+          if (!itemName) continue;
+          const baseAmount = Number(it.totalAmount) > 0
+            ? Number(it.totalAmount)
+            : Number(it.rate || it.Rate || 0) * Number(it.quantity || it.Quantity || it.receivedQty || it.ReceivedQty || 0);
+          const lineGstPct = Number(it.gstPct ?? it.GstPct ?? NaN);
+          const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate + master.sgstRate);
+          const gstAmount = baseAmount * (totalGSTRate / 100);
+
+          if (baseAmount > 0) baseForHead.push({ itemName, amount: Math.round(baseAmount * 100) / 100 });
+          if (gstAmount > 0) gstForHead.push({ itemName, amount: Math.round(gstAmount * 100) / 100 });
+        }
+
+        grnItemBreakdownByEntryId.set(grnRow.GRNID, { base: baseForHead, gst: gstForHead });
+      }
+    }
+
     // Track which EB ids are already in the GL (approved → posted to supplier)
     // so we don't show them twice in the pending-EB query below.
     const postedEBIds = new Set(
@@ -647,6 +707,15 @@ router.get("/:lheadId/transactions", async (req, res) => {
 
       const st = (r.SourceType || "").toLowerCase();
 
+      let items = null;
+      if (r.SourceType === "GRN" || r.SourceType === "GRNPosting") {
+        const breakdown = grnItemBreakdownByEntryId.get(r.SourceId);
+        if (breakdown) {
+          const list = Number(r.DebitAmount) > 0 ? breakdown.base : breakdown.gst;
+          if (list && list.length > 0) items = list;
+        }
+      }
+
       if (st === "newpayment" && r.PPaymentID) {
         docNo = r.NPDocNo || docNo;
         mode = r.NPMode;
@@ -711,6 +780,7 @@ router.get("/:lheadId/transactions", async (req, res) => {
         payment: r.PPaymentID
           ? { id: r.PPaymentID, docNo: r.NPDocNo, mode: r.NPMode, status: r.NPStatus }
           : null,
+        items,
       };
     });
 
