@@ -34,7 +34,7 @@ async function computeGrnPostingBuckets(pool, sql, grn) {
 
   let totalBase = 0,
     totalGST = 0;
-  const buckets = new Map(); // key: `${costCenterId}|${glHeadId}` -> { costCenterId, glHeadId, base, gst }
+  const buckets = new Map(); // key: `${costCenterId}|${glHeadId}` -> { costCenterId, glHeadId, base, gst, itemNames }
 
   if (receivedItems.length === 0) return { buckets, totalBase: 0, totalGST: 0 };
 
@@ -68,15 +68,29 @@ async function computeGrnPostingBuckets(pool, sql, grn) {
     const costCenterId = itemCostCentreMap[itemId] ?? null;
     const glHeadId = master.glHeadId ?? null;
     const bucketKey = `${costCenterId ?? "unassigned"}|${glHeadId ?? "default"}`;
-    const bucket = buckets.get(bucketKey) ?? { costCenterId, glHeadId, base: 0, gst: 0 };
+    const bucket = buckets.get(bucketKey) ?? { costCenterId, glHeadId, base: 0, gst: 0, itemNames: [] };
     bucket.base += baseAmount;
     bucket.gst += gstAmount;
+    const itemName = it.itemName || it.ItemName || it.description || it.Description || null;
+    if (itemName) bucket.itemNames.push(itemName);
     buckets.set(bucketKey, bucket);
   }
 
   totalBase = Math.round(totalBase * 100) / 100;
   totalGST = Math.round(totalGST * 100) / 100;
   return { buckets, totalBase, totalGST };
+}
+
+// Joins a bucket's item names into a short, readable suffix for the
+// Narration — "PORTLAND POZZOLANA CEMENT" for one item, "A, B" for two,
+// "A & 2 more" beyond that — so the item that actually earned a leg is
+// visible anywhere Narration is displayed (Trial Balance's drill-down,
+// Vendor Ledger, exports...), not just in the GRN's own Posting tab.
+function itemNameSuffix(itemNames) {
+  const unique = [...new Set(itemNames)];
+  if (unique.length === 0) return "";
+  if (unique.length <= 2) return ` — ${unique.join(", ")}`;
+  return ` — ${unique[0]} & ${unique.length - 1} more`;
 }
 
 /**
@@ -89,19 +103,20 @@ async function computeGrnPostingBuckets(pool, sql, grn) {
  */
 function buildGrnPostingLines({ buckets, grnNo, purchaseId, pgrnId, provisionalId }) {
   const lines = [];
-  for (const { costCenterId, glHeadId, base, gst } of buckets.values()) {
+  for (const { costCenterId, glHeadId, base, gst, itemNames } of buckets.values()) {
     const roundedBase = Math.round(base * 100) / 100;
     const roundedGst = Math.round(gst * 100) / 100;
     if (roundedBase <= 0) continue;
     const baseHeadId = glHeadId || purchaseId;
+    const itemSuffix = itemNameSuffix(itemNames || []);
     lines.push(
-      { LHeadId: baseHeadId, DebitAmount: roundedBase, CreditAmount: 0, Narration: `GRN Posting: ${grnNo} — Goods received (base)`, CostCenterId: costCenterId },
-      { LHeadId: pgrnId, DebitAmount: 0, CreditAmount: roundedBase, Narration: `GRN Posting: ${grnNo} — Provision for Pending GRN`, CostCenterId: costCenterId },
+      { LHeadId: baseHeadId, DebitAmount: roundedBase, CreditAmount: 0, Narration: `GRN Posting: ${grnNo} — Goods received (base)${itemSuffix}`, CostCenterId: costCenterId },
+      { LHeadId: pgrnId, DebitAmount: 0, CreditAmount: roundedBase, Narration: `GRN Posting: ${grnNo} — Provision for Pending GRN${itemSuffix}`, CostCenterId: costCenterId },
     );
     if (roundedGst > 0) {
       lines.push(
-        { LHeadId: provisionalId, DebitAmount: roundedGst, CreditAmount: 0, Narration: `GRN Posting: ${grnNo} — Provisional ITC`, CostCenterId: costCenterId },
-        { LHeadId: baseHeadId, DebitAmount: 0, CreditAmount: roundedGst, Narration: `GRN Posting: ${grnNo} — Purchase (tax offset)`, CostCenterId: costCenterId },
+        { LHeadId: provisionalId, DebitAmount: roundedGst, CreditAmount: 0, Narration: `GRN Posting: ${grnNo} — Provisional ITC${itemSuffix}`, CostCenterId: costCenterId },
+        { LHeadId: baseHeadId, DebitAmount: 0, CreditAmount: roundedGst, Narration: `GRN Posting: ${grnNo} — Purchase (tax offset)${itemSuffix}`, CostCenterId: costCenterId },
       );
     }
   }

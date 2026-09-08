@@ -302,19 +302,32 @@ async function postGRNApproval(pool, grnId, userEmail) {
   const itemIds = items.map((it) => it.itemId).filter((id) => id != null).map(String);
   const itemGlMap = await resolveItemGlHeads(pool, sql, itemIds);
 
-  const purchaseAmountByHead = new Map(); // lHeadId (null = default Purchase A/c) -> amount
-  const fixedAssetAmountByHead = new Map(); // lHeadId -> amount
+  const purchaseAmountByHead = new Map(); // lHeadId (null = default Purchase A/c) -> { amount, itemNames }
+  const fixedAssetAmountByHead = new Map(); // lHeadId -> { amount, itemNames }
   for (const it of items) {
     const amt = Number(it.totalAmount) || 0;
     const itemId = it.itemId != null ? String(it.itemId) : null;
     const master = itemId ? itemGlMap.get(itemId) : null;
-    if (master?.isFixedAsset) {
-      fixedAssetAmountByHead.set(master.glHeadId, (fixedAssetAmountByHead.get(master.glHeadId) || 0) + amt);
-    } else {
-      const headId = master?.glHeadId ?? null;
-      purchaseAmountByHead.set(headId, (purchaseAmountByHead.get(headId) || 0) + amt);
-    }
+    const itemName = it.itemName || it.ItemName || it.description || it.Description || null;
+    const target = master?.isFixedAsset
+      ? fixedAssetAmountByHead
+      : purchaseAmountByHead;
+    const headId = master?.isFixedAsset ? master.glHeadId : (master?.glHeadId ?? null);
+    const bucket = target.get(headId) ?? { amount: 0, itemNames: [] };
+    bucket.amount += amt;
+    if (itemName) bucket.itemNames.push(itemName);
+    target.set(headId, bucket);
   }
+  // See services/grnPosting.js's itemNameSuffix — same short "which item
+  // earned this leg" suffix, kept in sync between the two GRN posting
+  // paths so a leg's Narration reads the same regardless of which one
+  // posted it.
+  const itemNameSuffix = (itemNames) => {
+    const unique = [...new Set(itemNames)];
+    if (unique.length === 0) return "";
+    if (unique.length <= 2) return ` — ${unique.join(", ")}`;
+    return ` — ${unique[0]} & ${unique.length - 1} more`;
+  };
 
   const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
   const provisionalCreditHeadId = await getGLHeadId(
@@ -326,15 +339,15 @@ async function postGRNApproval(pool, grnId, userEmail) {
     GL_ACCOUNTS.PENDING_GRN_PROVISION,
   );
 
-  const purchaseLegs = Array.from(purchaseAmountByHead.entries()).map(([lHeadId, amt]) => ({
+  const purchaseLegs = Array.from(purchaseAmountByHead.entries()).map(([lHeadId, { amount, itemNames }]) => ({
     lHeadId: lHeadId || purchaseHeadId,
-    debit: amt,
-    narration: `GRN ${docNo} — goods received (base)`,
+    debit: amount,
+    narration: `GRN ${docNo} — goods received (base)${itemNameSuffix(itemNames)}`,
   }));
-  const fixedAssetLegs = Array.from(fixedAssetAmountByHead.entries()).map(([lHeadId, amt]) => ({
+  const fixedAssetLegs = Array.from(fixedAssetAmountByHead.entries()).map(([lHeadId, { amount, itemNames }]) => ({
     lHeadId,
-    debit: amt,
-    narration: `GRN ${docNo} — fixed asset received (capitalized)`,
+    debit: amount,
+    narration: `GRN ${docNo} — fixed asset received (capitalized)${itemNameSuffix(itemNames)}`,
   }));
 
   await postVoucher(pool, {
