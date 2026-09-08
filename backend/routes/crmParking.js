@@ -11,7 +11,7 @@ const { guardAndConvertHold, placeHoldIfNeeded, releaseHold } = require("../serv
 const { getNextDocNumber } = require("../services/docNumber");
 const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
-const { recalculateRemainingMilestones, isLegalWorkStarted, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
+const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
 const { recalculateBookingGst } = require("../services/crmGst");
 
@@ -188,8 +188,16 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
   //     conversion rolls back too, leaving the slot still held and retryable.
   //     Previously guardAndConvertHold ran outside the tx: a failed INSERT
   //     would permanently orphan the conversion (hold gone, slot unallotted).
-  const tx = pool.transaction();
-  await tx.begin();
+  //
+  // Callers can pass either a plain pool (the normal case — this function
+  // opens and owns its own transaction below) or an already-open Transaction
+  // (e.g. crmBookingAmendments.js's approve route, which needs this INSERT
+  // to commit/rollback together with its own Status='Approved' write). An
+  // mssql Transaction has no .transaction() factory — only ConnectionPool
+  // does — so that's the reliable way to tell which was handed in.
+  const ownsTransaction = typeof pool.transaction === "function";
+  const tx = ownsTransaction ? pool.transaction() : pool;
+  if (ownsTransaction) await tx.begin();
   let allotmentId;
   try {
     await assertSlotAvailable(tx, parkingSlotId);
@@ -215,9 +223,11 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
         VALUES (@bid, @aid, @pmid, @sid, @slot, @qty, @rate, @gstr, @gsta, @tot, 'Pending', @note, @cb, SYSDATETIME())
       `);
     allotmentId = result.recordset[0].Id;
-    await tx.commit();
+    if (ownsTransaction) await tx.commit();
   } catch (txErr) {
-    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    if (ownsTransaction) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    }
     throw txErr;
   }
   // ── END ATOMIC SECTION ──────────────────────────────────────────────────
@@ -305,19 +315,32 @@ async function applyEditParking(pool, id, b) {
   return { TotalAmount: totalAmount, RateSnapshot: effectiveRate };
 }
 
+async function shouldQueueParkingAmendment(pool, bookingId) {
+  // Queue an amendment only when the Agreement is Executed or Registered
+  // (physically signed). Before that — even at DirectorApproval/Confirmed
+  // workflow stages — parking changes are still in flux and must flow through
+  // directly without an approval queue.
+  return isLegalWorkStarted(pool, bookingId);
+}
+
 
 // actorUserId/reason are optional so the internal cancellation-cascade
 // callers below (releaseAllParkingForApplication) keep working unchanged —
 // but the DELETE /:id route always supplies both, since a super_admin-only,
 // audit-logged release is the whole point of that endpoint.
-async function applyReleaseParking(pool, id, actorUserId = null, reason = null) {
+// force=true is used only by the amendment-approval path (post-Agreement,
+// pre-Sale-Deed-Registration). It bypasses the "already paid" guards because
+// an admin has explicitly reviewed and approved this change. If the parking's
+// milestone was already paid, it is removed and the credit amount is returned
+// so the caller can surface it to the accounts team for refund processing.
+async function applyReleaseParking(pool, id, actorUserId = null, reason = null, force = false) {
   const row = await pool.request().input("id", sql.Int, id)
     .query("SELECT BookingId, PaymentStatus FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
   if (!row.recordset.length) throw parkingError("Allotment not found", 404);
   const { BookingId, PaymentStatus } = row.recordset[0];
 
   if (!BookingId) {
-    if (PaymentStatus === CrmStatus.PAID) {
+    if (!force && PaymentStatus === CrmStatus.PAID) {
       throw parkingError("This parking sale has already been paid and cannot be released", 409);
     }
     await pool.request().input("id", sql.Int, id)
@@ -338,21 +361,28 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null) 
   // milestone) fall back to the booking-wide settled check instead, since
   // their value has no isolated "paid" point of its own once blended.
   const milestone = await pool.request().input("paid", sql.Int, id)
-    .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid ORDER BY Id DESC");
+    .query("SELECT TOP 1 Id, Status, AmountDue AS Amount FROM dbo.CrmPaymentMilestone WHERE ParkingAllotmentId = @paid ORDER BY Id DESC");
+
+  let creditAmount = 0;
+
   if (milestone.recordset.length) {
-    if (milestone.recordset[0].Status === CrmStatus.PAID) {
+    if (!force && milestone.recordset[0].Status === CrmStatus.PAID) {
       throw parkingError("This parking charge has already been paid and cannot be released", 409);
     }
-  } else if (await isBookingFullySettled(pool, BookingId)) {
+    // force path: milestone was paid — record the credit amount for the
+    // caller to surface to the accounts team, then remove the milestone so
+    // the booking total is recalculated without it.
+    if (milestone.recordset[0].Status === CrmStatus.PAID) {
+      creditAmount = Number(milestone.recordset[0].Amount || 0);
+    }
+    await pool.request().input("mid", sql.Int, milestone.recordset[0].Id)
+      .query("DELETE FROM dbo.CrmPaymentMilestone WHERE Id = @mid");
+  } else if (!force && await isBookingFullySettled(pool, BookingId)) {
     throw parkingError("This booking is fully paid off — parking can no longer be released", 409);
   }
 
   await pool.request().input("id", sql.Int, id)
     .query("UPDATE dbo.CrmParkingAllotment SET IsActive = 0 WHERE Id = @id");
-  if (milestone.recordset.length) {
-    await pool.request().input("mid", sql.Int, milestone.recordset[0].Id)
-      .query("DELETE FROM dbo.CrmPaymentMilestone WHERE Id = @mid");
-  }
 
   await rollupBookingTotals(pool, BookingId);
   await syncParkingPaymentStatus(pool, BookingId);
@@ -361,7 +391,7 @@ async function applyReleaseParking(pool, id, actorUserId = null, reason = null) 
       { field: "ParkingAllotment", oldVal: CrmStatus.ACTIVE, newVal: reason ? `Released — ${reason}` : "Released" },
     ]);
   }
-  return {};
+  return creditAmount > 0 ? { creditAmount, creditNote: `Parking released post-Agreement — ₹${creditAmount.toLocaleString("en-IN")} overpaid. Refund to be processed by accounts team.` } : {};
 }
 
 // Cancellation-time release — unlike applyReleaseParking() above, this is
@@ -678,7 +708,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const slotNo = slot.recordset[0].SlotNo;
 
     if (!b.Immediate) {
-      if (![CrmStatus.DRAFT, CrmStatus.PENDING].includes(application.recordset[0].Status)) {
+      if (![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(application.recordset[0].Status)) {
         return res.status(400).json({
           error: `Cannot change this application's parking selection once it is ${application.recordset[0].Status} — this is locked after approval.`,
         });
@@ -773,7 +803,7 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
     if (row.recordset[0].ApplicationId) {
       const app = await pool.request().input("aid", sql.Int, row.recordset[0].ApplicationId)
         .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
-      if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING].includes(app.recordset[0].Status)) {
+      if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.recordset[0].Status)) {
         return res.status(400).json({
           error: `Cannot change this application's parking selection once it is ${app.recordset[0].Status} — this is locked after approval.`,
         });
@@ -797,7 +827,10 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
     const activeErr = await requireActiveBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    if (await isLegalWorkStarted(pool, bookingId)) {
+    if (await isSaleDeedRegistered(pool, bookingId))
+      return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
+
+    if (await shouldQueueParkingAmendment(pool, bookingId)) {
       if (!b.Reason?.trim()) return res.status(400).json({ error: "A reason is required to request this change — legal documents are already under verification for this booking" });
       const requestId = await createAmendmentRequest(pool, {
         bookingId, changeType: "ParkingAllotment", action: "Add", targetId: null,
@@ -806,6 +839,8 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
+    // applyAddParking owns its own transaction internally (see the function
+    // for why — slot-lock atomicity), so a plain pool is correct here.
     const result = await applyAddParking(pool, bookingId, b, actorId(req));
     res.status(201).json({ success: true, ...result });
   } catch (e) {
@@ -815,7 +850,7 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
 });
 
 // PUT /:id — edit an existing allotment's quantity.
-router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -831,7 +866,10 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       if (activeErr) return res.status(400).json({ error: activeErr });
     }
 
-    if (bookingId && await isLegalWorkStarted(pool, bookingId)) {
+    if (bookingId && await isSaleDeedRegistered(pool, bookingId))
+      return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
+
+    if (bookingId && await shouldQueueParkingAmendment(pool, bookingId)) {
       if (!b.Reason?.trim()) return res.status(400).json({ error: "A reason is required to request this change — legal documents are already under verification for this booking" });
       const requestId = await createAmendmentRequest(pool, {
         bookingId, changeType: "ParkingAllotment", action: "Edit", targetId: id,
@@ -840,8 +878,20 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
-    const result = await applyEditParking(pool, id, b);
-    res.json({ success: true, ...result });
+    // applyEditParking does UPDATE allotment + (optional) milestone UPDATE +
+    // rollupBookingTotals + syncParkingPaymentStatus — wrapped so a failure
+    // partway through can't leave the allotment's new quantity/rate out of
+    // sync with the booking's rolled-up totals or payment-status flag.
+    const tx = pool.transaction();
+    try {
+      await tx.begin();
+      const result = await applyEditParking(tx, id, b);
+      await tx.commit();
+      res.json({ success: true, ...result });
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
   } catch (e) {
     console.error("[crm-parking] PUT error:", e.message);
     res.status(e.status || 500).json({ error: e.message });
@@ -897,13 +947,14 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
 // this server-side check anyone with edit rights could call this endpoint
 // directly and bypass the frontend gate entirely.
 //
-// Reason is mandatory unconditionally and always written to the audit trail.
+// Reason is required only when routing through the amendment queue (agreement
+// Executed/Registered). For direct releases (normal booking workflow) it is
+// optional — recorded in the audit trail when supplied, silent when not.
 router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
     const reason = (req.query.reason || req.body?.Reason || "").trim();
-    if (!reason) return res.status(400).json({ error: "A reason is required to release a parking allotment" });
 
     const row = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
@@ -915,7 +966,11 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"
       if (activeErr) return res.status(400).json({ error: activeErr });
     }
 
-    if (bookingId && await isLegalWorkStarted(pool, bookingId)) {
+    if (bookingId && await isSaleDeedRegistered(pool, bookingId))
+      return res.status(409).json({ error: "The Sale Deed for this booking has been registered with the government. Parking allotments in a registered Sale Deed are a legal property right and cannot be modified through the ERP. Any changes require a Deed of Rectification at the Sub-Registrar's office." });
+
+    if (bookingId && await shouldQueueParkingAmendment(pool, bookingId)) {
+      if (!reason) return res.status(400).json({ error: "A reason is required — the Agreement is executed and this change must go through the amendment queue" });
       const requestId = await createAmendmentRequest(pool, {
         bookingId, changeType: "ParkingAllotment", action: "Release", targetId: id,
         proposedChange: {}, reason, requestedBy: actorId(req),
@@ -923,8 +978,19 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking"
       return res.status(202).json({ pending: true, requestId, message: "Legal documents are already under verification — this change needs approval before it applies." });
     }
 
-    const result = await applyReleaseParking(pool, id, actorId(req), reason);
-    res.json({ success: true, ...result });
+    // applyReleaseParking does UPDATE allotment + (optional) milestone DELETE
+    // + rollupBookingTotals + syncParkingPaymentStatus + audit log — same
+    // atomicity concern as PUT above.
+    const tx = pool.transaction();
+    try {
+      await tx.begin();
+      const result = await applyReleaseParking(tx, id, actorId(req), reason);
+      await tx.commit();
+      res.json({ success: true, ...result });
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
   } catch (e) {
     console.error("[crm-parking] DELETE error:", e.message);
     res.status(e.status || 500).json({ error: e.message });

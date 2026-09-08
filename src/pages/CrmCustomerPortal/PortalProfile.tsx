@@ -123,7 +123,7 @@ const PortalProfile: React.FC = () => {
         <div className="p-5 space-y-3">
           {keyDates.map((d) => (
             <div key={d.label} className="flex items-center gap-3">
-              {d.done ? <CheckCircle2 size={15} style={{ color: "#0F7A44" }} className="shrink-0" /> : <Circle size={15} className="text-slate-300 shrink-0" />}
+              {d.done ? <CheckCircle2 size={15} style={{ color: "#0F7A44" }} className="shrink-0" /> : <Circle size={15} className="shrink-0" style={{ color: TEXT_FAINT }} />}
               <span className="text-sm flex-1" style={{ color: TEXT_MUTED }}>{d.label}</span>
               <span className="text-sm font-medium" style={{ color: TEXT }}>{d.value ? fmtDate(d.value) : "—"}</span>
             </div>

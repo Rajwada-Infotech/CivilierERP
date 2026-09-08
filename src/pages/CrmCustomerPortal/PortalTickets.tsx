@@ -99,25 +99,25 @@ const PortalTickets: React.FC = () => {
           </DialogHeader>
           <div className="space-y-3">
             <div>
-              <label className="text-xs text-slate-500 block mb-1">Category</label>
+              <label className="text-xs block mb-1" style={{ color: TEXT_MUTED }}>Category</label>
               <select value={form.category} onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2">
+                className="w-full text-sm rounded-lg px-3 py-2 outline-none" style={{ border: `1px solid ${HAIRLINE}`, background: SURFACE_ALT, color: TEXT }}>
                 {TICKET_CATEGORIES.map((c) => <option key={c} value={c}>{c.replace(/([A-Z])/g, " $1").trim()}</option>)}
               </select>
             </div>
             <div>
-              <label className="text-xs text-slate-500 block mb-1">Subject</label>
+              <label className="text-xs block mb-1" style={{ color: TEXT_MUTED }}>Subject</label>
               <input type="text" value={form.subject} onChange={(e) => setForm((f) => ({ ...f, subject: e.target.value }))}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2" />
+                className="w-full text-sm rounded-lg px-3 py-2 outline-none" style={{ border: `1px solid ${HAIRLINE}`, background: SURFACE_ALT, color: TEXT }} />
             </div>
             <div>
-              <label className="text-xs text-slate-500 block mb-1">Description</label>
+              <label className="text-xs block mb-1" style={{ color: TEXT_MUTED }}>Description</label>
               <textarea value={form.description} onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))} rows={3}
-                className="w-full text-sm border border-slate-200 rounded-lg px-3 py-2 resize-none" placeholder="Describe your request..." />
+                className="w-full text-sm rounded-lg px-3 py-2 resize-none outline-none" placeholder="Describe your request..." style={{ border: `1px solid ${HAIRLINE}`, background: SURFACE_ALT, color: TEXT }} />
             </div>
           </div>
           <div className="flex justify-end gap-2 pt-2">
-            <button onClick={() => setDialogOpen(false)} className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50">Cancel</button>
+            <button onClick={() => setDialogOpen(false)} className="px-3 py-1.5 text-sm rounded-lg hover:opacity-80" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Cancel</button>
             <button onClick={handleSubmit} disabled={saving}
               className="px-4 py-1.5 text-sm text-white rounded-lg font-medium disabled:opacity-40" style={{ background: INK }}>
               {saving ? "Submitting..." : "Submit"}

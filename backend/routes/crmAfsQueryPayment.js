@@ -244,34 +244,46 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
     }
 
     const actor = actorId(req);
-    for (const file of files) {
-      await pool.request()
-        .input("aqpid", sql.Int,            id)
-        .input("dtype", sql.NVarChar(20),   "Info")
-        .input("fname", sql.NVarChar(255),  file.fileName)
-        .input("mtype", sql.NVarChar(100),  file.mimeType)
-        .input("fsize", sql.Int,            file.buffer.length)
-        .input("fdata", sql.VarBinary(sql.MAX), file.buffer)
-        .input("ub",    sql.Int,            actor)
-        .query(`
-          INSERT INTO dbo.CrmAfsQueryPaymentAttachments (AfsQueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
-          VALUES (@aqpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+    // Multiple attachment INSERTs + the Status flip + comm log — wrapped so
+    // a failure partway through a multi-file upload can't leave some files
+    // attached and others missing while the status already reads InfoSent.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      for (const file of files) {
+        await tx.request()
+          .input("aqpid", sql.Int,            id)
+          .input("dtype", sql.NVarChar(20),   "Info")
+          .input("fname", sql.NVarChar(255),  file.fileName)
+          .input("mtype", sql.NVarChar(100),  file.mimeType)
+          .input("fsize", sql.Int,            file.buffer.length)
+          .input("fdata", sql.VarBinary(sql.MAX), file.buffer)
+          .input("ub",    sql.Int,            actor)
+          .query(`
+            INSERT INTO dbo.CrmAfsQueryPaymentAttachments (AfsQueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
+            VALUES (@aqpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+          `);
+      }
+
+      if (row.Status === CrmStatus.PENDING) {
+        await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actor).query(`
+          UPDATE dbo.CrmAfsQueryPayment SET Status = 'InfoSent', InfoSentAt = SYSDATETIME(), InfoSentBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
         `);
-    }
+      }
 
-    if (row.Status === CrmStatus.PENDING) {
-      await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actor).query(`
-        UPDATE dbo.CrmAfsQueryPayment SET Status = 'InfoSent', InfoSentAt = SYSDATETIME(), InfoSentBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-    }
+      await logCommunication(tx, {
+        bookingId: row.BookingId, direction: "Outbound",
+        subject: "AFS stamp duty / registration fee details sent to customer",
+        summary: "Required government payment amount and paperwork for AFS registration shared with the customer.",
+        createdBy: actor,
+      });
 
-    await logCommunication(pool, {
-      bookingId: row.BookingId, direction: "Outbound",
-      subject: "AFS stamp duty / registration fee details sent to customer",
-      summary: "Required government payment amount and paperwork for AFS registration shared with the customer.",
-      createdBy: actor,
-    });
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     res.json({ success: true, count: files.length });
   } catch (e) {
@@ -310,40 +322,52 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
     }
 
     const actor = actorId(req);
-    if (proof) {
-      await pool.request()
-        .input("aqpid", sql.Int,            id)
-        .input("dtype", sql.NVarChar(20),   "Proof")
-        .input("fname", sql.NVarChar(255),  proof.fileName)
-        .input("mtype", sql.NVarChar(100),  proof.mimeType)
-        .input("fsize", sql.Int,            proof.buffer.length)
-        .input("fdata", sql.VarBinary(sql.MAX), proof.buffer)
-        .input("ub",    sql.Int,            actor)
+    // Proof attachment INSERT + Status flip to Confirmed + comm log — wrapped
+    // so a failure between them can't leave the confirmation recorded with no
+    // proof attached, or vice versa.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (proof) {
+        await tx.request()
+          .input("aqpid", sql.Int,            id)
+          .input("dtype", sql.NVarChar(20),   "Proof")
+          .input("fname", sql.NVarChar(255),  proof.fileName)
+          .input("mtype", sql.NVarChar(100),  proof.mimeType)
+          .input("fsize", sql.Int,            proof.buffer.length)
+          .input("fdata", sql.VarBinary(sql.MAX), proof.buffer)
+          .input("ub",    sql.Int,            actor)
+          .query(`
+            INSERT INTO dbo.CrmAfsQueryPaymentAttachments (AfsQueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
+            VALUES (@aqpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+          `);
+      }
+
+      await tx.request()
+        .input("id",  sql.Int,           id)
+        .input("amt", sql.Decimal(18,2), b.ConfirmedAmount != null ? parseFloat(b.ConfirmedAmount) : null)
+        .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
+        .input("ub",  sql.Int,           actor)
         .query(`
-          INSERT INTO dbo.CrmAfsQueryPaymentAttachments (AfsQueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
-          VALUES (@aqpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+          UPDATE dbo.CrmAfsQueryPayment SET
+            Status = 'Confirmed', ConfirmedAt = SYSDATETIME(), ConfirmedBy = @ub,
+            ConfirmedAmount = @amt, Remarks = ISNULL(@rem, Remarks),
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
         `);
+
+      await logCommunication(tx, {
+        bookingId: row.BookingId, direction: "Inbound",
+        subject: "AFS government payment confirmed",
+        summary: "Staff confirmed the customer has remitted AFS stamp duty and registration fee to the Sub-Registrar Office.",
+        createdBy: actor,
+      });
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
-
-    await pool.request()
-      .input("id",  sql.Int,           id)
-      .input("amt", sql.Decimal(18,2), b.ConfirmedAmount != null ? parseFloat(b.ConfirmedAmount) : null)
-      .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
-      .input("ub",  sql.Int,           actor)
-      .query(`
-        UPDATE dbo.CrmAfsQueryPayment SET
-          Status = 'Confirmed', ConfirmedAt = SYSDATETIME(), ConfirmedBy = @ub,
-          ConfirmedAmount = @amt, Remarks = ISNULL(@rem, Remarks),
-          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-
-    await logCommunication(pool, {
-      bookingId: row.BookingId, direction: "Inbound",
-      subject: "AFS government payment confirmed",
-      summary: "Staff confirmed the customer has remitted AFS stamp duty and registration fee to the Sub-Registrar Office.",
-      createdBy: actor,
-    });
 
     res.json({ success: true });
   } catch (e) {

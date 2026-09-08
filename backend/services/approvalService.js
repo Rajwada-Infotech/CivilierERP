@@ -185,6 +185,17 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   // — no legal_head carve-out here, that's specific to crm-agreements (see
   // its comment above).
   "crm-sales-deed-senior": CRM_APPROVER_ROLES,
+  // Registry Complete is a permanent legal act — restricted to legal_head and
+  // above by default; configurable via ApprovalWorkflows LevelDefs in Setup.
+  "crm-registry-complete": [...CRM_APPROVER_ROLES, "legal_head"],
+  // Registry Cancel is serious but less permanent — marketing_head and above.
+  "crm-registry-cancel": CRM_APPROVER_ROLES,
+  // Mutation Approve records that the municipal authority granted Khata transfer
+  // — legal title consequence, same default set as Registry Complete.
+  "crm-mutation-approve": [...CRM_APPROVER_ROLES, "legal_head"],
+  // Query Payment Confirm records government fee payment — marketing_head and
+  // above; legal_head included since they coordinate the registry visit.
+  "crm-query-payment-confirm": [...CRM_APPROVER_ROLES, "legal_head"],
 };
 
 async function validateApprovalModuleMap(log = console) {
@@ -706,6 +717,70 @@ async function transition(
   return result;
 }
 
+/**
+ * Generic gate for CRM gated actions that do not use the full Pending→Approved
+ * transition cycle (e.g. Registry Complete, Mutation Approve). Logic mirrors
+ * transition()'s two-path auth:
+ *   1. Role is in MODULE_APPROVER_ROLE_OVERRIDES[module], OR
+ *   2. User holds "edit" on approval-inbox page AND the active workflow for
+ *      the module (if one exists) permits their role/userId.
+ *
+ * Default role sets live in MODULE_APPROVER_ROLE_OVERRIDES above and are the
+ * configurable baseline — admins can further restrict or expand per-level via
+ * the Approval Setup UI (ApprovalWorkflows.LevelsData) without any code change.
+ */
+async function canPerformCrmGatedAction(module, userId, userRole) {
+  const role = (userRole || "").toLowerCase();
+
+  // DB-configured workflow always takes precedence over code defaults — this
+  // is the "dynamic from approval setup" path. An admin who sets up a workflow
+  // for this module in the Approval Setup UI completely overrides the role list
+  // below, without any code change.
+  const workflow = await getWorkflow(module);
+  if (workflow && workflow.LevelDefs?.length) {
+    if (!(await hasApprovalInboxEditRight(userId))) return false;
+    const levelDef = workflow.LevelDefs[0];
+    const roleOk = !Array.isArray(levelDef?.roles) || !levelDef.roles.length ||
+      levelDef.roles.map(r => String(r).toLowerCase()).includes(role);
+    const userOk = !Array.isArray(levelDef?.userIds) || !levelDef.userIds.length ||
+      userId == null || levelDef.userIds.includes(userId);
+    return roleOk && userOk;
+  }
+
+  // No DB workflow configured — fall back to the code-level defaults.
+  // MODULE_APPROVER_ROLE_OVERRIDES provides per-module defaults; CRM_APPROVER_ROLES
+  // is the system-wide baseline for any module not listed there.
+  const allowedRoles = MODULE_APPROVER_ROLE_OVERRIDES[module] || CRM_APPROVER_ROLES;
+  if (allowedRoles.includes(role)) return true;
+  // For modules without a code-level role override, also honour the approval-inbox
+  // page-right as a fallback (these users can configure a DB workflow to tighten it).
+  if (!Object.prototype.hasOwnProperty.call(MODULE_APPROVER_ROLE_OVERRIDES, module)) {
+    return hasApprovalInboxEditRight(userId);
+  }
+  return false;
+}
+
+/**
+ * Check whether a user may approve/reject a booking amendment.
+ * Mirrors the same two-path logic transition() uses for CRM modules:
+ *   1. Role is in CRM_APPROVER_ROLES, OR
+ *   2. User holds "edit" on approval-inbox page AND the active workflow
+ *      for "crm-booking-amendment" (if one exists) permits their role/userId.
+ */
+async function canApproveBookingAmendment(userId, userRole) {
+  const role = (userRole || "").toLowerCase();
+  if (CRM_APPROVER_ROLES.includes(role)) return true;
+  if (!(await hasApprovalInboxEditRight(userId))) return false;
+  const workflow = await getWorkflow("crm-booking-amendment");
+  if (!workflow || !workflow.LevelDefs?.length) return true;
+  const levelDef = workflow.LevelDefs[0];
+  const roleOk = !Array.isArray(levelDef?.roles) || !levelDef.roles.length ||
+    levelDef.roles.map(r => String(r).toLowerCase()).includes(role);
+  const userOk = !Array.isArray(levelDef?.userIds) || !levelDef.userIds.length ||
+    userId == null || levelDef.userIds.includes(userId);
+  return roleOk && userOk;
+}
+
 module.exports = {
   transition,
   guardEdit,
@@ -716,6 +791,9 @@ module.exports = {
   recordGLPosting,
   writeAuditLog,
   CRM_APPROVER_ROLES,
+  canApproveBookingAmendment,
+  canPerformCrmGatedAction,
+  hasApprovalInboxEditRight,
   // Canonical module → {table, pk, status} / GL poster maps — the single
   // source of truth for what each module's identity/status column is.
   MODULE_MAP,

@@ -127,23 +127,34 @@ router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", 
         .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
       const applicationId = booking.recordset[0]?.ApplicationId || null;
 
+      // One INSERT per file — wrapped so a failure partway through a
+      // multi-file upload can't leave some files attached and others
+      // silently dropped with no indication of which ones actually saved.
+      const tx = pool.transaction();
+      await tx.begin();
       const inserted = [];
-      for (const file of req.files) {
-        const result = await pool.request()
-          .input("bid",  sql.Int, bookingId)
-          .input("aid",  sql.Int, applicationId)
-          .input("type", sql.NVarChar(100), docType)
-          .input("fn",   sql.NVarChar(300), file.originalname)
-          .input("fb64", sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
-          .input("fs",   sql.BigInt, file.size)
-          .input("mt",   sql.NVarChar(150), file.mimetype)
-          .input("cb",   sql.Int, actorId(req))
-          .query(`
-            INSERT INTO dbo.CrmBookingDocument (BookingId, ApplicationId, DocumentType, FileName, FileBase64, FileSize, MimeType, CreatedBy, CreatedAt)
-            OUTPUT INSERTED.Id
-            VALUES (@bid, @aid, @type, @fn, @fb64, @fs, @mt, @cb, SYSDATETIME())
-          `);
-        inserted.push(result.recordset[0].Id);
+      try {
+        for (const file of req.files) {
+          const result = await tx.request()
+            .input("bid",  sql.Int, bookingId)
+            .input("aid",  sql.Int, applicationId)
+            .input("type", sql.NVarChar(100), docType)
+            .input("fn",   sql.NVarChar(300), file.originalname)
+            .input("fb64", sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
+            .input("fs",   sql.BigInt, file.size)
+            .input("mt",   sql.NVarChar(150), file.mimetype)
+            .input("cb",   sql.Int, actorId(req))
+            .query(`
+              INSERT INTO dbo.CrmBookingDocument (BookingId, ApplicationId, DocumentType, FileName, FileBase64, FileSize, MimeType, CreatedBy, CreatedAt)
+              OUTPUT INSERTED.Id
+              VALUES (@bid, @aid, @type, @fn, @fb64, @fs, @mt, @cb, SYSDATETIME())
+            `);
+          inserted.push(result.recordset[0].Id);
+        }
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
       }
       res.status(201).json({ success: true, ids: inserted, count: inserted.length });
     } catch (e) {
@@ -196,23 +207,31 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
         .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1 ORDER BY Id DESC");
       const bookingId = booking.recordset[0]?.Id || null;
 
+      const tx = pool.transaction();
+      await tx.begin();
       const inserted = [];
-      for (const file of req.files) {
-        const result = await pool.request()
-          .input("aid",  sql.Int, applicationId)
-          .input("bid",  sql.Int, bookingId)
-          .input("type", sql.NVarChar(100), docType)
-          .input("fn",   sql.NVarChar(300), file.originalname)
-          .input("fb64", sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
-          .input("fs",   sql.BigInt, file.size)
-          .input("mt",   sql.NVarChar(150), file.mimetype)
-          .input("cb",   sql.Int, actorId(req))
-          .query(`
-            INSERT INTO dbo.CrmBookingDocument (BookingId, ApplicationId, DocumentType, FileName, FileBase64, FileSize, MimeType, CreatedBy, CreatedAt)
-            OUTPUT INSERTED.Id
-            VALUES (@bid, @aid, @type, @fn, @fb64, @fs, @mt, @cb, SYSDATETIME())
-          `);
-        inserted.push(result.recordset[0].Id);
+      try {
+        for (const file of req.files) {
+          const result = await tx.request()
+            .input("aid",  sql.Int, applicationId)
+            .input("bid",  sql.Int, bookingId)
+            .input("type", sql.NVarChar(100), docType)
+            .input("fn",   sql.NVarChar(300), file.originalname)
+            .input("fb64", sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
+            .input("fs",   sql.BigInt, file.size)
+            .input("mt",   sql.NVarChar(150), file.mimetype)
+            .input("cb",   sql.Int, actorId(req))
+            .query(`
+              INSERT INTO dbo.CrmBookingDocument (BookingId, ApplicationId, DocumentType, FileName, FileBase64, FileSize, MimeType, CreatedBy, CreatedAt)
+              OUTPUT INSERTED.Id
+              VALUES (@bid, @aid, @type, @fn, @fb64, @fs, @mt, @cb, SYSDATETIME())
+            `);
+          inserted.push(result.recordset[0].Id);
+        }
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
       }
       res.status(201).json({ success: true, ids: inserted, count: inserted.length });
     } catch (e) {

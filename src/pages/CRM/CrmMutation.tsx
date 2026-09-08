@@ -14,6 +14,7 @@ import {
   File as FileIcon, FileImage, FileText as FileTextIcon, History, ScrollText, Link2, Landmark,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import { useAuth } from "@/contexts/AuthContext";
 
 const API = "/api/crm/mutation";
 
@@ -74,8 +75,14 @@ async function fetchEligible(): Promise<any[]> {
   return r.json();
 }
 
+const CRM_MUTATION_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "legal_head"];
+
 const CrmMutation: React.FC = () => {
   const qc = useQueryClient();
+  const { currentUser, canDoAction } = useAuth();
+  const canApproveMutation =
+    CRM_MUTATION_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase()) ||
+    canDoAction("approval-inbox" as any, "edit");
   const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
   const mutationIdFilter = sp.get("mutationId");
@@ -460,11 +467,17 @@ const CrmMutation: React.FC = () => {
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
                             <button onClick={() => setQueryOpen(true)} className="text-xs border border-orange-300 text-orange-700 px-3 py-1.5 rounded hover:bg-orange-100 font-medium">Raise Query</button>
-                            <button onClick={() => setApproveOpen(true)} disabled={!docsReady}
-                              title={!docsReady ? "Verify the mandatory documents first" : undefined}
-                              className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded hover:bg-emerald-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed">
-                              Approve
-                            </button>
+                            {canApproveMutation ? (
+                              <button onClick={() => setApproveOpen(true)} disabled={!docsReady}
+                                title={!docsReady ? "Verify the mandatory documents first" : undefined}
+                                className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded hover:bg-emerald-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                                Approve
+                              </button>
+                            ) : (
+                              <span className="text-xs text-amber-600 border border-amber-200 bg-amber-50 px-2.5 py-1.5 rounded flex items-center gap-1">
+                                🔒 Requires Legal Head / Admin
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

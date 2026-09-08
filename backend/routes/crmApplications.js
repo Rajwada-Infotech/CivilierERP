@@ -70,6 +70,7 @@ const APP_SELECT = `
     cust.State AS CustomerState, cust.Pincode AS CustomerPincode,
     bk.Id AS BookingId, bk.BookingNo, bk.Status AS BookingStatus, bk.UnitNo AS BookingUnitNo,
     bk.ProjectName AS BookingProjectName, bk.TotalValue AS BookingTotalValue, bk.GrandTotal AS BookingGrandTotal, bk.BookingDate,
+    (SELECT TOP 1 Status FROM dbo.CrmSalesDeed WHERE BookingId = bk.Id ORDER BY CreatedAt DESC) AS DeedStatus,
     -- Stage drives the Converted/In Process/Not Converted split every
     -- Applications view now works from. Converted means a LIVE booking
     -- exists right now (bk.Status NOT IN Cancelled/Rejected) — not merely
@@ -320,6 +321,18 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       return res.status(400).json({
         error: `Cannot change the Company/Project/Unit/Payment Plan selection once the application is ${existingStatus} — this is locked after approval.`,
       });
+    }
+    // A Pending application that has a live booking (Stage=Converted) must also
+    // be blocked from unit/plan changes — the booking is the live legal record.
+    if (changingUnitSelection) {
+      const bkCheck = await pool.request()
+        .input("AppId", sql.Int, id)
+        .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @AppId AND Status NOT IN ('Cancelled','Expired','Rejected')");
+      if (bkCheck.recordset.length > 0) {
+        return res.status(400).json({
+          error: "Cannot change unit/payment plan — this application has an active booking. Manage changes through the Booking module instead.",
+        });
+      }
     }
 
     // Contact identity fields (Mobile/AltMobile/Email) get the same

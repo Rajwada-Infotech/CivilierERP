@@ -1,5 +1,6 @@
 const express = require("express");
 const { CrmStatus } = require("../constants/crmStatuses");
+const { PARKING_TYPES } = require("../constants/parkingTypes");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -8,15 +9,49 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { isValidShortCode, ensureProjectShortCode } = require("../services/projectShortCode");
 const { getBlockLockReason, getFloorLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
+const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
+
+// Mirrors unitMaster.js's syncUnitPaymentPlanTags — deactivate all, then
+// upsert each valid plan ID back in. Called after generating each unit so
+// the block's payment plans propagate down to every generated unit.
+async function syncUnitPaymentPlanTags(pool, unitId, planIds) {
+  await pool.request().input("uid", sql.Int, unitId)
+    .query("UPDATE dbo.CrmUnitPaymentPlan SET IsActive = 0 WHERE UnitId = @uid");
+  for (const pid of planIds) {
+    await pool.request()
+      .input("uid", sql.Int, unitId)
+      .input("pid", sql.Int, pid)
+      .query(`
+        MERGE dbo.CrmUnitPaymentPlan AS tgt
+        USING (SELECT @uid AS UnitId, @pid AS PlanId) AS src
+          ON tgt.UnitId = src.UnitId AND tgt.PlanId = src.PlanId
+        WHEN MATCHED THEN UPDATE SET IsActive = 1
+        WHEN NOT MATCHED THEN INSERT (UnitId, PlanId, IsActive, CreatedAt) VALUES (src.UnitId, src.PlanId, 1, SYSDATETIME());
+      `);
+  }
+}
+
+// Mirrors blockMaster.js's syncBlockPaymentPlanTags.
+async function syncBlockPaymentPlanTags(pool, blockId, planIds) {
+  await pool.request().input("bid", sql.Int, blockId)
+    .query("UPDATE dbo.CrmBlockPaymentPlan SET IsActive = 0 WHERE BlockId = @bid");
+  for (const pid of planIds) {
+    await pool.request()
+      .input("bid", sql.Int, blockId)
+      .input("pid", sql.Int, pid)
+      .query(`
+        MERGE dbo.CrmBlockPaymentPlan AS tgt
+        USING (SELECT @bid AS BlockId, @pid AS PlanId) AS src
+          ON tgt.BlockId = src.BlockId AND tgt.PlanId = src.PlanId
+        WHEN MATCHED THEN UPDATE SET IsActive = 1
+        WHEN NOT MATCHED THEN INSERT (BlockId, PlanId, IsActive, CreatedAt) VALUES (src.BlockId, src.PlanId, 1, SYSDATETIME());
+      `);
+  }
+}
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
 
-// Same vocabulary as parkingSlotMaster.js's own PARKING_TYPES — kept in sync
-// by hand (no shared module for it there either) so a type picked in the
-// Parking Template here always lands as a valid ParkingType on the real
-// dbo.ParkingSlot row.
-const PARKING_TYPES = [CrmStatus.OPEN, "Covered", "Stack", "Basement"];
 
 async function getProject(pool, projectId) {
   const r = await pool.request().input("id", sql.Int, projectId).query(`
@@ -43,6 +78,10 @@ function resolveShortCode(project) {
 // represented in the per-floor tree and are left untouched in Unit Master —
 // this sync is additive/read-modeling only, it never changes real inventory.
 async function syncExistingStructure(pool, projectId) {
+  // ── Scaffold backward fill (existing behaviour) ──────────────────────────
+  // Sync floor-level unit counts from real UnitMaster rows, and create
+  // scaffold entries for any Block/FloorNo pair that has live units but no
+  // wizard floor row yet.
   await pool.request().input("pid", sql.Int, projectId).query(`
     UPDATE f SET
       UnitCount = realUnits.UnitCount,
@@ -78,6 +117,209 @@ async function syncExistingStructure(pool, projectId) {
         INSERT INTO dbo.CrmProjectAutoSetupFloor (ProjectId, BlockId, FloorNo, FloorLabel, UnitCount, HasUnits, IsGenerated, IsActive, CreatedAt)
         VALUES (@pid, @bid, @fno, @label, @uc, 1, 1, 1, SYSDATETIME())
       `);
+  }
+
+  // ── Template backward fill ────────────────────────────────────────────────
+  // For each block that has live units but NO active unit-template rows:
+  // derive the template from the actual UnitType distribution in UnitMaster
+  // (group by UnitType, count rows, average areas) and write it through to
+  // both CrmProjectAutoSetupUnitTemplate and BlockUnitTypeSpec.
+  // Only runs when the template slot is empty — never overwrites a template
+  // the user has already intentionally saved.
+  const blocksWithUnits = await pool.request().input("pid", sql.Int, projectId).query(`
+    SELECT DISTINCT b.Id AS BlockId
+    FROM dbo.BlockMaster b
+    JOIN dbo.UnitMaster u ON u.BlockId = b.Id AND u.IsActive = 1
+    WHERE b.ProjectId = @pid AND b.IsActive = 1
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.CrmProjectAutoSetupUnitTemplate t
+        WHERE t.BlockId = b.Id AND t.IsActive = 1
+      )
+  `);
+  for (const { BlockId } of blocksWithUnits.recordset) {
+    const typeRows = await pool.request().input("bid", sql.Int, BlockId).query(`
+      SELECT
+        UnitType,
+        -- Units-per-floor: total / distinct floors — that is what the template
+        -- Count column means. Minimum 1 so the template row is never a no-op.
+        GREATEST(1, COUNT(*) / NULLIF(COUNT(DISTINCT FloorNo), 0)) AS Cnt,
+        AVG(NULLIF(CarpetAreaSqFt, 0))       AS AvgCarpet,
+        AVG(NULLIF(BuiltUpAreaSqFt, 0))      AS AvgBuiltUp,
+        AVG(NULLIF(SuperBuiltUpAreaSqFt, 0)) AS AvgSBU,
+        AVG(NULLIF(OpenTerraceAreaSqFt, 0))  AS AvgOT,
+        AVG(NULLIF(RatePerSqFt, 0))          AS AvgRate
+      FROM dbo.UnitMaster
+      WHERE BlockId = @bid AND IsActive = 1 AND UnitType IS NOT NULL AND FloorNo IS NOT NULL
+      GROUP BY UnitType
+      ORDER BY COUNT(*) DESC
+    `);
+    if (!typeRows.recordset.length) continue;
+    let so = 1;
+    for (const tr of typeRows.recordset) {
+      await pool.request()
+        .input("bid",  sql.Int,          BlockId)
+        .input("so",   sql.Int,          so++)
+        .input("type", sql.NVarChar(50), tr.UnitType)
+        .input("cnt",  sql.Int,          tr.Cnt)
+        .input("ca",   sql.Decimal(18,2), tr.AvgCarpet  ?? null)
+        .input("bua",  sql.Decimal(18,2), tr.AvgBuiltUp ?? null)
+        .input("sbu",  sql.Decimal(18,2), tr.AvgSBU     ?? null)
+        .input("ot",   sql.Decimal(18,2), tr.AvgOT      ?? null)
+        .input("rate", sql.Decimal(18,2), tr.AvgRate    ?? null)
+        .query(`
+          INSERT INTO dbo.CrmProjectAutoSetupUnitTemplate
+            (BlockId, SortOrder, UnitType, Count, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedAt)
+          VALUES (@bid, @so, @type, @cnt, @ca, @bua, @sbu, @ot, @rate, 1, SYSDATETIME())
+        `);
+      // Also write-through to BlockUnitTypeSpec (forward-fill anchor).
+      if (tr.AvgCarpet || tr.AvgBuiltUp || tr.AvgSBU || tr.AvgRate) {
+        await pool.request()
+          .input("bid",  sql.Int,          BlockId)
+          .input("ut",   sql.NVarChar(50), tr.UnitType)
+          .input("ca",   sql.Decimal(18,2), tr.AvgCarpet  ?? null)
+          .input("bua",  sql.Decimal(18,2), tr.AvgBuiltUp ?? null)
+          .input("sbu",  sql.Decimal(18,2), tr.AvgSBU     ?? null)
+          .input("ot",   sql.Decimal(18,2), tr.AvgOT      ?? null)
+          .input("rate", sql.Decimal(18,2), tr.AvgRate    ?? null)
+          .query(`
+            MERGE dbo.BlockUnitTypeSpec AS tgt
+            USING (SELECT @bid AS BlockId, @ut AS UnitType) AS src
+              ON tgt.BlockId = src.BlockId AND tgt.UnitType = src.UnitType
+            WHEN MATCHED AND (tgt.CarpetAreaSqFt IS NULL AND tgt.SuperBuiltUpAreaSqFt IS NULL) THEN
+              UPDATE SET CarpetAreaSqFt=@ca, BuiltUpAreaSqFt=@bua, SuperBuiltUpAreaSqFt=@sbu,
+                         OpenTerraceAreaSqFt=@ot, BaseRatePerSqFt=@rate, UpdatedAt=SYSDATETIME()
+            WHEN NOT MATCHED THEN
+              INSERT (BlockId, UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, BaseRatePerSqFt)
+              VALUES (@bid, @ut, @ca, @bua, @sbu, @ot, @rate);
+          `);
+      }
+    }
+  }
+
+  // ── Parking template backward fill ───────────────────────────────────────
+  // For each block that has live ParkingSlot rows but NO active parking-
+  // template rows: derive the template from the actual ParkingType distribution
+  // in ParkingSlot (group by type, count). Only runs when the template slot is
+  // empty — never overwrites an intentionally saved parking template.
+  const blocksWithParking = await pool.request().input("pid", sql.Int, projectId).query(`
+    SELECT DISTINCT b.Id AS BlockId
+    FROM dbo.BlockMaster b
+    JOIN dbo.ParkingSlot ps ON ps.BlockId = b.Id AND ps.IsActive = 1
+    WHERE b.ProjectId = @pid AND b.IsActive = 1
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.CrmProjectAutoSetupParkingTemplate t
+        WHERE t.BlockId = b.Id AND t.IsActive = 1
+      )
+  `);
+  for (const { BlockId } of blocksWithParking.recordset) {
+    // Also try blocks that have ParkingMaster pricing but no slots yet.
+    const parkingRows = await pool.request().input("bid", sql.Int, BlockId).query(`
+      SELECT ParkingType, COUNT(*) AS Cnt
+      FROM dbo.ParkingSlot
+      WHERE BlockId = @bid AND IsActive = 1 AND ParkingType IS NOT NULL
+      GROUP BY ParkingType
+      ORDER BY COUNT(*) DESC
+    `);
+    if (!parkingRows.recordset.length) continue;
+    // Pull pricing from ParkingMaster — block-specific wins over project-wide.
+    const pmRows = await pool.request().input("bid", sql.Int, BlockId).input("pid", sql.Int, projectId).query(`
+      SELECT ParkingType, Charge, GstRate
+      FROM dbo.ParkingMaster
+      WHERE ProjectId = @pid AND IsActive = 1
+        AND (BlockId = @bid OR BlockId IS NULL)
+      ORDER BY CASE WHEN BlockId = @bid THEN 0 ELSE 1 END
+    `);
+    const pricingMap = {};
+    for (const pm of pmRows.recordset) {
+      if (!pricingMap[pm.ParkingType]) pricingMap[pm.ParkingType] = { Charge: pm.Charge, GstRate: pm.GstRate };
+    }
+    let so = 1;
+    for (const pr of parkingRows.recordset) {
+      await pool.request()
+        .input("bid",  sql.Int,          BlockId)
+        .input("so",   sql.Int,          so++)
+        .input("type", sql.NVarChar(50), pr.ParkingType)
+        .input("cnt",  sql.Int,          pr.Cnt)
+        .query(`
+          INSERT INTO dbo.CrmProjectAutoSetupParkingTemplate
+            (BlockId, SortOrder, ParkingType, Count, IsActive, CreatedAt)
+          VALUES (@bid, @so, @type, @cnt, 1, SYSDATETIME())
+        `);
+    }
+  }
+
+  // ── ParkingMaster backward fill ───────────────────────────────────────────
+  // For each block that has ParkingMaster pricing rows but NO parking template
+  // yet: build a template from ParkingMaster types (Count = 0 placeholder so
+  // the UI shows the types with pricing for the user to fill in slot counts).
+  const blocksWithPricingOnly = await pool.request().input("pid", sql.Int, projectId).query(`
+    SELECT DISTINCT b.Id AS BlockId
+    FROM dbo.BlockMaster b
+    JOIN dbo.ParkingMaster pm ON pm.BlockId = b.Id AND pm.ProjectId = b.ProjectId AND pm.IsActive = 1
+    WHERE b.ProjectId = @pid AND b.IsActive = 1
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.CrmProjectAutoSetupParkingTemplate t
+        WHERE t.BlockId = b.Id AND t.IsActive = 1
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.ParkingSlot ps WHERE ps.BlockId = b.Id AND ps.IsActive = 1
+      )
+  `);
+  for (const { BlockId } of blocksWithPricingOnly.recordset) {
+    const pmRows = await pool.request().input("bid", sql.Int, BlockId).input("pid", sql.Int, projectId).query(`
+      SELECT DISTINCT ParkingType FROM dbo.ParkingMaster
+      WHERE ProjectId = @pid AND BlockId = @bid AND IsActive = 1
+      ORDER BY ParkingType
+    `);
+    let so = 1;
+    for (const pm of pmRows.recordset) {
+      await pool.request()
+        .input("bid",  sql.Int,          BlockId)
+        .input("so",   sql.Int,          so++)
+        .input("type", sql.NVarChar(50), pm.ParkingType)
+        .query(`
+          INSERT INTO dbo.CrmProjectAutoSetupParkingTemplate
+            (BlockId, SortOrder, ParkingType, Count, IsActive, CreatedAt)
+          VALUES (@bid, @so, @type, 0, 1, SYSDATETIME())
+        `);
+    }
+  }
+
+  // ── Payment plan backward fill ────────────────────────────────────────────
+  // For each block that has CrmUnitPaymentPlan entries on its units but NO
+  // active CrmBlockPaymentPlan rows: union the unit-level plan IDs and write
+  // them up to the block. Only runs when the block slot is empty — never
+  // overwrites a block-level assignment the user has already saved.
+  const blocksNeedingPlanSync = await pool.request().input("pid", sql.Int, projectId).query(`
+    SELECT DISTINCT b.Id AS BlockId
+    FROM dbo.BlockMaster b
+    JOIN dbo.UnitMaster u ON u.BlockId = b.Id AND u.IsActive = 1
+    JOIN dbo.CrmUnitPaymentPlan upp ON upp.UnitId = u.Id AND upp.IsActive = 1
+    WHERE b.ProjectId = @pid AND b.IsActive = 1
+      AND NOT EXISTS (
+        SELECT 1 FROM dbo.CrmBlockPaymentPlan bpp
+        WHERE bpp.BlockId = b.Id AND bpp.IsActive = 1
+      )
+  `);
+  for (const { BlockId } of blocksNeedingPlanSync.recordset) {
+    const planIds = await pool.request().input("bid", sql.Int, BlockId).query(`
+      SELECT DISTINCT upp.PlanId
+      FROM dbo.CrmUnitPaymentPlan upp
+      JOIN dbo.UnitMaster u ON u.Id = upp.UnitId AND u.IsActive = 1
+      WHERE u.BlockId = @bid AND upp.IsActive = 1
+    `);
+    for (const { PlanId } of planIds.recordset) {
+      await pool.request()
+        .input("bid", sql.Int, BlockId)
+        .input("pid", sql.Int, PlanId)
+        .query(`
+          MERGE dbo.CrmBlockPaymentPlan AS tgt
+          USING (SELECT @bid AS BlockId, @pid AS PlanId) AS src
+            ON tgt.BlockId = src.BlockId AND tgt.PlanId = src.PlanId
+          WHEN MATCHED THEN UPDATE SET IsActive = 1
+          WHEN NOT MATCHED THEN INSERT (BlockId, PlanId, IsActive, CreatedAt) VALUES (src.BlockId, src.PlanId, 1, SYSDATETIME());
+        `);
+    }
   }
 }
 
@@ -303,8 +545,10 @@ router.get("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
       WHERE BlockId = @bid AND IsActive = 1
       ORDER BY SortOrder
     `);
+    const planRows = await pool.request().input("bid", sql.Int, blockId)
+      .query("SELECT PlanId FROM dbo.CrmBlockPaymentPlan WHERE BlockId = @bid AND IsActive = 1");
     const total = items.recordset.reduce((s, r) => s + r.Count, 0);
-    res.json({ items: items.recordset, total });
+    res.json({ items: items.recordset, total, paymentPlanIds: planRows.recordset.map((r) => r.PlanId) });
   } catch (e) {
     console.error("[crm-project-auto-setup] GET /blocks/:id/unit-template error:", e.message);
     res.status(500).json({ error: e.message });
@@ -328,6 +572,9 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
       if (!String(it.UnitType || "").trim()) return res.status(400).json({ error: "Every row needs a Unit Type" });
       if (!Number.isFinite(count) || count < 1 || count > 100) return res.status(400).json({ error: "Count must be between 1 and 100" });
     }
+    const requestedPlanIds = Array.isArray(req.body.PaymentPlanIds)
+      ? req.body.PaymentPlanIds.map((x) => parseInt(x, 10)).filter(Number.isFinite)
+      : [];
 
     const block = await pool.request().input("id", sql.Int, blockId)
       .query("SELECT Id, ProjectId FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
@@ -401,6 +648,18 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
         `);
     }
 
+    // Validate and sync block-level payment plan tags if provided.
+    if (requestedPlanIds.length) {
+      const applicable = await getApplicablePaymentPlans(pool, { projectId });
+      const applicableIds = new Set(applicable.map((p) => p.Id));
+      const invalid = requestedPlanIds.filter((pid) => !applicableIds.has(pid));
+      if (invalid.length) return res.status(400).json({ error: "One or more selected Payment Plans are not applicable to this Block." });
+      await syncBlockPaymentPlanTags(pool, blockId, requestedPlanIds);
+    } else if (req.body.PaymentPlanIds !== undefined) {
+      // Explicit empty array = clear all plan tags for this block.
+      await syncBlockPaymentPlanTags(pool, blockId, []);
+    }
+
     const total = items.reduce((s, it) => s + parseInt(it.Count, 10), 0);
     res.json({ message: "Template saved", total });
   } catch (e) {
@@ -442,21 +701,54 @@ router.post("/blocks/:id/unit-template/apply", requirePageRight("crm-auto-projec
 });
 
 // GET /blocks/:id/parking-template — the Block's Parking mix (e.g. 10x Open
-// + 5x Covered), in SortOrder, plus the computed total. Same shape as
-// GET /blocks/:id/unit-template. Empty array for a block that hasn't set
-// one up yet.
+// + 5x Covered) joined with ParkingMaster pricing (Charge + GstRate) so the
+// UI can show and edit both in one place. Pricing comes from ParkingMaster
+// keyed by ProjectId + BlockId + ParkingType — block-specific rate wins
+// over project-wide rate, same precedence the booking flow uses.
 router.get("/blocks/:id/parking-template", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
   const pool = getPool();
   try {
     const blockId = parseInt(req.params.id, 10);
+    const blockRow = await pool.request().input("bid", sql.Int, blockId)
+      .query("SELECT ProjectId FROM dbo.BlockMaster WHERE Id = @bid AND IsActive = 1");
+    const projectId = blockRow.recordset[0]?.ProjectId ?? null;
+
     const items = await pool.request().input("bid", sql.Int, blockId).query(`
-      SELECT Id, SortOrder, ParkingType, Count
-      FROM dbo.CrmProjectAutoSetupParkingTemplate
-      WHERE BlockId = @bid AND IsActive = 1
-      ORDER BY SortOrder
+      SELECT t.Id, t.SortOrder, t.ParkingType, t.Count
+      FROM dbo.CrmProjectAutoSetupParkingTemplate t
+      WHERE t.BlockId = @bid AND t.IsActive = 1
+      ORDER BY t.SortOrder
     `);
+
+    // Fetch pricing from ParkingMaster — block-specific wins over project-wide.
+    let pricingMap = {};
+    if (projectId) {
+      const pm = await pool.request()
+        .input("pid", sql.Int, projectId)
+        .input("bid", sql.Int, blockId)
+        .query(`
+          SELECT ParkingType, Charge, GstRate
+          FROM dbo.ParkingMaster
+          WHERE ProjectId = @pid AND IsActive = 1
+            AND (BlockId = @bid OR BlockId IS NULL)
+          ORDER BY CASE WHEN BlockId = @bid THEN 0 ELSE 1 END
+        `);
+      // Block-specific wins — first-seen per type.
+      for (const row of pm.recordset) {
+        if (!pricingMap[row.ParkingType]) {
+          pricingMap[row.ParkingType] = { Charge: row.Charge, GstRate: row.GstRate };
+        }
+      }
+    }
+
+    const merged = items.recordset.map((it) => ({
+      ...it,
+      Charge: pricingMap[it.ParkingType]?.Charge ?? null,
+      GstRate: pricingMap[it.ParkingType]?.GstRate ?? null,
+    }));
+
     const total = items.recordset.reduce((s, r) => s + r.Count, 0);
-    res.json({ items: items.recordset, total });
+    res.json({ items: merged, total, projectId });
   } catch (e) {
     console.error("[crm-project-auto-setup] GET /blocks/:id/parking-template error:", e.message);
     res.status(500).json({ error: e.message });
@@ -464,8 +756,9 @@ router.get("/blocks/:id/parking-template", requirePageRight("crm-auto-project-se
 });
 
 // PUT /blocks/:id/parking-template — replaces the block's whole Parking
-// template in one transaction (deactivate-then-reinsert), same pattern as
-// PUT /blocks/:id/unit-template.
+// template and forward-fills ParkingMaster pricing (Charge + GstRate) per type.
+// Items accept optional Charge + GstRate — when present and non-empty the
+// ParkingMaster row for this ProjectId + BlockId + ParkingType is upserted.
 router.put("/blocks/:id/parking-template", requirePageRight("crm-auto-project-setup", "edit"), async (req, res) => {
   const pool = getPool();
   const updatedBy = req.user?.userId || null;
@@ -481,9 +774,10 @@ router.put("/blocks/:id/parking-template", requirePageRight("crm-auto-project-se
       if (!Number.isFinite(count) || count < 1 || count > 500) return res.status(400).json({ error: "Count must be between 1 and 500" });
     }
 
-    const block = await pool.request().input("id", sql.Int, blockId)
-      .query("SELECT Id FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
-    if (!block.recordset.length) return res.status(404).json({ error: "Block not found" });
+    const blockRow = await pool.request().input("id", sql.Int, blockId)
+      .query("SELECT Id, ProjectId FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
+    if (!blockRow.recordset.length) return res.status(404).json({ error: "Block not found" });
+    const projectId = blockRow.recordset[0].ProjectId;
 
     const tx = pool.transaction();
     await tx.begin();
@@ -506,6 +800,31 @@ router.put("/blocks/:id/parking-template", requirePageRight("crm-auto-project-se
     } catch (e) {
       await tx.rollback();
       throw e;
+    }
+
+    // Forward-fill ParkingMaster pricing — only for items that supply Charge or GstRate.
+    if (projectId) {
+      for (const it of items) {
+        const charge = it.Charge !== undefined && it.Charge !== "" ? parseFloat(it.Charge) : null;
+        const gst    = it.GstRate !== undefined && it.GstRate !== "" ? parseFloat(it.GstRate) : null;
+        if (charge === null && gst === null) continue;
+        await pool.request()
+          .input("pid",  sql.Int,           projectId)
+          .input("bid",  sql.Int,           blockId)
+          .input("type", sql.NVarChar(50),  it.ParkingType)
+          .input("chg",  sql.Decimal(18,2), charge ?? 0)
+          .input("gst",  sql.Decimal(5,2),  gst ?? 0)
+          .query(`
+            MERGE dbo.ParkingMaster AS tgt
+            USING (SELECT @pid AS ProjectId, @bid AS BlockId, @type AS ParkingType) AS src
+              ON tgt.ProjectId = src.ProjectId AND tgt.BlockId = src.BlockId AND tgt.ParkingType = src.ParkingType
+            WHEN MATCHED THEN
+              UPDATE SET Charge = @chg, GstRate = @gst, IsActive = 1
+            WHEN NOT MATCHED THEN
+              INSERT (ProjectId, BlockId, ParkingType, Charge, GstRate, IsActive)
+              VALUES (src.ProjectId, src.BlockId, src.ParkingType, @chg, @gst, 1);
+          `);
+      }
     }
 
     const total = items.reduce((s, it) => s + parseInt(it.Count, 10), 0);
@@ -809,6 +1128,15 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
     let totalCreated = 0;
     const sample = [];
     const sequenceByBlock = new Map();
+    // Pre-fetch payment plan tags per block — forward-fill to each generated unit.
+    const plansByBlock = new Map();
+    for (const floor of floors.recordset) {
+      if (!plansByBlock.has(floor.BlockId)) {
+        const pr = await pool.request().input("bid", sql.Int, floor.BlockId)
+          .query("SELECT PlanId FROM dbo.CrmBlockPaymentPlan WHERE BlockId = @bid AND IsActive = 1");
+        plansByBlock.set(floor.BlockId, pr.recordset.map((r) => r.PlanId));
+      }
+    }
     for (const floor of floors.recordset) {
       if (!sequenceByBlock.has(floor.BlockId)) {
         sequenceByBlock.set(floor.BlockId, await getBlockUnitSequence(pool, floor.BlockId));
@@ -824,10 +1152,12 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
           .input("pid", sql.Int, projectId).input("bid", sql.Int, floor.BlockId).input("name", sql.NVarChar(100), unitName)
           .query("SELECT Id, IsActive FROM dbo.UnitMaster WHERE ProjectId = @pid AND BlockId = @bid AND UnitName = @name");
 
+        const blockPlanIds = plansByBlock.get(floor.BlockId) || [];
         if (dupe.recordset.length) {
           if (!dupe.recordset[0].IsActive) {
+            const reactivatedId = dupe.recordset[0].Id;
             await pool.request()
-              .input("id",             sql.Int,         dupe.recordset[0].Id)
+              .input("id",             sql.Int,         reactivatedId)
               .input("fno",            sql.Int,         floor.FloorNo)
               .input("utype",          sql.NVarChar(50),typeSlot?.UnitType || null)
               .input("area",           sql.Decimal(18,2),typeSlot?.AreaSqFt ?? null)
@@ -847,11 +1177,12 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                 RatePerSqFt          = ISNULL(RatePerSqFt, @rate),
                 UpdatedAt = SYSDATETIME()
               WHERE Id = @id`);
+            if (blockPlanIds.length) await syncUnitPaymentPlanTags(pool, reactivatedId, blockPlanIds);
             totalCreated++;
           }
           // Already active — leave it alone, it's already real inventory.
         } else {
-          await pool.request()
+          const ins = await pool.request()
             .input("pid",          sql.Int,          projectId)
             .input("bid",          sql.Int,          floor.BlockId)
             .input("name",         sql.NVarChar(100),unitName)
@@ -869,11 +1200,14 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                 (ProjectId, BlockId, UnitName, FloorNo, UnitType,
                  AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt,
                  IsActive, CreatedBy, CreatedAt)
+              OUTPUT INSERTED.Id
               VALUES
                 (@pid, @bid, @name, @fno, @utype,
                  @area, @carpetArea, @builtUp, @superBuiltUp, @openTerrace, @rate,
                  1, @cb, SYSDATETIME())
             `);
+          const newId = ins.recordset[0]?.Id;
+          if (newId && blockPlanIds.length) await syncUnitPaymentPlanTags(pool, newId, blockPlanIds);
           totalCreated++;
         }
         if (sample.length < 5) sample.push(unitName);

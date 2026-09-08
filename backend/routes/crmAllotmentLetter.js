@@ -113,7 +113,7 @@ router.post("/generate", requirePageRight("crm-allotment-letter", "create"), asy
     `);
     if (!chk.recordset[0]?.PaidCount) {
       return res.status(400).json({
-        error: "Allotment Letter can only be generated once the Booking Amount milestone is fully paid."
+        error: "Allotment Letter can only be generated once the Booking Amount milestone is fully paid — if the customer's payment is showing under On Account, apply it to this milestone first via On Account Adjustment."
       });
     }
 

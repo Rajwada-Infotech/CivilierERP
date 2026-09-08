@@ -100,7 +100,7 @@ const PortalOverview: React.FC = () => {
             <Clock size={18} className="mt-0.5 shrink-0" style={{ color: "#8A6D14" }} />
             <div className="text-sm">
               <p className="font-semibold" style={{ color: "#8A6D14" }}>{label} is on hold for you</p>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs mt-0.5" style={{ color: TEXT_MUTED }}>
                 Expires in {daysLeft} day{daysLeft === 1 ? "" : "s"} ({fmtDate(h.HoldUntil)}) — confirm your booking before it releases.
               </p>
             </div>

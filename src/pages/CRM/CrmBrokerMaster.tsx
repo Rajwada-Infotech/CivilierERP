@@ -23,6 +23,35 @@ import {
   User, Phone, Mail, MapPin, CreditCard, UserRound, FileBadge, Upload, FileText, Lock,
 } from "lucide-react";
 
+function AuthDownloadLink({ url, filename, label }: { url: string; filename: string; label: string }) {
+  const [loading, setLoading] = useState(false);
+  const handleDownload = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (loading) return;
+    setLoading(true);
+    try {
+      const res = await fetchWithAuth(url);
+      if (!res.ok) throw new Error("Failed to load file");
+      const blob = await res.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = filename;
+      anchor.click();
+      setTimeout(() => window.URL.revokeObjectURL(objectUrl), 10000);
+    } catch (err: any) {
+      toast.error(err.message || "Could not download file");
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <button onClick={handleDownload} disabled={loading} className="flex items-center gap-1.5 text-xs text-primary hover:underline mb-2 disabled:opacity-50">
+      <FileText size={12} /> {loading ? "Downloading..." : label}
+    </button>
+  );
+}
+
 const BROKER_TYPE = "BR";
 
 interface Broker {
@@ -373,10 +402,11 @@ const CrmBrokerMaster: React.FC = () => {
               <div className="rounded-lg border border-border p-3">
                 <label className="text-xs text-muted-foreground block mb-2 flex items-center gap-1.5"><FileBadge size={13} /> RERA / Broker Certificate</label>
                 {editingBroker?.LHeadCertificateFileName && (
-                  <a href={`/api/account-head/${editingId}/certificate/file`} target="_blank" rel="noreferrer"
-                    className="flex items-center gap-1.5 text-xs text-primary hover:underline mb-2">
-                    <FileText size={12} /> {editingBroker.LHeadCertificateFileName} (uploaded — click to view)
-                  </a>
+                  <AuthDownloadLink 
+                    url={`/api/account-head/${editingId}/certificate/file`}
+                    filename={editingBroker.LHeadCertificateFileName}
+                    label={`${editingBroker.LHeadCertificateFileName} (uploaded — click to download)`}
+                  />
                 )}
                 <div className="flex items-center gap-2">
                   <input ref={certInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp" disabled={locked}
@@ -486,10 +516,11 @@ const CrmBrokerMaster: React.FC = () => {
               <div>
                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Certificate</p>
                 {viewRecord.LHeadCertificateFileName ? (
-                  <a href={`/api/account-head/${viewRecord.LHeadId}/certificate/file`} target="_blank" rel="noreferrer"
-                    className="text-sm text-primary hover:underline flex items-center gap-1">
-                    <FileText size={13} /> {viewRecord.LHeadCertificateFileName}
-                  </a>
+                  <AuthDownloadLink 
+                    url={`/api/account-head/${viewRecord.LHeadId}/certificate/file`}
+                    filename={viewRecord.LHeadCertificateFileName}
+                    label={`${viewRecord.LHeadCertificateFileName} (click to download)`}
+                  />
                 ) : <p className="text-sm text-muted-foreground">Not uploaded</p>}
               </div>
             </div>

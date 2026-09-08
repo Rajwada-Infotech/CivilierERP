@@ -120,6 +120,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
   // unlocks Agreement prep.
   const [milestone1Status, setMilestone1Status] = useState<string | null>(null);
   const [milestone1PendingApproval, setMilestone1PendingApproval] = useState(false);
+  const [milestone1AwaitingAdjustment, setMilestone1AwaitingAdjustment] = useState(false);
   const bookingAmountPaid = milestone1Status === CrmStatus.PAID;
 
   useQuery({
@@ -128,6 +129,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
       const d = await fetchBankDetail(row.BookingId);
       setMilestone1Status(d?.Milestone1Status ?? null);
       setMilestone1PendingApproval(!!d?.Milestone1PendingApproval);
+      setMilestone1AwaitingAdjustment(!!d?.Milestone1AwaitingAdjustment);
       setForm(d ? {
         BankName: d.BankName || "", BranchName: d.BranchName || "", AccountNo: d.AccountNo || "",
         IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
@@ -222,15 +224,41 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
         </DialogHeader>
 
         {!bookingAmountPaid ? (
-          milestone1PendingApproval ? (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              <Lock size={13} /> Booking Amount submitted — awaiting Finance approval. This form unlocks automatically once Account's Head approves it.
-            </div>
-          ) : (
-            <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
-              <AlertTriangle size={13} /> Booking Amount (Milestone 1) must be paid before Bank & Nominee / Financing details can be completed.
-            </div>
-          )
+          // Gate is a 3-step progression (submit -> Finance approve -> apply
+          // On Account to the milestone) — shown as a checklist, not one
+          // line of prose, so staff can see exactly which step they're
+          // stuck on instead of re-reading a message that changes shape
+          // depending on state.
+          (() => {
+            const submitted = milestone1PendingApproval || milestone1AwaitingAdjustment;
+            const approved = milestone1AwaitingAdjustment;
+            const steps: { label: string; done: boolean }[] = [
+              { label: "Payment submitted for Booking Amount", done: submitted },
+              { label: "Approved by Finance", done: approved },
+              { label: "Applied to Milestone 1 (On Account Adjustment)", done: false },
+            ];
+            return (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2">
+                <div className="flex items-center gap-2 text-xs font-medium text-amber-800">
+                  <Lock size={13} /> Bank & Nominee / Financing details unlock once Booking Amount is fully settled
+                </div>
+                <div className="space-y-1 pl-1">
+                  {steps.map((s) => (
+                    <div key={s.label} className={`flex items-center gap-2 text-xs ${s.done ? "text-emerald-700" : "text-muted-foreground"}`}>
+                      {s.done ? <CheckCircle2 size={13} className="shrink-0" /> : <Circle size={13} className="shrink-0" />}
+                      {s.label}
+                    </div>
+                  ))}
+                </div>
+                {!submitted && (
+                  <p className="text-[11px] text-amber-700 pt-0.5 border-t border-amber-200/70">No Booking Amount payment has been submitted yet.</p>
+                )}
+                {approved && (
+                  <p className="text-[11px] text-amber-700 pt-0.5 border-t border-amber-200/70">Payment is approved and held On Account — go to On Account Adjustment to apply it to Milestone 1.</p>
+                )}
+              </div>
+            );
+          })()
         ) : !canEdit ? (
           <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
             <Lock size={13} /> This record is locked — only the assigned salesperson or an admin can edit it.

@@ -12,7 +12,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { CRM_APPROVER_ROLES } = require("../services/approvalService");
+const { canApproveBookingAmendment } = require("../services/approvalService");
 const { emitNotification } = require("../services/notify");
 const extraChargesRouter = require("./crmExtraCharges");
 const parkingRouter = require("./crmParking");
@@ -20,10 +20,6 @@ const coApplicantRouter = require("./crmCoApplicant");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
-
-function isApprover(req) {
-  return CRM_APPROVER_ROLES.includes(String(req.user?.role || "").toLowerCase());
-}
 
 const LIST_SELECT = `
   SELECT r.*,
@@ -80,7 +76,8 @@ router.get("/booking/:bookingId", requirePageRight("crm-bookings", "view"), asyn
 // know to check whether anything needs re-issuing. Admin/super_admin/
 // marketing_head only, same approver set crm-bookings itself uses.
 router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req, res) => {
-  if (!isApprover(req)) return res.status(403).json({ error: "Only admin, super_admin, or marketing_head can approve a booking amendment" });
+  if (!(await canApproveBookingAmendment(req.user?.id, req.user?.role)))
+    return res.status(403).json({ error: "You are not authorised to approve booking amendments" });
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -96,39 +93,57 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
     const actor = actorId(req);
     let applyResult;
 
-    if (reqRow.ChangeType === "ExtraCharge") {
-      if (reqRow.Action === "Add") applyResult = await extraChargesRouter.applyAddExtraCharge(pool, reqRow.BookingId, proposedChange, actor);
-      else if (reqRow.Action === "Edit") applyResult = await extraChargesRouter.applyEditExtraCharge(pool, reqRow.TargetId, proposedChange, actor);
-      else if (reqRow.Action === "Release") applyResult = await extraChargesRouter.applyReleaseExtraCharge(pool, reqRow.TargetId);
-      // Unrecognized Action on a known ChangeType — reject rather than fall
-      // through to marking this Approved with nothing actually applied.
-      // (Guards against bad/legacy data or a future Action value added on
-      // the request-creation side — crmExtraCharges.js/crmParking.js —
-      // without a matching branch here.)
-      else return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType ExtraCharge` });
-    } else if (reqRow.ChangeType === "ParkingAllotment") {
-      if (reqRow.Action === "Add") applyResult = await parkingRouter.applyAddParking(pool, reqRow.BookingId, proposedChange, actor);
-      else if (reqRow.Action === "Edit") applyResult = await parkingRouter.applyEditParking(pool, reqRow.TargetId, proposedChange);
-      else if (reqRow.Action === "Release") applyResult = await parkingRouter.applyReleaseParking(pool, reqRow.TargetId);
-      else return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType ParkingAllotment` });
-    } else if (reqRow.ChangeType === "CoApplicant") {
-      if (reqRow.Action === "Add") applyResult = await coApplicantRouter.applyAddCoApplicant(pool, reqRow.BookingId, proposedChange, actor);
-      else if (reqRow.Action === "Edit") applyResult = await coApplicantRouter.applyEditCoApplicant(pool, reqRow.TargetId, proposedChange, actor);
-      else if (reqRow.Action === "Remove") applyResult = await coApplicantRouter.applyRemoveCoApplicant(pool, reqRow.TargetId);
-      else return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType CoApplicant` });
-    } else {
-      return res.status(400).json({ error: `Unknown ChangeType: ${reqRow.ChangeType}` });
-    }
+    // The apply* call and the request's own status flip to Approved must
+    // succeed or fail together — without a transaction, a failure between
+    // them (e.g. the UPDATE below hitting a dropped connection) leaves the
+    // change already applied (extra charge added, parking allotted, co-
+    // applicant edited) but the request still sitting Pending, open to
+    // being approved a second time and double-applying it.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (reqRow.ChangeType === "ExtraCharge") {
+        if (reqRow.Action === "Add") applyResult = await extraChargesRouter.applyAddExtraCharge(tx, reqRow.BookingId, proposedChange, actor);
+        else if (reqRow.Action === "Edit") applyResult = await extraChargesRouter.applyEditExtraCharge(tx, reqRow.TargetId, proposedChange, actor);
+        else if (reqRow.Action === "Release") applyResult = await extraChargesRouter.applyReleaseExtraCharge(tx, reqRow.TargetId);
+        // Unrecognized Action on a known ChangeType — reject rather than fall
+        // through to marking this Approved with nothing actually applied.
+        // (Guards against bad/legacy data or a future Action value added on
+        // the request-creation side — crmExtraCharges.js/crmParking.js —
+        // without a matching branch here.)
+        else { await tx.rollback(); return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType ExtraCharge` }); }
+      } else if (reqRow.ChangeType === "ParkingAllotment") {
+        if (reqRow.Action === "Add") applyResult = await parkingRouter.applyAddParking(tx, reqRow.BookingId, proposedChange, actor);
+        else if (reqRow.Action === "Edit") applyResult = await parkingRouter.applyEditParking(tx, reqRow.TargetId, proposedChange);
+        // force=true: admin has approved this post-Agreement change; bypasses
+        // the "already paid" guard and returns a creditAmount if applicable.
+        else if (reqRow.Action === "Release") applyResult = await parkingRouter.applyReleaseParking(tx, reqRow.TargetId, actor, reqRow.Reason, true);
+        else { await tx.rollback(); return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType ParkingAllotment` }); }
+      } else if (reqRow.ChangeType === "CoApplicant") {
+        if (reqRow.Action === "Add") applyResult = await coApplicantRouter.applyAddCoApplicant(tx, reqRow.BookingId, proposedChange, actor);
+        else if (reqRow.Action === "Edit") applyResult = await coApplicantRouter.applyEditCoApplicant(tx, reqRow.TargetId, proposedChange, actor);
+        else if (reqRow.Action === "Remove") applyResult = await coApplicantRouter.applyRemoveCoApplicant(tx, reqRow.TargetId);
+        else { await tx.rollback(); return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType CoApplicant` }); }
+      } else {
+        await tx.rollback();
+        return res.status(400).json({ error: `Unknown ChangeType: ${reqRow.ChangeType}` });
+      }
 
-    await pool.request()
-      .input("id", sql.Int, id)
-      .input("rb", sql.Int, actor)
-      .input("notes", sql.NVarChar(500), notes)
-      .query(`
-        UPDATE dbo.CrmBookingAmendmentRequest SET
-          Status = '${CrmStatus.APPROVED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(), ReviewNotes = @notes
-        WHERE Id = @id
-      `);
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("rb", sql.Int, actor)
+        .input("notes", sql.NVarChar(500), notes)
+        .query(`
+          UPDATE dbo.CrmBookingAmendmentRequest SET
+            Status = '${CrmStatus.APPROVED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(), ReviewNotes = @notes
+          WHERE Id = @id
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     // Legal visibility — this booking's financial details just changed
     // after its Agreement documents were already under verification.
@@ -142,6 +157,15 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
         ag.Id, "crm_agreement");
     }
 
+    // If releasing parking on a fully-paid booking generated a credit,
+    // notify the approver so the accounts team can process the refund.
+    if (applyResult?.creditAmount) {
+      await emitNotification(pool, actor, "crm_booking_amendment_credit",
+        "Refund Required — Parking Released Post-Payment",
+        applyResult.creditNote,
+        reqRow.BookingId, "crm_booking");
+    }
+
     res.json({ success: true, ...applyResult });
   } catch (e) {
     console.error("[crm-booking-amendments] approve error:", e.message);
@@ -151,7 +175,8 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
 
 // PUT /:id/reject — close the request without applying anything.
 router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, res) => {
-  if (!isApprover(req)) return res.status(403).json({ error: "Only admin, super_admin, or marketing_head can reject a booking amendment" });
+  if (!(await canApproveBookingAmendment(req.user?.id, req.user?.role)))
+    return res.status(403).json({ error: "You are not authorised to reject booking amendments" });
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
@@ -171,6 +196,8 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
           Status = '${CrmStatus.REJECTED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(), ReviewNotes = @notes
         WHERE Id = @id
       `);
+    // Single write — reject applies nothing, so there's no compound-write
+    // atomicity risk here the way approve above has.
 
     if (row.recordset[0].RequestedBy) {
       await emitNotification(pool, row.recordset[0].RequestedBy, "crm_booking_amendment_rejected",

@@ -6,10 +6,16 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
-
-const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
+const { PARKING_TYPES } = require("../constants/parkingTypes");
 
 bumpCacheVersion("parking-master").catch(() => {});
+
+// GET /types — the canonical list of parking types, sourced from the shared
+// constant so every frontend that needs a parking type dropdown reads the
+// same authoritative list rather than maintaining its own hardcoded copy.
+router.get("/types", async (req, res) => {
+  res.json(PARKING_TYPES);
+});
 
 // GET all parking rates — includes an InUse flag (any CrmParkingAllotment
 // row ever referencing this rate) so the frontend can grey out Delete

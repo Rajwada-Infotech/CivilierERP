@@ -16,20 +16,15 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const API = "/api/parking-master";
 const DROPDOWN_API = "/api/business/dropdown";
-const PARKING_TYPES = ["Open", "Covered", "Stack", "Basement"];
-
 async function fetchParkingRates(): Promise<any[]> {
   const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch parking rates");
   return res.json().catch(() => ({}));
 }
 
-// ── Fields — Company -> Project -> Block, each strictly gated behind its
-// parent (disabledWhen in MasterPage.tsx) so this can never fall back to
-// showing every row unfiltered. Block stays optional within that chain:
-// leaving it unset makes the rate apply to every block in the project (a
-// block-specific rate overrides it).
-const fields: FieldDef[] = [
+// ── Fields defined inside the component so parkingTypes (fetched live from
+// /api/parking-master/types) can drive the ParkingType dropdown dynamically.
+const FIELDS_STATIC_PREFIX: FieldDef[] = [
   {
     name: "companyId",
     label: "Company",
@@ -71,14 +66,8 @@ const fields: FieldDef[] = [
         .map((b) => ({ value: String(b.Id), label: b.Name }));
     },
   },
-  {
-    name: "parkingType",
-    label: "Parking Type",
-    type: "select",
-    required: true,
-    defaultValue: "Open",
-    options: PARKING_TYPES,
-  },
+];
+const FIELDS_STATIC_SUFFIX: FieldDef[] = [
   {
     name: "charge",
     label: "Charge (₹)",
@@ -126,6 +115,28 @@ const ParkingMaster: React.FC = () => {
     queryFn: fetchParkingRates,
     staleTime: 5 * 60 * 1000,
   });
+
+  const { data: parkingTypes = [] } = useQuery<string[]>({
+    queryKey: ["parking-master-types"],
+    queryFn: async () => {
+      const r = await fetchWithAuth("/api/parking-master/types");
+      return r.ok ? r.json() : [];
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const fields = React.useMemo<FieldDef[]>(() => [
+    ...FIELDS_STATIC_PREFIX,
+    {
+      name: "parkingType",
+      label: "Parking Type",
+      type: "select",
+      required: true,
+      defaultValue: parkingTypes[0] ?? "Open",
+      options: parkingTypes,
+    } as FieldDef,
+    ...FIELDS_STATIC_SUFFIX,
+  ], [parkingTypes]);
 
   const { data: allBlocks = [] } = useQuery<{ Id: number; Name: string; ProjectId: number }[]>({
     queryKey: ["parking-master-blocks"],

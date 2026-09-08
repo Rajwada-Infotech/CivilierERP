@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff, ArrowLeft } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useTransform, useSpring } from "framer-motion";
 import { toast } from "sonner";
-import { INK, VIOLET_DEEP, VIOLET, GOLD, PORCELAIN, serif } from "./portalTheme";
+import { INK, VIOLET_DEEP, VIOLET, GOLD, PORCELAIN, serif, TEXT_MUTED, TEXT_FAINT, TEXT, HAIRLINE } from "./portalTheme";
 
 const API = "/api/crm-portal";
 
@@ -42,13 +42,14 @@ function AnimatedInput({ label, type, value, onChange, placeholder, children }: 
   const has = value.length > 0;
   return (
     <div className="relative">
-      <motion.label className="absolute left-4 pointer-events-none font-medium z-10 origin-left text-slate-500"
+      <motion.label className="absolute left-4 pointer-events-none font-medium z-10 origin-left"
+        style={{ color: TEXT_MUTED }}
         animate={{
           top: focused || has ? "6px" : "50%",
           y: focused || has ? "0%" : "-50%",
           fontSize: focused || has ? "9px" : "13px",
           letterSpacing: focused || has ? "0.08em" : "0",
-          color: focused ? GOLD : "rgba(100,116,139,0.8)",
+          color: focused ? GOLD : TEXT_FAINT,
           textTransform: focused || has ? "uppercase" as const : "none" as const,
         }}
         transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}>
@@ -68,8 +69,8 @@ function AnimatedInput({ label, type, value, onChange, placeholder, children }: 
       <input type={type} value={value} onChange={onChange}
         placeholder={focused ? placeholder : ""}
         onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-        className="w-full rounded-xl px-4 pt-6 pb-2.5 text-sm text-slate-800 outline-none transition-colors"
-        style={{ background: focused ? "rgba(255,255,255,0.98)" : "rgba(248,250,252,0.9)", border: "none" }} />
+        className="w-full rounded-xl px-4 pt-6 pb-2.5 text-sm outline-none transition-colors"
+        style={{ color: TEXT, background: focused ? "rgba(255,255,255,0.98)" : "rgba(248,250,252,0.9)", border: "none" }} />
       {children}
     </div>
   );
@@ -128,9 +129,9 @@ function WelcomeCard() {
         </motion.div>
         <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}>
           <p className="text-xl font-semibold" style={{ ...serif, color: INK }}>Welcome back!</p>
-          <p className="text-sm text-slate-400 mt-1">Taking you to your dashboard…</p>
+          <p className="text-sm mt-1" style={{ color: TEXT_FAINT }}>Taking you to your dashboard…</p>
         </motion.div>
-        <div className="w-48 h-1 rounded-full bg-slate-100 overflow-hidden">
+        <div className="w-48 h-1 rounded-full overflow-hidden" style={{ background: HAIRLINE }}>
           <motion.div className="h-full rounded-full" style={{ background: GOLD }}
             initial={{ width: "0%" }} animate={{ width: "100%" }}
             transition={{ duration: 1.2, delay: 0.3, ease: "easeInOut" }} />
@@ -241,7 +242,8 @@ export default function PortalLogin() {
       <div className="flex-1 flex items-center justify-center px-6 py-12">
         <div className="w-full max-w-md">
           {/* Mobile back link */}
-          <motion.button onClick={() => navigate("/login")} className="flex lg:hidden items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 mb-8 transition-colors"
+          <motion.button onClick={() => navigate("/login")} className="flex lg:hidden items-center gap-1.5 text-sm mb-8 transition-colors hover:opacity-80"
+            style={{ color: TEXT_MUTED }}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
             <ArrowLeft size={14} /> Staff login
           </motion.button>
@@ -281,7 +283,7 @@ export default function PortalLogin() {
                       <motion.div className="absolute inset-0 rounded-full"
                         style={{ border: "1.5px dashed rgba(201,162,39,0.30)" }}
                         animate={{ rotate: 360 }} transition={{ duration: 20, repeat: Infinity, ease: "linear" }} />
-                      <div className="w-16 h-16 rounded-full bg-white border border-slate-100 shadow-md flex items-center justify-center overflow-hidden">
+                      <div className="w-16 h-16 rounded-full bg-white border shadow-md flex items-center justify-center overflow-hidden" style={{ borderColor: HAIRLINE }}>
                         <img src="/Civilier.png" alt="CivilierERP" className="w-12 h-12 object-contain" />
                       </div>
                     </div>
@@ -292,7 +294,7 @@ export default function PortalLogin() {
                       Customer Portal
                     </motion.h1>
                   </motion.div>
-                  <p className="text-xs text-slate-400">Sign in to track your application, agreement and payments</p>
+                  <p className="text-xs" style={{ color: TEXT_FAINT }}>Sign in to track your application, agreement and payments</p>
                 </div>
 
                 {/* Form */}
@@ -307,9 +309,10 @@ export default function PortalLogin() {
                     onChange={(e) => { setPassword(e.target.value); setError(""); }}
                     placeholder="••••••••">
                     <motion.button type="button" onClick={() => setShowPass(!showPass)}
-                      className="absolute right-3 bottom-2.5 text-slate-400 transition-colors p-1"
+                      className="absolute right-3 bottom-2.5 transition-colors p-1 hover:opacity-80"
+                      style={{ color: TEXT_FAINT }}
                       onMouseEnter={(e) => (e.currentTarget.style.color = GOLD)}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = "")}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = TEXT_FAINT)}
                       whileTap={{ scale: 0.85 }}>
                       <AnimatePresence mode="wait">
                         <motion.span key={showPass ? "off" : "on"}
@@ -321,7 +324,7 @@ export default function PortalLogin() {
                     </motion.button>
                   </AnimatedInput>
 
-                  <p className="text-[11px] text-slate-400 -mt-1.5 px-1">
+                  <p className="text-[11px] -mt-1.5 px-1" style={{ color: TEXT_FAINT }}>
                     First time signing in? Use your registered mobile number as the password.
                   </p>
 
@@ -329,8 +332,8 @@ export default function PortalLogin() {
                     {error && (
                       <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
                         exit={{ opacity: 0, y: -6 }}
-                        className="px-4 py-2.5 rounded-xl text-sm text-red-600 flex items-center gap-2"
-                        style={{ background: "rgba(254,226,226,0.8)", border: "1px solid rgba(252,165,165,0.5)" }}>
+                        className="px-4 py-2.5 rounded-xl text-sm flex items-center gap-2"
+                        style={{ background: "rgba(254,226,226,0.8)", border: "1px solid rgba(252,165,165,0.5)", color: "#dc2626" }}>
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                           <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
                         </svg>
@@ -351,7 +354,7 @@ export default function PortalLogin() {
                 </motion.form>
 
                 <div className="mt-5 text-center">
-                  <p className="text-[11px] text-slate-400">
+                  <p className="text-[11px]" style={{ color: TEXT_FAINT }}>
                     Are you our staff?{" "}
                     <button onClick={() => navigate("/login")} className="font-medium hover:underline transition-colors" style={{ color: VIOLET }}>
                       Go to main login

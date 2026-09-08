@@ -14,6 +14,7 @@ import {
   File as FileIcon, FileImage, FileText as FileTextIcon, XCircle, History, ScrollText, MapPin, Link2,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@/components/ui/dialog";
+import { useAuth } from "@/contexts/AuthContext";
 
 const API = "/api/crm/registry";
 
@@ -75,8 +76,14 @@ async function fetchEligible(): Promise<any[]> {
   return r.json();
 }
 
+const CRM_REGISTRY_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "legal_head"];
+
 const CrmRegistry: React.FC = () => {
   const qc = useQueryClient();
+  const { currentUser, canDoAction } = useAuth();
+  const canCompleteOrCancelRegistry =
+    CRM_REGISTRY_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase()) ||
+    canDoAction("approval-inbox" as any, "edit");
   const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
   const registryIdFilter = sp.get("registryId");
@@ -462,7 +469,7 @@ const CrmRegistry: React.FC = () => {
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5">{detail.RegNo} · {detail.BookingNo} · {detail.UnitNo} {detail.DeedNo && `· Deed ${detail.DeedNo}`}</p>
                   </div>
-                  {!locked && (
+                  {!locked && canCompleteOrCancelRegistry && (
                     <button onClick={() => setCancelOpen(true)} className="text-xs border border-rose-200 text-rose-600 px-2.5 py-1.5 rounded hover:bg-rose-50 font-medium">Cancel</button>
                   )}
                 </div>
@@ -503,12 +510,18 @@ const CrmRegistry: React.FC = () => {
                           <div className="flex items-center gap-2 shrink-0">
                             <button onClick={() => { setScheduleOpen("reschedule"); setScheduledDate(detail.ScheduledDate ? String(detail.ScheduledDate).slice(0, 10) : ""); setAppointmentTime(detail.AppointmentTime || ""); setAppointmentOffice(detail.AppointmentOffice || ""); setRescheduleReason(""); }}
                               className="text-xs border border-blue-300 text-blue-700 px-3 py-1.5 rounded hover:bg-blue-100 font-medium">Reschedule</button>
-                            <button onClick={() => { setCompleteOpen(true); setCompleteForm((f) => ({ ...f, SubRegistrarOffice: detail.AppointmentOffice || detail.SubRegistrarOffice || "" })); }}
-                              disabled={required.length > 0 && verifiedCount < required.length}
-                              title={required.length > 0 && verifiedCount < required.length ? "Verify the mandatory documents first" : undefined}
-                              className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded hover:bg-emerald-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed">
-                              Mark Completed
-                            </button>
+                            {canCompleteOrCancelRegistry ? (
+                              <button onClick={() => { setCompleteOpen(true); setCompleteForm((f) => ({ ...f, SubRegistrarOffice: detail.AppointmentOffice || detail.SubRegistrarOffice || "" })); }}
+                                disabled={required.length > 0 && verifiedCount < required.length}
+                                title={required.length > 0 && verifiedCount < required.length ? "Verify the mandatory documents first" : undefined}
+                                className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded hover:bg-emerald-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                                Mark Completed
+                              </button>
+                            ) : (
+                              <span className="text-xs text-amber-600 border border-amber-200 bg-amber-50 px-2.5 py-1.5 rounded flex items-center gap-1">
+                                🔒 Requires Legal Head / Admin
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

@@ -179,6 +179,11 @@ const BOOKING_SELECT = `
     FROM dbo.CrmAgreement
     WHERE BookingId = b.Id ORDER BY CreatedAt DESC
   ) ag
+  OUTER APPLY (
+    SELECT TOP 1 Status AS DeedStatus
+    FROM dbo.CrmSalesDeed
+    WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+  ) sd
 `;
 
 // GET / — all bookings. By default, Cancelled/Rejected bookings are
@@ -369,61 +374,75 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
       }
     }
 
-    await pool.request()
-      .input("id",    sql.Int,           id)
-      .input("pid",   sql.Int,           b.ProjectId   ? parseInt(b.ProjectId) : null)
-      .input("pname", sql.NVarChar(200), b.ProjectName || null)
-      .input("unit",  sql.NVarChar(100), b.UnitNo || null)
-      .input("blk",   sql.NVarChar(100), b.BlockName   || null)
-      .input("flr",   sql.NVarChar(100), b.FloorName   || null)
-      .input("rate",  sql.Decimal(18,2), rate)
-      .input("tot",   sql.Decimal(18,2), total)
-      .input("bamt",  sql.Decimal(18,2), b.BookingAmount  != null ? parseFloat(b.BookingAmount) : null)
-      .input("bdate", sql.Date,          b.BookingDate || null)
-      .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
-      .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
-      .input("ppid",  sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
-      .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("ub",    sql.Int,           actorId(req))
-      .query(`
-        UPDATE dbo.CrmBooking SET
-          ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
-          UnitNo = ISNULL(@unit, UnitNo), BlockName = @blk, FloorName = @flr,
-          RatePerSqFt = ISNULL(@rate, RatePerSqFt),
-          TotalValue = ISNULL(@tot, TotalValue),
-          BookingAmount = ISNULL(@bamt, BookingAmount),
-          BookingDate = ISNULL(@bdate, BookingDate), PaymentMode = ISNULL(@pmode, PaymentMode),
-          AssignedTo = ISNULL(@asgn, AssignedTo),
-          PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
-          -- HsnCode is no longer settable here — it's fully auto-resolved by
-          -- recalculateBookingGst below (Unit+Parking value decides 1% vs
-          -- 5%), never a manual per-booking input. See migration 283.
-          -- GrandTotal tracks TotalValue changes without disturbing the
-          -- already-rolled-up Parking/ExtraCharges totals.
-          GrandTotal = ISNULL(@tot, TotalValue) + ParkingTotal + ExtraChargesTotal,
-          Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id AND IsActive = 1
-      `);
+    // The booking field UPDATE, GST recalc, and (on a plan switch) the full
+    // delete-and-regenerate of the payment schedule are one financial event
+    // — wrapped so a failure partway through can never leave a booking on a
+    // new PaymentPlanId/TotalValue with its old milestones deleted and no
+    // replacement schedule generated (a booking with zero payment schedule).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",    sql.Int,           id)
+        .input("pid",   sql.Int,           b.ProjectId   ? parseInt(b.ProjectId) : null)
+        .input("pname", sql.NVarChar(200), b.ProjectName || null)
+        .input("unit",  sql.NVarChar(100), b.UnitNo || null)
+        .input("blk",   sql.NVarChar(100), b.BlockName   || null)
+        .input("flr",   sql.NVarChar(100), b.FloorName   || null)
+        .input("rate",  sql.Decimal(18,2), rate)
+        .input("tot",   sql.Decimal(18,2), total)
+        .input("bamt",  sql.Decimal(18,2), b.BookingAmount  != null ? parseFloat(b.BookingAmount) : null)
+        .input("bdate", sql.Date,          b.BookingDate || null)
+        .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
+        .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
+        .input("ppid",  sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
+        .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("ub",    sql.Int,           actorId(req))
+        .query(`
+          UPDATE dbo.CrmBooking SET
+            ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
+            UnitNo = ISNULL(@unit, UnitNo), BlockName = @blk, FloorName = @flr,
+            RatePerSqFt = ISNULL(@rate, RatePerSqFt),
+            TotalValue = ISNULL(@tot, TotalValue),
+            BookingAmount = ISNULL(@bamt, BookingAmount),
+            BookingDate = ISNULL(@bdate, BookingDate), PaymentMode = ISNULL(@pmode, PaymentMode),
+            AssignedTo = ISNULL(@asgn, AssignedTo),
+            PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
+            -- HsnCode is no longer settable here — it's fully auto-resolved by
+            -- recalculateBookingGst below (Unit+Parking value decides 1% vs
+            -- 5%), never a manual per-booking input. See migration 283.
+            -- GrandTotal tracks TotalValue changes without disturbing the
+            -- already-rolled-up Parking/ExtraCharges totals.
+            GrandTotal = ISNULL(@tot, TotalValue) + ParkingTotal + ExtraChargesTotal,
+            Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id AND IsActive = 1
+        `);
 
-    // TotalValue may have just moved — Unit+Parking could have crossed the
-    // Rs. 45L GST bracket.
-    await recalculateBookingGst(pool, id);
+      // TotalValue may have just moved — Unit+Parking could have crossed the
+      // Rs. 45L GST bracket.
+      await recalculateBookingGst(tx, id);
 
-    await logCrmAudit(pool, "Booking", id, actor, [
-      { field: "AssignedTo", oldVal: oldRow.AssignedTo, newVal: b.AssignedTo },
-    ]);
+      await logCrmAudit(tx, "Booking", id, actor, [
+        { field: "AssignedTo", oldVal: oldRow.AssignedTo, newVal: b.AssignedTo },
+      ]);
 
-    if (planIsChanging) {
-      await pool.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
-      const effectiveTotal = total || oldRow.TotalValue;
-      const effectiveBookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : oldRow.BookingAmount;
-      await generateMilestonesForBooking(pool, id, effectiveTotal, newPlanId, b.BookingDate || null, actor, effectiveBookingAmount);
-    } else if (total != null && total !== oldRow.TotalValue) {
-      // TotalValue moved (rate correction) without a plan switch — the
-      // existing schedule's ₹/% no longer add up to what's actually owed.
-      // A plan switch already regenerates the whole schedule from scratch
-      // above, so this only fires on the "same plan, new total" path.
-      await recalculateRemainingMilestones(pool, id);
+      if (planIsChanging) {
+        await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid");
+        const effectiveTotal = total || oldRow.TotalValue;
+        const effectiveBookingAmount = b.BookingAmount != null ? parseFloat(b.BookingAmount) : oldRow.BookingAmount;
+        await generateMilestonesForBooking(tx, id, effectiveTotal, newPlanId, b.BookingDate || null, actor, effectiveBookingAmount);
+      } else if (total != null && total !== oldRow.TotalValue) {
+        // TotalValue moved (rate correction) without a plan switch — the
+        // existing schedule's ₹/% no longer add up to what's actually owed.
+        // A plan switch already regenerates the whole schedule from scratch
+        // above, so this only fires on the "same plan, new total" path.
+        await recalculateRemainingMilestones(tx, id);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
 
     res.json({ success: true, milestonesRegenerated: planIsChanging });
@@ -510,69 +529,85 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
                : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
     const area = unitRow.AreaSqFt != null ? Number(unitRow.AreaSqFt) : null;
     const total = area && rate ? Math.round(area * rate) : oldRow.TotalValue;
-    await pool.request()
-      .input("id",    sql.Int, id)
-      .input("uid",   sql.Int, newUnitId)
-      .input("pid",   sql.Int, unitRow.ProjectId || null)
-      .input("pname", sql.NVarChar(200), unitRow.ProjectName || null)
-      .input("cid",   sql.Int, unitRow.CompanyId || null)
-      .input("unit",  sql.NVarChar(100), unitRow.UnitName)
-      .input("blk",   sql.NVarChar(100), unitRow.BlockName || null)
-      .input("utype", sql.NVarChar(100), unitRow.UnitType || null)
-      .input("area",  sql.Decimal(18,2), area)
-      .input("carpetArea",       sql.Decimal(18,2), unitRow.CarpetAreaSqFt != null ? Number(unitRow.CarpetAreaSqFt) : null)
-      .input("builtUpArea",      sql.Decimal(18,2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
-      .input("superBuiltUpArea", sql.Decimal(18,2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
-      .input("openTerraceArea",  sql.Decimal(18,2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
-      .input("rate",             sql.Decimal(18,2), rate)
-      .input("tot",   sql.Decimal(18,2), total)
-      .input("ppid",  sql.Int, newPlanId)
-      .input("ub",    sql.Int, actor)
-      .query(`
-        UPDATE dbo.CrmBooking SET
-          UnitId = @uid, ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
-          CompanyId = @cid, UnitNo = @unit, BlockName = @blk, UnitType = @utype, AreaSqFt = @area,
-          CarpetAreaSqFt = @carpetArea, BuiltUpAreaSqFt = @builtUpArea, SuperBuiltUpAreaSqFt = @superBuiltUpArea, OpenTerraceAreaSqFt = @openTerraceArea,
-          RatePerSqFt = ISNULL(@rate, RatePerSqFt),
-          TotalValue = @tot,
-          PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
-          GrandTotal = @tot + ParkingTotal + ExtraChargesTotal,
-          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
+    // Re-pointing a real legal transaction to a different physical unit,
+    // its GST recalc, the (conditional) full payment-schedule regeneration,
+    // the permanent change-log entry, and the audit log are one event —
+    // wrapped so a failure partway through can never leave a booking
+    // pointing at a new unit with its old milestones deleted and no
+    // regenerated schedule, or a UnitId change with no CrmUnitChangeLog
+    // entry to explain it.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",    sql.Int, id)
+        .input("uid",   sql.Int, newUnitId)
+        .input("pid",   sql.Int, unitRow.ProjectId || null)
+        .input("pname", sql.NVarChar(200), unitRow.ProjectName || null)
+        .input("cid",   sql.Int, unitRow.CompanyId || null)
+        .input("unit",  sql.NVarChar(100), unitRow.UnitName)
+        .input("blk",   sql.NVarChar(100), unitRow.BlockName || null)
+        .input("utype", sql.NVarChar(100), unitRow.UnitType || null)
+        .input("area",  sql.Decimal(18,2), area)
+        .input("carpetArea",       sql.Decimal(18,2), unitRow.CarpetAreaSqFt != null ? Number(unitRow.CarpetAreaSqFt) : null)
+        .input("builtUpArea",      sql.Decimal(18,2), unitRow.BuiltUpAreaSqFt != null ? Number(unitRow.BuiltUpAreaSqFt) : null)
+        .input("superBuiltUpArea", sql.Decimal(18,2), unitRow.SuperBuiltUpAreaSqFt != null ? Number(unitRow.SuperBuiltUpAreaSqFt) : null)
+        .input("openTerraceArea",  sql.Decimal(18,2), unitRow.OpenTerraceAreaSqFt != null ? Number(unitRow.OpenTerraceAreaSqFt) : null)
+        .input("rate",             sql.Decimal(18,2), rate)
+        .input("tot",   sql.Decimal(18,2), total)
+        .input("ppid",  sql.Int, newPlanId)
+        .input("ub",    sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmBooking SET
+            UnitId = @uid, ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
+            CompanyId = @cid, UnitNo = @unit, BlockName = @blk, UnitType = @utype, AreaSqFt = @area,
+            CarpetAreaSqFt = @carpetArea, BuiltUpAreaSqFt = @builtUpArea, SuperBuiltUpAreaSqFt = @superBuiltUpArea, OpenTerraceAreaSqFt = @openTerraceArea,
+            RatePerSqFt = ISNULL(@rate, RatePerSqFt),
+            TotalValue = @tot,
+            PaymentPlanId = ISNULL(@ppid, PaymentPlanId),
+            GrandTotal = @tot + ParkingTotal + ExtraChargesTotal,
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
 
-    // New unit means a new TotalValue — Unit+Parking could have crossed the
-    // Rs. 45L GST bracket.
-    await recalculateBookingGst(pool, id);
+      // New unit means a new TotalValue — Unit+Parking could have crossed the
+      // Rs. 45L GST bracket.
+      await recalculateBookingGst(tx, id);
 
-    if (newPlanId) {
-      // Only the %-based schedule steps get wiped and regenerated — a
-      // Parking/Extra-Charge milestone is a fixed line item tied to a real
-      // allotment/charge row elsewhere (see the same exclusion in
-      // recalculateRemainingMilestones), not part of the plan schedule, and
-      // deleting it here would silently orphan that charge's own payment
-      // tracking.
-      await pool.request().input("bid", sql.Int, id).query(`
-        DELETE FROM dbo.CrmPaymentMilestone
-        WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
-      `);
-      await generateMilestonesForBooking(pool, id, total, newPlanId, null, actor, oldRow.BookingAmount);
+      if (newPlanId) {
+        // Only the %-based schedule steps get wiped and regenerated — a
+        // Parking/Extra-Charge milestone is a fixed line item tied to a real
+        // allotment/charge row elsewhere (see the same exclusion in
+        // recalculateRemainingMilestones), not part of the plan schedule, and
+        // deleting it here would silently orphan that charge's own payment
+        // tracking.
+        await tx.request().input("bid", sql.Int, id).query(`
+          DELETE FROM dbo.CrmPaymentMilestone
+          WHERE BookingId = @bid AND ExtraChargeId IS NULL AND ParkingAllotmentId IS NULL
+        `);
+        await generateMilestonesForBooking(tx, id, total, newPlanId, null, actor, oldRow.BookingAmount);
+      }
+
+      await tx.request()
+        .input("bid",    sql.Int, id)
+        .input("oldUid", sql.Int, oldUnitId || null)
+        .input("newUid", sql.Int, newUnitId)
+        .input("reason", sql.NVarChar(sql.MAX), b.Reason.trim())
+        .input("cb",     sql.Int, actor)
+        .query(`
+          INSERT INTO dbo.CrmUnitChangeLog (BookingId, OldUnitId, NewUnitId, Reason, ChangedBy, ChangedAt)
+          VALUES (@bid, @oldUid, @newUid, @reason, @cb, SYSDATETIME())
+        `);
+
+      await logCrmAudit(tx, "Booking", id, actor, [
+        { field: "UnitId", oldVal: oldUnitId, newVal: newUnitId },
+      ]);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
     }
-
-    await pool.request()
-      .input("bid",    sql.Int, id)
-      .input("oldUid", sql.Int, oldUnitId || null)
-      .input("newUid", sql.Int, newUnitId)
-      .input("reason", sql.NVarChar(sql.MAX), b.Reason.trim())
-      .input("cb",     sql.Int, actor)
-      .query(`
-        INSERT INTO dbo.CrmUnitChangeLog (BookingId, OldUnitId, NewUnitId, Reason, ChangedBy, ChangedAt)
-        VALUES (@bid, @oldUid, @newUid, @reason, @cb, SYSDATETIME())
-      `);
-
-    await logCrmAudit(pool, "Booking", id, actor, [
-      { field: "UnitId", oldVal: oldUnitId, newVal: newUnitId },
-    ]);
 
     res.json({ success: true, unitNo: unitRow.UnitName, paymentPlanUpdated: !!newPlanId });
   } catch (e) {
@@ -1452,11 +1487,13 @@ router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req
 // step — an invoice is a record of a real transaction, not a draft that
 // needs sign-off like the Agreement/Sales Deed documents).
 router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  const _diagStep = { step: "init" };
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
     const b = req.body;
     const type = b.InvoiceType || "Maintenance";
+    _diagStep.step = "activeCheck"; _diagStep.type = type; _diagStep.body = b;
 
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -1511,11 +1548,13 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       if (mRow.DemandStatus === CrmStatus.PENDING) {
         return res.status(400).json({ error: `A demand must be raised for "${mRow.MilestoneName}" (from the Demands page) before its invoice can be generated` });
       }
+      _diagStep.step = "dupCheck"; _diagStep.mid = milestoneId;
       const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid AND Status <> 'Void'");
       if (already.recordset.length) return res.status(400).json({ error: `"${mRow.MilestoneName}" already has an invoice` });
       amount = Number(mRow.AmountDue);
       invoiceDate = mRow.DemandRaisedOn || null;
       description = b.Description || `${mRow.MilestoneName} — invoice`;
+      _diagStep.step = "dupCheckPassed"; _diagStep.amount = amount;
     } else {
       amount = parseFloat(b.Amount);
       if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
@@ -1580,8 +1619,10 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       if (rawPrefix.length > 10) return res.status(400).json({ error: "Invoice prefix must be 10 characters or fewer" });
       invoiceNo = await getNextDocNumber(pool, rawPrefix, rawPrefix);
     } else {
+      _diagStep.step = "getNextDocNumber";
       invoiceNo = await getNextDocNumber(pool, "INV", "INV");
     }
+    _diagStep.step = "insert"; _diagStep.invoiceNo = invoiceNo;
     const result = await pool.request()
       .input("no",   sql.NVarChar(30),  invoiceNo)
       .input("bid",  sql.Int,           id)
@@ -1597,6 +1638,7 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
         OUTPUT INSERTED.Id
         VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid, @oaid)
       `);
+    _diagStep.step = "pdfGen";
     const invoiceId = result.recordset[0].Id;
     // Best-effort, same request — the invoice record itself is the source of
     // truth and must not fail to create just because PDF rendering hit a
@@ -1619,7 +1661,119 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     if (e.number === 2601 || e.number === 2627) {
       return res.status(400).json({ error: "An invoice already exists for this milestone, on-account payment, or billing period — it can't be generated twice" });
     }
-    console.error("[crm-bookings] POST /:id/invoices error:", e.message);
+    if (e.number === 207) {
+      console.error("[crm-bookings] POST /:id/invoices schema error (run pending migrations): ", e.message);
+      return res.status(500).json({ error: "Database schema is out of date — ask your administrator to run: node migrate.js up" });
+    }
+    console.error("[crm-bookings] POST /:id/invoices error at step=%s sqlNum=%s:", _diagStep.step, e.number, e.message, "| ctx:", JSON.stringify(_diagStep));
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// Shared by POST /bookings/invoices/bulk-generate below. Deliberately a
+// narrower re-implementation of the "Milestone"/"Booking" branch of
+// POST /:id/invoices above (same validation, same amount/date sourcing,
+// same standard INV-YYYY-NNNNN numbering) rather than a refactor of that
+// route into calling this — the single-invoice route also supports
+// CustomInvoiceNo/InvoicePrefix and several other manual-entry types
+// (Maintenance/Other/OnAccount) that bulk-generation has no use for;
+// making it depend on this narrower helper would risk regressing a
+// route that already works, for no benefit bulk-generation actually needs.
+// Runs on its own transaction per milestone so one row's failure in a batch
+// can never partially apply (insert without commit, etc.) — the caller loops
+// this per-row, matching the same independent-per-row pattern already used
+// by crmAgreements.js/crmSalesDeed.js's PUT /documents/bulk-review.
+async function generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, actorUserId) {
+  const activeErr = await requireActiveBooking(pool, bookingId);
+  if (activeErr) { const e = new Error(activeErr); e.status = 400; throw e; }
+
+  const m = await pool.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, bookingId).query(`
+    SELECT Id, MilestoneName, AmountDue, DemandStatus, DemandRaisedOn FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid
+  `);
+  const mRow = m.recordset[0];
+  if (!mRow) { const e = new Error("Milestone not found on this booking"); e.status = 404; throw e; }
+  if (mRow.DemandStatus === CrmStatus.PENDING) {
+    const e = new Error(`A demand must be raised for "${mRow.MilestoneName}" before its invoice can be generated`);
+    e.status = 400; throw e;
+  }
+  const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid AND Status <> 'Void'");
+  if (already.recordset.length) { const e = new Error(`"${mRow.MilestoneName}" already has an invoice`); e.status = 400; throw e; }
+
+  const amount = Number(mRow.AmountDue);
+  const invoiceDate = mRow.DemandRaisedOn || null;
+  const description = `${mRow.MilestoneName} — invoice`;
+  const invoiceNo = await getNextDocNumber(pool, "INV", "INV");
+
+  const tx = pool.transaction();
+  await tx.begin();
+  let invoiceId;
+  try {
+    const result = await tx.request()
+      .input("no",   sql.NVarChar(30),  invoiceNo)
+      .input("bid",  sql.Int,           bookingId)
+      .input("type", sql.NVarChar(30),  "Milestone")
+      .input("amt",  sql.Decimal(18,2), amount)
+      .input("dt",   sql.Date,          invoiceDate)
+      .input("desc", sql.NVarChar(500), description)
+      .input("cb",   sql.Int,           actorUserId)
+      .input("mid",  sql.Int,           milestoneId)
+      .query(`
+        INSERT INTO dbo.CrmInvoice (InvoiceNo, BookingId, InvoiceType, Amount, InvoiceDate, Description, CreatedBy, CreatedAt, MilestoneId)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @type, @amt, ISNULL(@dt, CAST(SYSDATETIME() AS DATE)), @desc, @cb, SYSDATETIME(), @mid)
+      `);
+    invoiceId = result.recordset[0].Id;
+    await tx.commit();
+  } catch (txErr) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+    if (txErr.number === 2601 || txErr.number === 2627) {
+      const e = new Error(`"${mRow.MilestoneName}" already has an invoice`); e.status = 400; throw e;
+    }
+    throw txErr;
+  }
+
+  try {
+    await generateInvoicePdf(pool, invoiceId);
+  } catch (pdfErr) {
+    console.error("[crm-bookings] bulk invoice PDF generation failed:", pdfErr.message);
+  }
+
+  return { id: invoiceId, InvoiceNo: invoiceNo, MilestoneName: mRow.MilestoneName };
+}
+
+// POST /bookings/invoices/bulk-generate — generate invoices for several
+// ready milestones (possibly across different bookings) in one call, for
+// the Invoices page's bulk-select action. Each row is processed
+// independently — one bad row (already invoiced, demand not raised since
+// the list was loaded, booking no longer active) doesn't block the rest;
+// same "keep going, report what happened" shape as crmAgreements.js's
+// PUT /documents/bulk-review.
+router.post("/invoices/bulk-generate", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) return res.status(400).json({ error: "items is required" });
+    if (items.length > 200) return res.status(400).json({ error: "Cannot process more than 200 at once" });
+
+    const actor = actorId(req);
+    const results = { succeeded: [], skipped: [] };
+    for (const item of items) {
+      const bookingId = parseInt(item?.bookingId, 10);
+      const milestoneId = parseInt(item?.milestoneId, 10);
+      if (!bookingId || !milestoneId) {
+        results.skipped.push({ bookingId: item?.bookingId, milestoneId: item?.milestoneId, reason: "Invalid bookingId/milestoneId" });
+        continue;
+      }
+      try {
+        const outcome = await generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, actor);
+        results.succeeded.push({ bookingId, milestoneId, ...outcome });
+      } catch (itemErr) {
+        results.skipped.push({ bookingId, milestoneId, reason: itemErr.message });
+      }
+    }
+    res.json(results);
+  } catch (e) {
+    console.error("[crm-bookings] POST /invoices/bulk-generate error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
@@ -2120,7 +2274,8 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
     // agRegistered is the strict gate Pre-Possession and Handover actually require.
     const agDone       = ag  && [CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(ag.Status);
     const agRegistered = ag  && ag.Status === CrmStatus.REGISTERED;
-    const sdDone  = sd  && sd.CustomerApprovalStatus === CrmStatus.APPROVED;
+    // Sale Deed "done" = director approved (full approval chain completed).
+    const sdDone  = sd  && sd.DirectorApprovalStatus === CrmStatus.APPROVED;
     const qpDone  = qp  && qp.Status === "Confirmed";
     const ppDone  = pp  && pp.Status === "Ready";
     const pnDone  = pn  && pn.Status === "Acknowledged";
@@ -2128,11 +2283,23 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
     const regDone = reg && reg.Status === "Completed";
     const mutDone = mut && mut.Status === "Approved";
 
+    // Possession sub-steps (Pre-Possession + Possession Notice) are tracked on
+    // their dedicated pages; here we show one "Handover" chip whose gate reflects
+    // the full sequence: Agreement Registered → Pre-Possession → Possession Notice
+    // → Handover. Active once Agreement is Registered; done only when Handover is Completed.
+    const possessionActive = agRegistered;
+    const possessionDone   = hoDone;
+    const possessionInProgress = pp || pn || ho;
+
     const { nocType: resolvedNocType } = await resolveNocType(pool, id);
     const activeNoc = resolvedNocType === "Bank" ? bankNoc : orgNoc;
 
     const d = (v) => v ? String(v).slice(0, 10) : null;
 
+    // Minimal high-level lifecycle — 9 stages.
+    // Sub-step detail (Legal Milestones, Pre-Possession, Possession Notice,
+    // Query Payment) lives on each step's own dedicated page; the bar here
+    // shows only the major milestones so it stays readable at a glance.
     const steps = [
       {
         key: "application",
@@ -2159,6 +2326,9 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         blockedBy: null,
       },
       {
+        // Covers the full Agreement phase: AFS registration, legal milestones,
+        // all Agreement sub-steps. Detail is on the dedicated Agreement and
+        // Legal Milestones pages — this chip shows only the headline status.
         key: "agreement",
         label: "Agreement",
         status: agDone ? "done" : ag ? "active" : wc ? "active" : "locked",
@@ -2167,102 +2337,59 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
         blockedBy: wc ? null : "Welcome Call must be completed first",
       },
       {
-        key: "legal_milestones",
-        label: "Legal Milestones",
-        // Real gate (crmLegalMilestones.js POST /): agreement must exist (no status
-        // check), so gate on `ag` not `agDone`.
-        status: lm && lm.OverallStatus === "Cleared" ? "done"
-               : lm ? "active"
-               : ag ? "active"
-               : "locked",
-        date: lm ? d(lm.CreatedAt) : null,
-        link: "/crm/legal-milestones",
-        blockedBy: ag ? null : "Agreement must exist first",
-      },
-      {
         key: "noc",
-        label: resolvedNocType === "Bank" ? "Bank NOC" : "Org NOC",
-        // Both NOC types require Agreement to be physically registered (crmNoc.js POST).
-        // Since a booking only ever gets one NOC (based on financing), we dynamically
-        // resolve the type and show only the applicable one here.
+        label: resolvedNocType === "Bank" ? "Bank NOC" : "NOC",
         status: activeNoc && activeNoc.Status === "Issued" ? "done"
                : activeNoc ? "active"
                : agRegistered ? "active"
                : "locked",
         date: activeNoc ? d(activeNoc.CreatedAt) : null,
         link: `/crm/noc?bookingId=${id}`,
-        blockedBy: agRegistered ? null : "Agreement must be Registered at Sub-Registrar first",
-      },
-      // ─── Physical possession sequence: real gate is Agreement Registered, not
-      // anything to do with Sale Deed (which comes AFTER handover in this chain).
-      // The old lifecycle placed Sales Deed before these three steps — exactly
-      // backwards from every real gate in crmPrePossession.js, crmHandover.js,
-      // and crmSalesDeed.js's own comment ("AFS registered → possession → handover
-      // → Sale Deed drafted → registered.").
-      {
-        key: "pre_possession",
-        label: "Pre-Possession",
-        // Real gate (crmPrePossession.js POST /): Agreement.Status = 'Registered'.
-        status: ppDone ? "done" : pp ? "active" : agRegistered ? "active" : "locked",
-        date: pp ? d(pp.CreatedAt) : null,
-        link: "/crm/pre-possession",
         blockedBy: agRegistered ? null : "Agreement must be Registered first",
       },
       {
-        key: "possession_notice",
-        label: "Possession Notice",
-        status: pnDone ? "done" : pn ? "active" : ppDone ? "active" : "locked",
-        date: pn ? d(pn.OfferedDate || pn.CreatedAt) : null,
-        link: "/crm/possession-notice",
-        blockedBy: ppDone ? null : "Pre-Possession inspection must be Ready first",
-      },
-      {
+        // Single "Handover" chip covers: Pre-Possession inspection → Possession
+        // Notice → Handover. Sub-step detail is on the Pre-Possession and
+        // Possession Notice pages; this chip is done when Handover is Completed.
         key: "handover",
         label: "Handover",
-        // Real gate (crmHandover.js POST /): Agreement Registered AND Possession
-        // Notice Acknowledged AND no open NOC.
-        status: hoDone ? "done" : ho ? "active" : pnDone ? "active" : "locked",
-        date: ho ? d(ho.ActualHandoverDate || ho.CreatedAt) : null,
+        status: possessionDone ? "done"
+               : possessionInProgress ? "active"
+               : possessionActive ? "active"
+               : "locked",
+        date: ho ? d(ho.ActualHandoverDate || ho.CreatedAt)
+             : pn ? d(pn.OfferedDate || pn.CreatedAt)
+             : pp ? d(pp.CreatedAt) : null,
         link: "/crm/handover",
-        blockedBy: pnDone ? null : "Possession Notice must be Acknowledged first",
+        blockedBy: agRegistered ? null : "Agreement must be Registered first",
       },
-      // ─── Post-handover legal/financial sequence.
       {
         key: "sales_deed",
-        label: "Sales Deed",
-        // Real gate (crmSalesDeed.js POST /): Handover Completed (+ Agreement
-        // Registered + Loan Processing cleared — Loan Processing isn't yet a
-        // separate tracked step here, so sales_deed can show active once hoDone
-        // even if Loan Processing is still outstanding; acceptable known gap).
+        label: "Sale Deed",
         status: sdDone ? "done" : sd ? "active" : hoDone ? "active" : "locked",
         date: sd ? d(sd.CreatedAt) : null,
         link: `/crm/sales-deed?bookingId=${id}`,
         blockedBy: hoDone ? null : "Handover must be Completed first",
       },
       {
-        key: "query_payment",
-        label: "Query Payment",
-        // Real gate (crmQueryPayment.js POST /): Sale Deed must exist.
-        status: qpDone ? "done" : qp ? "active" : sd ? "active" : "locked",
-        date: qp ? d(qp.CreatedAt) : null,
-        link: `/crm/query-payment?bookingId=${id}`,
-        blockedBy: sd ? null : "Sales Deed must be created first",
-      },
-      {
+        // Single "Registry" chip covers: Query Payment → Registry appointment
+        // → completion. Query Payment detail is on its own dedicated page.
         key: "registry",
         label: "Registry",
-        // Real gate (crmRegistry.js POST /): QueryPayment.Status = 'Confirmed'.
-        status: regDone ? "done" : reg ? "active" : qpDone ? "active" : "locked",
-        date: reg ? d(reg.CompletedDate || reg.ScheduledDate || reg.CreatedAt) : null,
+        status: regDone ? "done"
+               : reg ? "active"
+               : qpDone ? "active"
+               : qp ? "active"
+               : sd ? "active"
+               : "locked",
+        date: reg ? d(reg.CompletedDate || reg.ScheduledDate || reg.CreatedAt)
+             : qp ? d(qp.CreatedAt) : null,
         link: `/crm/registry?bookingId=${id}`,
-        blockedBy: qpDone ? null : "Query Payment must be Confirmed first",
+        blockedBy: sd ? null : "Sale Deed must be created first",
       },
       {
         key: "mutation",
         label: "Mutation",
-        // Real gate (crmMutation.js POST /): Registry.Status = 'Completed'.
-        // Was not tracked at all in the old lifecycle — chain silently ended at
-        // Registry. Mutation is the final ownership-transfer step.
         status: mutDone ? "done" : mut ? "active" : regDone ? "active" : "locked",
         date: mut ? d(mut.CreatedAt) : null,
         link: `/crm/mutation?bookingId=${id}`,
