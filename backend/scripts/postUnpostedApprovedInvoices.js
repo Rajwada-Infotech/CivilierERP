@@ -39,7 +39,7 @@ async function main() {
     FROM dbo.ExpenseBooking eb
     LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = eb.LHeadId
     WHERE eb.ESourceType NOT IN ('GRN')
-      AND (eb.EStatus = 'Approved' OR eb.Status = 'Approved')
+      AND eb.EStatus = 'Approved'
       AND NOT EXISTS (
         SELECT 1 FROM dbo.GeneralLedgerEntry gle
         WHERE gle.SourceType IN ('ExpenseBooking', 'InvoicePosting') AND gle.SourceId = eb.Eid AND gle.IsReversed = 0
