@@ -1101,7 +1101,16 @@ const Payment: React.FC = () => {
       // the Bank field on whatever was last selected (previously this left
       // the wrong bank showing, and the cheque number blank/unpickable
       // since it had already been deducted from the lot under this loan).
+      // bankName has to be carried over alongside bankId — unlike
+      // handleBankSelect (the normal dropdown path), this pre-fill never
+      // went through that handler, so form.bankName was silently left
+      // unset and the save failed with a NOT NULL violation on
+      // NewPayment.PBankName the moment the user didn't happen to
+      // re-touch the Bank dropdown themselves.
       bankId: loan.LenderBankAccountId ?? f.bankId,
+      bankName: loan.LenderBankAccountId
+        ? (banks.find((b) => b.id === loan.LenderBankAccountId)?.label?.split(" — ")[0] ?? f.bankName)
+        : f.bankName,
       mode: loan.PaymentMode || f.mode,
       chequeLotId: isChequeMode ? (loan.ChequeLotId ?? f.chequeLotId) : f.chequeLotId,
       chequeLotNumber: isChequeMode ? (loan.ChequeLotNumber || f.chequeLotNumber) : f.chequeLotNumber,
