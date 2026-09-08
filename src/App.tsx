@@ -126,6 +126,11 @@ const MaintenanceDashboard = lazy(() => import("./pages/maintenance/MaintenanceD
 const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceDirectory"));
 const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/CustomerMaintenanceProfile"));
 const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
+const SecurityAttendance = lazy(() => import("./pages/maintenance/SecurityAttendance"));
+const ElectricityMaintenance = lazy(() => import("./pages/maintenance/ElectricityMaintenance"));
+const MeterReadingMaster = lazy(() => import("./pages/masters/MeterReadingMaster"));
+const ElectricityProviderMaster = lazy(() => import("./pages/masters/ElectricityProviderMaster"));
+const ElectricityTariffMaster = lazy(() => import("./pages/masters/ElectricityTariffMaster"));
 const ChargeHeadMaster = lazy(() => import("./pages/masters/ChargeHeadMaster"));
 const CivilWorkDprDashboard = lazy(
   () => import("./pages/civilworkdpr/CivilWorkDprDashboard"),
@@ -933,6 +938,46 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="maintenance-bills">
             <MaintenanceBills />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/security-attendance"
+        element={
+          <ProtectedRoute pageKey="maintenance-security-attendance">
+            <SecurityAttendance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/maintenance/electricity"
+        element={
+          <ProtectedRoute pageKey="maintenance-electricity">
+            <ElectricityMaintenance />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/meter-reading"
+        element={
+          <ProtectedRoute pageKey="meter-reading-master">
+            <MeterReadingMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/electricity-provider"
+        element={
+          <ProtectedRoute pageKey="electricity-provider-master">
+            <ElectricityProviderMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/electricity-tariff"
+        element={
+          <ProtectedRoute pageKey="electricity-tariff-master">
+            <ElectricityTariffMaster />
           </ProtectedRoute>
         }
       />
