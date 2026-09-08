@@ -377,13 +377,9 @@ const fixedAssetSetupItems = [
 ];
 
 const followupSetupItems = [
-  {
-    icon: ClipboardList,
-    label: "Task Master",
-    path: "/followup/setup/task-master",
-    color: "text-teal-500",
-    pageKey: "task-master",
-  },
+  // "Task Master" was moved from here into the Follow-Up module sidebar
+  // (see sidebars/FollowupSidebar.ts) — it's the module's core master list,
+  // not a set-and-forget configuration. Route/pageKey unchanged.
   {
     icon: Users,
     label: "Department Master",

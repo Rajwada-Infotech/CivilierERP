@@ -8,7 +8,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
 import {
   Chart2,
-  Calendar,
+  Grid1,
   ArrowLeft2,
   Crown,
   Data,
@@ -27,6 +27,7 @@ import {
   Cpu,
 } from "iconsax-react";
 import { Wrench } from "lucide-react";
+import { TimelineIcon } from "@/components/icons/TimelineIcon";
 
 // ── Per-module nav definitions ────────────────────────────────────────────────
 import { engineeringNavItems } from "./sidebars/EngineeringSidebar";
@@ -80,7 +81,7 @@ const MODULE_HEADER: Record<
   },
   followup: {
     label: "Follow-Up",
-    icon: Calendar,
+    icon: Grid1,
     color: "#0d9488",
     from: "from-teal-600/30",
     to: "to-teal-600/0",
@@ -115,7 +116,7 @@ const MODULE_HEADER: Record<
   },
   civilworkdpr: {
     label: "Civil Work DPR",
-    icon: Buildings2,
+    icon: TimelineIcon,
     color: "#0891b2",
     from: "from-cyan-600/30",
     to: "to-cyan-600/0",

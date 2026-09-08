@@ -434,13 +434,8 @@ const maintenanceSetupItems: SetupItem[] = [
 ];
 
 const followupSetupItems: SetupItem[] = [
-  {
-    icon: ClipboardList,
-    label: "Task Master",
-    path: "/followup/setup/task-master",
-    color: "text-teal-500",
-    pageKey: "task-master",
-  },
+  // "Task Master" moved into the Follow-Up module sidebar (followupNavItems)
+  // — kept out of the Setup sheet so it isn't listed twice on mobile.
   {
     icon: Users,
     label: "Department Master",
