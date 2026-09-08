@@ -171,6 +171,8 @@ const ALL_ROUTES = [
   { path: "/api/charge-head", file: "./routes/chargeHead" },
   { path: "/api/maintenance", file: "./routes/maintenance" },
   { path: "/api/maintenance-bills", file: "./routes/maintenanceBill" },
+  { path: "/api/security-attendance", file: "./routes/securityAttendance" },
+  { path: "/api/electricity-maintenance", file: "./routes/electricityMaintenance" },
   { path: "/api/item-groups", file: "./routes/itemGroup" },
   { path: "/api/item-master", file: "./routes/itemMaster" },
   { path: "/api/tds-master", file: "./routes/tdsMaster" },

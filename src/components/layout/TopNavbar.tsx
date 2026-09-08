@@ -42,6 +42,8 @@ import {
   Car,
   PlusCircle,
   Wallet,
+  Gauge,
+  Zap,
   CalendarClock,
   Wand2,
   Percent,
@@ -274,6 +276,27 @@ const maintenanceSetupItems = [
     path: "/masters/charge-head",
     color: "text-slate-500",
     pageKey: "charge-head-master",
+  },
+  {
+    icon: Gauge,
+    label: "Meter Reading Master",
+    path: "/masters/meter-reading",
+    color: "text-lime-600",
+    pageKey: "meter-reading-master",
+  },
+  {
+    icon: Zap,
+    label: "Electricity Provider Master",
+    path: "/masters/electricity-provider",
+    color: "text-amber-500",
+    pageKey: "electricity-provider-master",
+  },
+  {
+    icon: ReceiptIndianRupee,
+    label: "Electricity Tariff Master",
+    path: "/masters/electricity-tariff",
+    color: "text-emerald-500",
+    pageKey: "electricity-tariff-master",
   },
 ];
 
