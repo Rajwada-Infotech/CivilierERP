@@ -1,4 +1,4 @@
-// Lets components outside the NavigationContainer (BottomPillNav, TopHeader)
+// Lets components outside the NavigationContainer (SidebarMenu, TopHeader)
 // trigger navigation — same need the web app's MobileNav.tsx solves with
 // react-router's useNavigate() from inside the tree; RN's overlay
 // components sit outside it, so they need a ref instead.

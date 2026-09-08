@@ -4,15 +4,15 @@ import { View, ActivityIndicator } from "react-native";
 import { useAuth } from "@/auth/AuthContext";
 import AuthStack from "./AuthStack";
 import MainStack from "./MainStack";
-import { BottomPillNav } from "./BottomPillNav";
+import { SidebarMenu } from "./SidebarMenu";
 import { navigationRef } from "./navigationRef";
 import { colors } from "@/theme/colors";
 
 export default function RootNavigator() {
   const { currentUser, isLoading } = useAuth();
   // Dashboard is MainStack's initial route, so this is accurate before the
-  // container's own state exists — see BottomPillNav.tsx for why this
-  // isn't read from navigationRef directly.
+  // container's own state exists — see SidebarMenu.tsx for why this isn't
+  // read from navigationRef directly.
   const [activeRoute, setActiveRoute] = useState("Dashboard");
 
   if (isLoading) {
@@ -37,7 +37,7 @@ export default function RootNavigator() {
       {currentUser ? (
         <>
           <MainStack />
-          <BottomPillNav activeRoute={activeRoute} />
+          <SidebarMenu activeRoute={activeRoute} />
         </>
       ) : (
         <AuthStack />

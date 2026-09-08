@@ -1,15 +1,17 @@
-// Shared stack header — React Navigation reserves safe-area space above it
-// automatically. Logo + wordmark + version on the left; notification bell
-// (badge = useMaintenanceAlerts().alerts.length) and profile avatar on the right.
-import { View, Text, Image, Pressable } from "react-native";
+// Shared stack header — mirrors mobile-supplier's TopHeader.tsx exactly:
+// animated logo on the left, notification bell (badge =
+// useMaintenanceAlerts().alerts.length) and profile avatar on the right. No
+// hamburger/menu button — there's nothing behind it yet (see MainStack.tsx),
+// and Dashboard/Notifications/Profile are all reachable without one.
+import { View, Text, Pressable } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { NativeStackHeaderProps } from "@react-navigation/native-stack";
-import { Bell, Menu as MenuIcon } from "lucide-react-native";
+import { Bell } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { useAuth } from "@/auth/AuthContext";
-import { useAppVersion } from "@/hooks/useAppVersion";
 import { useMaintenanceAlerts } from "@/hooks/useMaintenanceAlerts";
+import { AnimatedLogo } from "@/components/AnimatedLogo";
 import { navigate } from "./navigationRef";
 
 const ACCENT = "#65a30d";
@@ -26,7 +28,6 @@ function initialsOf(name?: string) {
 
 export function TopHeader(_props: NativeStackHeaderProps) {
   const { currentUser } = useAuth();
-  const { appVersion, isLoading } = useAppVersion();
   const { alerts } = useMaintenanceAlerts();
   const alertCount = alerts.length;
 
@@ -36,19 +37,8 @@ export function TopHeader(_props: NativeStackHeaderProps) {
       style={{ backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: `${colors.border}80` }}
     >
       <View className="flex-row items-center justify-between px-4 py-2.5">
-        <View className="flex-row items-center gap-2 flex-1 min-w-0">
-          <Pressable onPress={() => navigate("Menu")} hitSlop={8} style={{ padding: 2 }}>
-            <MenuIcon size={20} color={colors.foreground} />
-          </Pressable>
-          <Image source={require("../../assets/branding/Civilier.png")} style={{ width: 28, height: 28, borderRadius: 7 }} />
-          <View className="min-w-0">
-            <Text numberOfLines={1} style={{ color: ACCENT, fontSize: 15, fontFamily: fonts.heading.bold, letterSpacing: -0.3 }}>
-              CivilierERP Maintenance
-            </Text>
-            <Text style={{ color: "#a3a3a3", fontSize: 10, fontFamily: fonts.body.medium }}>
-              {isLoading ? "…" : `v${appVersion}`}
-            </Text>
-          </View>
+        <View className="flex-1 min-w-0">
+          <AnimatedLogo iconSize={28} />
         </View>
 
         <View className="flex-row items-center gap-3">
