@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Civilier Maintenance",
+    "slug": "mobile-maintenance",
+    "scheme": "civiliererpmaintenance",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rajwadainfotech.civiliermaintenance",
+      "infoPlist": {
+        "NSCameraUsageDescription": "CivilierERP Maintenance uses the camera to attach photos to maintenance records.",
+        "NSPhotoLibraryUsageDescription": "CivilierERP Maintenance needs access to your photo library to attach existing photos to records."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E9F5E1",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.rajwadainfotech.civiliermaintenance"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-font",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "owner": "grenxnja"
+  }
+}
