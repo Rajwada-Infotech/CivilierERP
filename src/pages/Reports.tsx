@@ -359,7 +359,19 @@ const ALL_REPORTS: ReportDef[] = [
     // credit-note flow through this table), so "Amount" here is that debit.
     columns: [
       { header: "Doc No", accessor: (r) => (r.EDocNo ?? "—") as string },
+      {
+        header: "Date",
+        accessor: (r) => (r.EDocDate ? String(r.EDocDate).slice(0, 10) : "—"),
+      },
       { header: "Paid To", accessor: (r) => (r.ESupplierName ?? "—") as string },
+      {
+        // Direct / Indirect / Others (or "Direct / Indirect" for a split
+        // booking) — resolved server-side from the booking's expense head(s)
+        // via the same rule the P&L uses. See expenseBooking.js
+        // classifyExpenseHeadTypeMany.
+        header: "Expense Type",
+        accessor: (r) => (r.EExpenseType ?? "—") as string,
+      },
       {
         header: "Amount",
         accessor: (r) => fmt(Number(r.ENetAmount ?? r.EGrnTotalAmount ?? r.EAmount) || 0),
@@ -2336,10 +2348,12 @@ const ReportTable: React.FC<{
   // EDocDate) for this closer, single-head view.
   const effectiveColumns = useMemo<ExportColumn[]>(() => {
     if (!isExpenseRegister || !expenseHeadId) return report.columns;
+    // "Expense Type" is already a base column (per-row EExpenseType) — the
+    // single-head view just adds the head's own name plus the closer invoice
+    // detail; no need to repeat the type here.
     return [
       ...report.columns,
       { header: "GL Name", accessor: (r) => (r.EFilterHeadName ?? "—") as string },
-      { header: "Expense Type", accessor: (r) => (r.EFilterExpenseType ?? "—") as string },
       { header: "Vendor Name", accessor: (r) => (r.ESupplierName ?? "—") as string },
       {
         header: "Invoice Amt",
@@ -2354,6 +2368,22 @@ const ReportTable: React.FC<{
       },
     ];
   }, [isExpenseRegister, expenseHeadId, report.columns]);
+
+  // ── Ledger Report: per-column filters ─────────────────────────────────────
+  // The generic report engine only exposes Company/Project/Date filters. The
+  // Ledger Report additionally gets one filter control per column, applied
+  // client-side to the already-loaded rows (the feed loads with limit 500 and
+  // is scoped by the date range first). Low-cardinality columns (Group,
+  // Expense Type, Source) render as a <select> of the distinct values present;
+  // Date / GL Name / Doc No are "contains" text; Debit / Credit are "≥ amount".
+  const isLedgerReport = report.id === "ledger-report";
+  const [colFilters, setColFilters] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setColFilters({});
+  }, [report.id]);
+  useEffect(() => {
+    setPage(1);
+  }, [colFilters]);
 
   const buildParams = (): Record<string, string> => {
     const fc = report.filterConfig ?? {};
@@ -2509,13 +2539,54 @@ const ReportTable: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadId, rows, projects]);
 
-  const totalPages = Math.ceil(rows.length / PAGE_SIZE);
-  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const cell = (row: Record<string, unknown>, col: ExportColumn): string => {
     if (typeof col.accessor === "function") return col.accessor(row) as string;
     const v = row[col.accessor as string];
     return v == null ? "—" : String(v);
   };
+
+  // Ledger Report column-filter machinery (see the isLedgerReport note above).
+  const LEDGER_SELECT_COLS = ["Group", "Expense Type", "Source"];
+  // Debit / Credit have no filter control — an amount threshold isn't a useful
+  // way to slice a ledger feed.
+  const LEDGER_NO_FILTER_COLS = ["Debit", "Credit"];
+  const ledgerColOptions = useMemo<Record<string, string[]>>(() => {
+    if (!isLedgerReport) return {};
+    const sets: Record<string, Set<string>> = {};
+    for (const h of LEDGER_SELECT_COLS) sets[h] = new Set();
+    for (const row of rows) {
+      for (const h of LEDGER_SELECT_COLS) {
+        const col = effectiveColumns.find((c) => c.header === h);
+        if (!col) continue;
+        const v = cell(row, col);
+        if (v && v !== "—") sets[h].add(v);
+      }
+    }
+    const entries: [string, string[]][] = Object.entries(sets).map(([k, s]) => [
+      k,
+      [...s].sort(),
+    ]);
+    return Object.fromEntries(entries);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLedgerReport, rows, effectiveColumns]);
+
+  const applyColFilters = (list: Record<string, unknown>[]) => {
+    const active = Object.entries(colFilters).filter(([, v]) => v.trim() !== "");
+    if (!active.length) return list;
+    return list.filter((row) =>
+      active.every(([header, val]) => {
+        const col = effectiveColumns.find((c) => c.header === header);
+        if (!col) return true;
+        const cv = cell(row, col);
+        if (LEDGER_SELECT_COLS.includes(header)) return cv === val;
+        return cv.toLowerCase().includes(val.trim().toLowerCase());
+      }),
+    );
+  };
+
+  const viewRows = isLedgerReport ? applyColFilters(rows) : rows;
+  const totalPages = Math.ceil(viewRows.length / PAGE_SIZE);
+  const pageRows = viewRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <>
@@ -2544,7 +2615,9 @@ const ReportTable: React.FC<{
           </span>
           {!loading && !error && !isVendorLedger && (
             <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
-              {rows.length} records
+              {viewRows.length === rows.length
+                ? `${rows.length} records`
+                : `${viewRows.length} of ${rows.length} records`}
             </span>
           )}
         </div>
@@ -2640,12 +2713,16 @@ const ReportTable: React.FC<{
 
           {!isVendorLedger && (
           <ExportMenu
-            data={rows as unknown as Record<string, unknown>[]}
-            fetchData={fetchAllForExport}
+            data={viewRows as unknown as Record<string, unknown>[]}
+            fetchData={
+              isLedgerReport
+                ? async () => applyColFilters(await fetchAllForExport())
+                : fetchAllForExport
+            }
             columns={effectiveColumns}
             title={report.label}
             filename={report.id}
-            disabled={loading || rows.length === 0}
+            disabled={loading || viewRows.length === 0}
           />
           )}
         </div>
@@ -2741,6 +2818,62 @@ const ReportTable: React.FC<{
                     </th>
                   ))}
                 </tr>
+                {isLedgerReport && (
+                  <tr className="border-b border-border bg-muted/10">
+                    <th className="px-2 py-1.5">
+                      {Object.values(colFilters).some((v) => v.trim() !== "") && (
+                        <button
+                          onClick={() => setColFilters({})}
+                          title="Clear all column filters"
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </th>
+                    {effectiveColumns.map((col) => {
+                      const val = colFilters[col.header] ?? "";
+                      const set = (v: string) =>
+                        setColFilters((f) => ({ ...f, [col.header]: v }));
+                      const base =
+                        "w-full min-w-[90px] rounded border border-border bg-background px-1.5 py-1 text-[11px] font-normal normal-case tracking-normal text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40";
+                      let control: React.ReactNode = null;
+                      if (LEDGER_NO_FILTER_COLS.includes(col.header)) {
+                        control = null;
+                      } else if (LEDGER_SELECT_COLS.includes(col.header)) {
+                        control = (
+                          <select
+                            value={val}
+                            onChange={(e) => set(e.target.value)}
+                            className={base}
+                          >
+                            <option value="">All</option>
+                            {(ledgerColOptions[col.header] ?? []).map((o) => (
+                              <option key={o} value={o}>
+                                {o}
+                              </option>
+                            ))}
+                          </select>
+                        );
+                      } else {
+                        control = (
+                          <input
+                            type="text"
+                            placeholder="Filter…"
+                            value={val}
+                            onChange={(e) => set(e.target.value)}
+                            className={base}
+                          />
+                        );
+                      }
+                      return (
+                        <th key={col.header} className="px-2 py-1.5 font-normal">
+                          {control}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                )}
               </thead>
               <tbody className="divide-y divide-border/40">
                 {pageRows.map((row, i) => (
@@ -2762,6 +2895,16 @@ const ReportTable: React.FC<{
                     ))}
                   </tr>
                 ))}
+                {viewRows.length === 0 && (
+                  <tr>
+                    <td
+                      colSpan={effectiveColumns.length + 1}
+                      className="px-4 py-8 text-center text-xs text-muted-foreground"
+                    >
+                      No rows match the column filters.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
@@ -2769,7 +2912,7 @@ const ReportTable: React.FC<{
             <div className="flex items-center justify-between px-4 py-2.5 border-t border-border text-xs text-muted-foreground">
               <span>
                 {(page - 1) * PAGE_SIZE + 1}–
-                {Math.min(page * PAGE_SIZE, rows.length)} of {rows.length}
+                {Math.min(page * PAGE_SIZE, viewRows.length)} of {viewRows.length}
               </span>
               <div className="flex items-center gap-1">
                 <button
