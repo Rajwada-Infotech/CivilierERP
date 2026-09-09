@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -133,6 +134,11 @@ interface ReportDef {
   columns: ExportColumn[];
   defaultParams?: Record<string, string>;
   filterConfig?: FilterConfig;
+  /** When set, the tile is a launcher: clicking it navigates to this route
+   *  (a report that lives as its own page, e.g. the Follow-Up performance
+   *  reports) instead of opening an inline table. `apiPath`/`columns` are
+   *  then unused — pass "" / []. */
+  route?: string;
 }
 
 interface ModuleSection {
@@ -1928,6 +1934,42 @@ const ALL_REPORTS: ReportDef[] = [
       { header: "Summary", accessor: (r) => (r.Summary ?? "—") as string },
     ],
   },
+
+  // ── Follow-Up performance reports ─────────────────────────────────────────
+  // These live as their own pages (FollowupShell-wrapped charts/tables), so
+  // the catalog tile is a launcher — clicking it navigates to the route
+  // rather than rendering an inline table. Moved here out of the Follow-Up
+  // module sidebar.
+  {
+    id: "task-performance-report",
+    label: "Task Performance Report",
+    description: "Completion rates, delays & performance by assignee / department",
+    icon: BarChart3,
+    color: "#0d9488",
+    route: "/followup/task-performance-report",
+    apiPath: "",
+    columns: [],
+  },
+  {
+    id: "tag-performance-report",
+    label: "Tag Performance Report",
+    description: "Task volume, turnaround & ageing sliced by tag",
+    icon: Percent,
+    color: "#0d9488",
+    route: "/followup/tag-performance-report",
+    apiPath: "",
+    columns: [],
+  },
+  {
+    id: "entry-type-doc-followup-report",
+    label: "Entry Type & Document Report",
+    description: "Follow-up activity by entry type and linked document",
+    icon: FileText,
+    color: "#0d9488",
+    route: "/followup/entry-type-doc-followup-report",
+    apiPath: "",
+    columns: [],
+  },
 ];
 
 const REPORT_MAP = new Map(ALL_REPORTS.map((r) => [r.id, r]));
@@ -2018,6 +2060,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
     icon: ListChecks,
     reportIds: [
       "task-performance-report",
+      "tag-performance-report",
       "entry-type-doc-followup-report",
     ],
   },
@@ -3039,6 +3082,7 @@ const MARKETING_HEAD_SECTION_IDS = new Set(["sales-automation", "crm"]);
 
 const Reports: React.FC = () => {
   usePageRights("reports");
+  const navigate = useNavigate();
   const { currentUser } = useAuth();
   const visibleSections =
     currentUser?.role === "marketing_head"
@@ -3159,6 +3203,12 @@ const Reports: React.FC = () => {
   };
 
   const handleTileClick = (reportId: string) => {
+    // Launcher tiles (Follow-Up performance reports) open their own page.
+    const routeTo = REPORT_MAP.get(reportId)?.route;
+    if (routeTo) {
+      navigate(routeTo);
+      return;
+    }
     setActiveReport((prev) => (prev === reportId ? null : reportId));
     setTimeout(
       () =>

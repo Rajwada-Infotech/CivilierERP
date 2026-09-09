@@ -46,6 +46,24 @@ const APPS = [
     downloadName: "CivilierERP-FixedAsset.apk",
     version: "1.0.0",
   },
+  {
+    key: "follow-up",
+    title: "Civilier Follow-Up",
+    description:
+      "For task follow-ups — scan or download to install the Follow-Up app (tasks, close/cancel, transfer, performance) on your device.",
+    apkPath: "/downloads/CivilierERPFollowUp.apk",
+    downloadName: "CivilierERP-FollowUp.apk",
+    version: "1.0.0",
+  },
+  {
+    key: "maintenance",
+    title: "Civilier Maintenance",
+    description:
+      "For maintenance & security teams — scan or download to install the Maintenance app (bills, attendance, electricity, directory) on your device.",
+    apkPath: "/downloads/CivilierERPMaintenance.apk",
+    downloadName: "CivilierERP-Maintenance.apk",
+    version: "1.0.0",
+  },
 ] as const;
 
 function AppCard({ title, description, apkPath, downloadName, version }: (typeof APPS)[number]) {
