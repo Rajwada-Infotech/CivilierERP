@@ -1,15 +1,15 @@
 /**
  * VendorLedgerReport.tsx — Reports → Vendor Ledger Report
  *
- * Search any Supplier by name and see every transaction ever posted
- * against it: invoices, payments, journal vouchers, fund transfers. Same
- * running-balance passbook pattern as Balance Enquiry, just searched by
- * name instead of picked from a bank-only dropdown. See
- * backend/routes/vendorLedger.js.
+ * Search any Sundry Creditor — Supplier or Contractor — by name and see
+ * every transaction ever posted against it: invoices, payments, journal
+ * vouchers, fund transfers. Same running-balance passbook pattern as
+ * Balance Enquiry, just searched by name instead of picked from a
+ * bank-only dropdown. See backend/routes/vendorLedger.js.
  *
- * Before a supplier is searched/selected, shows every supplier transaction
+ * Before a vendor is searched/selected, shows every vendor transaction
  * (newest first) instead of an empty placeholder — the "all" view then
- * narrows to one supplier's own passbook (with running balance and summary
+ * narrows to one vendor's own passbook (with running balance and summary
  * tiles) once one is picked. `VendorLedgerReportBody` is the reusable core
  * (no page chrome), embedded directly into Reports.tsx's report catalog;
  * the default export below just wraps it for the standalone route.
@@ -97,7 +97,7 @@ function datePreset(key: "today" | "week" | "month" | "fy" | "all"): { from: str
 // LHeadType codes used across this app's AccountHeadMaster.
 const TYPE_META: Record<string, { label: string; icon: React.ElementType; color: string }> = {
   S: { label: "Supplier", icon: Building2, color: "text-orange-500" },
-  C: { label: "Customer", icon: Users, color: "text-sky-500" },
+  C: { label: "Contractor", icon: Building2, color: "text-amber-600" },
   A: { label: "Customer", icon: Users, color: "text-sky-500" },
   BR: { label: "Broker", icon: Users, color: "text-violet-500" },
   B: { label: "Bank", icon: Landmark, color: "text-emerald-500" },
@@ -296,7 +296,7 @@ export function VendorLedgerReportBody() {
             value={query}
             onChange={(e) => { setQuery(e.target.value); setShowResults(true); }}
             onFocus={() => setShowResults(true)}
-            placeholder="Type a supplier name…"
+            placeholder="Type a supplier or contractor name…"
             className="w-full h-9 pl-8 pr-8 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
           />
           {(query || selectedHead) && (
@@ -570,7 +570,7 @@ export default function VendorLedgerReport() {
       <Breadcrumbs items={["Dashboard", "Reports", "Vendor Ledger Report"]} />
       <FinanceShell
         title="Vendor Ledger Report"
-        subtitle="Every transaction posted against a supplier"
+        subtitle="Every transaction posted against a supplier or contractor"
         icon={Users}
       >
         <VendorLedgerReportBody />
