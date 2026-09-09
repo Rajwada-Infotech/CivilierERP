@@ -259,10 +259,23 @@ async function cancelPaymentCheque(pool, { paymentId, chequeNo, reason, userEmai
       WHERE PPaymentID = @PPaymentID
     `);
 
-  // Reverse whatever GL posting this payment made on approval — a no-op if
-  // it was never posted (e.g. still Pending) since the underlying UPDATE is
-  // scoped to IsReversed = 0 rows for this exact source.
-  await reversePostingBySource(pool, "NewPayment", payment.PPaymentID);
+  // Reverse whatever GL this payment posted — a no-op for whichever
+  // SourceType didn't apply (each UPDATE is scoped to IsReversed = 0 rows
+  // for its exact source, so reversing one that was never posted just
+  // matches zero rows). Same full set newPayment.js's hard-DELETE route
+  // already reverses for a PPaymentID (see its own comment there): a
+  // payment posts under exactly one of 'NewPayment' (auto-post on
+  // approval) or 'PaymentPosting' (the manual "Post to GL" action,
+  // authoritative — see postPaymentApproval's guard in
+  // services/generalLedger.js and POST /:id/post-to-gl in newPayment.js),
+  // and may separately carry a 'BounceChargePosting' leg. Reversing only
+  // 'NewPayment' left whichever of these actually applied still standing —
+  // a live, unreversed GL entry (and a disbalanced ledger) for any
+  // cancelled cheque whose payment had gone through one of the others.
+  // LoanRepayment is handled separately below by reverseLoanRepaymentIfLinked.
+  for (const sourceType of ["NewPayment", "PaymentPosting", "BounceChargePosting"]) {
+    await reversePostingBySource(pool, sourceType, payment.PPaymentID);
+  }
 
   // Recompute the invoice's paid/remaining amount now that this payment no
   // longer counts (Status='Cancelled' is already excluded by syncBillStatus's
