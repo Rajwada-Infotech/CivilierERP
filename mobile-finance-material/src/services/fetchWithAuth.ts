@@ -3,7 +3,7 @@
 // don't exist here: localStorage/sessionStorage (-> expo-secure-store,
 // async) and window.location.href (-> sessionEvents, consumed by
 // AuthContext).
-import { apiUrl } from "@/utils/apiBase";
+import { apiUrl, API_BASE_URL } from "@/utils/apiBase";
 import { getToken, clearAuthStorage } from "./authStorage";
 import { emitSessionExpired } from "./sessionEvents";
 
@@ -58,8 +58,12 @@ export async function fetchWithAuth(
     });
   } catch (err: unknown) {
     if (err instanceof Error && err.name === "AbortError") throw err;
-    console.error("Network error:", err);
-    throw new Error("Network error. Please check your connection.");
+    console.error(`Network error reaching ${API_BASE_URL}:`, err);
+    throw new Error(
+      __DEV__
+        ? `Can't reach the backend at ${API_BASE_URL}. Make sure it's running and, on a phone, that EXPO_PUBLIC_API_URL points to your computer's LAN IP.`
+        : "Network error. Please check your connection.",
+    );
   }
 
   if (response.status === 401) {
