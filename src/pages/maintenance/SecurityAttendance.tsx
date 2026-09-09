@@ -43,11 +43,14 @@ import {
   rejectSecurityAttendance,
   cancelSecurityAttendance,
   getSecurityAttendanceLogs,
+  searchSecurityVendors,
   type SecurityShift,
   type SecurityPersonnelRow,
   type SecurityAttendanceRow,
   type AttendanceStatus,
+  type VendorOption,
 } from "@/api/securityAttendanceApi";
+import { getEnterpriseOptions } from "@/api/enterpriseApi";
 
 const PAGE_KEY = "maintenance-security-attendance";
 const TABS = ["overview", "checkinout", "personnel", "history", "shifts"] as const;
@@ -537,6 +540,8 @@ function PersonnelTab({ rights }: { rights: ReturnType<typeof usePageRights> }) 
                 <th className="text-left px-4 py-2.5">Security ID</th>
                 <th className="text-left px-4 py-2.5">Name</th>
                 <th className="text-left px-4 py-2.5">Phone</th>
+                <th className="text-left px-4 py-2.5">Vendor</th>
+                <th className="text-left px-4 py-2.5">Project</th>
                 <th className="text-left px-4 py-2.5">Default Shift</th>
                 <th className="text-left px-4 py-2.5">Status</th>
                 <th className="text-right px-4 py-2.5">Actions</th>
@@ -548,6 +553,8 @@ function PersonnelTab({ rights }: { rights: ReturnType<typeof usePageRights> }) 
                   <td className="px-4 py-2.5 font-mono text-xs">{p.SecurityCode}</td>
                   <td className="px-4 py-2.5 font-medium text-foreground">{p.Name}</td>
                   <td className="px-4 py-2.5 text-muted-foreground">{p.Phone || "—"}</td>
+                  <td className="px-4 py-2.5 text-muted-foreground">{p.VendorName || "—"}</td>
+                  <td className="px-4 py-2.5 text-muted-foreground">{p.ProjectName || "—"}</td>
                   <td className="px-4 py-2.5 text-muted-foreground">{p.DefaultShiftName || "—"}</td>
                   <td className="px-4 py-2.5">
                     <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${p.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>
@@ -594,17 +601,42 @@ function PersonnelFormDialog({
   const [remarks, setRemarks] = useState(person?.Remarks || "");
   const [saving, setSaving] = useState(false);
 
+  // ── Vendor — typeahead across Supplier/Contractor/Broker/Customer heads,
+  //     same search-box pattern VendorLedgerReportBody uses. ──────────────
+  const [vendorId, setVendorId] = useState<number | null>(person?.VendorId ?? null);
+  const [vendorQuery, setVendorQuery] = useState(person?.VendorName || "");
+  const [vendorResultsOpen, setVendorResultsOpen] = useState(false);
+  const [vendorDebounced, setVendorDebounced] = useState("");
+  React.useEffect(() => {
+    const t = setTimeout(() => setVendorDebounced(vendorQuery.trim()), 250);
+    return () => clearTimeout(t);
+  }, [vendorQuery]);
+  const { data: vendorResults = [], isFetching: vendorSearching } = useQuery({
+    queryKey: ["security-vendor-search", vendorDebounced],
+    queryFn: () => searchSecurityVendors(vendorDebounced),
+    enabled: vendorDebounced.length >= 2,
+  });
+
+  // ── Project ───────────────────────────────────────────────────────────
+  const [projectId, setProjectId] = useState(person?.ProjectId ? String(person.ProjectId) : "");
+  const { data: projectOptions } = useQuery({
+    queryKey: ["enterprise-options", "P"],
+    queryFn: () => getEnterpriseOptions(undefined, "P"),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const handleSave = async () => {
     if (!isEdit && !securityCode.trim()) { toast.error("Security ID is required"); return; }
     if (!name.trim()) { toast.error("Name is required"); return; }
     setSaving(true);
     try {
       const shiftId = defaultShiftId ? Number(defaultShiftId) : null;
+      const projId = projectId ? Number(projectId) : null;
       if (isEdit) {
-        await updateSecurityPersonnel(person!.Id, { name, phone: phone || undefined, defaultShiftId: shiftId, status, remarks: remarks || undefined });
+        await updateSecurityPersonnel(person!.Id, { name, phone: phone || undefined, defaultShiftId: shiftId, vendorId, projectId: projId, status, remarks: remarks || undefined });
         toast.success("Personnel updated");
       } else {
-        await createSecurityPersonnel({ securityCode, name, phone: phone || undefined, defaultShiftId: shiftId, remarks: remarks || undefined });
+        await createSecurityPersonnel({ securityCode, name, phone: phone || undefined, defaultShiftId: shiftId, vendorId, projectId: projId, remarks: remarks || undefined });
         toast.success("Personnel added");
       }
       onSaved();
@@ -617,37 +649,85 @@ function PersonnelFormDialog({
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle className="font-heading text-base">{isEdit ? "Edit Personnel" : "Add Security Personnel"}</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
-          <div>
-            <label className={labelCls}>Security ID</label>
-            <input value={securityCode} onChange={(e) => setSecurityCode(e.target.value)} disabled={isEdit} className={`${fieldCls} disabled:opacity-60`} />
-          </div>
-          <div>
-            <label className={labelCls}>Name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} className={fieldCls} />
-          </div>
-          <div>
-            <label className={labelCls}>Phone</label>
-            <input value={phone} onChange={(e) => setPhone(e.target.value)} className={fieldCls} />
-          </div>
-          <div>
-            <label className={labelCls}>Default Shift</label>
-            <select value={defaultShiftId} onChange={(e) => setDefaultShiftId(e.target.value)} className={fieldCls}>
-              <option value="">Not assigned</option>
-              {shifts.map((s) => (<option key={s.Id} value={s.Id}>{s.Name}</option>))}
-            </select>
-          </div>
-          {isEdit && (
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>Status</label>
-              <select value={status} onChange={(e) => setStatus(e.target.value as "Active" | "Inactive")} className={fieldCls}>
-                <option value="Active">Active</option>
-                <option value="Inactive">Inactive</option>
+              <label className={labelCls}>Security ID</label>
+              <input value={securityCode} onChange={(e) => setSecurityCode(e.target.value)} disabled={isEdit} className={`${fieldCls} disabled:opacity-60`} />
+            </div>
+            <div>
+              <label className={labelCls}>Name</label>
+              <input value={name} onChange={(e) => setName(e.target.value)} className={fieldCls} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Phone</label>
+              <input value={phone} onChange={(e) => setPhone(e.target.value)} className={fieldCls} />
+            </div>
+            <div>
+              <label className={labelCls}>Project</label>
+              <select value={projectId} onChange={(e) => setProjectId(e.target.value)} className={fieldCls}>
+                <option value="">Not assigned</option>
+                {(projectOptions || []).map((p: { id: number; label: string }) => (
+                  <option key={p.id} value={p.id}>{p.label}</option>
+                ))}
               </select>
             </div>
-          )}
+          </div>
+          <div className="relative">
+            <label className={labelCls}>Vendor (Supplier / Contractor / Broker / Customer)</label>
+            <input
+              value={vendorQuery}
+              onChange={(e) => { setVendorQuery(e.target.value); setVendorId(null); setVendorResultsOpen(true); }}
+              onFocus={() => setVendorResultsOpen(true)}
+              onBlur={() => setTimeout(() => setVendorResultsOpen(false), 150)}
+              placeholder="Search vendor by name…"
+              className={fieldCls}
+            />
+            {vendorResultsOpen && vendorDebounced.length >= 2 && (
+              <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
+                {vendorSearching ? (
+                  <div className="px-3 py-2.5 text-xs text-muted-foreground">Searching…</div>
+                ) : vendorResults.length === 0 ? (
+                  <div className="px-3 py-2.5 text-xs text-muted-foreground">No matching vendor found.</div>
+                ) : (
+                  vendorResults.map((v: VendorOption) => (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => { setVendorId(v.id); setVendorQuery(v.name); setVendorResultsOpen(false); }}
+                      className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/40 transition-colors"
+                    >
+                      <span className="text-xs text-foreground truncate">{v.name}</span>
+                      <span className="shrink-0 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{v.typeLabel}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelCls}>Default Shift</label>
+              <select value={defaultShiftId} onChange={(e) => setDefaultShiftId(e.target.value)} className={fieldCls}>
+                <option value="">Not assigned</option>
+                {shifts.map((s) => (<option key={s.Id} value={s.Id}>{s.Name}</option>))}
+              </select>
+            </div>
+            {isEdit && (
+              <div>
+                <label className={labelCls}>Status</label>
+                <select value={status} onChange={(e) => setStatus(e.target.value as "Active" | "Inactive")} className={fieldCls}>
+                  <option value="Active">Active</option>
+                  <option value="Inactive">Inactive</option>
+                </select>
+              </div>
+            )}
+          </div>
           <div>
             <label className={labelCls}>Remarks</label>
             <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} rows={2} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground" />

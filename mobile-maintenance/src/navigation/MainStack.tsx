@@ -3,7 +3,10 @@ import DashboardScreen from "@/screens/dashboard/DashboardScreen";
 import ProfileScreen from "@/screens/dashboard/ProfileScreen";
 import NotificationsScreen from "@/screens/notifications/NotificationsScreen";
 import DirectoryScreen from "@/screens/directory/DirectoryScreen";
+import CustomerProfileScreen from "@/screens/directory/CustomerProfileScreen";
 import BillsScreen from "@/screens/bills/BillsScreen";
+import BillViewScreen from "@/screens/bills/BillViewScreen";
+import BillFormScreen from "@/screens/bills/BillFormScreen";
 import AttendanceScreen from "@/screens/attendance/AttendanceScreen";
 import ElectricityScreen from "@/screens/electricity/ElectricityScreen";
 import { TopHeader } from "./TopHeader";
@@ -16,7 +19,10 @@ import { TopHeader } from "./TopHeader";
 export type MainStackParamList = {
   Dashboard: undefined;
   Directory: undefined;
+  CustomerProfile: { bookingId: number; customerName?: string | null };
   Bills: undefined;
+  BillView: { billId: number };
+  BillForm: { billId?: number };
   Attendance: undefined;
   Electricity: undefined;
   Profile: undefined;
@@ -30,7 +36,10 @@ export default function MainStack() {
     <Stack.Navigator screenOptions={{ header: (props) => <TopHeader {...props} /> }}>
       <Stack.Screen name="Dashboard" component={DashboardScreen} options={{ title: "Dashboard" }} />
       <Stack.Screen name="Directory" component={DirectoryScreen} options={{ title: "Customer Directory" }} />
+      <Stack.Screen name="CustomerProfile" component={CustomerProfileScreen} options={{ title: "Customer Profile" }} />
       <Stack.Screen name="Bills" component={BillsScreen} options={{ title: "Maintenance Bills" }} />
+      <Stack.Screen name="BillView" component={BillViewScreen} options={{ title: "Bill" }} />
+      <Stack.Screen name="BillForm" component={BillFormScreen} options={({ route }) => ({ title: route.params?.billId ? "Edit Bill" : "Create Bill" })} />
       <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "Security Attendance" }} />
       <Stack.Screen name="Electricity" component={ElectricityScreen} options={{ title: "Electricity Maintenance" }} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />

@@ -23,7 +23,21 @@ export interface SecurityPersonnelRow {
   DefaultShiftName: string | null;
   StartTime: string | null;
   EndTime: string | null;
+  // Which agency/party supplies this guard — a Supplier/Contractor/
+  // Broker/Customer head, same set Vendor Ledger Report searches.
+  VendorId: number | null;
+  VendorName: string | null;
+  VendorType: "S" | "C" | "BR" | "A" | null;
+  ProjectId: number | null;
+  ProjectName: string | null;
   CreatedAt: string | null;
+}
+
+export interface VendorOption {
+  id: number;
+  name: string;
+  type: "S" | "C" | "BR" | "A";
+  typeLabel: string;
 }
 
 export type AttendanceStatus = "Present" | "Late" | "Absent" | "HalfDay";
@@ -137,13 +151,24 @@ export const getSecurityPersonnel = (search?: string): Promise<SecurityPersonnel
 };
 
 export const createSecurityPersonnel = (payload: {
-  securityCode: string; name: string; phone?: string; defaultShiftId?: number | null; remarks?: string;
+  securityCode: string; name: string; phone?: string; defaultShiftId?: number | null;
+  vendorId?: number | null; projectId?: number | null; remarks?: string;
 }) => postJson<{ id: number; message: string }>("/personnel", payload, "Failed to add security personnel");
 
 export const updateSecurityPersonnel = (
   id: number,
-  payload: { name: string; phone?: string; defaultShiftId?: number | null; status?: string; remarks?: string },
+  payload: {
+    name: string; phone?: string; defaultShiftId?: number | null;
+    vendorId?: number | null; projectId?: number | null; status?: string; remarks?: string;
+  },
 ) => putJson<{ message: string }>(`/personnel/${id}`, payload, "Failed to update security personnel");
+
+// Typeahead over Supplier/Contractor/Broker/Customer heads — the Personnel
+// form's "Vendor" field (which agency supplies this guard).
+export const searchSecurityVendors = (q: string): Promise<VendorOption[]> => {
+  if (q.trim().length < 2) return Promise.resolve([]);
+  return fetchWithAuth(`${BASE}/vendor-search?q=${encodeURIComponent(q)}`).then((r) => r.json().catch(() => []));
+};
 
 // ── Attendance list / history ────────────────────────────────────────────
 export interface AttendanceFilters {

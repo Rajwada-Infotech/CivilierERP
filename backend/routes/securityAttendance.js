@@ -159,22 +159,60 @@ router.put("/shifts/:id", requirePageRight(PAGE_KEY, "edit"), async (req, res) =
 
 // ── SECURITY PERSONNEL ───────────────────────────────────────────────────
 
-router.get("/personnel", requirePageRight(PAGE_KEY, "view"), async (req, res) => {
+// LHeadType values that represent a real vendor/party who could plausibly
+// supply security personnel — same set Vendor Ledger Report searches
+// (Supplier/Contractor/Broker/Customer), never Bank/GL/Loan heads.
+const VENDOR_TYPES = ["S", "C", "BR", "A"];
+const VENDOR_TYPE_LABEL = { S: "Supplier", C: "Contractor", BR: "Broker", A: "Customer" };
+
+// GET /vendor-search?q= — typeahead for the Personnel form's Vendor field.
+// Registered before "/personnel/:id" isn't a concern here since this path
+// segment ("vendor-search") never collides with "/personnel", but it's
+// still placed above the other personnel routes for readability.
+router.get("/vendor-search", requirePageRight(PAGE_KEY, "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const q = req.query.q ? String(req.query.q).trim() : "";
+    if (q.length < 2) return res.json([]);
+    const result = await pool.request().input("Q", sql.NVarChar(200), `%${q}%`).query(`
+      SELECT TOP 30
+        LHeadId AS id, ISNULL(DisplayName, LHeadName) AS name, RTRIM(LHeadType) AS type
+      FROM dbo.AccountHeadMaster
+      WHERE LHeadStatus = 1
+        AND LHeadType IN (${VENDOR_TYPES.map((t) => `'${t}'`).join(",")})
+        AND (LHeadName LIKE @Q OR DisplayName LIKE @Q OR LHeadCode LIKE @Q)
+      ORDER BY ISNULL(DisplayName, LHeadName)
+    `);
+    res.json(result.recordset.map((r) => ({ ...r, typeLabel: VENDOR_TYPE_LABEL[r.type] || r.type })));
+  } catch (err) {
+    console.error("GET /security-attendance/vendor-search error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const PERSONNEL_SELECT = `
+  SELECT sp.Id, sp.SecurityCode, sp.Name, sp.Phone, sp.Status, sp.Remarks,
+         sp.DefaultShiftId, sh.Name AS DefaultShiftName, sh.StartTime, sh.EndTime,
+         sp.VendorId, ISNULL(ahm.DisplayName, ahm.LHeadName) AS VendorName, RTRIM(ahm.LHeadType) AS VendorType,
+         sp.ProjectId, ent.name AS ProjectName,
+         sp.CreatedAt
+  FROM dbo.SecurityPersonnel sp
+  LEFT JOIN dbo.SecurityShift sh ON sh.Id = sp.DefaultShiftId
+  LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = sp.VendorId
+  LEFT JOIN dbo.enterprise ent ON ent.id = sp.ProjectId
+`;
+
+router.get("/personnel", requirePageRight(PAGE_KEY, "view"), async (req, res) => {
+  try {
     const search = req.query.search ? String(req.query.search).trim() : null;
-    const req0 = pool.request();
+    const req0 = getPool().request();
     let where = "1=1";
     if (search) {
       req0.input("search", sql.NVarChar(200), `%${search}%`);
       where += " AND (sp.Name LIKE @search OR sp.SecurityCode LIKE @search)";
     }
     const r = await req0.query(`
-      SELECT sp.Id, sp.SecurityCode, sp.Name, sp.Phone, sp.Status, sp.Remarks,
-             sp.DefaultShiftId, sh.Name AS DefaultShiftName, sh.StartTime, sh.EndTime,
-             sp.CreatedAt
-      FROM dbo.SecurityPersonnel sp
-      LEFT JOIN dbo.SecurityShift sh ON sh.Id = sp.DefaultShiftId
+      ${PERSONNEL_SELECT}
       WHERE ${where}
       ORDER BY sp.Status DESC, sp.Name
     `);
@@ -186,7 +224,7 @@ router.get("/personnel", requirePageRight(PAGE_KEY, "view"), async (req, res) =>
 });
 
 router.post("/personnel", requirePageRight(PAGE_KEY, "create"), async (req, res) => {
-  const { securityCode, name, phone, defaultShiftId, remarks } = req.body;
+  const { securityCode, name, phone, defaultShiftId, vendorId, projectId, remarks } = req.body;
   if (!securityCode || !String(securityCode).trim()) return res.status(400).json({ error: "Security ID is required" });
   if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
   try {
@@ -201,12 +239,14 @@ router.post("/personnel", requirePageRight(PAGE_KEY, "create"), async (req, res)
       .input("Name", sql.NVarChar(150), String(name).trim())
       .input("Phone", sql.NVarChar(20), phone || null)
       .input("DefaultShiftId", sql.Int, defaultShiftId || null)
+      .input("VendorId", sql.Int, vendorId || null)
+      .input("ProjectId", sql.Int, projectId || null)
       .input("Remarks", sql.NVarChar(500), remarks || null)
       .input("CreatedBy", sql.NVarChar(150), actorOf(req))
       .query(`
-        INSERT INTO dbo.SecurityPersonnel (SecurityCode, Name, Phone, DefaultShiftId, Remarks, CreatedBy)
+        INSERT INTO dbo.SecurityPersonnel (SecurityCode, Name, Phone, DefaultShiftId, VendorId, ProjectId, Remarks, CreatedBy)
         OUTPUT INSERTED.Id
-        VALUES (@SecurityCode, @Name, @Phone, @DefaultShiftId, @Remarks, @CreatedBy)
+        VALUES (@SecurityCode, @Name, @Phone, @DefaultShiftId, @VendorId, @ProjectId, @Remarks, @CreatedBy)
       `);
     res.status(201).json({ id: r.recordset[0].Id, message: "Security personnel added" });
   } catch (err) {
@@ -218,7 +258,7 @@ router.post("/personnel", requirePageRight(PAGE_KEY, "create"), async (req, res)
 router.put("/personnel/:id", requirePageRight(PAGE_KEY, "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
-  const { name, phone, defaultShiftId, status, remarks } = req.body;
+  const { name, phone, defaultShiftId, vendorId, projectId, status, remarks } = req.body;
   if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required" });
   try {
     const pool = getPool();
@@ -228,12 +268,15 @@ router.put("/personnel/:id", requirePageRight(PAGE_KEY, "edit"), async (req, res
       .input("Name", sql.NVarChar(150), String(name).trim())
       .input("Phone", sql.NVarChar(20), phone || null)
       .input("DefaultShiftId", sql.Int, defaultShiftId || null)
+      .input("VendorId", sql.Int, vendorId || null)
+      .input("ProjectId", sql.Int, projectId || null)
       .input("Status", sql.NVarChar(20), status || "Active")
       .input("Remarks", sql.NVarChar(500), remarks || null)
       .input("UpdatedBy", sql.NVarChar(150), actorOf(req))
       .query(`
         UPDATE dbo.SecurityPersonnel SET
           Name = @Name, Phone = @Phone, DefaultShiftId = @DefaultShiftId,
+          VendorId = @VendorId, ProjectId = @ProjectId,
           Status = @Status, Remarks = @Remarks, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id
       `);
