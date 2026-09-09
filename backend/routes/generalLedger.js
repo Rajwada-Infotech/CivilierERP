@@ -70,14 +70,18 @@ router.get("/options", async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        LHeadId            AS id,
-        ISNULL(DisplayName, LHeadName) AS label,
-        LHeadCode          AS code,
-        ISNULL(IsSystemGenerated, 0) AS isSystemGenerated
-      FROM dbo.AccountHeadMaster
-      WHERE LHeadType = 'GL'
-        AND LHeadStatus = 1
-      ORDER BY LHeadName
+        ahm.LHeadId            AS id,
+        ISNULL(ahm.DisplayName, ahm.LHeadName) AS label,
+        ahm.LHeadCode          AS code,
+        ISNULL(ahm.IsSystemGenerated, 0) AS isSystemGenerated,
+        -- Immediate parent group name — lets a picker group these heads
+        -- (e.g. Reports.tsx's Expense Head filter) instead of one flat list.
+        ag.Name AS groupName
+      FROM dbo.AccountHeadMaster ahm
+      LEFT JOIN dbo.AccountGroup ag ON ag.AGId = ahm.LBelongsTo
+      WHERE ahm.LHeadType = 'GL'
+        AND ahm.LHeadStatus = 1
+      ORDER BY ahm.LHeadName
     `);
     res.json(result.recordset);
   } catch (err) {
