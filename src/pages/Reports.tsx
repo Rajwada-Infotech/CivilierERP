@@ -16,6 +16,7 @@ import { WorkerAttendanceLogGroups } from "@/pages/civilworkdpr/WorkerAttendance
 import type { AttendanceReportRow } from "@/api/workerAttendanceApi";
 import { VendorLedgerReportBody } from "@/pages/finance/VendorLedgerReport";
 import { getProjects as fetchProjectOptions } from "@/api/grnApi";
+import { MultiSelectDropdown, type MultiSelectOption } from "@/components/ui/MultiSelectDropdown";
 import {
   Building2,
   Calendar,
@@ -479,6 +480,7 @@ const ALL_REPORTS: ReportDef[] = [
       },
       { header: "Source", accessor: (r) => (r.SourceType ?? "—") as string },
       { header: "Doc No", accessor: (r) => (r.DocNo ?? "—") as string },
+      { header: "Paid To", accessor: (r) => (r.PaidTo ?? "—") as string },
       { header: "Debit", accessor: (r) => fmt(Number(r.DebitAmount) || 0) },
       { header: "Credit", accessor: (r) => fmt(Number(r.CreditAmount) || 0) },
       { header: "Narration", accessor: (r) => (r.Narration ?? "—") as string },
@@ -2342,12 +2344,13 @@ const LedgerReportGroups: React.FC<{
 
             {!collapsed && (
               <div className="overflow-x-auto bg-muted/5">
-                <table className="w-full text-xs min-w-[720px]">
+                <table className="w-full text-xs min-w-[860px]">
                   <thead>
                     <tr className="text-muted-foreground uppercase tracking-wide text-[10px] font-heading">
                       <th className="text-left pl-11 pr-3 py-2">Date</th>
                       <th className="text-left px-3 py-2">Source</th>
                       <th className="text-left px-3 py-2">Doc No</th>
+                      <th className="text-left px-3 py-2">Paid To</th>
                       <th className="text-left px-3 py-2">Narration</th>
                       <th className="text-right px-3 py-2">Debit</th>
                       <th className="text-right px-4 sm:px-5 py-2">Credit</th>
@@ -2366,6 +2369,9 @@ const LedgerReportGroups: React.FC<{
                         <td className="px-3 py-2 whitespace-nowrap">{(r.SourceType as string) ?? "—"}</td>
                         <td className="px-3 py-2 whitespace-nowrap font-mono text-muted-foreground">
                           {(r.DocNo as string) ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-foreground max-w-[180px] truncate" title={(r.PaidTo as string) ?? ""}>
+                          {(r.PaidTo as string) || "—"}
                         </td>
                         <td className="px-3 py-2 text-foreground max-w-[280px] truncate" title={(r.Narration as string) ?? ""}>
                           {(r.Narration as string) ?? "—"}
@@ -2451,38 +2457,41 @@ const ReportTable: React.FC<{
       .catch(() => {});
   }, [isPaymentReasonReport]);
 
-  // ── Expense Head switcher (expense-register only) ────────────────────────
+  // ── Expense Head switcher (expense-register only) — nested (grouped by
+  //     parent Account Group) multi-select, so more than one head can be
+  //     picked at once instead of one at a time. ───────────────────────────
   const isExpenseRegister = report.id === "expense-register";
   const isGrnRegister = report.id === "grn-register";
-  const [expenseHeadId, setExpenseHeadId] = useState<string>("");
-  const [expenseHeadOptions, setExpenseHeadOptions] = useState<{ id: number; name: string }[]>([]);
+  const [expenseHeadIds, setExpenseHeadIds] = useState<string[]>([]);
+  const [expenseHeadOptions, setExpenseHeadOptions] = useState<MultiSelectOption[]>([]);
   useEffect(() => {
     if (!isExpenseRegister) return;
-    fetchWithAuth("/api/journal-voucher/ledger-options")
+    fetchWithAuth("/api/general-ledger/options")
       .then((r) => r.json().catch(() => []))
-      .then((list: { id: number; label: string; type: string }[]) =>
+      .then((list: { id: number; label: string; code: string | null; groupName: string | null }[]) =>
         setExpenseHeadOptions(
-          (Array.isArray(list) ? list : [])
-            .filter((l) => l.type === "GL")
-            .map((l) => ({ id: l.id, name: l.label })),
+          (Array.isArray(list) ? list : []).map((l) => ({
+            id: l.id,
+            label: l.label,
+            hint: l.code || undefined,
+            group: l.groupName || null,
+          })),
         ),
       )
       .catch(() => {});
   }, [isExpenseRegister]);
 
-  // Once a specific Expense Head is picked, the register adds columns that
-  // only make sense in a filtered view: GL Name + Expense Type describe the
-  // filtered head itself (same value every row — resolved once server-side,
-  // see expenseBooking.js's EFilterHeadName/EFilterExpenseType), and Vendor
-  // Name / Invoice Amt / Invoice Date restate the row's own supplier/amount/
-  // real invoice date (EVendorInvoiceDate, distinct from the booking's own
-  // EDocDate) for this closer, single-head view.
+  // Always show the richer column set for the Expense Register — every row
+  // carries its own GL Name + Direct/Indirect Expense Type now (resolved
+  // per row server-side, see expenseBooking.js's ERowGLName/
+  // ERowExpenseType), not just a single filtered head's, so this no longer
+  // needs to gate on whether a head is picked.
   const effectiveColumns = useMemo<ExportColumn[]>(() => {
-    if (!isExpenseRegister || !expenseHeadId) return report.columns;
+    if (!isExpenseRegister) return report.columns;
     return [
       ...report.columns,
-      { header: "GL Name", accessor: (r) => (r.EFilterHeadName ?? "—") as string },
-      { header: "Expense Type", accessor: (r) => (r.EFilterExpenseType ?? "—") as string },
+      { header: "GL Name", accessor: (r) => (r.ERowGLName ?? "—") as string },
+      { header: "Expense Type", accessor: (r) => (r.ERowExpenseType ?? "—") as string },
       { header: "Vendor Name", accessor: (r) => (r.ESupplierName ?? "—") as string },
       {
         header: "Invoice Amt",
@@ -2496,7 +2505,7 @@ const ReportTable: React.FC<{
         },
       },
     ];
-  }, [isExpenseRegister, expenseHeadId, report.columns]);
+  }, [isExpenseRegister, report.columns]);
 
   const buildParams = (): Record<string, string> => {
     const fc = report.filterConfig ?? {};
@@ -2546,8 +2555,9 @@ const ReportTable: React.FC<{
     // Stock summary: pass selected godownId to inventory-master
     if (isStockSummary && godownId) f["godownId"] = godownId;
 
-    // Expense Register: pass selected expenseHeadId
-    if (isExpenseRegister && expenseHeadId) f["expenseHeadId"] = expenseHeadId;
+    // Expense Register: pass every selected Expense Head, comma-separated —
+    // the backend's expenseHeadId param accepts either one id or a list.
+    if (isExpenseRegister && expenseHeadIds.length) f["expenseHeadId"] = expenseHeadIds.join(",");
 
     // Payment Reason Report: scope to a single reason when selected
     if (isPaymentReasonReport && reasonFilter) f["reason"] = reasonFilter;
@@ -2596,7 +2606,7 @@ const ReportTable: React.FC<{
     filters.rangeTo,
     godownId,
     reasonFilter,
-    expenseHeadId,
+    expenseHeadIds,
     projects,
   ]);
 
@@ -2650,7 +2660,7 @@ const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadId, rows, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, rows, projects]);
 
   const totalPages = Math.ceil(rows.length / PAGE_SIZE);
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -2755,28 +2765,19 @@ const ReportTable: React.FC<{
             </div>
           )}
 
-          {/* Expense Head switcher — expense-register only */}
+          {/* Expense Head switcher — expense-register only. Nested (grouped
+              by parent Account Group) multi-select — pick any number of
+              heads at once instead of one at a time. */}
           {isExpenseRegister && expenseHeadOptions.length > 0 && (
-            <div className="relative flex items-center">
-              <Receipt
-                size={11}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-              <select
-                value={expenseHeadId}
-                onChange={(e) => setExpenseHeadId(e.target.value)}
-                className="appearance-none pl-7 pr-6 py-1.5 h-[30px] rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
-              >
-                <option value="">All Expense Heads</option>
-                {expenseHeadOptions.map((h) => (
-                  <option key={h.id} value={String(h.id)}>
-                    {h.name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown
-                size={11}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            <div className="w-56">
+              <MultiSelectDropdown
+                options={expenseHeadOptions}
+                value={expenseHeadIds}
+                onChange={setExpenseHeadIds}
+                placeholder="All Expense Heads"
+                searchPlaceholder="Search expense heads…"
+                itemNoun="expense head"
+                className="h-[30px] py-1"
               />
             </div>
           )}

@@ -9,6 +9,10 @@ export interface MultiSelectOption {
   label: string;
   /** Optional secondary text shown dimmed after the label (code, count, etc.). */
   hint?: string | null;
+  /** When any option in the list sets this, the panel renders as a nested
+   *  (grouped) list — a sticky section header per distinct group, options
+   *  without one falling under "Other". Omit entirely for a flat list. */
+  group?: string | null;
 }
 
 interface MultiSelectDropdownProps {
@@ -90,6 +94,22 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
         ? liveSelected.filter((x) => x !== id)
         : [...liveSelected, id],
     );
+
+  const hasGroups = useMemo(() => options.some((o) => o.group), [options]);
+  const groupedFiltered = useMemo(() => {
+    if (!hasGroups) return null;
+    const byGroup = new Map<string, MultiSelectOption[]>();
+    for (const o of filtered) {
+      const key = o.group || "Other";
+      if (!byGroup.has(key)) byGroup.set(key, []);
+      byGroup.get(key)!.push(o);
+    }
+    return Array.from(byGroup.entries()).sort(([a], [b]) => {
+      if (a === "Other") return 1;
+      if (b === "Other") return -1;
+      return a.localeCompare(b);
+    });
+  }, [hasGroups, filtered]);
 
   const allFilteredSelected =
     filtered.length > 0 && filtered.every((o) => liveSelected.includes(String(o.id)));
@@ -211,40 +231,21 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
             <p className="px-3 py-4 text-xs text-muted-foreground text-center">
               No {itemNoun} matches “{search}”.
             </p>
+          ) : groupedFiltered ? (
+            groupedFiltered.map(([groupName, groupOptions]) => (
+              <div key={groupName}>
+                <div className="sticky top-0 z-10 px-3 py-1 text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground bg-muted/60 backdrop-blur-sm">
+                  {groupName}
+                </div>
+                {groupOptions.map((o) => (
+                  <OptionRow key={o.id} option={o} selected={liveSelected.includes(String(o.id))} onToggle={toggle} />
+                ))}
+              </div>
+            ))
           ) : (
-            filtered.map((o) => {
-              const id = String(o.id);
-              const isSelected = liveSelected.includes(id);
-              return (
-                <button
-                  key={id}
-                  type="button"
-                  role="option"
-                  aria-selected={isSelected}
-                  onClick={() => toggle(id)}
-                  className={cn(
-                    "w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors",
-                    "hover:bg-accent focus:outline-none focus-visible:bg-accent",
-                    isSelected && "bg-primary/5",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors",
-                      isSelected
-                        ? "bg-primary border-primary text-primary-foreground"
-                        : "border-border",
-                    )}
-                  >
-                    {isSelected && <Check size={11} strokeWidth={3} />}
-                  </span>
-                  <span className="flex-1 min-w-0 truncate text-foreground">{o.label}</span>
-                  {o.hint && (
-                    <span className="shrink-0 text-[11px] text-muted-foreground">{o.hint}</span>
-                  )}
-                </button>
-              );
-            })
+            filtered.map((o) => (
+              <OptionRow key={o.id} option={o} selected={liveSelected.includes(String(o.id))} onToggle={toggle} />
+            ))
           )}
         </div>
 
@@ -282,5 +283,34 @@ export const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
     </Popover>
   );
 };
+
+const OptionRow: React.FC<{ option: MultiSelectOption; selected: boolean; onToggle: (id: string) => void }> = ({
+  option,
+  selected,
+  onToggle,
+}) => (
+  <button
+    type="button"
+    role="option"
+    aria-selected={selected}
+    onClick={() => onToggle(String(option.id))}
+    className={cn(
+      "w-full flex items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors",
+      "hover:bg-accent focus:outline-none focus-visible:bg-accent",
+      selected && "bg-primary/5",
+    )}
+  >
+    <span
+      className={cn(
+        "shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-colors",
+        selected ? "bg-primary border-primary text-primary-foreground" : "border-border",
+      )}
+    >
+      {selected && <Check size={11} strokeWidth={3} />}
+    </span>
+    <span className="flex-1 min-w-0 truncate text-foreground">{option.label}</span>
+    {option.hint && <span className="shrink-0 text-[11px] text-muted-foreground">{option.hint}</span>}
+  </button>
+);
 
 export default MultiSelectDropdown;
