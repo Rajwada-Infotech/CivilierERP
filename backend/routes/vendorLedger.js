@@ -1,14 +1,16 @@
 /**
  * vendorLedger.js — Finance → Vendor Ledger Report
  *
- * A supplier's "passbook": search any AccountHeadMaster row of type 'S' by
- * name and see every transaction ever posted against it (invoices,
- * payments, journal vouchers, fund transfers...), with a running balance.
- * Same evidence and pattern as balanceEnquiry.js (dbo.GeneralLedgerEntry is
- * the single canonical, provably-complete ledger table — every module that
- * ever posts against a party head goes through services/generalLedger.js's
- * postVoucher()), just scoped to Suppliers and searched by name instead of
- * picked from a company-scoped dropdown.
+ * A vendor's "passbook": search any AccountHeadMaster row of type Supplier
+ * ('S') or Contractor ('C') by name and see every transaction ever posted
+ * against it (invoices, payments, journal vouchers, fund transfers...),
+ * with a running balance. Same evidence and pattern as balanceEnquiry.js
+ * (dbo.GeneralLedgerEntry is the single canonical, provably-complete
+ * ledger table — every module that ever posts against a party head goes
+ * through services/generalLedger.js's postVoucher()), just scoped to
+ * Sundry Creditors (Supplier + Contractor — same scope
+ * ON_ACCOUNT_PARTY_TYPES below already uses) and searched by name instead
+ * of picked from a company-scoped dropdown.
  */
 const express = require("express");
 const router = express.Router();
@@ -29,6 +31,14 @@ const HEAD_SELECT = `
   ahm.CompanyName                        AS CompanyName
 `;
 
+// "Vendor" = Sundry Creditor = Supplier or Contractor (LHeadType 'S'/'C') —
+// the two AccountHeadMaster types this report ever meant to cover. Every
+// place in this file that used to hard-filter to just 'S' left Contractors
+// invisible here even though they're posted against the exact same
+// GeneralLedgerEntry table via the exact same postVoucher() path.
+const VENDOR_HEAD_TYPES = ["S", "C"];
+const VENDOR_HEAD_TYPES_SQL = `'${VENDOR_HEAD_TYPES.join("','")}'`;
+
 // ── GET /search?q= — find a party/GL head by name ───────────────────────────
 router.get("/search", requirePageRight("vendor-ledger", "view"), async (req, res) => {
   try {
@@ -40,7 +50,7 @@ router.get("/search", requirePageRight("vendor-ledger", "view"), async (req, res
       SELECT TOP 30 ${HEAD_SELECT}
       FROM dbo.AccountHeadMaster ahm
       WHERE ahm.LHeadStatus = 1
-        AND ahm.LHeadType = 'S'
+        AND ahm.LHeadType IN (${VENDOR_HEAD_TYPES_SQL})
         AND (ahm.LHeadName LIKE @Q OR ahm.DisplayName LIKE @Q OR ahm.LHeadCode LIKE @Q)
       ORDER BY ISNULL(ahm.DisplayName, ahm.LHeadName)
     `);
@@ -51,12 +61,12 @@ router.get("/search", requirePageRight("vendor-ledger", "view"), async (req, res
   }
 });
 
-// Shared: resolve a head row (404 if not found / inactive / not a Supplier).
+// Shared: resolve a head row (404 if not found / inactive / not a vendor).
 async function loadHead(pool, headId) {
   const result = await pool.request().input("Id", sql.Int, headId).query(`
     SELECT ${HEAD_SELECT}
     FROM dbo.AccountHeadMaster ahm
-    WHERE ahm.LHeadId = @Id AND ahm.LHeadStatus = 1 AND ahm.LHeadType = 'S'
+    WHERE ahm.LHeadId = @Id AND ahm.LHeadStatus = 1 AND ahm.LHeadType IN (${VENDOR_HEAD_TYPES_SQL})
   `);
   return result.recordset[0] || null;
 }
@@ -388,7 +398,7 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
         eb.EVendorInvoiceDate AS VendorInvoiceDate,
         ls.LoanNo  AS LoanDocNo
       FROM dbo.GeneralLedgerEntry gle
-      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = gle.LHeadId AND ahm.LHeadType = 'S'
+      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = gle.LHeadId AND ahm.LHeadType IN (${VENDOR_HEAD_TYPES_SQL})
       LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = gle.CostCenterId
       LEFT JOIN dbo.NewPayment np
         ON gle.SourceType IN ('NewPayment', 'PaymentPosting', 'BounceChargePosting', 'LoanRepayment')
@@ -420,8 +430,8 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
              oal.CompanyId, oal.ProjectId,
              ISNULL(ahm.DisplayName, ahm.LHeadName) AS PartyName, ahm.LHeadType AS PartyType
       FROM dbo.OnAccountLedger oal
-      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oal.PartyId AND ahm.LHeadType = 'S'
-      WHERE oal.PartyType = 'Supplier'
+      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oal.PartyId AND ahm.LHeadType IN (${VENDOR_HEAD_TYPES_SQL})
+      WHERE oal.PartyType IN (${ON_ACCOUNT_PARTY_TYPES.map((t) => `'${t}'`).join(",")})
         AND (@From IS NULL OR oal.TxnDate >= @From)
         AND (@To IS NULL OR oal.TxnDate <= @To)
     `);
