@@ -479,6 +479,7 @@ const ALL_REPORTS: ReportDef[] = [
       },
       { header: "Source", accessor: (r) => (r.SourceType ?? "—") as string },
       { header: "Doc No", accessor: (r) => (r.DocNo ?? "—") as string },
+      { header: "Paid To", accessor: (r) => (r.PaidTo ?? "—") as string },
       { header: "Debit", accessor: (r) => fmt(Number(r.DebitAmount) || 0) },
       { header: "Credit", accessor: (r) => fmt(Number(r.CreditAmount) || 0) },
       { header: "Narration", accessor: (r) => (r.Narration ?? "—") as string },
@@ -2342,12 +2343,13 @@ const LedgerReportGroups: React.FC<{
 
             {!collapsed && (
               <div className="overflow-x-auto bg-muted/5">
-                <table className="w-full text-xs min-w-[720px]">
+                <table className="w-full text-xs min-w-[860px]">
                   <thead>
                     <tr className="text-muted-foreground uppercase tracking-wide text-[10px] font-heading">
                       <th className="text-left pl-11 pr-3 py-2">Date</th>
                       <th className="text-left px-3 py-2">Source</th>
                       <th className="text-left px-3 py-2">Doc No</th>
+                      <th className="text-left px-3 py-2">Paid To</th>
                       <th className="text-left px-3 py-2">Narration</th>
                       <th className="text-right px-3 py-2">Debit</th>
                       <th className="text-right px-4 sm:px-5 py-2">Credit</th>
@@ -2366,6 +2368,9 @@ const LedgerReportGroups: React.FC<{
                         <td className="px-3 py-2 whitespace-nowrap">{(r.SourceType as string) ?? "—"}</td>
                         <td className="px-3 py-2 whitespace-nowrap font-mono text-muted-foreground">
                           {(r.DocNo as string) ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-foreground max-w-[180px] truncate" title={(r.PaidTo as string) ?? ""}>
+                          {(r.PaidTo as string) || "—"}
                         </td>
                         <td className="px-3 py-2 text-foreground max-w-[280px] truncate" title={(r.Narration as string) ?? ""}>
                           {(r.Narration as string) ?? "—"}
