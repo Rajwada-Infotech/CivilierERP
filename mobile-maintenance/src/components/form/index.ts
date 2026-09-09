@@ -3,4 +3,5 @@ export {
 } from "./Form";
 export { PickerField } from "./PickerField";
 export { DateField } from "./DateField";
+export { TimeField } from "./TimeField";
 export { ImageCaptureField } from "./ImageCaptureField";

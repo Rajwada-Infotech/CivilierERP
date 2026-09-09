@@ -219,6 +219,8 @@ function mapOnAccountRow(r) {
     JournalVoucherNo: null,
     FundTransferDocNo: null,
     ExpenseBookingDocNo: null,
+    VendorInvoiceNo: null,
+    VendorInvoiceDate: null,
     LoanDocNo: null,
   };
 }
@@ -277,6 +279,8 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
         jv.JVNo    AS JournalVoucherNo,
         ft.DocNo   AS FundTransferDocNo,
         eb.EDocNo  AS ExpenseBookingDocNo,
+        eb.EVendorInvoiceNo   AS VendorInvoiceNo,
+        eb.EVendorInvoiceDate AS VendorInvoiceDate,
         ls.LoanNo  AS LoanDocNo
       FROM dbo.GeneralLedgerEntry gle
       LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = gle.CostCenterId
@@ -380,6 +384,8 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
         jv.JVNo    AS JournalVoucherNo,
         ft.DocNo   AS FundTransferDocNo,
         eb.EDocNo  AS ExpenseBookingDocNo,
+        eb.EVendorInvoiceNo   AS VendorInvoiceNo,
+        eb.EVendorInvoiceDate AS VendorInvoiceDate,
         ls.LoanNo  AS LoanDocNo
       FROM dbo.GeneralLedgerEntry gle
       JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = gle.LHeadId AND ahm.LHeadType = 'S'

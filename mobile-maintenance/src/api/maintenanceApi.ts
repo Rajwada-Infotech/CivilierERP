@@ -33,3 +33,6 @@ export const getMaintenanceDirectory = (search?: string): Promise<MaintenanceDir
 
 export const getMaintenanceCustomer = (bookingId: number | string): Promise<MaintenanceDirectoryRow> =>
   getJson(`/api/maintenance/customers/${bookingId}`, "Failed to load customer");
+
+export const getMaintenancePayments = (bookingId: number | string): Promise<unknown[]> =>
+  getJson(`/api/maintenance/customers/${bookingId}/payments`, "Failed to load payment history");

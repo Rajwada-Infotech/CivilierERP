@@ -1054,53 +1054,6 @@ async function classifyExpenseHeadType(pool, headId) {
   return isDirect ? "Direct Expense" : "Indirect Expense";
 }
 
-// Batched version of the classifier above — resolves many Expense Heads to
-// "Direct" / "Indirect" in one query, for the Expense Register's per-row
-// "Expense Type" column (a booking can debit several heads via
-// ExpenseHeadAllocation, plus the legacy single EGLAccountId). Same rule:
-// walk each head's AccountGroup ancestry to the shallowest bucket directly
-// under the EXPENSES root, then classify that bucket's name. Heads with no
-// EXPENSES-rooted bucket are simply absent from the returned map (caller
-// treats that as "Others").
-async function classifyExpenseHeadTypeMany(pool, headIds) {
-  const ids = [...new Set(headIds)].filter((id) => Number.isInteger(id) && id > 0);
-  const map = new Map();
-  if (ids.length === 0) return map;
-  const req = pool.request();
-  const ph = ids.map((id, i) => {
-    req.input(`h${i}`, sql.Int, id);
-    return `@h${i}`;
-  });
-  const r = await req.query(`
-    ;WITH grp AS (
-      SELECT ahm.LHeadId AS HeadId, ag.AGId, ag.Name, ag.ParentGroupId, 0 AS lvl
-      FROM dbo.AccountHeadMaster ahm
-      JOIN dbo.AccountGroup ag ON ag.AGId = ahm.LBelongsTo
-      WHERE ahm.LHeadId IN (${ph.join(",")})
-      UNION ALL
-      SELECT g.HeadId, ag.AGId, ag.Name, ag.ParentGroupId, g.lvl + 1
-      FROM grp g
-      JOIN dbo.AccountGroup ag ON ag.AGId = g.ParentGroupId
-      WHERE g.lvl < 20
-    ),
-    bucket AS (
-      SELECT g.HeadId, g.Name AS BucketName,
-             ROW_NUMBER() OVER (PARTITION BY g.HeadId ORDER BY g.lvl) AS rn
-      FROM grp g
-      JOIN dbo.AccountGroup rootGrp ON rootGrp.AGId = g.ParentGroupId
-      WHERE rootGrp.Name = 'EXPENSES' AND rootGrp.ParentGroupId IS NULL
-    )
-    SELECT HeadId, BucketName FROM bucket WHERE rn = 1
-  `);
-  for (const row of r.recordset) {
-    const name = (row.BucketName || "").toLowerCase();
-    const isDirect =
-      /\bdirect expense/.test(name) || /project|construction/.test(name);
-    map.set(row.HeadId, isDirect ? "Direct" : "Indirect");
-  }
-  return map;
-}
-
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
   try {
@@ -1120,7 +1073,13 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const projectName = (req.query.projectName || "").toString().trim() || null;
     const docNo = (req.query.docNo || "").toString().trim() || null;
     const supplierId = req.query.supplierId ? parseInt(req.query.supplierId, 10) : null;
-    const expenseHeadId = req.query.expenseHeadId ? parseInt(req.query.expenseHeadId, 10) : null;
+    // Accepts either a single id ("12") or a comma-separated list ("12,15,20")
+    // — the Expense Register report's filter is a multi-select.
+    const expenseHeadIds = (req.query.expenseHeadId ? String(req.query.expenseHeadId) : "")
+      .split(",")
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => Number.isInteger(n) && n > 0);
+    const expenseHeadIdsCsv = expenseHeadIds.length ? expenseHeadIds.join(",") : null;
 
     const hasPaymentTermId = await ebHasPaymentTermId(pool);
     const hasDirectItemsCol = await ebHasDirectItemsData(pool);
@@ -1149,7 +1108,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         .input("ProjectName", sql.NVarChar(255), projectName)
         .input("DocNo", sql.NVarChar(100), docNo ? `%${docNo}%` : null)
         .input("SupplierId", sql.Int, supplierId)
-        .input("ExpenseHeadId", sql.Int, expenseHeadId).query(`
+        .input("ExpenseHeadIds", sql.NVarChar(sql.MAX), expenseHeadIdsCsv).query(`
         SELECT
           eb.Eid, eb.Eid AS id,
           eb.EProjectName, eb.EDocumentType, eb.EDocDate,
@@ -1258,10 +1217,11 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           -- Expense Head lives in one of two places: the multi-head
           -- ExpenseHeadAllocation table (migration 303, direct bookings
           -- split across several heads) or the legacy single EGLAccountId
-          -- column — match either.
-          AND (@ExpenseHeadId IS NULL OR eb.EGLAccountId = @ExpenseHeadId OR EXISTS (
+          -- column — match either. Multi-select: any of the picked heads.
+          AND (@ExpenseHeadIds IS NULL OR eb.EGLAccountId IN (SELECT value FROM STRING_SPLIT(@ExpenseHeadIds, ',')) OR EXISTS (
             SELECT 1 FROM dbo.ExpenseHeadAllocation eha
-            WHERE eha.SourceType = 'ExpenseBooking' AND eha.SourceId = eb.Eid AND eha.LHeadId = @ExpenseHeadId
+            WHERE eha.SourceType = 'ExpenseBooking' AND eha.SourceId = eb.Eid
+              AND eha.LHeadId IN (SELECT value FROM STRING_SPLIT(@ExpenseHeadIds, ','))
           ))
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -1287,48 +1247,28 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     // than per-row to avoid an N+1.
     const allocMap = await getAllocationsForMany(pool, sql, "ExpenseBooking", rows.map((r) => r.Eid));
 
-    // Per-row "Expense Type" (Direct / Indirect / Others) for the Expense
-    // Register. A booking's expense head(s) live in the multi-head
-    // ExpenseHeadAllocation table and/or the legacy single EGLAccountId —
-    // classify every distinct head on the page in one query, then fold each
-    // booking's heads into a single label ("Direct", "Indirect",
-    // "Direct / Indirect" when a split booking spans both, "Others" when no
-    // head resolves to an EXPENSES bucket).
-    const pageHeadIds = [];
-    for (const r of rows) {
-      if (Number.isInteger(r.EGLAccountId)) pageHeadIds.push(r.EGLAccountId);
-      for (const a of allocMap.get(r.Eid) || []) pageHeadIds.push(a.lHeadId);
-    }
-    const headTypeMap = await classifyExpenseHeadTypeMany(pool, pageHeadIds);
-    const expenseTypeForRow = (r) => {
-      const heads = [
-        ...(Number.isInteger(r.EGLAccountId) ? [r.EGLAccountId] : []),
-        ...(allocMap.get(r.Eid) || []).map((a) => a.lHeadId),
-      ];
-      const types = [...new Set(heads.map((h) => headTypeMap.get(h)).filter(Boolean))].sort();
-      return types.length ? types.join(" / ") : "Others";
-    };
+    // Expense Register report: every row gets its own GL Name + Direct/
+    // Indirect Expense Type (not just a single filtered head's) — the
+    // "primary" head for classification purposes is the first allocation
+    // row, falling back to the legacy single EGLAccountId. Distinct heads
+    // across the page are classified once each (classifyExpenseHeadType is
+    // a small recursive-CTE call), not per row, to avoid an N+1.
+    const primaryHeadIdOf = (r) => (allocMap.get(r.Eid) || [])[0]?.lHeadId ?? r.EGLAccountId ?? null;
+    const distinctHeadIds = [...new Set(rows.map(primaryHeadIdOf).filter((id) => Number.isInteger(id) && id > 0))];
+    const expenseTypeByHeadId = new Map(
+      await Promise.all(distinctHeadIds.map(async (id) => [id, await classifyExpenseHeadType(pool, id)])),
+    );
 
-    // Expense Register report: once scoped to one Expense Head, the report
-    // adds columns (GL Name, Direct/Indirect type) describing THAT head —
-    // the same value for every row, since every row is already guaranteed
-    // to match it. Resolved once per request, not per row.
-    let filterHeadName = null;
-    let filterExpenseType = null;
-    if (expenseHeadId) {
-      const headRes = await pool.request().input("HeadId", sql.Int, expenseHeadId)
-        .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @HeadId");
-      filterHeadName = headRes.recordset[0]?.LHeadName ?? null;
-      filterExpenseType = await classifyExpenseHeadType(pool, expenseHeadId);
-    }
-
-    const rowsWithExpenseHead = rows.map((r) => ({
-      ...r,
-      EExpenseHeadNames: (allocMap.get(r.Eid) || []).map((a) => a.lHeadName).join(", ") || null,
-      EExpenseType: expenseTypeForRow(r),
-      EFilterHeadName: filterHeadName,
-      EFilterExpenseType: filterExpenseType,
-    }));
+    const rowsWithExpenseHead = rows.map((r) => {
+      const allocNames = (allocMap.get(r.Eid) || []).map((a) => a.lHeadName).join(", ") || null;
+      const primaryHeadId = primaryHeadIdOf(r);
+      return {
+        ...r,
+        EExpenseHeadNames: allocNames,
+        ERowGLName: allocNames || r.EGLAccountName || null,
+        ERowExpenseType: primaryHeadId ? (expenseTypeByHeadId.get(primaryHeadId) ?? null) : null,
+      };
+    });
 
     res.json({
       data: rowsWithExpenseHead.map(({ _total, ...r }) => r),

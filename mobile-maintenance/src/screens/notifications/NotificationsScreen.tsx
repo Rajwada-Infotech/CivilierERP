@@ -40,12 +40,12 @@ export default function NotificationsScreen() {
       contentContainerStyle={{ padding: 16, paddingBottom: 40 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#65a30d" />}
     >
-      <View className="flex-row items-center gap-2 mb-1">
-        <Bell size={16} color="#65a30d" />
-        <Text style={{ fontSize: 16, fontFamily: fonts.heading.bold, color: colors.foreground }}>Notifications</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+        <Bell size={17} color="#65a30d" />
+        <Text style={{ fontSize: 17, fontFamily: fonts.heading.bold, color: colors.foreground }}>Notifications</Text>
       </View>
-      <Text style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 16 }}>
-        {alerts.length === 0 ? "All caught up" : `${alerts.length} alert${alerts.length !== 1 ? "s" : ""}`}
+      <Text style={{ fontSize: 11.5, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginBottom: 18 }}>
+        {alerts.length === 0 ? "All caught up" : `${alerts.length} alert${alerts.length !== 1 ? "s" : ""} need attention`}
       </Text>
 
       {isLoading ? (
@@ -66,7 +66,7 @@ export default function NotificationsScreen() {
           </Text>
         </View>
       ) : (
-        <View style={{ gap: 8 }}>
+        <View style={{ gap: 10 }}>
           {alerts.map((alert) => {
             const m = META[alert.type];
             const Icon = m.icon;
@@ -74,24 +74,39 @@ export default function NotificationsScreen() {
               <Pressable
                 key={alert.id}
                 onPress={() => navigate(alert.route as never, alert.params as never)}
-                className="flex-row items-center gap-3"
-                style={{ borderRadius: 12, borderWidth: 1, borderColor: m.border, backgroundColor: colors.card, padding: 12 }}
+                style={({ pressed }) => ({
+                  flexDirection: "row",
+                  alignItems: "flex-start",
+                  gap: 12,
+                  borderRadius: 14,
+                  borderWidth: 1,
+                  borderColor: pressed ? m.color : m.border,
+                  backgroundColor: pressed ? m.wash : colors.card,
+                  padding: 14,
+                })}
               >
-                <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: m.wash, alignItems: "center", justifyContent: "center" }}>
-                  <Icon size={15} color={m.color} />
+                <View style={{ width: 36, height: 36, borderRadius: 11, backgroundColor: m.wash, alignItems: "center", justifyContent: "center" }}>
+                  <Icon size={16} color={m.color} />
                 </View>
-                <View className="flex-1 min-w-0">
-                  <Text numberOfLines={1} style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.foreground }}>
-                    {alert.title}
-                  </Text>
-                  <Text numberOfLines={1} style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground, marginTop: 2 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                    <Text numberOfLines={1} style={{ flex: 1, fontSize: 12.5, fontFamily: fonts.heading.semibold, color: colors.foreground }}>
+                      {alert.title}
+                    </Text>
+                    {alert.time && (
+                      <Text style={{ fontSize: 9.5, fontFamily: fonts.body.medium, color: colors.mutedForeground }}>{fmtRelative(alert.time)}</Text>
+                    )}
+                  </View>
+                  <Text numberOfLines={2} style={{ fontSize: 11, fontFamily: fonts.body.regular, color: colors.mutedForeground, lineHeight: 15 }}>
                     {alert.subtitle}
                   </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 8 }}>
+                    <Text style={{ fontSize: 9, fontFamily: fonts.heading.semibold, color: m.color, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                      {m.label}
+                    </Text>
+                  </View>
                 </View>
-                {alert.time && (
-                  <Text style={{ fontSize: 9, fontFamily: fonts.body.regular, color: "#5c6270" }}>{fmtRelative(alert.time)}</Text>
-                )}
-                <ChevronRight size={14} color="#5c6270" />
+                <ChevronRight size={14} color={colors.mutedForeground} style={{ marginTop: 2 }} />
               </Pressable>
             );
           })}

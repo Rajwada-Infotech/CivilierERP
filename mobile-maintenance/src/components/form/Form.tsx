@@ -46,7 +46,7 @@ const boxStyle = {
 };
 
 export function TextField({
-  label, value, onChangeText, placeholder, required, error, autoCapitalize, keyboardType, multiline,
+  label, value, onChangeText, placeholder, required, error, autoCapitalize, keyboardType, multiline, disabled,
 }: {
   label: string;
   value: string;
@@ -57,6 +57,7 @@ export function TextField({
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   keyboardType?: "default" | "numeric" | "decimal-pad" | "email-address";
   multiline?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <View style={{ marginBottom: 14 }}>
@@ -69,10 +70,12 @@ export function TextField({
         autoCapitalize={autoCapitalize}
         keyboardType={keyboardType}
         multiline={multiline}
+        editable={!disabled}
         style={[
           boxStyle,
           multiline ? { minHeight: 84, paddingTop: 10, textAlignVertical: "top" } : { paddingVertical: 10 },
           error ? { borderColor: colors.destructive } : null,
+          disabled ? { opacity: 0.5 } : null,
         ]}
       />
       <FieldError error={error} />

@@ -6,6 +6,7 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { expenseBookingSupplierSql } = require("../utils/expenseBookingSupplier");
 
 let accountHeadColumnMetaPromise = null;
 
@@ -69,14 +70,18 @@ router.get("/options", async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        LHeadId            AS id,
-        ISNULL(DisplayName, LHeadName) AS label,
-        LHeadCode          AS code,
-        ISNULL(IsSystemGenerated, 0) AS isSystemGenerated
-      FROM dbo.AccountHeadMaster
-      WHERE LHeadType = 'GL'
-        AND LHeadStatus = 1
-      ORDER BY LHeadName
+        ahm.LHeadId            AS id,
+        ISNULL(ahm.DisplayName, ahm.LHeadName) AS label,
+        ahm.LHeadCode          AS code,
+        ISNULL(ahm.IsSystemGenerated, 0) AS isSystemGenerated,
+        -- Immediate parent group name — lets a picker group these heads
+        -- (e.g. Reports.tsx's Expense Head filter) instead of one flat list.
+        ag.Name AS groupName
+      FROM dbo.AccountHeadMaster ahm
+      LEFT JOIN dbo.AccountGroup ag ON ag.AGId = ahm.LBelongsTo
+      WHERE ahm.LHeadType = 'GL'
+        AND ahm.LHeadStatus = 1
+      ORDER BY ahm.LHeadName
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -173,6 +178,11 @@ router.get("/transactions", async (req, res) => {
     const groupId = req.query.groupId ? parseInt(req.query.groupId, 10) : null;
     const search = req.query.search ? String(req.query.search).trim() : null;
 
+    // Resolved supplier/contractor for the ExpenseBooking/InvoicePosting leg
+    // (GRN/PO/WO_PO/WORK_DONE -> source doc's supplier, direct/manual ->
+    // eb.LHeadId) — same helper Expense Register's own "Paid To" column uses.
+    const ebSup = expenseBookingSupplierSql("eb", "glt");
+
     const result = await pool
       .request()
       .input("Offset", sql.Int, offset)
@@ -192,12 +202,25 @@ router.get("/transactions", async (req, res) => {
         ft.DocNo        AS FundTransferDocNo,
         eb.EDocNo       AS ExpenseBookingDocNo,
         ISNULL(grn.DocNo, grn.GRNNo) AS GrnDocNo,
+        -- The counter-party this leg was actually paid to/received from,
+        -- whichever source this leg came from — payments/received payments
+        -- resolve via their own party head, invoices via the same resolved-
+        -- supplier logic the Expense Register report uses, and a direct
+        -- GRN posting via the GRN's own SupplierID. Journal Vouchers and
+        -- Fund Transfers have no single "party" concept, so this stays
+        -- NULL for them (shown as "—" on the client).
+        -- NULLIF strips the empty string expenseBookingSupplierSql's
+        -- nameExpr falls back to (ISNULL(...,'')) when eb has no match at
+        -- all, so COALESCE actually reaches the later fallbacks instead of
+        -- short-circuiting on '' (an empty string is non-NULL to COALESCE).
+        COALESCE(npParty.LHeadName, rp.RPCustomerName, NULLIF(${ebSup.nameExpr}, ''), grnSupplier.LHeadName) AS PaidTo,
         COUNT(*) OVER() AS TotalCount
       FROM dbo.GeneralLedgerEntry gle
       JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = gle.LHeadId AND ahm.LHeadType = 'GL'
       LEFT JOIN dbo.AccountGroup ag ON ag.AGId = ahm.LBelongsTo
       LEFT JOIN dbo.NewPayment np
         ON gle.SourceType IN ('NewPayment', 'PaymentPosting') AND np.PPaymentID = gle.SourceId
+      LEFT JOIN dbo.AccountHeadMaster npParty ON npParty.LHeadId = np.PPartyId
       LEFT JOIN dbo.ReceivedPayment rp
         ON gle.SourceType = 'ReceivedPayment' AND rp.RPPaymentID = gle.SourceId
       LEFT JOIN dbo.JournalVoucher jv
@@ -206,8 +229,10 @@ router.get("/transactions", async (req, res) => {
         ON gle.SourceType = 'FundTransfer' AND ft.FTId = gle.SourceId
       LEFT JOIN dbo.ExpenseBooking eb
         ON gle.SourceType IN ('ExpenseBooking', 'InvoicePosting') AND eb.Eid = gle.SourceId
+      ${ebSup.joins}
       LEFT JOIN dbo.GoodsReceiptNotes grn
         ON gle.SourceType IN ('GRN', 'GRNPosting') AND grn.GRNID = gle.SourceId
+      LEFT JOIN dbo.AccountHeadMaster grnSupplier ON grnSupplier.LHeadId = grn.SupplierID
       WHERE gle.IsReversed = 0
         AND (@From IS NULL OR gle.VoucherDate >= @From)
         AND (@To IS NULL OR gle.VoucherDate <= @To)

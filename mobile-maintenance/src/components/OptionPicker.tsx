@@ -48,6 +48,7 @@ export function PickerRow({
 
 export function OptionPickerModal({
   visible, title, options, selectedKey, onSelect, onClose, searchable, clearable, loading,
+  query: controlledQuery, onQueryChange, searchPlaceholder,
 }: {
   visible: boolean;
   title: string;
@@ -58,15 +59,27 @@ export function OptionPickerModal({
   searchable?: boolean;
   clearable?: boolean;
   loading?: boolean;
+  // Server-driven search (e.g. a typeahead API capped to top-N matches,
+  // which can't be filtered client-side the way a small static list can):
+  // pass both to hand search control to the parent — `options` is then
+  // used as-is (no local filtering), and the parent debounces/fetches on
+  // `onQueryChange`. Omit both for the default self-contained local filter.
+  query?: string;
+  onQueryChange?: (q: string) => void;
+  searchPlaceholder?: string;
 }) {
   const insets = useSafeAreaInsets();
-  const [search, setSearch] = useState("");
+  const serverDriven = onQueryChange !== undefined;
+  const [localSearch, setLocalSearch] = useState("");
+  const search = serverDriven ? controlledQuery ?? "" : localSearch;
+  const setSearch = serverDriven ? onQueryChange! : setLocalSearch;
 
   const filtered = useMemo(() => {
+    if (serverDriven) return options;
     if (!search) return options;
     const q = search.toLowerCase();
     return options.filter((o) => o.label.toLowerCase().includes(q) || o.sublabel?.toLowerCase().includes(q));
-  }, [options, search]);
+  }, [options, search, serverDriven]);
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
@@ -95,7 +108,7 @@ export function OptionPickerModal({
               <TextInput
                 value={search}
                 onChangeText={setSearch}
-                placeholder="Search…"
+                placeholder={searchPlaceholder || "Search…"}
                 placeholderTextColor={`${colors.mutedForeground}99`}
                 style={{ flex: 1, color: colors.foreground, fontFamily: fonts.body.regular, fontSize: 12.5, paddingVertical: 8 }}
               />

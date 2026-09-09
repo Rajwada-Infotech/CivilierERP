@@ -3,7 +3,11 @@
 // Total Billed) and the same Breakdown section (Bill Status donut, Billed
 // vs Unbilled Customers donut, 14-day billing trend line), pulling from the
 // exact same three endpoints. Charts are hand-drawn with react-native-svg
-// (see components/charts/*) since recharts has no RN equivalent.
+// (see components/charts/*) since recharts has no RN equivalent. Stat
+// cards are laid out as explicit paired rows rather than a flex-wrap
+// cluster — the latter doesn't balance widths across wrap lines in RN and
+// produced uneven card sizes (same issue found and fixed on Electricity's
+// Reports tab).
 import { useMemo, useState } from "react";
 import { ActivityIndicator, RefreshControl, ScrollView, Text, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
@@ -25,10 +29,10 @@ function StatCard({ label, value, icon: Icon, color }: {
 }) {
   return (
     <View
-      style={{ flex: 1, minWidth: "45%", backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: `${color}30`, padding: 14, overflow: "hidden" }}
+      style={{ flex: 1, backgroundColor: colors.card, borderRadius: 14, borderWidth: 1, borderColor: `${color}30`, padding: 14, overflow: "hidden" }}
     >
       <View style={{ position: "absolute", left: 0, top: 10, bottom: 10, width: 2.5, borderRadius: 2, backgroundColor: color }} />
-      <View className="flex-row items-start justify-between mb-3">
+      <View style={{ flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 10 }}>
         <Text style={{ fontSize: 9.5, fontFamily: fonts.heading.bold, color, opacity: 0.9, textTransform: "uppercase", letterSpacing: 1.2, flex: 1, marginRight: 6 }}>
           {label}
         </Text>
@@ -36,7 +40,7 @@ function StatCard({ label, value, icon: Icon, color }: {
           <Icon size={12} color={color} />
         </View>
       </View>
-      <Text style={{ fontSize: 20, fontFamily: fonts.heading.bold, color: colors.foreground }}>{value}</Text>
+      <Text style={{ fontSize: 20, fontFamily: fonts.heading.bold, color: colors.foreground, fontVariant: ["tabular-nums"] }}>{value}</Text>
     </View>
   );
 }
@@ -46,7 +50,7 @@ function ChartCard({ title, icon: Icon, children }: {
 }) {
   return (
     <View style={{ borderRadius: 14, borderWidth: 1, borderColor: `${ACCENT}30`, backgroundColor: colors.card, marginBottom: 14, overflow: "hidden" }}>
-      <View className="flex-row items-center gap-2" style={{ paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: `${ACCENT}20` }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: `${ACCENT}20` }}>
         <View style={{ width: 20, height: 20, borderRadius: 6, backgroundColor: `${ACCENT}26`, alignItems: "center", justifyContent: "center" }}>
           <Icon size={11} color={ACCENT} />
         </View>
@@ -101,8 +105,7 @@ export default function DashboardScreen() {
 
   return (
     <ScrollView
-      className="flex-1"
-      style={{ backgroundColor: colors.background }}
+      style={{ flex: 1, backgroundColor: colors.background }}
       contentContainerStyle={{ padding: 16, paddingBottom: 96 }}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={ACCENT} />}
     >
@@ -114,31 +117,15 @@ export default function DashboardScreen() {
         </View>
       ) : (
         <>
-          <View className="flex-row flex-wrap gap-3 mb-5">
-            <StatCard
-              label="Confirmed Customers"
-              value={String(directoryRows.length)}
-              icon={Users}
-              color={ACCENT}
-            />
-            <StatCard
-              label="Active Charge Heads"
-              value={String(chargeHeadRows.length)}
-              icon={ListChecks}
-              color="#0ea5e9"
-            />
-            <StatCard
-              label="Bills Issued"
-              value={String(activeBills.length)}
-              icon={Receipt}
-              color="#f59e0b"
-            />
-            <StatCard
-              label="Total Billed"
-              value={formatINR(totalBilled)}
-              icon={Wallet}
-              color="#22c55e"
-            />
+          <View style={{ gap: 10, marginBottom: 20 }}>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <StatCard label="Confirmed Customers" value={String(directoryRows.length)} icon={Users} color={ACCENT} />
+              <StatCard label="Active Charge Heads" value={String(chargeHeadRows.length)} icon={ListChecks} color="#0ea5e9" />
+            </View>
+            <View style={{ flexDirection: "row", gap: 10 }}>
+              <StatCard label="Bills Issued" value={String(activeBills.length)} icon={Receipt} color="#f59e0b" />
+              <StatCard label="Total Billed" value={formatINR(totalBilled)} icon={Wallet} color="#22c55e" />
+            </View>
           </View>
 
           <SectionLabel>Breakdown</SectionLabel>
