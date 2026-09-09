@@ -9,8 +9,9 @@ import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
 import {
-  RefreshCw, AlertCircle, ListChecks, CheckCircle2, XCircle,
-  ArrowLeftRight, BarChart3, Clock, ChevronRight, ShieldCheck, Users,
+  RefreshCw, AlertCircle, ListChecks, ClipboardList, CheckCircle2, XCircle,
+  ArrowLeftRight, BarChart3, Tag, FileText, MessageSquareX, Repeat,
+  Clock, ChevronRight, ShieldCheck, Users,
 } from "lucide-react-native";
 import type { MainStackParamList } from "@/navigation/MainStack";
 import { useAuth } from "@/auth/AuthContext";
@@ -36,17 +37,43 @@ function isDueToday(t: Task) {
   return dt.toDateString() === now.toDateString();
 }
 
-const SHORTCUTS: Array<{
+type Shortcut = {
   label: string;
-  desc: string;
   icon: React.ComponentType<{ size?: number; color?: string }>;
   nav: keyof MainStackParamList;
-}> = [
-  { label: "Tasks", desc: "Active & on-hold tasks with due dates", icon: ListChecks, nav: "TaskList" },
-  { label: "Close Task", desc: "Mark tasks complete", icon: CheckCircle2, nav: "CloseTask" },
-  { label: "Cancelled Tasks", desc: "Cancelled task history", icon: XCircle, nav: "CancelledTasks" },
-  { label: "Task Transfer", desc: "Reassign tasks to another user", icon: ArrowLeftRight, nav: "TaskTransfer" },
-  { label: "Task Performance", desc: "Completion rates & delays", icon: BarChart3, nav: "TaskPerformance" },
+};
+
+// Same three groups the nav menu (NavSheet) shows — Transactions / Reports /
+// Setup — surfaced on the landing screen so every Follow-Up destination is
+// visible without opening the menu.
+const GROUPS: Array<{ label: string; items: Shortcut[] }> = [
+  {
+    label: "Transactions",
+    items: [
+      { label: "Follow-Up Board", icon: ListChecks, nav: "FollowUpDashboard" },
+      { label: "Tasks", icon: Repeat, nav: "TaskList" },
+      { label: "Task Master", icon: ClipboardList, nav: "TaskMaster" },
+      { label: "Close Task", icon: CheckCircle2, nav: "CloseTask" },
+      { label: "Cancelled Tasks", icon: XCircle, nav: "CancelledTasks" },
+      { label: "Task Transfer", icon: ArrowLeftRight, nav: "TaskTransfer" },
+    ],
+  },
+  {
+    label: "Reports",
+    items: [
+      { label: "Task Performance Report", icon: BarChart3, nav: "TaskPerformance" },
+      { label: "Tag Performance Report", icon: Tag, nav: "TagPerformance" },
+      { label: "Entry Type & Document Report", icon: FileText, nav: "EntryTypeDocReport" },
+    ],
+  },
+  {
+    label: "Setup",
+    items: [
+      { label: "Department Master", icon: Users, nav: "DepartmentMaster" },
+      { label: "Tag Master", icon: Tag, nav: "TagMaster" },
+      { label: "Cancel Template", icon: MessageSquareX, nav: "CancelTemplate" },
+    ],
+  },
 ];
 
 export default function DashboardScreen() {
@@ -186,30 +213,29 @@ export default function DashboardScreen() {
             </View>
           </View>
 
-          {/* Shortcuts */}
-          <View className="mt-6">
-            <SectionLabel>Follow-Up</SectionLabel>
-            {SHORTCUTS.map((sc, i) => (
-              <FadeSlideIn key={sc.label} delay={200 + i * 45} distance={10}>
-                <Pressable
-                  onPress={() => navigation.navigate(sc.nav)}
-                  className="flex-row items-center gap-3 rounded-2xl px-4 py-3.5 mb-2"
-                  style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}
-                >
-                  <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: `${ACCENT}1f` }}>
-                    <sc.icon size={16} color={ACCENT} />
-                  </View>
-                  <View className="flex-1 min-w-0">
-                    <Text style={{ color: colors.foreground, fontSize: 13.5, fontFamily: fonts.heading.semibold }}>{sc.label}</Text>
-                    <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 11, fontFamily: fonts.body.regular, marginTop: 1 }}>
-                      {sc.desc}
+          {/* All Follow-Up destinations, grouped like the nav menu */}
+          {GROUPS.map((group, gi) => (
+            <View key={group.label} className="mt-6">
+              <SectionLabel>{group.label}</SectionLabel>
+              {group.items.map((sc, i) => (
+                <FadeSlideIn key={sc.nav} delay={160 + (gi * 4 + i) * 40} distance={10}>
+                  <Pressable
+                    onPress={() => navigation.navigate(sc.nav)}
+                    className="flex-row items-center gap-3 rounded-2xl px-4 py-3 mb-2"
+                    style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}
+                  >
+                    <View className="w-9 h-9 rounded-xl items-center justify-center" style={{ backgroundColor: `${ACCENT}1f` }}>
+                      <sc.icon size={16} color={ACCENT} />
+                    </View>
+                    <Text style={{ color: colors.foreground, fontSize: 13.5, fontFamily: fonts.heading.semibold, flex: 1 }}>
+                      {sc.label}
                     </Text>
-                  </View>
-                  <ChevronRight size={16} color={`${colors.mutedForeground}80`} />
-                </Pressable>
-              </FadeSlideIn>
-            ))}
-          </View>
+                    <ChevronRight size={16} color={`${colors.mutedForeground}80`} />
+                  </Pressable>
+                </FadeSlideIn>
+              ))}
+            </View>
+          ))}
         </>
       )}
 

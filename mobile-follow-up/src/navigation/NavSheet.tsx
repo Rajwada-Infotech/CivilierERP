@@ -1,38 +1,64 @@
 // RN port of the web app's MobileNav.tsx pattern — a floating trigger that
-// opens a full nav panel instead of a persistent tab bar. This app is
-// Follow-Up-only, so there's no module strip: the sheet just renders the
-// Follow-Up nav tree (RN port of FollowupSidebar.ts). Leaves without a
-// mobile screen yet alert "not built on mobile yet".
+// opens a full nav panel. This app is Follow-Up-only, so instead of a
+// module strip the sheet shows every Follow-Up destination at once, grouped
+// into Transactions / Reports / Setup (matching the web Follow-Up sidebar +
+// Reports catalog + Setup fly-out). Every group is always expanded — the
+// point is that all three sections are visible together.
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Modal, Pressable, ScrollView, Text, View, Alert } from "react-native";
+import { Animated, Easing, Modal, Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
-  Grip, X, User, LogOut, LayoutDashboard, ListChecks, CheckCircle2,
-  XCircle, ArrowLeftRight, BarChart3, ClipboardList,
+  Grip, X, User, LogOut, LayoutDashboard, ListChecks, ClipboardList,
+  CheckCircle2, XCircle, ArrowLeftRight, BarChart3, Tag, FileText,
+  Users, MessageSquareX, Repeat,
 } from "lucide-react-native";
 import { useAuth } from "@/auth/AuthContext";
-import { colors, moduleAccents } from "@/theme/colors";
+import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { navigationRef } from "./navigationRef";
 import type { MainStackParamList } from "./MainStack";
 
-const ACCENT = moduleAccents.followup;
+const ACCENT = "#0d9488";
 
 type NavLeaf = {
   label: string;
   icon: React.ComponentType<{ size?: number; color?: string }>;
-  nav?: keyof MainStackParamList;
+  nav: keyof MainStackParamList;
 };
+type NavGroup = { label: string; items: NavLeaf[] };
 
-// RN port of followupNavItems (FollowupSidebar.ts) — same order.
-const FOLLOWUP_NAV: NavLeaf[] = [
-  { label: "Dashboard", icon: LayoutDashboard, nav: "FollowUpDashboard" },
-  { label: "Tasks", icon: ListChecks, nav: "TaskList" },
-  { label: "Close Task", icon: CheckCircle2, nav: "CloseTask" },
-  { label: "Cancelled Tasks", icon: XCircle, nav: "CancelledTasks" },
-  { label: "Task Transfer", icon: ArrowLeftRight, nav: "TaskTransfer" },
-  { label: "Task Master", icon: ClipboardList },
-  { label: "Task Performance Report", icon: BarChart3, nav: "TaskPerformance" },
+// Mirrors the three web surfaces for Follow-Up:
+//   Transactions → FollowupSidebar.ts
+//   Reports      → Reports.tsx "followup" section
+//   Setup        → TopNavbar.tsx followupSetupItems
+const GROUPS: NavGroup[] = [
+  {
+    label: "Transactions",
+    items: [
+      { label: "Follow-Up Board", icon: ListChecks, nav: "FollowUpDashboard" },
+      { label: "Tasks", icon: Repeat, nav: "TaskList" },
+      { label: "Task Master", icon: ClipboardList, nav: "TaskMaster" },
+      { label: "Close Task", icon: CheckCircle2, nav: "CloseTask" },
+      { label: "Cancelled Tasks", icon: XCircle, nav: "CancelledTasks" },
+      { label: "Task Transfer", icon: ArrowLeftRight, nav: "TaskTransfer" },
+    ],
+  },
+  {
+    label: "Reports",
+    items: [
+      { label: "Task Performance Report", icon: BarChart3, nav: "TaskPerformance" },
+      { label: "Tag Performance Report", icon: Tag, nav: "TagPerformance" },
+      { label: "Entry Type & Document Report", icon: FileText, nav: "EntryTypeDocReport" },
+    ],
+  },
+  {
+    label: "Setup",
+    items: [
+      { label: "Department Master", icon: Users, nav: "DepartmentMaster" },
+      { label: "Tag Master", icon: Tag, nav: "TagMaster" },
+      { label: "Cancel Template", icon: MessageSquareX, nav: "CancelTemplate" },
+    ],
+  },
 ];
 
 export function NavSheet() {
@@ -69,12 +95,8 @@ export function NavSheet() {
     Animated.timing(slide, { toValue: 0, duration: 220, easing: Easing.in(Easing.cubic), useNativeDriver: true }).start(() => setOpen(false));
   };
 
-  const go = (item: NavLeaf) => {
-    if (!item.nav) {
-      Alert.alert(item.label, `The ${item.label} screen isn't built on mobile yet — use the web app for now.`);
-      return;
-    }
-    if (navigationRef.isReady()) navigationRef.navigate(item.nav as never);
+  const go = (nav: keyof MainStackParamList) => {
+    if (navigationRef.isReady()) navigationRef.navigate(nav as never);
     closeSheet();
   };
 
@@ -85,6 +107,26 @@ export function NavSheet() {
     .join("")
     .toUpperCase()
     .slice(0, 2);
+
+  const Leaf = ({ item }: { item: NavLeaf }) => {
+    const active = activeRoute === item.nav;
+    return (
+      <Pressable
+        onPress={() => go(item.nav)}
+        className="flex-row items-center gap-3 px-3 py-2.5 rounded-xl mb-1"
+        style={{
+          backgroundColor: active ? `${ACCENT}1f` : "transparent",
+          borderWidth: 1,
+          borderColor: active ? `${ACCENT}4d` : "transparent",
+        }}
+      >
+        <item.icon size={15} color={active ? ACCENT : colors.mutedForeground} />
+        <Text style={{ color: active ? ACCENT : colors.foreground, fontSize: 12.5, fontFamily: fonts.body.medium }}>
+          {item.label}
+        </Text>
+      </Pressable>
+    );
+  };
 
   return (
     <>
@@ -128,14 +170,14 @@ export function NavSheet() {
               left: 0,
               right: 0,
               bottom: 0,
-              maxHeight: "85%",
+              maxHeight: "88%",
               backgroundColor: colors.card,
               borderTopLeftRadius: 24,
               borderTopRightRadius: 24,
               borderWidth: 1,
               borderColor: colors.border,
               overflow: "hidden",
-              transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [400, 0] }) }],
+              transform: [{ translateY: slide.interpolate({ inputRange: [0, 1], outputRange: [420, 0] }) }],
             }}
           >
             <View style={{ height: 3, backgroundColor: ACCENT }} />
@@ -159,7 +201,7 @@ export function NavSheet() {
                 </Text>
               </View>
               <Pressable
-                onPress={() => { if (navigationRef.isReady()) navigationRef.navigate("Profile" as never); closeSheet(); }}
+                onPress={() => go("Profile")}
                 className="w-8 h-8 rounded-lg items-center justify-center"
                 style={{ borderWidth: 1, borderColor: colors.border }}
               >
@@ -181,28 +223,34 @@ export function NavSheet() {
               </Pressable>
             </View>
 
-            {/* Follow-Up nav */}
-            <ScrollView style={{ paddingHorizontal: 16, paddingTop: 4 }} contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}>
-              {FOLLOWUP_NAV.map((item) => {
-                const active = item.nav ? activeRoute === item.nav : false;
-                return (
-                  <Pressable
-                    key={item.label}
-                    onPress={() => go(item)}
-                    className="flex-row items-center gap-3 px-3 py-3 rounded-xl mb-1.5"
+            <ScrollView
+              style={{ paddingHorizontal: 16, paddingTop: 4 }}
+              contentContainerStyle={{ paddingBottom: insets.bottom + 24 }}
+              showsVerticalScrollIndicator={false}
+            >
+              {/* Dashboard — standalone entry above the groups */}
+              <Leaf item={{ label: "Dashboard", icon: LayoutDashboard, nav: "Dashboard" }} />
+
+              {GROUPS.map((group) => (
+                <View key={group.label} className="mt-3">
+                  <Text
                     style={{
-                      backgroundColor: active ? `${ACCENT}1f` : "transparent",
-                      borderWidth: 1,
-                      borderColor: active ? `${ACCENT}4d` : "transparent",
+                      color: colors.mutedForeground,
+                      fontSize: 10,
+                      fontFamily: fonts.heading.bold,
+                      textTransform: "uppercase",
+                      letterSpacing: 1.5,
+                      marginBottom: 6,
+                      marginLeft: 4,
                     }}
                   >
-                    <item.icon size={16} color={active ? ACCENT : colors.mutedForeground} />
-                    <Text style={{ color: active ? ACCENT : colors.foreground, fontSize: 13, fontFamily: fonts.body.medium }}>
-                      {item.label}
-                    </Text>
-                  </Pressable>
-                );
-              })}
+                    {group.label}
+                  </Text>
+                  {group.items.map((item) => (
+                    <Leaf key={item.nav} item={item} />
+                  ))}
+                </View>
+              ))}
             </ScrollView>
           </Animated.View>
         </Animated.View>

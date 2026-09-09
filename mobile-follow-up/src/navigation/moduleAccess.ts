@@ -15,6 +15,9 @@ export const FOLLOWUP_PAGE_KEYS = [
   "followup-task-transfer",
   "task-performance-report",
   "entry-type-doc-followup-report",
+  "followup-department-master",
+  "followup-tag-master",
+  "followup-cancel-template-master",
 ];
 
 export function useModuleAccess() {

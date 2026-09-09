@@ -87,3 +87,25 @@ export const getTaskPerformanceReport = (params?: Record<string, string>) =>
         : ""
     }`,
   );
+
+// ── Setup masters ────────────────────────────────────────────────────────────
+export interface MasterRow {
+  Id: number;
+  Name: string;
+  IsActive: boolean | number;
+}
+
+/** GET /api/department-master → [{Id, DepartmentName, IsActive, …}] */
+export const getDepartments = async (): Promise<MasterRow[]> =>
+  (await getJson<Array<{ Id: number; DepartmentName: string; IsActive: boolean | number }>>(
+    "/api/department-master",
+  )).map((d) => ({ Id: d.Id, Name: d.DepartmentName, IsActive: d.IsActive }));
+
+/** GET /api/tag-master → [{Id, Name, IsActive, …}] */
+export const getTags = () => getJson<MasterRow[]>("/api/tag-master");
+
+/** GET /api/cancel-template-master → [{Id, Reason, IsActive, …}] */
+export const getCancelTemplates = async (): Promise<MasterRow[]> =>
+  (await getJson<Array<{ Id: number; Reason: string; IsActive: boolean | number }>>(
+    "/api/cancel-template-master",
+  )).map((c) => ({ Id: c.Id, Name: c.Reason, IsActive: c.IsActive }));

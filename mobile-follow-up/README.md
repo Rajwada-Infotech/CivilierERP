@@ -40,20 +40,28 @@ src/
                            TopHeader, moduleAccess (followup gate)
   screens/
     auth/LoginScreen
-    dashboard/             DashboardScreen (task snapshot + shortcuts),
+    dashboard/             DashboardScreen (task snapshot + grouped links),
                            Notifications, Profile
-    followup/              FollowUpDashboard, TaskList, CloseTask,
-                           CancelledTasks, TaskTransfer*, TaskPerformance*
+    followup/              FollowUpDashboard, TaskList, TaskMaster, CloseTask,
+                           CancelledTasks, TaskTransfer*, TaskPerformance*,
+                           TagPerformance*, EntryTypeDocReport*
+    setup/                 DepartmentMaster, TagMaster, CancelTemplate
   services/                fetchWithAuth, secure-store, react-query client
   theme/                   colors, fonts
 ```
 
+The FAB **Menu** (NavSheet) and the Dashboard both group every destination
+into **Transactions / Reports / Setup**, mirroring the web app's Follow-Up
+sidebar + Reports catalog + Setup fly-out.
+
 `*` = wired into navigation, screen body is a "build me out" placeholder
-(`ComingSoon`). The read-only task lists (Tasks / Close Task / Cancelled)
-are live against the backend.
+(`ComingSoon`). Live against the backend: the task lists (Follow-Up Board /
+Tasks / Task Master / Close Task / Cancelled Tasks) and the Setup masters
+(read-only).
 
 ## Building on this
 
-New Follow-Up screens: add the component under `src/screens/followup/`,
-register it in `src/navigation/MainStack.tsx` (route name + `<Stack.Screen>`),
-and add a leaf to `FOLLOWUP_NAV` in `src/navigation/NavSheet.tsx`.
+New screen: add the component under `src/screens/{followup,setup}/`, register
+it in `src/navigation/MainStack.tsx` (route name + `<Stack.Screen>`), and add
+a leaf to the right group in `GROUPS` in `src/navigation/NavSheet.tsx` (and,
+optionally, `src/screens/dashboard/DashboardScreen.tsx`).
