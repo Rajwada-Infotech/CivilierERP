@@ -155,9 +155,10 @@ function exportColumns(showParty: boolean, showBalance: boolean): ExportColumn[]
   ];
   if (showParty) cols.push({ header: "Party", accessor: (r) => (r.PartyName as string) ?? "—" });
   cols.push(
-    { header: "Voucher No", accessor: "VoucherNo" },
+    { header: "Doc Number", accessor: (r) => docRefFor(r as unknown as LedgerEntry) ?? "—" },
     { header: "Type", accessor: (r) => sourceMeta(r.SourceType as string).label },
-    { header: "Reference", accessor: (r) => docRefFor(r as unknown as LedgerEntry) ?? "—" },
+    { header: "Vendor Invoice No", accessor: (r) => (r.VendorInvoiceNo as string) ?? "—" },
+    { header: "Vendor Invoice Date", accessor: (r) => fmtDate(r.VendorInvoiceDate as string) },
     { header: "Narration", accessor: "Narration" },
     { header: "Cost Centre", accessor: (r) => (r.CostCenterName as string) ?? "—" },
     { header: "Debit", accessor: (r) => (Number(r.DebitAmount) > 0 ? Number(r.DebitAmount).toFixed(2) : "") },
@@ -487,8 +488,10 @@ export function VendorLedgerReportBody() {
                   <tr className="border-b border-border/60 text-muted-foreground uppercase tracking-wide text-[10px] font-heading">
                     <th className="text-left px-4 sm:px-5 py-2.5">Date</th>
                     {showParty && <th className="text-left px-3 py-2.5">Party</th>}
+                    <th className="text-left px-3 py-2.5">Doc Number</th>
                     <th className="text-left px-3 py-2.5">Type</th>
-                    <th className="text-left px-3 py-2.5">Reference</th>
+                    <th className="text-left px-3 py-2.5">Vendor Invoice No</th>
+                    <th className="text-left px-3 py-2.5">Vendor Invoice Date</th>
                     <th className="text-left px-3 py-2.5">Narration</th>
                     <th className="text-right px-3 py-2.5">Debit</th>
                     <th className="text-right px-3 py-2.5">Credit</th>
@@ -515,12 +518,14 @@ export function VendorLedgerReportBody() {
                             </button>
                           </td>
                         )}
+                        <td className="px-3 py-2.5 whitespace-nowrap font-mono text-muted-foreground">{ref ?? "—"}</td>
                         <td className="px-3 py-2.5 whitespace-nowrap">
                           <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full ${m.bg} ${m.color}`}>
                             <Icon size={11} /> {m.label}
                           </span>
                         </td>
-                        <td className="px-3 py-2.5 whitespace-nowrap font-mono text-muted-foreground">{ref ?? "—"}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap font-mono text-muted-foreground">{t.VendorInvoiceNo ?? "—"}</td>
+                        <td className="px-3 py-2.5 whitespace-nowrap text-muted-foreground">{fmtDate(t.VendorInvoiceDate)}</td>
                         <td className="px-3 py-2.5 text-foreground max-w-[280px] truncate" title={t.Narration ?? ""}>
                           {/* Normalized "{Type} of ₹X" instead of each
                               source's own raw narration text (which varied

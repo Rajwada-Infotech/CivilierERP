@@ -54,6 +54,8 @@ export interface LedgerEntry {
   JournalVoucherNo: string | null;
   FundTransferDocNo: string | null;
   ExpenseBookingDocNo: string | null;
+  VendorInvoiceNo: string | null;
+  VendorInvoiceDate: string | null;
   LoanDocNo: string | null;
   // Present only on a single party's ledger (/:headId/transactions) — a
   // running balance across mixed parties wouldn't mean anything.

@@ -1013,7 +1013,7 @@ export default function TrialBalance() {
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [filterMode, from, to, asOn, selCompany, selProject, selCostCenter],
+    [drillNode, filterMode, from, to, asOn, selCompany, selProject, selCostCenter],
   );
 
   // Level 3 — show the exact GL leg the user clicked. Every field needed is

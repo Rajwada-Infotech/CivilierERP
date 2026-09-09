@@ -357,11 +357,31 @@ const ALL_REPORTS: ReportDef[] = [
     // supplier, direct/manual bookings -> eb.LHeadId) + Amount posted to
     // the Expense Head — an invoice always debits it (there's no
     // credit-note flow through this table), so "Amount" here is that debit.
+    // Net Amt (eb.EAmount, the pre-GST taxable base) / Tax Amt (Total −
+    // Net) / Total Amount follow the same split MaterialExpenseBooking.tsx
+    // uses (Basic Amt + GST% -> Net Amt there — same numbers, this report
+    // just spells out the tax split instead of a %).
     columns: [
       { header: "Doc No", accessor: (r) => (r.EDocNo ?? "—") as string },
+      {
+        header: "Doc Date",
+        accessor: (r) => (r.EDocDate ? String(r.EDocDate).slice(0, 10) : "—"),
+      },
       { header: "Paid To", accessor: (r) => (r.ESupplierName ?? "—") as string },
       {
-        header: "Amount",
+        header: "Net Amt",
+        accessor: (r) => fmt(Number(r.EAmount) || 0),
+      },
+      {
+        header: "Tax Amt",
+        accessor: (r) => {
+          const total = Number(r.ENetAmount ?? r.EGrnTotalAmount ?? r.EAmount) || 0;
+          const net = Number(r.EAmount) || 0;
+          return fmt(Math.max(0, total - net));
+        },
+      },
+      {
+        header: "Total Amount",
         accessor: (r) => fmt(Number(r.ENetAmount ?? r.EGrnTotalAmount ?? r.EAmount) || 0),
       },
     ],
@@ -2250,6 +2270,125 @@ const SectionFilters: React.FC<{
   </div>
 );
 
+// ── Ledger Report: one row per GL head, expand to see its own postings ─────
+// Same "singular head, click to see the postings" shape the user asked for
+// here — modeled on WorkerAttendanceLogGroups' collapsed-group pattern
+// above, just grouped by GL head (LHeadName) instead of by date/activity.
+const LedgerReportGroups: React.FC<{
+  rows: Record<string, unknown>[];
+  onRowClick: (row: Record<string, unknown>) => void;
+}> = ({ rows, onRowClick }) => {
+  const [collapsedHeads, setCollapsedHeads] = useState<Record<string, boolean>>({});
+
+  const groups = useMemo(() => {
+    const byHead = new Map<
+      string,
+      { name: string; groupName: string; expenseType: string; debit: number; credit: number; rows: Record<string, unknown>[] }
+    >();
+    for (const row of rows) {
+      const name = (row.LHeadName as string) || "—";
+      const existing = byHead.get(name);
+      const debit = Number(row.DebitAmount) || 0;
+      const credit = Number(row.CreditAmount) || 0;
+      if (existing) {
+        existing.debit += debit;
+        existing.credit += credit;
+        existing.rows.push(row);
+      } else {
+        byHead.set(name, {
+          name,
+          groupName: (row.GroupName as string) || "—",
+          expenseType: (row.ExpenseType as string) || "—",
+          debit,
+          credit,
+          rows: [row],
+        });
+      }
+    }
+    return Array.from(byHead.values()).sort((a, b) => b.rows.length - a.rows.length);
+  }, [rows]);
+
+  const toggleHead = (name: string) =>
+    setCollapsedHeads((prev) => ({ ...prev, [name]: !prev[name] }));
+
+  return (
+    <div>
+      {groups.map((group) => {
+        const collapsed = collapsedHeads[group.name] !== false; // default collapsed
+        return (
+          <div key={group.name} className="border-b border-border/60 last:border-0">
+            <button
+              type="button"
+              onClick={() => toggleHead(group.name)}
+              className="w-full flex items-center gap-2.5 px-4 sm:px-5 py-3 hover:bg-muted/20 transition-colors text-left"
+            >
+              <span className="text-xs font-medium text-foreground truncate">{group.name}</span>
+              <span className="text-[11px] text-muted-foreground truncate hidden sm:inline">
+                · {group.groupName}
+                {group.expenseType !== "—" && ` · ${group.expenseType}`}
+              </span>
+              <span className="ml-auto flex items-center gap-3 shrink-0">
+                <span className="text-[10px] tabular-nums text-emerald-600 dark:text-emerald-400">
+                  Dr {fmt(group.debit)}
+                </span>
+                <span className="text-[10px] tabular-nums text-rose-600 dark:text-rose-400">
+                  Cr {fmt(group.credit)}
+                </span>
+                <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                  {group.rows.length} txn{group.rows.length === 1 ? "" : "s"}
+                </span>
+              </span>
+            </button>
+
+            {!collapsed && (
+              <div className="overflow-x-auto bg-muted/5">
+                <table className="w-full text-xs min-w-[720px]">
+                  <thead>
+                    <tr className="text-muted-foreground uppercase tracking-wide text-[10px] font-heading">
+                      <th className="text-left pl-11 pr-3 py-2">Date</th>
+                      <th className="text-left px-3 py-2">Source</th>
+                      <th className="text-left px-3 py-2">Doc No</th>
+                      <th className="text-left px-3 py-2">Narration</th>
+                      <th className="text-right px-3 py-2">Debit</th>
+                      <th className="text-right px-4 sm:px-5 py-2">Credit</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/40">
+                    {group.rows.map((r, i) => (
+                      <tr
+                        key={i}
+                        onClick={() => onRowClick(r)}
+                        className="hover:bg-muted/20 transition-colors cursor-pointer"
+                      >
+                        <td className="pl-11 pr-3 py-2 whitespace-nowrap text-muted-foreground">
+                          {r.VoucherDate ? String(r.VoucherDate).slice(0, 10) : "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">{(r.SourceType as string) ?? "—"}</td>
+                        <td className="px-3 py-2 whitespace-nowrap font-mono text-muted-foreground">
+                          {(r.DocNo as string) ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 text-foreground max-w-[280px] truncate" title={(r.Narration as string) ?? ""}>
+                          {(r.Narration as string) ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400">
+                          {Number(r.DebitAmount) > 0 ? fmt(Number(r.DebitAmount)) : "—"}
+                        </td>
+                        <td className="px-4 sm:px-5 py-2 text-right tabular-nums text-rose-600 dark:text-rose-400">
+                          {Number(r.CreditAmount) > 0 ? fmt(Number(r.CreditAmount)) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 // ── Report data table ─────────────────────────────────────────────────────────
 
 const ReportTable: React.FC<{
@@ -2288,6 +2427,10 @@ const ReportTable: React.FC<{
   // ── Worker Attendance renders as the same grouped/collapsible log the
   //     Worker Attendance page itself uses, instead of a flat table. ─────────
   const isWorkerAttendance = report.id === "worker-attendance";
+
+  // ── Ledger Report renders one row per GL head (click to expand its own
+  //     postings) instead of a flat, repeated-head-per-row table. ───────────
+  const isLedgerReport = report.id === "ledger-report";
 
   // ── Vendor Ledger Report is search-driven (any party/GL head) with its
   //     own internal fetching (search, per-party passbook, all-transactions
@@ -2723,6 +2866,11 @@ const ReportTable: React.FC<{
       {!loading && !error && rows.length > 0 && (
         isWorkerAttendance ? (
           <WorkerAttendanceLogGroups rows={rows as unknown as AttendanceReportRow[]} />
+        ) : isLedgerReport ? (
+          <LedgerReportGroups
+            rows={rows as unknown as Record<string, unknown>[]}
+            onRowClick={setSelectedRow}
+          />
         ) : (
         <>
           <div className="overflow-x-auto">
