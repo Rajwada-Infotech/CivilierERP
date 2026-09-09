@@ -51,12 +51,28 @@ build_and_fetch() {
   }
 }
 
-build_and_fetch mobile CivilierERP.apk
-build_and_fetch mobile-admin CivilierERPAdmin.apk
+# Keep this list in sync with src/pages/DownloadAndroidApp.tsx's APPS array —
+# each entry's out_file must match that page's apkPath basename.
+build_and_fetch mobile                  CivilierERP.apk
+build_and_fetch mobile-admin            CivilierERPAdmin.apk
+build_and_fetch mobile-supplier         CivilierERPSupplier.apk
+build_and_fetch mobile-Fixed-Asset      CivilierERPFixedAsset.apk
+build_and_fetch mobile-follow-up        CivilierERPFollowUp.apk
+build_and_fetch mobile-maintenance      CivilierERPMaintenance.apk
+
+APKS=(
+  CivilierERP.apk
+  CivilierERPAdmin.apk
+  CivilierERPSupplier.apk
+  CivilierERPFixedAsset.apk
+  CivilierERPFollowUp.apk
+  CivilierERPMaintenance.apk
+)
 
 echo "==> Uploading to $EC2_USER@$EC2_HOST:$EC2_REMOTE_PATH"
 scp -i "$EC2_SSH_KEY" -o StrictHostKeyChecking=accept-new \
-  "$RELEASE_DIR/CivilierERP.apk" "$RELEASE_DIR/CivilierERPAdmin.apk" \
+  "${APKS[@]/#/$RELEASE_DIR/}" \
   "$EC2_USER@$EC2_HOST:$EC2_REMOTE_PATH/"
 
-echo "==> Done. Live at https://civiliererp.in/downloads/CivilierERP.apk and .../CivilierERPAdmin.apk"
+echo "==> Done. Live under https://civiliererp.in/downloads/ :"
+printf '  - %s\n' "${APKS[@]}"
