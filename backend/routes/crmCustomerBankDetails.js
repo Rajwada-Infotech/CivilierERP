@@ -43,7 +43,18 @@ async function requireAssignedOrApprover(req, res, pool, { bookingId, applicatio
 router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = ["b.IsActive = 1", `b.Status = '${CrmStatus.APPROVED}'`];
+    // Not paginated — Pending/Complete counts are computed client-side from
+    // the full set (see CrmCustomerBankDetails.tsx), same reasoning as
+    // CrmDemands. Company/Project/Block narrows the set server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,
         COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
@@ -68,10 +79,11 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       LEFT JOIN dbo.CrmCustomerBankDetail d ON d.BookingId = b.Id
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
       OUTER APPLY (
         SELECT TOP 1 Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = b.Id ORDER BY CallDate DESC, CreatedAt DESC
       ) wc
-      WHERE b.IsActive = 1 AND b.Status = '${CrmStatus.APPROVED}'
+      WHERE ${conds.join(" AND ")}
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);

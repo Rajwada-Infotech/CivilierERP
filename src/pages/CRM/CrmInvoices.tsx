@@ -355,7 +355,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
   const milestones: any[] = bookingDetail?.milestones || [];
   const eligibleMilestones = milestones.filter((m) => getMilestoneInsight(m, existingInvoices).tone === "ready");
   const eligibleOnAccount = (onAccountData?.payments || []).filter(
-    (p: any) => !p.InvoiceId && !existingInvoices.some((inv: any) => inv.OnAccountPaymentId === p.Id && inv.Status !== "Void")
+    (p: any) => !p.InvoiceId && p.Status !== "Applied" && p.Status !== "PartiallyApplied" && !existingInvoices.some((inv: any) => inv.OnAccountPaymentId === p.Id && inv.Status !== "Void")
   );
   // Real money still owed on this booking's payment plan — a Maintenance/
   // Other invoice never touches this, so raising one while this is non-empty

@@ -1966,6 +1966,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                                   <Download size={12} /> Download
                                 </button>
                               </div>
+                            ) : p.Status === "Applied" || p.Status === "PartiallyApplied" ? (
+                              <div className="flex items-center gap-2 shrink-0">
+                                <span className="text-[11px] text-muted-foreground italic">
+                                  Applied to milestone (invoiced there)
+                                </span>
+                              </div>
                             ) : (
                               <div className="flex items-center gap-2 shrink-0">
                                 <span className="flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full border text-amber-700 bg-amber-50 border-amber-200">

@@ -8,11 +8,23 @@ import { useNavigate } from "react-router-dom";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/brokerage";
 
-async function fetchBrokerages(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
+interface BrokerPaymentsCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — Paid/Pending/InFinance totals are
+// computed client-side from the whole set (see below), same as CrmDemands.
+// Company/Project/Block narrows the set server-side instead. Shares the
+// same /api/crm/brokerage endpoint CrmBrokerage.tsx uses (already paginated
+// there for its own scanning view) — this page just never sends ?page=.
+async function fetchBrokerages(cpb?: BrokerPaymentsCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
   if (!r.ok) {
     const body = await r.json().catch(() => null);
     throw new Error(body?.error || `Failed to load broker records (${r.status})`);
@@ -37,10 +49,11 @@ const CrmBrokerPayments: React.FC = () => {
   const navigate = useNavigate();
   usePageRights("crm-brokerage");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
   const { data: records = [], isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["crm-brokerage"],
-    queryFn: fetchBrokerages,
+    queryKey: ["crm-brokerage", cpb],
+    queryFn: () => fetchBrokerages(cpb),
     staleTime: 30_000,
   });
 
@@ -186,6 +199,7 @@ const CrmBrokerPayments: React.FC = () => {
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary"
             />
           </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
           {!isError && (
             <>
               {totalPending > 0 && (

@@ -23,12 +23,14 @@ const WC_SELECT = `
     b.BookingNo,
     COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
     COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
-    a.ApplicantName, a.Mobile
+    a.ApplicantName, a.Mobile,
+    CASE WHEN sub.IsLocked = 1 THEN 1 ELSE 0 END AS HasSubmittedChecklist
   FROM dbo.CrmWelcomeCall wc
-  JOIN  dbo.CrmBooking b     ON b.Id = wc.BookingId
-  JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
+  JOIN dbo.CrmBooking b ON b.Id = wc.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-  LEFT JOIN dbo.Users u      ON u.id = wc.CalledBy
+  LEFT JOIN dbo.Users u ON u.id = wc.CalledBy
+  LEFT JOIN dbo.CrmWelcomeCallSubmission sub ON sub.BookingId = wc.BookingId
 `;
 
 const OUTCOMES = ["Welcomed","NotReachable","RequestedCallback","VoiceMail","Busy","SwitchedOff"];

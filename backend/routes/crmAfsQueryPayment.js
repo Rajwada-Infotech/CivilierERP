@@ -48,10 +48,19 @@ router.get("/", requirePageRight("crm-afs-query-payment", "view"), async (req, r
   try {
     const pool = getPool();
     const { status } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const where = [];
     if (status) { req0.input("st", sql.NVarChar(20), status); where.push("aqp.Status = @st"); }
-    const result = await req0.query(`${AQP_SELECT} ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY aqp.CreatedAt DESC`);
+    // Not paginated — status counts are computed client-side from the full
+    // set (see CrmAfsQueryPayment.tsx), same reasoning as CrmDemands.
+    // Company/Project/Block narrows the set server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("um.BlockId = @blockId"); }
+    const result = await req0.query(`${AQP_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY aqp.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-afs-query-payment] GET error:", e.message);

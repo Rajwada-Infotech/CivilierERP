@@ -241,6 +241,46 @@ const DocPreviewDialog: React.FC<{ doc: any; onClose: () => void }> = ({ doc, on
 // DocPreviewDialog above, pointed at the actual invoice PDF route
 // (CrmBookingDetail.tsx's Payment & Invoice tab uses the identical
 // component) instead of the old plain-text Type/Amount/Date summary.
+const WelcomeCallPdfDialog: React.FC<{ bookingId: number; bookingNo: string; onClose: () => void }> = ({ bookingId, bookingNo, onClose }) => {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    fetchWithAuth(`${VC_API}/${bookingId}/pdf`)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (cancelled || !blob) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => setBlobUrl(null));
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [bookingId]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <div className="flex items-start justify-between">
+            <DialogTitle className="font-heading flex items-center gap-1.5"><FileCheck size={16} className="text-amber-600 dark:text-amber-400" /> Welcome Call Verification - {bookingNo}</DialogTitle>
+            {blobUrl && (
+              <a href={blobUrl} download={`WelcomeCall_Verification_${bookingNo}.pdf`}
+                className="shrink-0 px-3 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 flex items-center gap-1.5">
+                <Download size={14} /> Download PDF
+              </a>
+            )}
+          </div>
+        </DialogHeader>
+        <div className="flex items-center justify-center min-h-[300px] bg-muted/20 rounded-lg overflow-hidden border border-border">
+          {!blobUrl ? <span className="text-sm text-muted-foreground">Loading preview...</span>
+            : <iframe src={blobUrl} title={`WelcomeCall_${bookingNo}`} className="w-full h-[60vh] border-0" />}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const InvoicePdfDialog: React.FC<{ bookingId: number; invoice: any; onClose: () => void }> = ({ bookingId, invoice, onClose }) => {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
@@ -771,16 +811,22 @@ const ChecklistSectionBlock: React.FC<{
 // themselves render, not the gate itself.
 const ChecklistSubmitFooter: React.FC<{
   vc: any; locked: boolean; submitting: boolean; reopening: boolean;
-  onSubmit: () => void; onReopen: () => void; onContinue?: () => void;
-}> = ({ vc, locked, submitting, reopening, onSubmit, onReopen, onContinue }) => {
+  onSubmit: () => void; onReopen: () => void; onContinue?: () => void; onPreviewPdf?: () => void;
+}> = ({ vc, locked, submitting, reopening, onSubmit, onReopen, onContinue, onPreviewPdf }) => {
   const rights = usePageRights("crm-welcome-calls");
   if (!vc) return null;
   return (
-    <div className="rounded-xl border border-border p-3.5 space-y-2">
+    <div className="rounded-xl border border-border p-3.5 space-y-2 bg-muted/10">
       {locked ? (
         <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
           <span className="flex items-center gap-1.5 font-medium"><Lock size={12} /> Submitted and locked{vc.submission?.SubmittedAt ? ` — ${String(vc.submission.SubmittedAt).slice(0, 16).replace("T", " ")}` : ""}</span>
           <div className="flex items-center gap-3">
+            {onPreviewPdf && (
+              <button type="button" onClick={onPreviewPdf}
+                className="flex items-center gap-1 font-medium text-emerald-700 hover:underline">
+                <FileCheck size={12} /> View PDF
+              </button>
+            )}
             {onContinue && (
               <button type="button" onClick={onContinue}
                 className="flex items-center gap-1 font-medium text-emerald-800 hover:underline">
@@ -886,6 +932,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
   // just the one-line teaser.
   const [expandedCard, setExpandedCard] = useState<"plan" | "bank" | null>(null);
   const [viewingInvoice, setViewingInvoice] = useState<any | null>(null);
+  const [viewingWelcomeCallPdf, setViewingWelcomeCallPdf] = useState<{ id: number, no: string } | null>(null);
   // Was a fixed 300px sidebar + narrow column crammed into max-w-6xl with
   // 11px fonts everywhere — genuinely well-architected underneath (single
   // shared checklist source, verify-next-to-the-real-data placement, a live
@@ -1331,6 +1378,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
         <ChecklistSubmitFooter
           vc={vcState.vc} locked={vcState.locked} submitting={vcState.submitting} reopening={vcState.reopening}
           onSubmit={vcState.handleSubmit} onReopen={vcState.handleReopen}
+          onPreviewPdf={() => setViewingWelcomeCallPdf({ id: booking.BookingId, no: booking.BookingNo })}
           onContinue={() => { onClose(); navigate(`/crm/communication?bookingId=${booking.BookingId}`); }}
         />
 
@@ -2155,6 +2203,9 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
     {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
 
     {/* Invoice PDF preview — real generated PDF, same as CrmBookingDetail.tsx's Payment & Invoice tab */}
+    {viewingWelcomeCallPdf && (
+      <WelcomeCallPdfDialog bookingId={viewingWelcomeCallPdf.id} bookingNo={viewingWelcomeCallPdf.no} onClose={() => setViewingWelcomeCallPdf(null)} />
+    )}
     {viewingInvoice && (
       <InvoicePdfDialog bookingId={booking.BookingId} invoice={viewingInvoice} onClose={() => setViewingInvoice(null)} />
     )}
@@ -2178,6 +2229,7 @@ const CrmWelcomeCall: React.FC = () => {
   // rows never set this, so they always open in normal logging mode.
   const [activeCall, setActiveCall] = useState<any | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
+  const [viewingWelcomeCallPdf, setViewingWelcomeCallPdf] = useState<{ id: number; no: string } | null>(null);
 
   // Opening from a row click used to only ever set local state — the URL
   // stayed plain /crm/welcome-calls, so refreshing lost the open dialog and
@@ -2407,16 +2459,28 @@ const CrmWelcomeCall: React.FC = () => {
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">{c.Mobile} · {c.ProjectName || c.UnitNo}</div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {c.Outcome && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${outcomeColor[c.Outcome] || ""}`}>
-                        {c.Outcome}
-                      </span>
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="flex items-center gap-2">
+                      {c.Outcome && (
+                        <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full border ${c.Outcome === "Welcomed" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+                          {c.Outcome}
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">{c.CallDate ? String(c.CallDate).slice(0, 16).replace("T", " ") : "—"}</span>
+                      <ChevronRight size={14} className="text-muted-foreground ml-1" />
+                    </div>
+                    {!!c.HasSubmittedChecklist && (
+                      <div
+                        role="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewingWelcomeCallPdf({ id: c.BookingId, no: c.BookingNo });
+                        }}
+                        className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 transition-colors cursor-pointer"
+                      >
+                        <FileCheck size={12} /> View PDF
+                      </div>
                     )}
-                    <span className="text-xs text-muted-foreground">
-                      {c.CallDate ? String(c.CallDate).slice(0, 16).replace("T", " ") : "—"}
-                    </span>
-                    <ChevronRight size={14} className="text-muted-foreground" />
                   </div>
                 </div>
                 {(c.Notes || c.DurationSeconds || c.NextCallDate || c.PreferredAgreementDate || custom.length > 0) && (
@@ -2456,6 +2520,9 @@ const CrmWelcomeCall: React.FC = () => {
         />
       )}
     </CrmShell>
+    {viewingWelcomeCallPdf && (
+      <WelcomeCallPdfDialog bookingId={viewingWelcomeCallPdf.id} bookingNo={viewingWelcomeCallPdf.no} onClose={() => setViewingWelcomeCallPdf(null)} />
+    )}
     </>
   );
 };

@@ -31,14 +31,24 @@ const AL_SELECT = `
 router.get("/", requirePageRight("crm-allotment-letter", "view"), async (req, res) => {
   try {
     const pool = getPool();
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const where = [];
     if (req.query.status) {
       req0.input("st", sql.NVarChar(20), req.query.status);
       where.push("al.Status = @st");
     }
+    // Not paginated — stat counts are always computed off the full
+    // unfiltered list client-side (see CrmAllotmentLetter.tsx), same
+    // reasoning as CrmDemands. Company/Project/Block narrows the set
+    // server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("um.BlockId = @blockId"); }
     const result = await req0.query(
-      `${AL_SELECT} ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY al.CreatedAt DESC`
+      `${AL_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY al.CreatedAt DESC`
     );
     res.json(result.recordset);
   } catch (e) {

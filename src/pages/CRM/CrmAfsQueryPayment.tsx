@@ -27,6 +27,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/afs-query-payment";
 const BKG_API = "/api/crm/bookings";
@@ -148,8 +149,17 @@ function fileToStaged(file: File): Promise<StagedFile> {
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_COMBINED_BYTES = 6 * 1024 * 1024;
 
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
+interface AfsQpCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — statusCounts are computed
+// client-side from the whole set (see below), same as CrmDemands.
+// Company/Project/Block narrows the set server-side instead.
+async function fetchAll(cpb?: AfsQpCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load AFS Query Payments");
   return r.json();
 }
@@ -365,10 +375,11 @@ const CrmAfsQueryPayment: React.FC = () => {
   const [confirming, setConfirming] = useState(false);
   const [filterStatus, setFilterStatus] = useState<"all" | "Pending" | "InfoSent" | "Confirmed">("all");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const infoInputRef = useRef<HTMLInputElement>(null);
   const proofInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: rows = [], isLoading, dataUpdatedAt: listUpdatedAt, isFetching: listFetching, refetch: refetchList } = useQuery({ queryKey: ["crm-afs-query-payment"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: rows = [], isLoading, dataUpdatedAt: listUpdatedAt, isFetching: listFetching, refetch: refetchList } = useQuery({ queryKey: ["crm-afs-query-payment", cpb], queryFn: () => fetchAll(cpb), staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: eligibleBookings = [] } = useQuery({ queryKey: ["crm-afs-query-payment-eligible"], queryFn: fetchEligibleBookings, staleTime: 60_000 });
   const { data: detail, refetch: refetchDetail } = useQuery({
@@ -960,6 +971,7 @@ const CrmAfsQueryPayment: React.FC = () => {
                     placeholder="Search name, AQP no, booking, unit..."
                     className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
                 </div>
+                <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
                 <div className="flex items-center gap-2 flex-wrap">
                   {(["all", "Pending", "InfoSent", "Confirmed"] as const).map((s) => {
                     const label = s === "all" ? "All" : s === "InfoSent" ? "Info Sent" : s;

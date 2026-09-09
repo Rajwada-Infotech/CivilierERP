@@ -14,6 +14,7 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/customer-bank-details";
 const CHECKLIST_API = "/api/crm/welcome-calls";
@@ -64,8 +65,17 @@ function initials(name: string | null | undefined) {
   return name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
 }
 
-async function fetchList(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+interface BankDetailsCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — Pending/Complete counts are
+// computed client-side from the whole set (see `counts` below), same as
+// CrmDemands. Company/Project/Block narrows the set server-side instead.
+async function fetchList(cpb?: BankDetailsCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  try { const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchBankDetail(bookingId: number): Promise<any> {
   try { const r = await fetchWithAuth(`${API}/booking/${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
@@ -419,8 +429,9 @@ const CrmCustomerBankDetails: React.FC = () => {
   const [search, setSearch] = useState("");
   const [activeRow, setActiveRow] = useState<any | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
-  const { data: list = [], isLoading } = useQuery({ queryKey: ["crm-bank-details-list"], queryFn: fetchList, staleTime: 30_000 });
+  const { data: list = [], isLoading } = useQuery({ queryKey: ["crm-bank-details-list", cpb], queryFn: () => fetchList(cpb), staleTime: 30_000 });
 
   // Deep-link support: /crm/customer-bank-details?bookingId=X opens the
   // dialog for that booking directly (e.g. from the Bookings list action).
@@ -465,6 +476,7 @@ const CrmCustomerBankDetails: React.FC = () => {
               placeholder="Search by customer, booking, project..."
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
           </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
           <div className="flex rounded-lg border border-border overflow-hidden">
             {([
               ["All", counts.all],

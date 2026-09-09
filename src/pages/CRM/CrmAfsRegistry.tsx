@@ -23,6 +23,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/afs-registry";
 const BKG_API = "/api/crm/bookings";
@@ -93,8 +94,17 @@ function Timeline({ row }: { row: any }) {
   );
 }
 
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
+interface AfsRegistryCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — status counts (awaitingRegNo, etc.)
+// are computed client-side from the whole set, same as CrmDemands.
+// Company/Project/Block narrows the set server-side instead.
+async function fetchAll(cpb?: AfsRegistryCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load AFS Registry trackers");
   return r.json();
 }
@@ -138,9 +148,10 @@ const CrmAfsRegistry: React.FC = () => {
   const [completedDate, setCompletedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [detailRow, setDetailRow] = useState<any | null>(null);
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [filterStatus, setFilterStatus] = useState<"all" | "Pending" | "Scheduled" | "Completed">("all");
 
-  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-afs-registry"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-afs-registry", cpb], queryFn: () => fetchAll(cpb), staleTime: 30_000 });
   const { data: eligibleBookings = [], isFetching: eligFetching } = useQuery({
     queryKey: ["crm-afs-registry-eligible"],
     queryFn: fetchEligibleBookings,
@@ -410,6 +421,7 @@ const CrmAfsRegistry: React.FC = () => {
                 placeholder="Search name, AREG no, booking, unit..."
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
             </div>
+            <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
             <div className="flex items-center gap-2 flex-wrap">
               {(["all", "Pending", "Scheduled", "Completed"] as const).map((s) => {
                 const label = s === "all" ? "All" : s;

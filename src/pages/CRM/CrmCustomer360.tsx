@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -12,14 +12,28 @@ import {
   CalendarClock, ExternalLink, Activity
 } from "lucide-react";
 
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+
 const API = "/api/crm/customer-360";
 
-async function fetchCustomerList(search: string): Promise<any[]> {
-  const params = new URLSearchParams();
-  if (search) params.set("search", search);
+const PAGE_SIZE = 20;
+interface Customer360Filters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchCustomerList(filters: Customer360Filters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
   const r = await fetchWithAuth(`${API}?${params}`);
-  if (!r.ok) return [];
-  return r.json();
+  if (!r.ok) return { rows: [], total: 0 };
+  const data = await r.json();
+  return { rows: data.rows || [], total: data.total || 0 };
 }
 async function fetchCustomer360(mobile: string): Promise<any> {
   if (!mobile) return null;
@@ -97,13 +111,21 @@ const CrmCustomer360: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedMobile, setSelectedMobile] = useState<string | null>(null);
   const [expandedBookingId, setExpandedBookingId] = useState<number | null>(null);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
 
-  const { data: list = [], isLoading: listLoading } = useQuery({
-    queryKey: ["crm-customer-360-list", searchTerm],
-    queryFn: () => fetchCustomerList(searchTerm),
+  const listFilters: Customer360Filters = useMemo(
+    () => ({ search: searchTerm, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [searchTerm, cpb]
+  );
+  const { data: listResult, isLoading: listLoading } = useQuery({
+    queryKey: ["crm-customer-360-list", listFilters, page],
+    queryFn: () => fetchCustomerList(listFilters, page),
     enabled: !selectedMobile,
     staleTime: 30_000,
   });
+  const list = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["crm-customer-360", selectedMobile],
@@ -124,18 +146,19 @@ const CrmCustomer360: React.FC = () => {
       <CrmShell title="CRM — Applicant Ledger" subtitle="Full customer journey and centralized financial ledger — lead to after-sales, in one view">
       {!selectedMobile ? (
         <>
-          <div className="flex gap-2 max-w-md">
-            <div className="relative flex-1">
+          <div className="flex gap-2 flex-wrap items-center">
+            <div className="relative flex-1 min-w-56 max-w-md">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input value={search} onChange={(e) => setSearch(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && setSearchTerm(search.trim())}
+                onKeyDown={(e) => e.key === "Enter" && (setSearchTerm(search.trim()), setPage(1))}
                 placeholder="Filter by name, mobile, or customer no..."
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
-            <button onClick={() => setSearchTerm(search.trim())}
+            <button onClick={() => { setSearchTerm(search.trim()); setPage(1); }}
               className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
               Filter
             </button>
+            <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
           </div>
 
           {listLoading ? (
@@ -166,6 +189,7 @@ const CrmCustomer360: React.FC = () => {
               ))}
             </div>
           )}
+          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
         </>
       ) : (
         <>

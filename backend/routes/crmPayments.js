@@ -1466,7 +1466,7 @@ router.put("/on-account/:id/apply", requirePageRight("crm-payments", "edit"), as
 router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, projectId, search, dateFrom, dateTo, page = "1", pageSize = "50" } = req.query;
+    const { status, projectId, companyId, blockId, search, dateFrom, dateTo, page = "1", pageSize = "50" } = req.query;
     const offset = (parseInt(page) - 1) * parseInt(pageSize);
 
     const req_ = pool.request()
@@ -1476,6 +1476,8 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
     let where = "WHERE o.BookingId IS NOT NULL";
     if (status)    { where += " AND o.Status = @status";     req_.input("status",    sql.NVarChar(30), status); }
     if (projectId) { where += " AND b.ProjectId = @pid";     req_.input("pid",       sql.Int, parseInt(projectId)); }
+    if (companyId) { where += " AND b.CompanyId = @cid";     req_.input("cid",       sql.Int, parseInt(companyId)); }
+    if (blockId)   { where += " AND um.BlockId = @bid2";     req_.input("bid2",      sql.Int, parseInt(blockId)); }
     if (dateFrom)  { where += " AND o.ReceivedDate >= @df";  req_.input("df",        sql.Date, dateFrom); }
     if (dateTo)    { where += " AND o.ReceivedDate <= @dt";  req_.input("dt",        sql.Date, dateTo); }
     if (search) {
@@ -1510,6 +1512,8 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
     let countWhere = "WHERE o.BookingId IS NOT NULL";
     if (status)    { countWhere += " AND o.Status = @status";     countReq.input("status",    sql.NVarChar(30), status); }
     if (projectId) { countWhere += " AND b.ProjectId = @pid";     countReq.input("pid",       sql.Int, parseInt(projectId)); }
+    if (companyId) { countWhere += " AND b.CompanyId = @cid";     countReq.input("cid",       sql.Int, parseInt(companyId)); }
+    if (blockId)   { countWhere += " AND um.BlockId = @bid2";     countReq.input("bid2",      sql.Int, parseInt(blockId)); }
     if (dateFrom)  { countWhere += " AND o.ReceivedDate >= @df";  countReq.input("df",        sql.Date, dateFrom); }
     if (dateTo)    { countWhere += " AND o.ReceivedDate <= @dt";  countReq.input("dt",        sql.Date, dateTo); }
     if (search) {

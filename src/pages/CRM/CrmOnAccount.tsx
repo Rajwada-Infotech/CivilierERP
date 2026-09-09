@@ -16,6 +16,8 @@ import {
   Filter, X, BadgeIndianRupee,
 } from "lucide-react";
 
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+
 const API = "/api/crm/payments";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -366,15 +368,18 @@ export default function CrmOnAccount() {
   const [dateTo, setDateTo]     = useState("");
   const [mode, setMode]         = useState("");
   const [page, setPage]         = useState(1);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const PAGE = 50;
 
   // committed filters (applied on Search click / Enter)
   const [applied, setApplied] = useState({ search: "", status: "", dateFrom: "", dateTo: "" });
-  const hasFilters = applied.search || applied.status || applied.dateFrom || applied.dateTo || mode;
+  const hasFilters = applied.search || applied.status || applied.dateFrom || applied.dateTo || mode
+    || cpb.companyId || cpb.projectId || cpb.blockId;
 
   function runSearch() { setApplied({ search, status, dateFrom, dateTo }); setPage(1); }
   function clearAll()  {
     setSearch(""); setStatus(""); setDateFrom(""); setDateTo(""); setMode("");
+    setCpb({ companyId: "", projectId: "", blockId: "" });
     setApplied({ search: "", status: "", dateFrom: "", dateTo: "" }); setPage(1);
   }
 
@@ -394,10 +399,13 @@ export default function CrmOnAccount() {
     ...(applied.status   ? { status: applied.status }     : {}),
     ...(applied.dateFrom ? { dateFrom: applied.dateFrom } : {}),
     ...(applied.dateTo   ? { dateTo: applied.dateTo }     : {}),
+    ...(cpb.companyId ? { companyId: cpb.companyId } : {}),
+    ...(cpb.projectId ? { projectId: cpb.projectId } : {}),
+    ...(cpb.blockId   ? { blockId: cpb.blockId }     : {}),
   });
 
   const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ["crm-on-account", applied, page],
+    queryKey: ["crm-on-account", applied, cpb, page],
     queryFn: async () => {
       const r = await fetchWithAuth(`${API}/on-account?${params}`);
       if (!r.ok) throw new Error("Failed to load deposits");
@@ -519,6 +527,8 @@ export default function CrmOnAccount() {
             className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
           <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
             className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
 
           <button onClick={runSearch}
             className="h-8 flex items-center gap-1.5 px-3 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90">

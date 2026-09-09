@@ -11,6 +11,7 @@ import { translateError } from "@/lib/translateError";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import {
   Plus, FileText, CheckCircle2, X, Upload, ExternalLink,
   Eye, Download, Clock, AlertTriangle, ArrowRight, Circle, Dot,
@@ -109,8 +110,17 @@ function fileToStaged(file: File): Promise<StagedFile> {
 
 // ─── API ─────────────────────────────────────────────────────────────────────
 
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
+interface AllotmentLetterCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — stat counts are always computed
+// off the full unfiltered list client-side, same as CrmDemands.
+// Company/Project/Block narrows the set server-side instead.
+async function fetchAll(cpb?: AllotmentLetterCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load Allotment Letters");
   return r.json();
 }
@@ -245,6 +255,7 @@ const CrmAllotmentLetter: React.FC = () => {
   // List panel — search / filter
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
   // Detail / Acknowledge
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -260,7 +271,7 @@ const CrmAllotmentLetter: React.FC = () => {
   const [pdfError, setPdfError] = useState<string | null>(null);
 
   const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-allotment-letter"], queryFn: fetchAll, staleTime: 30_000,
+    queryKey: ["crm-allotment-letter", cpb], queryFn: () => fetchAll(cpb), staleTime: 30_000,
   });
   const { data: eligibleBookings = [] } = useQuery({
     queryKey: ["crm-allotment-letter-eligible"], queryFn: fetchEligible, staleTime: 30_000,
@@ -456,6 +467,7 @@ const CrmAllotmentLetter: React.FC = () => {
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary"
               />
             </div>
+            <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
 
             <div className="flex-1 overflow-y-auto space-y-2">
               {isLoading ? (
