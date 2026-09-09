@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/communication";
 const BKG_API = "/api/crm/bookings";
@@ -61,8 +62,25 @@ function dayLabel(v: string) {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-async function fetchAll(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+interface CommunicationFilters {
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+// NOTE on scale: still fetched in full — every log row is folded client-side
+// into one conversation per customer (see `conversations` below), so raw
+// pagination would split a thread's messages across pages. Company/Project/
+// Block narrows the set server-side instead, same lever used on CrmDemands.
+async function fetchAll(filters?: CommunicationFilters): Promise<any[]> {
+  try {
+    const q = new URLSearchParams();
+    if (filters?.companyId) q.set("companyId", filters.companyId);
+    if (filters?.projectId) q.set("projectId", filters.projectId);
+    if (filters?.blockId) q.set("blockId", filters.blockId);
+    const url = q.toString() ? `${API}?${q}` : API;
+    const r = await fetchWithAuth(url);
+    return r.ok ? r.json() : [];
+  } catch { return []; }
 }
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -458,9 +476,10 @@ const CrmCommunication: React.FC = () => {
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [composer, setComposer] = useState({ Channel: "Call", Direction: "Outbound", Text: "" });
   const [sending, setSending] = useState(false);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const { data: logs = [], isLoading } = useQuery({ queryKey: ["crm-communication"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: logs = [], isLoading } = useQuery({ queryKey: ["crm-communication", cpb], queryFn: () => fetchAll(cpb), staleTime: 30_000 });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: apps = [] } = useQuery({ queryKey: ["crm-applications"], queryFn: fetchApps, staleTime: 5 * 60_000 });
 
@@ -679,6 +698,10 @@ const CrmCommunication: React.FC = () => {
             <p className="text-[11px] text-muted-foreground mt-1">{label}</p>
           </div>
         ))}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
       </div>
 
       {/* ── Messaging-app two-pane layout ── */}

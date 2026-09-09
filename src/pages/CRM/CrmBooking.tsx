@@ -29,6 +29,8 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { CrmBookingDetail } from "./CrmBookingDetail";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
@@ -114,6 +116,30 @@ async function fetchBookings(applicationId?: string): Promise<any[]> {
     return res.json();
   } catch { return []; }
 }
+
+const PAGE_SIZE = 20;
+interface BookingListFilters {
+  search: string;
+  status: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+// Main-list fetch: server-side search/status/Company/Project/Block +
+// pagination. Kept entirely separate from fetchBookings() above, which stays
+// exactly as-is for the applicationId-scoped deep-link/legacy callers.
+async function fetchBookingsList(filters: BookingListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ includeCancelled: "1", page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.status !== "All") params.set("status", filters.status);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  const res = await fetchWithAuth(`${API}?${params}`);
+  if (!res.ok) return { rows: [], total: 0 };
+  const data = await res.json();
+  return { rows: data.rows || [], total: data.total || 0 };
+}
 // Which real company bank account this booking's token payment lands in —
 // scoped to the selected unit's project (falls back to the open bank list if
 // the project has none tagged), same "Deposited To" pattern already used by
@@ -182,8 +208,11 @@ const CrmBooking: React.FC = () => {
   const appFilter = sp.get("applicationId") || "";
   const viewFilter = sp.get("view") || "";
 
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM, ApplicationId: appFilter });
   const [saving, setSaving] = useState(false);
@@ -200,11 +229,26 @@ const CrmBooking: React.FC = () => {
     navigate(`/crm/bookings?view=${id}`, { replace: true });
   };
 
-  const { data: bookings = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-bookings", appFilter],
-    queryFn: () => fetchBookings(appFilter || undefined),
+  const listFilters: BookingListFilters = useMemo(
+    () => ({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, statusFilter, cpb]
+  );
+
+  // The applicationId-scoped deep-link mode (?applicationId=X) keeps using
+  // the original unpaginated, unfiltered fetch exactly as before — it's
+  // fetching "the booking(s) for this one application," not a page of the
+  // main list. Only the main list (no appFilter) goes through the new
+  // server-side search/status/Company/Project/Block + pagination path.
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-bookings", appFilter, listFilters, page],
+    queryFn: async () => {
+      if (appFilter) return { rows: await fetchBookings(appFilter), total: 0 };
+      return fetchBookingsList(listFilters, page);
+    },
     staleTime: 30_000,
   });
+  const bookings = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
 
   // Deep-link support: /crm/bookings?applicationId=X (from "View Booking"
   // elsewhere in the app) opens that booking's detail modal directly in
@@ -374,14 +418,9 @@ const CrmBooking: React.FC = () => {
     }));
   };
 
-  const filtered = useMemo(() => {
-    return (bookings as any[]).filter((b: any) => {
-      const s = !search || b.ApplicantName?.toLowerCase().includes(search.toLowerCase())
-        || b.BookingNo?.includes(search) || b.UnitNo?.includes(search);
-      const st = statusFilter === "All" || b.Status === statusFilter;
-      return s && st;
-    });
-  }, [bookings, search, statusFilter]);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
 
   const handleSave = async () => {
     if (!form.ApplicationId) { toast.error("Please select an Application"); return; }
@@ -727,11 +766,12 @@ const CrmBooking: React.FC = () => {
         <div className="flex gap-3 flex-wrap items-center px-3.5 py-3 border-b" style={{ borderColor }}>
           <div className="relative flex-1 min-w-48">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name, booking no, unit..."
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+              placeholder="Search name, booking no, unit... (Enter to search)"
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
           </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
             <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-amber-500/40">
               <SelectValue placeholder="All Statuses" />
             </SelectTrigger>
@@ -740,16 +780,18 @@ const CrmBooking: React.FC = () => {
               {STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
             </SelectContent>
           </Select>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
         </div>
 
         <DataTable
-          data={filtered}
+          data={bookings}
           columns={bookingColumns}
           searchable={false}
           loading={isLoading}
           emptyMessage="No bookings found"
           className="border-0"
         />
+        {!appFilter && <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />}
       </div>
 
       {/* New Booking Dialog — manual fallback, still requires a real Application.

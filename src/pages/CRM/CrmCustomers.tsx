@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/customers";
 const SA_LEADS_API = "/api/sa/leads";
@@ -28,13 +30,25 @@ const EMPTY_FORM = {
   Notes: "",
 };
 
-async function fetchCustomers(search: string): Promise<any[]> {
+const PAGE_SIZE = 20;
+interface CustomerListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchCustomersList(filters: CustomerListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
   try {
-    const url = search ? `${API}?search=${encodeURIComponent(search)}` : API;
-    const res = await fetchWithAuth(url);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
+    const res = await fetchWithAuth(`${API}?${params}`);
+    if (!res.ok) return { rows: [], total: 0 };
+    const data = await res.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
 }
 // Only converted leads are offered here — this dropdown IS the real "only a
 // converted lead may enter the CRM module" gate now (Leads -> Customer ->
@@ -321,7 +335,10 @@ const CrmCustomers: React.FC = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -426,11 +443,20 @@ const CrmCustomers: React.FC = () => {
     }
   };
 
-  const { data: customers = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-customers", search],
-    queryFn: () => fetchCustomers(search),
+  const listFilters: CustomerListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-customers", listFilters, page],
+    queryFn: () => fetchCustomersList(listFilters, page),
     staleTime: 30_000,
   });
+  const customers = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
 
   // Deep-link from CrmLeads.tsx's "Create Customer" action
@@ -583,11 +609,15 @@ const CrmCustomers: React.FC = () => {
         </div>
       }
     >
-      <div className="relative max-w-md">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name, mobile, PAN, customer no..."
-          className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+      <div className="flex gap-3 flex-wrap items-center">
+        <div className="relative flex-1 min-w-48 max-w-md">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+            placeholder="Search name, mobile, PAN, customer no... (Enter to search)"
+            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+        </div>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
       </div>
 
       <DataTable
@@ -598,6 +628,7 @@ const CrmCustomers: React.FC = () => {
         emptyMessage="No customers found"
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
+      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       {/* New Customer Dialog — wide two-column layout, compact enough to
           fit the whole field set on one screen without an inner scroller. */}

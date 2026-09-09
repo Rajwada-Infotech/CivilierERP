@@ -15,10 +15,19 @@ router.get("/", requirePageRight("crm-communication", "view"), async (req, res) 
   try {
     const pool = getPool();
     const { applicationId, bookingId } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [];
     if (applicationId) { req0.input("aid", sql.Int, parseInt(applicationId)); conds.push("c.ApplicationId = @aid"); }
     if (bookingId)      { req0.input("bid", sql.Int, parseInt(bookingId));     conds.push("c.BookingId = @bid"); }
+    // Company/Project/Block narrow which conversations are visible — same
+    // scope as every other CRM list — resolved via either linkage a log
+    // entry can carry (its own ApplicationId, or via its BookingId).
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("(a.CompanyId = @companyId OR b.CompanyId = @companyId)"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("(a.ProjectId = @projectId OR b.ProjectId = @projectId)"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const result = await req0.query(`
       SELECT c.*, cu.name AS CreatedByName,
@@ -30,6 +39,7 @@ router.get("/", requirePageRight("crm-communication", "view"), async (req, res) 
       -- Communication Log's call/SMS/WhatsApp/email quick-actions work.
       LEFT JOIN dbo.CrmApplication a ON a.Id = ISNULL(c.ApplicationId, b.ApplicationId)
       LEFT JOIN dbo.Users cu ON cu.id = c.CreatedBy
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
       ${where}
       ORDER BY c.ContactedAt DESC
     `);

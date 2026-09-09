@@ -15,6 +15,7 @@ import {
   AlertTriangle, ListChecks, LayoutList, FolderClock, RotateCcw, Upload,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 // The Agreement Papers register — a cross-agreement, documents-only view
 // scoped to the crm-documents permission (distinct from full crm-agreements
@@ -118,10 +119,19 @@ function AgeBadge({ days, awaitingUpload }: { days: number; awaitingUpload: bool
   );
 }
 
-async function fetchAllDocuments(status: string, documentType: string): Promise<any[]> {
+interface AgreementDocCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — status counts and per-agreement
+// grouping are computed client-side from the whole set (see `groups`/
+// `counts` below), so raw pagination would split an agreement's documents
+// across pages. Company/Project/Block narrows the set server-side instead,
+// same pattern as CrmDemands/CrmCommunication.
+async function fetchAllDocuments(status: string, documentType: string, cpb: AgreementDocCpb): Promise<any[]> {
   const params = new URLSearchParams();
   if (status) params.set("status", status);
   if (documentType) params.set("documentType", documentType);
+  if (cpb.companyId) params.set("companyId", cpb.companyId);
+  if (cpb.projectId) params.set("projectId", cpb.projectId);
+  if (cpb.blockId) params.set("blockId", cpb.blockId);
   const qs = params.toString();
   const r = await fetchWithAuth(`${API}/documents/all${qs ? `?${qs}` : ""}`);
   if (!r.ok) return [];
@@ -378,10 +388,11 @@ const CrmAgreementPapers: React.FC = () => {
   const [bulkRejectOpen, setBulkRejectOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
   const { data: documents = [], isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
-    queryKey: ["crm-agreement-papers", status, documentType],
-    queryFn: () => fetchAllDocuments(status, documentType),
+    queryKey: ["crm-agreement-papers", status, documentType, cpb],
+    queryFn: () => fetchAllDocuments(status, documentType, cpb),
     staleTime: 30_000,
   });
 
@@ -594,6 +605,7 @@ const CrmAgreementPapers: React.FC = () => {
             {grouped ? <ListChecks size={14} /> : <LayoutList size={14} />}
             <span className="hidden sm:inline">{grouped ? "Grouped" : "Flat"}</span>
           </button>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
           <button onClick={() => exportCsv(sorted)} title="Export current view to CSV"
             className="flex items-center gap-1.5 text-sm border border-border rounded-lg px-2.5 py-2 hover:bg-muted">
             <Download size={14} /> <span className="hidden sm:inline">Export</span>

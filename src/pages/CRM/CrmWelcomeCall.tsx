@@ -15,6 +15,8 @@ import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useAuth } from "@/contexts/AuthContext";
 import { translateError } from "@/lib/translateError";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/welcome-calls";
 const CO_API = "/api/crm/co-applicants";
@@ -50,11 +52,34 @@ const nowLocal = () => {
   return d.toISOString().slice(0, 16);
 };
 
-async function fetchQueue(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${API}/queue`); return r.ok ? r.json() : []; } catch { return []; }
+interface WelcomeCpbFilters { companyId: string; projectId: string; blockId: string }
+function cpbParams(f: WelcomeCpbFilters): URLSearchParams {
+  const q = new URLSearchParams();
+  if (f.companyId) q.set("companyId", f.companyId);
+  if (f.projectId) q.set("projectId", f.projectId);
+  if (f.blockId) q.set("blockId", f.blockId);
+  return q;
 }
-async function fetchCalls(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+// Queue is naturally bounded to "still needs a call" bookings, not the full
+// historical volume — Company/Project/Block narrows it, no pagination needed.
+async function fetchQueue(cpb: WelcomeCpbFilters): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${API}/queue?${cpbParams(cpb)}`); return r.ok ? r.json() : []; } catch { return []; }
+}
+
+const PAGE_SIZE = 20;
+// Call History is a genuine, ever-growing audit log — the one view here
+// that actually needs pagination.
+async function fetchCallsList(cpb: WelcomeCpbFilters, search: string, page: number): Promise<{ rows: any[]; total: number }> {
+  const q = cpbParams(cpb);
+  q.set("page", String(page));
+  q.set("pageSize", String(PAGE_SIZE));
+  if (search) q.set("search", search);
+  try {
+    const r = await fetchWithAuth(`${API}?${q}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
 }
 async function fetchUsers(): Promise<{ value: string; label: string }[]> {
   try {
@@ -148,8 +173,8 @@ type VcState = {
 async function fetchVerificationChecklist(bookingId: number): Promise<VcState | null> {
   try { const r = await fetchWithAuth(`${VC_API}/${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
 }
-async function fetchRecheckQueue(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${VC_API}/recheck/queue`); return r.ok ? r.json() : []; } catch { return []; }
+async function fetchRecheckQueue(cpb: WelcomeCpbFilters): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${VC_API}/recheck/queue?${cpbParams(cpb)}`); return r.ok ? r.json() : []; } catch { return []; }
 }
 
 function mimeIcon(mime: string | null | undefined) {
@@ -2141,7 +2166,10 @@ const CrmWelcomeCall: React.FC = () => {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
   const bkgFilter = sp.get("bookingId");
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [historyPage, setHistoryPage] = useState(1);
   const [view, setView] = useState<"queue" | "recheck" | "history">("queue");
   const [activeBooking, setActiveBooking] = useState<any | null>(null);
   // Set only when opening a booking from Call History for a specific past
@@ -2164,8 +2192,8 @@ const CrmWelcomeCall: React.FC = () => {
   };
 
   const { data: queue = [], isLoading: queueLoading } = useQuery({
-    queryKey: ["crm-welcome-queue"],
-    queryFn: fetchQueue,
+    queryKey: ["crm-welcome-queue", cpb],
+    queryFn: () => fetchQueue(cpb),
     staleTime: 30_000,
   });
 
@@ -2183,26 +2211,29 @@ const CrmWelcomeCall: React.FC = () => {
       fetchBookingById(id).then((b) => { if (b) setActiveBooking(b); });
     }
   }, [bkgFilter, deepLinkOpened, queue]);
-  const { data: history = [], isLoading: historyLoading, refetch: refetchHistory } = useQuery({
-    queryKey: ["crm-welcome-calls-history"],
-    queryFn: fetchCalls,
+  const { data: historyResult, isLoading: historyLoading, refetch: refetchHistory } = useQuery({
+    queryKey: ["crm-welcome-calls-history", cpb, search, historyPage],
+    queryFn: () => fetchCallsList(cpb, search, historyPage),
     staleTime: 60_000,
   });
+  const history = historyResult?.rows ?? [];
+  const historyTotal = historyResult?.total ?? 0;
   const { data: recheckQueue = [], isLoading: recheckLoading } = useQuery({
-    queryKey: ["crm-welcome-recheck-queue"],
-    queryFn: fetchRecheckQueue,
+    queryKey: ["crm-welcome-recheck-queue", cpb],
+    queryFn: () => fetchRecheckQueue(cpb),
     staleTime: 30_000,
   });
 
+  // Queue and Recheck are already server-filtered by Company/Project/Block;
+  // their local search box still narrows client-side since both lists are
+  // small and bounded (open work items, not a growing log).
   const filteredQueue = useMemo(() =>
     (queue as any[]).filter((c: any) =>
       !search || c.ApplicantName?.toLowerCase().includes(search.toLowerCase()) || c.BookingNo?.includes(search)
     ), [queue, search]);
 
-  const filteredHistory = useMemo(() =>
-    (history as any[]).filter((c: any) =>
-      !search || c.ApplicantName?.toLowerCase().includes(search.toLowerCase()) || c.BookingNo?.includes(search)
-    ), [history, search]);
+  // History is now server-paginated/searched — no client-side re-filtering.
+  const filteredHistory = history;
 
   const overdueCount = useMemo(() =>
     (queue as any[]).filter((c: any) => c.NextCallDate && new Date(c.NextCallDate) <= new Date()).length,
@@ -2307,10 +2338,12 @@ const CrmWelcomeCall: React.FC = () => {
         <div className="flex gap-3 items-center flex-wrap px-3.5 py-3 border-b" style={{ borderColor }}>
           <div className="relative flex-1 min-w-48">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by customer or booking no..."
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { setSearch(searchInput); setHistoryPage(1); } }}
+              placeholder="Search by customer or booking no... (Enter to search)"
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
           </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setHistoryPage(1); }} />
           <div className="flex items-center gap-1 rounded-lg bg-muted/20 p-1 shrink-0">
             <button onClick={() => setView("queue")}
               className={`px-3 py-1.5 text-xs font-heading font-medium rounded-lg transition-all ${
@@ -2401,6 +2434,7 @@ const CrmWelcomeCall: React.FC = () => {
           })}
           </div>
         )}
+        {view === "history" && <CrmPaginationBar page={historyPage} pageSize={PAGE_SIZE} total={historyTotal} onPage={setHistoryPage} />}
       </div>
 
       {/* Same pattern as CrmBooking.tsx's own ?applicationId= deep link:

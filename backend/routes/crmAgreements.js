@@ -13,6 +13,7 @@ const { emitNotification } = require("../services/notify");
 const { validateAgreementPreparationPrerequisites, maybeAutoCreateLegalMilestone, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep, syncLegalMilestoneFromDocument, maybeUnlockBrokerageOnAgreementExecuted } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
+const { applyPagination } = require("../services/crmListPagination");
 // Senior approval is gated to admin/super_admin/dba via this shared engine —
 // same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
 // able to self-approve on this page.
@@ -157,13 +158,53 @@ async function agreementFollowupProgress(pool, agreementId) {
 router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status } = req.query;
+    const { status, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [];
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("ag.Status = @st"); }
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR ag.AgreementNo LIKE @search OR b.BookingNo LIKE @search)");
+    }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const result = await req0.query(`${AGR_SELECT} ${where} ORDER BY ag.CreatedAt DESC`);
-    res.json(result.recordset);
+    const SELECT_WITH_BLOCK = `${AGR_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY ag.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY ag.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("st2", sql.NVarChar(30), status || null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmAgreement ag
+          JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE (@st2 IS NULL OR ag.Status = @st2)
+            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR ag.AgreementNo LIKE @search2 OR b.BookingNo LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-agreements] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -1724,10 +1765,20 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
   try {
     const pool = getPool();
     const { status, documentType } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [];
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("d.Status = @st"); }
     if (documentType) { req0.input("dt", sql.NVarChar(100), documentType); conds.push("d.DocumentType = @dt"); }
+    // Not paginated — the register's status-count badges and per-agreement
+    // grouping are computed client-side from the full set (see
+    // CrmAgreementPapers.tsx), same reasoning as CrmDemands/CrmCommunication.
+    // Company/Project/Block narrows the set server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     // Includes the agreement-level lifecycle fields (senior/customer approval,
     // send/date state) and the Legal Executive assignment — not just the
@@ -1750,6 +1801,7 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       LEFT JOIN dbo.Users le ON le.id = ag.LegalExecutiveId
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
       ${where}
       ORDER BY d.CreatedAt DESC
     `);

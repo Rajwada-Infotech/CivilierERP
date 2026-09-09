@@ -11,6 +11,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { maybeAutoCreateSalesDeed, maybeAutoCreateBrokerage, requireActiveBooking, recalculateRemainingMilestones, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
 const { postCrmOnAccountToGL, postCrmOnAccountApplied } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -285,6 +286,9 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
   try {
     const pool = getPool();
     const { status, search, view } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [
       "b.IsActive = 1",
@@ -302,8 +306,11 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
       req0.input("q", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @q OR b.BookingNo LIKE @q OR m.DemandNo LIKE @q OR m.MilestoneName LIKE @q)");
     }
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const result = await req0.query(`
+    const BASE_SELECT = `
       SELECT m.Id, m.MilestoneNo, m.MilestoneName, m.AmountDue, m.AmountPaid, m.[Percent], m.DueDate, m.Status,
              m.DemandStatus, m.DemandNo, m.DemandRaisedOn, m.DemandNotes,
              b.Id AS BookingId, b.BookingNo, b.ProjectName, b.UnitNo, b.AssignedTo,
@@ -316,26 +323,75 @@ router.get("/demands", requirePageRight("crm-payments", "view"), async (req, res
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.Users u ON u.id = b.AssignedTo
-      ${where}
-      ORDER BY b.BookingNo, m.MilestoneNo
-    `);
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+    `;
 
-    const rows = result.recordset;
-    const summary = {
-      pendingCount: 0, pendingAmount: 0,
-      demandedCount: 0, demandedAmount: 0,
-      paidCount: 0, paidAmount: 0,
-      overdueCount: 0, overdueAmount: 0,
-    };
-    for (const r of rows) {
-      const balance = Math.max(0, Number(r.AmountDue || 0) - Number(r.AmountPaid || 0));
-      const paid = Number(r.AmountPaid || 0);
-      if (r.DemandStatus === CrmStatus.PENDING) { summary.pendingCount++; summary.pendingAmount += balance; }
-      else if (r.DemandStatus === CrmStatus.DEMANDED) { summary.demandedCount++; summary.demandedAmount += balance; }
-      else if (r.DemandStatus === CrmStatus.PAID) { summary.paidCount++; summary.paidAmount += paid; }
-      if (r.IsOverdue && r.DemandStatus !== CrmStatus.PAID) { summary.overdueCount++; summary.overdueAmount += balance; }
+    // Summary is always computed over the FULL filtered set, independent of
+    // pagination — it drives the tab badges (pending/demanded/paid/overdue
+    // counts+amounts), which must stay accurate no matter which page is on
+    // screen. Kept as a single unpaginated pass exactly like before, just
+    // now honoring the new Company/Project/Block scope too.
+    function computeSummary(rows) {
+      const summary = {
+        pendingCount: 0, pendingAmount: 0,
+        demandedCount: 0, demandedAmount: 0,
+        paidCount: 0, paidAmount: 0,
+        overdueCount: 0, overdueAmount: 0,
+      };
+      for (const r of rows) {
+        const balance = Math.max(0, Number(r.AmountDue || 0) - Number(r.AmountPaid || 0));
+        const paid = Number(r.AmountPaid || 0);
+        if (r.DemandStatus === CrmStatus.PENDING) { summary.pendingCount++; summary.pendingAmount += balance; }
+        else if (r.DemandStatus === CrmStatus.DEMANDED) { summary.demandedCount++; summary.demandedAmount += balance; }
+        else if (r.DemandStatus === CrmStatus.PAID) { summary.paidCount++; summary.paidAmount += paid; }
+        if (r.IsOverdue && r.DemandStatus !== CrmStatus.PAID) { summary.overdueCount++; summary.overdueAmount += balance; }
+      }
+      return summary;
     }
-    res.json({ demands: rows, summary });
+
+    if (!req.query.page) {
+      const result = await req0.query(`${BASE_SELECT} ${where} ORDER BY b.BookingNo, m.MilestoneNo`);
+      return res.json({ demands: result.recordset, summary: computeSummary(result.recordset) });
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    // Summary needs only the fields computeSummary reads — a lighter query
+    // than BASE_SELECT's full join set, still over every matching row (not
+    // just the current page).
+    const summaryReq = pool.request()
+      .input("st", sql.NVarChar(20), status && [CrmStatus.PENDING, CrmStatus.DEMANDED, CrmStatus.PAID].includes(status) ? status : null)
+      .input("q", sql.NVarChar(200), search ? `%${search}%` : null)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .input("blockId", sql.Int, blockId);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [rowsResult, summaryRows] = await Promise.all([
+      req0.query(`${BASE_SELECT} ${where} ORDER BY b.BookingNo, m.MilestoneNo OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      summaryReq.query(`
+        SELECT m.AmountDue, m.AmountPaid, m.DemandStatus,
+               CASE WHEN m.DueDate < CAST(SYSDATETIME() AS DATE) AND m.Status = '${CrmStatus.PENDING}' THEN 1 ELSE 0 END AS IsOverdue
+        FROM dbo.CrmPaymentMilestone m
+        JOIN dbo.CrmBooking b ON b.Id = m.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+        WHERE b.IsActive = 1
+          AND b.Status NOT IN ('Cancelled', 'Rejected')
+          AND m.Status NOT IN ('Waived')
+          ${view !== "all" ? "AND (m.AmountDue - ISNULL(m.AmountPaid, 0)) > 0" : ""}
+          AND (@st IS NULL OR m.DemandStatus = @st)
+          AND (@q IS NULL OR (a.ApplicantName LIKE @q OR b.BookingNo LIKE @q OR m.DemandNo LIKE @q OR m.MilestoneName LIKE @q))
+          AND (@companyId IS NULL OR b.CompanyId = @companyId)
+          AND (@projectId IS NULL OR b.ProjectId = @projectId)
+          AND (@blockId IS NULL OR um.BlockId = @blockId)
+      `),
+    ]);
+    res.json({
+      demands: rowsResult.recordset,
+      summary: computeSummary(summaryRows.recordset),
+      total: summaryRows.recordset.length,
+      page, pageSize,
+    });
   } catch (e) {
     console.error("[crm-payments] GET /demands error:", e.message);
     res.status(500).json({ error: e.message });

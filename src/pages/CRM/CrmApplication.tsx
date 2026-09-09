@@ -21,6 +21,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useGstRates, computeUnitParkingGst, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/applications";
 const CUSTOMER_API = "/api/crm/customers";
@@ -105,16 +107,53 @@ async function fetchAllBanks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 
-// The management page needs every stage (Converted/In Process/Not
-// Converted) for its own tabs — every other page's application-selector
-// dropdown deliberately gets the narrower default (Converted excluded, see
-// crmApplications.js GET /), so only this page opts back in.
-async function fetchApps(): Promise<any[]> {
+const PAGE_SIZE = 20;
+
+interface ApplicationListFilters {
+  search: string; status: string; displayStage: string;
+  companyId: string; projectId: string; blockId: string;
+}
+
+// The management page's own paginated list — server-side filtered on
+// exactly the same terms the page's UI exposes (search/status/stage/
+// Company/Project/Block), unlike every other page's application-selector
+// dropdown (New Booking, Unit/Parking Matrix, Communication Log), which
+// still calls GET / with no ?page= at all and keeps getting the original
+// bare-array/Converted-excluded-by-default behavior untouched.
+async function fetchApplicationsList(filters: ApplicationListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const q = new URLSearchParams();
+  q.set("page", String(page));
+  q.set("pageSize", String(PAGE_SIZE));
+  if (filters.search) q.set("search", filters.search);
+  if (filters.status && filters.status !== "All") q.set("status", filters.status);
+  if (filters.displayStage) q.set("displayStage", filters.displayStage);
+  if (filters.companyId) q.set("companyId", filters.companyId);
+  if (filters.projectId) q.set("projectId", filters.projectId);
+  if (filters.blockId) q.set("blockId", filters.blockId);
   try {
-    const res = await fetchWithAuth(`${API}?includeConverted=1`);
-    if (!res.ok) return [];
+    const res = await fetchWithAuth(`${API}?${q}`);
+    if (!res.ok) return { rows: [], total: 0 };
     return res.json();
-  } catch { return []; }
+  } catch { return { rows: [], total: 0 }; }
+}
+
+// Same filter set as the list above, minus stage itself — for the tab
+// badges, which must reflect the true total under the current
+// search/status/Company/Project/Block filters regardless of which page or
+// stage is currently selected (a page's own row count stopped being usable
+// as "the total" the moment the list became paginated).
+async function fetchStageCounts(filters: Omit<ApplicationListFilters, "displayStage">): Promise<Record<Stage, number>> {
+  const q = new URLSearchParams();
+  if (filters.search) q.set("search", filters.search);
+  if (filters.status && filters.status !== "All") q.set("status", filters.status);
+  if (filters.companyId) q.set("companyId", filters.companyId);
+  if (filters.projectId) q.set("projectId", filters.projectId);
+  if (filters.blockId) q.set("blockId", filters.blockId);
+  try {
+    const res = await fetchWithAuth(`${API}/stage-counts?${q}`);
+    if (!res.ok) return { InProcess: 0, Converted: 0, NotConverted: 0 };
+    return res.json();
+  } catch { return { InProcess: 0, Converted: 0, NotConverted: 0 }; }
 }
 async function fetchAppDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
@@ -653,9 +692,12 @@ const CrmApplication: React.FC = () => {
   const canRequestBookingCancellation = canDoAction("crm-cancellations", "create");
   const { theme } = useTheme();
   const isDark = theme !== "light";
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [activeStage, setActiveStage] = useState<Stage>("InProcess");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [step, setStep] = useState(1);
   // Furthest step this application has actually reached — persisted
@@ -715,7 +757,27 @@ const CrmApplication: React.FC = () => {
     setSearchParams((sp) => { sp.delete("id"); return sp; }, { replace: true });
   };
 
-  const { data: apps = [], isLoading } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 60_000 });
+  const listFilters: ApplicationListFilters = { search, status: statusFilter, displayStage: activeStage, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId };
+  const { data: listData, isLoading } = useQuery({
+    queryKey: ["crm-apps", listFilters, page],
+    queryFn: () => fetchApplicationsList(listFilters, page),
+    placeholderData: (prev) => prev,
+  });
+  const apps = listData?.rows || [];
+  const total = listData?.total || 0;
+  // Stage tab counts — same filters minus stage itself, so a badge's number
+  // always matches "how many total match everything except which tab is
+  // active", independent of pagination.
+  const { data: stageCounts = { InProcess: 0, Converted: 0, NotConverted: 0 } } = useQuery({
+    queryKey: ["crm-apps-stage-counts", search, statusFilter, cpb],
+    queryFn: () => fetchStageCounts({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    placeholderData: (prev) => prev,
+  });
+  // Any filter change resets back to page 1 — otherwise a narrower result
+  // set can strand the user on a page number that no longer exists.
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
   const { data: viewingAppDetail } = useQuery({
     queryKey: ["crm-app-detail", viewingAppId],
     queryFn: () => fetchAppDetail(viewingAppId as number),
@@ -985,37 +1047,17 @@ const CrmApplication: React.FC = () => {
     [brokers, form.BrokerId]
   );
 
-  // Display stage: a Converted application whose booking is not yet Approved
-  // (still Pending/Review) shows in "In Process" — it's still moving through
-  // the approval chain. Only a fully Approved booking is a real conversion.
-  const getDisplayStage = (a: any): Stage => {
-    if (a.Stage === "Converted" && a.BookingStatus !== CrmStatus.APPROVED) return "InProcess";
-    return a.Stage as Stage;
-  };
-
-  const stageCounts = useMemo(() => {
-    const counts: Record<Stage, number> = { InProcess: 0, Converted: 0, NotConverted: 0 };
-    for (const a of apps as any[]) {
-      const ds = getDisplayStage(a);
-      if (ds in counts) counts[ds]++;
-    }
-    return counts;
-  }, [apps]);
-
+  // Display stage (a Converted application whose booking isn't yet Approved
+  // still reads as "In Process" — it's still moving through the approval
+  // chain) is now computed server-side (DISPLAY_STAGE_EXPR in
+  // crmApplications.js) for both the paginated list (?displayStage=) and
+  // the counts endpoint, so this page no longer filters/counts client-side
+  // — `apps` from the query above is already the current page's correctly
+  // filtered rows, and `stageCounts` above is already the server's totals.
   const conversionRate = useMemo(() => {
-    const total = stageCounts.Converted + stageCounts.NotConverted;
-    return total > 0 ? Math.round((stageCounts.Converted / total) * 100) : 0;
+    const convTotal = stageCounts.Converted + stageCounts.NotConverted;
+    return convTotal > 0 ? Math.round((stageCounts.Converted / convTotal) * 100) : 0;
   }, [stageCounts]);
-
-  const filtered = useMemo(() => {
-    return (apps as any[]).filter((a: any) => {
-      const s = !search || a.ApplicantName?.toLowerCase().includes(search.toLowerCase())
-        || a.Mobile?.includes(search) || a.ApplicationNo?.includes(search);
-      const st = statusFilter === "All" || a.Status === statusFilter;
-      const stg = getDisplayStage(a) === activeStage;
-      return s && st && stg;
-    });
-  }, [apps, search, statusFilter, activeStage]);
 
   // Source field is no longer editable in the wizard (see CrmApplication
   // task history), but Source is still submitted and still shown in the
@@ -1907,7 +1949,7 @@ const CrmApplication: React.FC = () => {
             const Icon = stageIcon[stg];
             const active = activeStage === stg;
             return (
-              <button key={stg} onClick={() => setActiveStage(stg)}
+              <button key={stg} onClick={() => updateFilter(setActiveStage)(stg)}
                 className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-medium border-b-2 -mb-px transition-colors shrink-0 ${
                   active ? "border-amber-500 text-amber-600 dark:text-amber-400" : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}>
@@ -1923,12 +1965,13 @@ const CrmApplication: React.FC = () => {
         <div className="flex gap-3 flex-wrap items-center px-3.5 py-3 border-b" style={{ borderColor }}>
           <div className="relative flex-1 min-w-48">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && updateFilter(setSearch)(searchInput.trim())}
               placeholder="Search name, mobile, app no..."
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
           </div>
           {activeStage !== "Converted" && (
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
               <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-amber-500/40">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
@@ -1938,19 +1981,37 @@ const CrmApplication: React.FC = () => {
               </SelectContent>
             </Select>
           )}
+          {/* Company -> Project -> Block cascading filter, shared across
+              every CRM list page being migrated to this same pattern — not
+              derived from this page's own (now paginated) applications
+              list, but from lightweight master-data endpoints, so filter
+              options stay correct and cheap regardless of how many
+              applications exist. */}
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+          <button onClick={() => updateFilter(setSearch)(searchInput.trim())}
+            className="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted">Search</button>
+          {(search || statusFilter !== "All" || cpb.companyId || cpb.projectId || cpb.blockId) && (
+            <button onClick={() => { updateFilter(setSearchInput)(""); setSearch(""); setStatusFilter("All"); setCpb({ companyId: "", projectId: "", blockId: "" }); setPage(1); }}
+              className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Clear filters</button>
+          )}
         </div>
 
         {/* Table — sortable via DataTable; filtering stays the purpose-built
-            search box + status/stage controls above, so DataTable's own
-            global search is disabled to avoid a second, redundant search box. */}
+            search box + status/stage/Company-Project-Block controls above,
+            so DataTable's own global search is disabled to avoid a second,
+            redundant search box. `apps` is now the current page's already
+            server-filtered rows, not a client-side-filtered full list. */}
         <DataTable
-          data={filtered}
+          data={apps}
           columns={activeStage === "Converted" ? convertedColumns : inProcessColumns}
           searchable={false}
           loading={isLoading}
-          emptyMessage={activeStage === "Converted" ? "No converted applications yet" : activeStage === "NotConverted" ? "No rejected/cancelled applications" : "No applications in process"}
+          emptyMessage={activeStage === "Converted" ? "No converted applications match these filters" : activeStage === "NotConverted" ? "No rejected/cancelled applications match these filters" : "No applications in process match these filters"}
           className="border-0"
         />
+        <div className="px-3.5">
+          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+        </div>
       </div>
 
       {/* New Application Dialog — 5-step wizard: what the customer is

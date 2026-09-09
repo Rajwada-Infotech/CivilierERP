@@ -421,7 +421,15 @@ router.post("/:bookingId/reopen", requirePageRight("crm-welcome-calls", "edit"),
 router.get("/recheck/queue", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const conds = [`ci.RecheckStatus = '${CrmStatus.OPEN}'`];
+    const req0 = pool.request();
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,
         COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
@@ -433,7 +441,8 @@ router.get("/recheck/queue", requirePageRight("crm-welcome-calls", "view"), asyn
       JOIN dbo.CrmBooking b ON b.Id = ci.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      WHERE ci.RecheckStatus = '${CrmStatus.OPEN}'
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      WHERE ${conds.join(" AND ")}
       GROUP BY b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo), COALESCE(bn.ProjectName, b.ProjectName), a.ApplicantName, a.Mobile
       ORDER BY MIN(ci.RecheckRequestedAt)
     `);

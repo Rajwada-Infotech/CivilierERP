@@ -9,6 +9,7 @@ const { actorId } = require("../services/saAccess");
 const { maybeAutoCreateAgreement, requireApprovedBooking } = require("../services/crmWorkflowGuards");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { emitNotification } = require("../services/notify");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -53,7 +54,21 @@ function computeStreak(orderedOutcomes) {
 router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    // Not paginated — this queue is naturally bounded to "still needs a
+    // call" bookings, not the full historical volume. Company/Project/Block
+    // still narrows it for a multi-company deployment.
+    const conds = [
+      `b.Status = '${CrmStatus.APPROVED}'`, "b.IsActive = 1",
+      "(last.Id IS NULL OR (last.Outcome <> 'Welcomed' AND (last.NextCallDate IS NULL OR last.NextCallDate <= CAST(SYSDATETIME() AS DATE))))",
+    ];
+    const req0 = pool.request();
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,
         COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
@@ -75,17 +90,14 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
       OUTER APPLY (
         SELECT TOP 1 Id, Outcome, CallDate, NextCallDate
         FROM dbo.CrmWelcomeCall
         WHERE BookingId = b.Id
         ORDER BY CallDate DESC, CreatedAt DESC
       ) last
-      WHERE b.Status = '${CrmStatus.APPROVED}' AND b.IsActive = 1
-        AND (
-          last.Id IS NULL
-          OR (last.Outcome <> 'Welcomed' AND (last.NextCallDate IS NULL OR last.NextCallDate <= CAST(SYSDATETIME() AS DATE)))
-        )
+      WHERE ${conds.join(" AND ")}
       ORDER BY ISNULL(last.NextCallDate, b.BookingDate)
     `);
     // Compute the real consecutive streak in JS for each row and strip the
@@ -285,14 +297,55 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
 router.get("/", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { bookingId, pending } = req.query;
+    const { bookingId, pending, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [];
     if (bookingId) { req0.input("bid", sql.Int, parseInt(bookingId)); conds.push("wc.BookingId = @bid"); }
     if (pending === "1") conds.push("wc.NextCallDate <= CAST(SYSDATETIME() AS DATE)");
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
+    }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const result = await req0.query(`${WC_SELECT} ${where} ORDER BY wc.CreatedAt DESC`);
-    res.json(result.recordset);
+    const SELECT_WITH_BLOCK = `${WC_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY wc.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY wc.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("bid2", sql.Int, bookingId ? parseInt(bookingId) : null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmWelcomeCall wc
+          JOIN dbo.CrmBooking b ON b.Id = wc.BookingId
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE (@bid2 IS NULL OR wc.BookingId = @bid2)
+            ${pending === "1" ? "AND wc.NextCallDate <= CAST(SYSDATETIME() AS DATE)" : ""}
+            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-welcome-calls] GET error:", e.message);
     res.status(500).json({ error: e.message });

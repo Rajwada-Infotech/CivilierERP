@@ -22,6 +22,7 @@ const {
   bounceMoneyReceipt,
   approveMoneyReceipt,
 } = require("../services/crmMoneyReceiptWorkflow");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -47,7 +48,9 @@ function requireMoneyReceiptApprover(req, res) {
 router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { bookingId, status, companyId } = req.query;
+    const { bookingId, status, companyId, search } = req.query;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [];
     if (bookingId) {
@@ -62,8 +65,14 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
       req0.input("companyId", sql.Int, parseInt(companyId, 10));
       conds.push("b.CompanyId = @companyId");
     }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR a.Mobile LIKE @search OR b.BookingNo LIKE @search OR mr.ReceiptNo LIKE @search)");
+    }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const result = await req0.query(`
+    const BASE_SELECT = `
       SELECT mr.Id, mr.ReceiptNo, mr.BookingId, mr.Amount, mr.BaseAmount, mr.GSTAmount, mr.PaymentMode, mr.ChequeNo, mr.ChequeDate,
              mr.TransactionRef, mr.ReceivedDate, mr.CreatedAt, mr.ReceivedPaymentId, mr.Status AS MoneyReceiptStatus,
              mr.BouncedReason, mr.ApprovedAt,
@@ -77,14 +86,45 @@ router.get("/", requirePageRight("crm-money-receipts", "view"), async (req, res)
       LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
       LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
       LEFT JOIN dbo.ReceivedPayment rp ON rp.RPPaymentID = mr.ReceivedPaymentId
-      ${where}
-      ORDER BY mr.CreatedAt DESC
-    `);
-    res.json(result.recordset.map((r) => ({
+    `;
+    const shape = (rows) => rows.map((r) => ({
       ...r,
       Status: deriveStatus(r.MoneyReceiptStatus, r.RPStatus),
       BouncedReason: r.BouncedReason || (r.RPStatus === CrmStatus.REJECTED ? r.RPRejectionNote : null),
-    })));
+    }));
+
+    if (!req.query.page) {
+      const result = await req0.query(`${BASE_SELECT} ${where} ORDER BY mr.CreatedAt DESC`);
+      return res.json(shape(result.recordset));
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${BASE_SELECT} ${where} ORDER BY mr.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("bid2", sql.Int, bookingId ? parseInt(bookingId, 10) : null)
+        .input("st2", sql.NVarChar(20), status && [CrmStatus.PENDING, CrmStatus.APPROVED, "Bounced"].includes(status) ? status : null)
+        .input("companyId2", sql.Int, companyId ? parseInt(companyId, 10) : null)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmMoneyReceipt mr
+          JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE (@bid2 IS NULL OR mr.BookingId = @bid2)
+            AND (@st2 IS NULL OR mr.Status = @st2)
+            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR a.Mobile LIKE @search2 OR b.BookingNo LIKE @search2 OR mr.ReceiptNo LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: shape(result.recordset), total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     handleError(res, e, "GET /");
   }

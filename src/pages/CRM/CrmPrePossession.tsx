@@ -16,6 +16,7 @@ import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/pre-possession";
 
@@ -33,8 +34,18 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string; b
 };
 
 
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
+interface PrePossessionCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — Ready/Pending/Total counts are
+// computed client-side from the whole set (see `total`/`ready`/`pending`
+// below), same as CrmDemands. Company/Project/Block narrows the set
+// server-side instead.
+async function fetchAll(cpb?: PrePossessionCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
   if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || `HTTP ${r.status}`); }
   return r.json();
 }
@@ -412,9 +423,10 @@ const CrmPrePossession: React.FC = () => {
   const [createPrefillId, setCreatePrefillId] = useState<string | undefined>(undefined);
   const [checkLoading,    setCheckLoading]    = useState<Record<string, boolean>>({});
   const [activeTab,       setActiveTab]       = useState<"checks" | "gateway">("checks");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
   const { data: records = [], isLoading, isError, error, dataUpdatedAt, isFetching, refetch } =
-    useQuery({ queryKey: ["crm-pre-possession"], queryFn: fetchAll, staleTime: 30_000 });
+    useQuery({ queryKey: ["crm-pre-possession", cpb], queryFn: () => fetchAll(cpb), staleTime: 30_000 });
 
   const { data: gateway = [], isLoading: gwLoading, isError: gwError, error: gwErrorMsg, refetch: gwRefetch } =
     useQuery({ queryKey: ["crm-pre-possession-gateway"], queryFn: fetchGatewayStatus, staleTime: 30_000 });
@@ -496,17 +508,20 @@ const CrmPrePossession: React.FC = () => {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 border-b border-border mb-4">
-          {(["checks", "gateway"] as const).map((t) => (
-            <button key={t} onClick={() => setActiveTab(t)}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}>
-              {t === "checks"
-                ? `Active Checks${total > 0 ? ` (${total})` : ""}`
-                : `Gateway${gwTotal > 0 ? ` (${gwTotal})` : ""}`}
-            </button>
-          ))}
+        <div className="flex gap-1 border-b border-border mb-4 items-center justify-between flex-wrap">
+          <div className="flex gap-1">
+            {(["checks", "gateway"] as const).map((t) => (
+              <button key={t} onClick={() => setActiveTab(t)}
+                className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}>
+                {t === "checks"
+                  ? `Active Checks${total > 0 ? ` (${total})` : ""}`
+                  : `Gateway${gwTotal > 0 ? ` (${gwTotal})` : ""}`}
+              </button>
+            ))}
+          </div>
+          {activeTab === "checks" && <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />}
         </div>
 
         {/* ── Active Checks ── */}

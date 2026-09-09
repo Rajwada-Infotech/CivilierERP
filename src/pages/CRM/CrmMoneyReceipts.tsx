@@ -12,6 +12,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { FileText, Download, CheckCircle2, Clock, AlertTriangle, Search, RotateCcw } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/money-receipts";
 
@@ -52,6 +54,25 @@ async function fetchReceipts(bookingId?: string): Promise<ReceiptRow[]> {
   const res = await fetchWithAuth(`${API}?${q}`);
   if (!res.ok) throw new Error("Failed to load money receipts");
   return res.json();
+}
+
+const PAGE_SIZE = 20;
+interface ReceiptListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchReceiptsList(filters: ReceiptListFilters, page: number): Promise<{ rows: ReceiptRow[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  const res = await fetchWithAuth(`${API}?${params}`);
+  if (!res.ok) throw new Error("Failed to load money receipts");
+  const data = await res.json();
+  return { rows: data.rows || [], total: data.total || 0 };
 }
 
 function StatusPill({ status }: { status: ReceiptRow["Status"] }) {
@@ -111,22 +132,37 @@ const CrmMoneyReceipts: React.FC = () => {
   const [searchParams] = useSearchParams();
   const bookingIdParam = searchParams.get("bookingId") || undefined;
 
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [previewReceipt, setPreviewReceipt] = useState<ReceiptRow | null>(null);
   const qc = useQueryClient();
 
-  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-money-receipts", bookingIdParam],
-    queryFn: () => fetchReceipts(bookingIdParam),
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
+  const listFilters: ReceiptListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+
+  // bookingId-scoped mode (deep-linked from a Booking's detail view) keeps
+  // the original unpaginated, unfiltered fetch exactly as before — it's
+  // fetching "the receipts for this one booking," not a page of the main
+  // list. Only the main list (no bookingIdParam) goes through the new
+  // server-side search/Company/Project/Block + pagination path.
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-money-receipts", bookingIdParam, listFilters, page],
+    queryFn: async () => {
+      if (bookingIdParam) return { rows: await fetchReceipts(bookingIdParam), total: 0 };
+      return fetchReceiptsList(listFilters, page);
+    },
     staleTime: 30_000,
   });
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return rows;
-    const q = search.trim().toLowerCase();
-    return rows.filter((r) =>
-      r.ReceiptNo.toLowerCase().includes(q) || r.BookingNo.toLowerCase().includes(q) || r.ApplicantName?.toLowerCase().includes(q));
-  }, [rows, search]);
+  const rows = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
+  const filtered = rows;
 
   async function handleResubmit(row: ReceiptRow) {
     try {
@@ -239,10 +275,12 @@ const CrmMoneyReceipts: React.FC = () => {
       <div className="flex gap-3 flex-wrap items-center">
         <div className="relative flex-1 min-w-48">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search receipt no, booking, applicant..."
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+            placeholder="Search receipt no, booking, applicant... (Enter to search)"
             className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
+        {!bookingIdParam && <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />}
       </div>
 
       <DataTable
@@ -253,6 +291,7 @@ const CrmMoneyReceipts: React.FC = () => {
         emptyMessage="No money receipts yet — one becomes available once a Booking's Data Review checklist is complete and it's been submitted for approval."
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
+      {!bookingIdParam && <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />}
 
       {previewReceipt && <ReceiptPdfDialog receipt={previewReceipt} onClose={() => setPreviewReceipt(null)} />}
     </CrmShell>
