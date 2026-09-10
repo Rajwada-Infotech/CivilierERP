@@ -263,13 +263,30 @@
     }
 }
 
-/* BW theme polish. The grayscale() on <html> is what enforces "no other
-   colour" — it desaturates every hard-coded colour the token swap can't
-   reach (module accents, recharts hex fills, status badges, avatars,
-   inline SVG). filter on <html> specifically is safe for position:fixed
-   (the ICB is unchanged); a filter on a <div> wrapper would not be. */
-[data-theme="bw"] {
-    filter: grayscale(1) contrast(1.02);
+/* BW theme "no other colour" enforcement.
+
+   A full-viewport backdrop-filter overlay (not a plain `filter` on <html>)
+   greyscales everything painted beneath it — module accents, recharts hex
+   fills, status badges, avatars, inline SVG — while anything stacked ABOVE
+   it keeps its colour. The CivilierERP logo opts back into colour via
+   `.bw-color-keep` (a very high z-index + its own stacking context), so it
+   is the one thing that stays full-colour under BW. */
+[data-theme="bw"]::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 2147483646;
+    backdrop-filter: grayscale(1) contrast(1.02);
+    -webkit-backdrop-filter: grayscale(1) contrast(1.02);
+}
+[data-theme="bw"] .bw-color-keep {
+    position: relative;
+    z-index: 2147483647;
+    isolation: isolate;
+    /* own compositing layer so it paints above the ::after backdrop overlay
+       regardless of intermediate stacking contexts */
+    transform: translateZ(0);
 }
 [data-theme="bw"] body {
     background:

@@ -236,7 +236,7 @@ function LogoRing({ size }: { size: number }) {
         style={{ border: "1px dotted rgba(167,139,250,0.4)" }}
         animate={{ rotate: -360 }}
         transition={{ duration: 15, repeat: Infinity, ease: "linear" }} />
-      <img src="/Civilier.png" alt="CivilierERP" className="w-full h-full rounded-full object-cover"
+      <img src="/Civilier.png" alt="CivilierERP" className="w-full h-full rounded-full object-cover bw-color-keep"
         style={{ filter: "drop-shadow(0 8px 20px rgba(124,58,237,0.4))" }} />
     </div>
   );
@@ -783,7 +783,7 @@ export default function Login() {
                 <div className="text-center mb-6 sm:mb-8">
                   <motion.div initial={{ scale: 0.7, opacity: 0, y: 10 }} animate={{ scale: 1, opacity: 1, y: 0 }}
                     transition={{ delay: 0.2, duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-                    className="flex flex-col items-center gap-3">
+                    className="flex flex-col items-center gap-3 bw-color-keep">
                     <LogoRing size={80} />
                     <motion.h1 className="text-2xl sm:text-3xl font-bold tracking-tight"
                       style={{ background: "linear-gradient(135deg,#4c1d95,#7c3aed,#a78bfa)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}
