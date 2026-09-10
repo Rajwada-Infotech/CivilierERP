@@ -221,7 +221,7 @@ function FloatingParticles() {
 // ── Pulsing logo ring ─────────────────────────────────────────────────────────
 function LogoRing({ size }: { size: number }) {
   return (
-    <div className="relative" style={{ width: size, height: size }}>
+    <div className="relative bw-color-keep" style={{ width: size, height: size }}>
       {[1, 2, 3].map((i) => (
         <motion.div key={i} className="absolute inset-0 rounded-full"
           style={{ border: "1px solid rgba(124,58,237,0.3)" }}
@@ -606,7 +606,7 @@ export default function Login() {
       </AnimatePresence>
 
       {/* Split layout */}
-      <div className="relative z-10 w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+      <div className="relative z-10 bw-login-lift w-full max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
 
         {/* LEFT: Hero copy + floating preview cards */}
         <motion.div className="hidden lg:flex flex-col gap-6 relative"

@@ -301,6 +301,20 @@
 [data-theme="bw"] header.fixed.top-0 > *:not(:first-child) {
     filter: grayscale(1) contrast(1.02);
 }
+
+/* Login page: lift the two-column grid above the greyscale overlay so the
+   animated logo (rings + mark + wordmark) renders in colour, then re-grey
+   everything in that subtree that is NOT the logo. Mirrors the navbar rule. */
+[data-theme="bw"] .bw-login-lift {
+    z-index: 2147483647;
+}
+[data-theme="bw"] .bw-login-lift > *:not(:last-child) {
+    filter: grayscale(1) contrast(1.02);
+}
+[data-theme="bw"] .bw-login-lift .p-6 > *:not(:first-child),
+[data-theme="bw"] .bw-login-lift .text-center > *:not(:first-child) {
+    filter: grayscale(1) contrast(1.02);
+}
 [data-theme="bw"] body {
     background:
         radial-gradient(circle at 50% -10%, rgba(0, 0, 0, 0.035), transparent 45%),
