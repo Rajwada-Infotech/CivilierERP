@@ -2453,9 +2453,10 @@ const LedgerReportGroups: React.FC<{
 const ReportTable: React.FC<{
   report: ReportDef;
   filters: FilterState;
+  companies: CompanyOption[];
   projects: { id: number; name: string }[];
   onClose: () => void;
-}> = ({ report, filters, projects, onClose }) => {
+}> = ({ report, filters, companies, projects, onClose }) => {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2517,6 +2518,11 @@ const ReportTable: React.FC<{
   const isGrnRegister = report.id === "grn-register";
   const [expenseHeadIds, setExpenseHeadIds] = useState<string[]>([]);
   const [expenseHeadOptions, setExpenseHeadOptions] = useState<MultiSelectOption[]>([]);
+  // Expense Register also gets Company / Project multi-selects (checkbox
+  // dropdowns) — ReportTable remounts per report (key=report.id) so these
+  // reset on their own when you switch reports.
+  const [companyIds, setCompanyIds] = useState<string[]>([]);
+  const [projectIds, setProjectIds] = useState<string[]>([]);
   useEffect(() => {
     if (!isExpenseRegister) return;
     fetchWithAuth("/api/general-ledger/options")
@@ -2612,6 +2618,14 @@ const ReportTable: React.FC<{
     // the backend's expenseHeadId param accepts either one id or a list.
     if (isExpenseRegister && expenseHeadIds.length) f["expenseHeadId"] = expenseHeadIds.join(",");
 
+    // Expense Register: multi-select Company / Project — comma-separated ids.
+    // These supersede the section bar's single Company / Project filters.
+    if (isExpenseRegister && companyIds.length) f["companyId"] = companyIds.join(",");
+    if (isExpenseRegister && projectIds.length) {
+      f["projectId"] = projectIds.join(",");
+      delete f["projectName"];
+    }
+
     // Payment Reason Report: scope to a single reason when selected
     if (isPaymentReasonReport && reasonFilter) f["reason"] = reasonFilter;
 
@@ -2660,6 +2674,8 @@ const ReportTable: React.FC<{
     godownId,
     reasonFilter,
     expenseHeadIds,
+    companyIds,
+    projectIds,
     projects,
   ]);
 
@@ -2713,7 +2729,7 @@ const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, rows, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, rows, projects]);
 
   const totalPages = Math.ceil(rows.length / PAGE_SIZE);
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -2821,6 +2837,34 @@ const ReportTable: React.FC<{
           {/* Expense Head switcher — expense-register only. Nested (grouped
               by parent Account Group) multi-select — pick any number of
               heads at once instead of one at a time. */}
+          {isExpenseRegister && companies.length > 0 && (
+            <div className="w-44">
+              <MultiSelectDropdown
+                options={companies.map((c) => ({ id: c.id, label: c.name }))}
+                value={companyIds}
+                onChange={setCompanyIds}
+                placeholder="All Companies"
+                searchPlaceholder="Search companies…"
+                itemNoun="company"
+                className="h-[30px] py-1"
+              />
+            </div>
+          )}
+
+          {isExpenseRegister && projects.length > 0 && (
+            <div className="w-44">
+              <MultiSelectDropdown
+                options={projects.map((pr) => ({ id: pr.id, label: pr.name }))}
+                value={projectIds}
+                onChange={setProjectIds}
+                placeholder="All Projects"
+                searchPlaceholder="Search projects…"
+                itemNoun="project"
+                className="h-[30px] py-1"
+              />
+            </div>
+          )}
+
           {isExpenseRegister && expenseHeadOptions.length > 0 && (
             <div className="w-56">
               <MultiSelectDropdown
@@ -3375,6 +3419,7 @@ const Reports: React.FC = () => {
                           key={activeReportDef.id}
                           report={activeReportDef}
                           filters={filters}
+                          companies={companies}
                           projects={projects}
                           onClose={() => setActiveReport(null)}
                         />
