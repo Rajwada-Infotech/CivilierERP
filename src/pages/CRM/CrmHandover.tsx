@@ -433,7 +433,7 @@ const CrmHandover: React.FC = () => {
 
       {/* ── Schedule Handover dialog ─────────────────────────────────────── */}
       <Dialog open={newDialog} onOpenChange={(o) => { if (!o) setNewDialog(false); }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle className="font-heading">Schedule Handover</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -476,7 +476,7 @@ const CrmHandover: React.FC = () => {
 
       {/* ── Raise Snag dialog ────────────────────────────────────────────── */}
       <Dialog open={snagDialog} onOpenChange={(o) => { if (!o) setSnagDialog(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Raise Snag Item</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -506,7 +506,7 @@ const CrmHandover: React.FC = () => {
       {/* Collecting all 4 mandatory fields the backend requires for Completed:
           ActualHandoverDate, KeyHandoverBy, FinalDuesCleared, CustomerAcknowledged */}
       <Dialog open={completeDialog} onOpenChange={(o) => { if (!o) setCompleteDialog(false); }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader>
             <DialogTitle className="font-heading">Complete Handover</DialogTitle>
           </DialogHeader>

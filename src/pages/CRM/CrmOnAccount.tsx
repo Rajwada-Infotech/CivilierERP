@@ -148,7 +148,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl">
+      <DialogContent accent="crm" className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <ArrowRightLeft size={16} className="text-primary" />

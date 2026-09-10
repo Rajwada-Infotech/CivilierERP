@@ -710,7 +710,7 @@ const CrmParkingBooking: React.FC = () => {
 
       {/* Release confirmation — super admin, requires written reason + RELEASE text */}
       <Dialog open={!!releaseTarget} onOpenChange={(o) => { if (!o) { setReleaseTarget(null); setReleaseReason(""); setReleaseConfirmText(""); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-red-600">
               <AlertTriangle size={16} /> Release Parking Allotment
@@ -766,7 +766,7 @@ const CrmParkingBooking: React.FC = () => {
 
       {/* New standalone sale dialog */}
       <Dialog open={newDialogOpen} onOpenChange={(o) => { if (!o) resetForm(); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent accent="crm" className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>New Standalone Parking Sale</DialogTitle>
             <DialogDescription>

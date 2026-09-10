@@ -185,7 +185,7 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
+      <DialogContent accent="crm" className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
         <DialogHeader className="space-y-0.5">
           <DialogTitle className="font-heading text-base font-bold flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
@@ -602,7 +602,7 @@ const CrmCustomers: React.FC = () => {
       {/* New Customer Dialog — wide two-column layout, compact enough to
           fit the whole field set on one screen without an inner scroller. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setDupSuggestions([]); } }}>
-        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
+        <DialogContent accent="crm" className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="font-heading text-base font-bold flex items-center gap-2">
               <UserPlus size={16} className="text-amber-500" /> New Customer

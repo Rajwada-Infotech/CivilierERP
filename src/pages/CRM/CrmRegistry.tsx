@@ -674,7 +674,7 @@ const CrmRegistry: React.FC = () => {
 
         {/* Start Registry */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setBookingId(""); } }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader><DialogTitle className="font-heading">Start Registry</DialogTitle></DialogHeader>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
@@ -698,7 +698,7 @@ const CrmRegistry: React.FC = () => {
 
         {/* Schedule / Reschedule */}
         <Dialog open={!!scheduleOpen} onOpenChange={(o) => !o && setScheduleOpen(null)}>
-          <DialogContent className="max-w-xs">
+          <DialogContent accent="crm" className="max-w-xs">
             <DialogHeader><DialogTitle className="font-heading">{scheduleOpen === "reschedule" ? "Reschedule Appointment" : "Schedule Registration"}</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <div className="grid grid-cols-2 gap-3">
@@ -732,7 +732,7 @@ const CrmRegistry: React.FC = () => {
 
         {/* Complete */}
         <Dialog open={completeOpen} onOpenChange={(o) => !o && setCompleteOpen(false)}>
-          <DialogContent className="max-w-md">
+          <DialogContent accent="crm" className="max-w-md">
             <DialogHeader><DialogTitle className="font-heading">Mark Registry Completed</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <div>
@@ -788,7 +788,7 @@ const CrmRegistry: React.FC = () => {
 
         {/* Cancel */}
         <Dialog open={cancelOpen} onOpenChange={(o) => !o && setCancelOpen(false)}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader><DialogTitle className="font-heading">Cancel Registry</DialogTitle></DialogHeader>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Reason *</label>
@@ -803,7 +803,7 @@ const CrmRegistry: React.FC = () => {
 
         {/* Preview */}
         <Dialog open={!!previewDoc} onOpenChange={(o) => { if (!o) closePreview(); }}>
-          <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-3xl p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-4 py-2.5 border-b border-border">
               <DialogTitle className="text-sm truncate">{previewDoc?.name}</DialogTitle>
             </DialogHeader>

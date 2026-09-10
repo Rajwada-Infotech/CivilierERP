@@ -23,7 +23,7 @@ export function ProxyActionDialog({
   const [remarks, setRemarks] = useState("");
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent accent="crm" className="max-w-md">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             <UserCircle2 size={16} className="text-primary" /> {title}

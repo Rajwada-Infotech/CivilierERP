@@ -542,7 +542,7 @@ const CrmDemands: React.FC = () => {
 
       {/* Raise Demand Dialog */}
       <Dialog open={!!raiseRow} onOpenChange={(o) => { if (!o) { setRaiseRow(null); setRaiseNotes(""); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle>Raise Payment Demand</DialogTitle></DialogHeader>
           {raiseRow && (
             <div className="space-y-3">
@@ -606,7 +606,7 @@ const CrmDemands: React.FC = () => {
       </AlertDialog>
       {/* Bulk Raise Dialog */}
       <Dialog open={bulkOpen} onOpenChange={(o) => { if (!o) { setBulkOpen(false); setBulkProject(""); setBulkMilestone(""); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Zap size={16} /> Raise All Eligible Demands</DialogTitle></DialogHeader>
           <div className="space-y-3 text-sm">
             <p className="text-xs text-muted-foreground">

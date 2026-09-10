@@ -1895,7 +1895,7 @@ const CrmSalesDeed: React.FC = () => {
         </div>
 
         <Dialog open={!!previewDoc} onOpenChange={(o) => { if (!o) closePreview(); }}>
-          <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-3xl p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-4 py-2.5 border-b border-border">
               <DialogTitle className="text-sm truncate">{previewDoc?.name}</DialogTitle>
             </DialogHeader>
@@ -1911,7 +1911,7 @@ const CrmSalesDeed: React.FC = () => {
 
         {/* Keep the New Deed creation Dialog and Proxy Dialogs below everything */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-          <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-lg p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-6 py-4 border-b border-border">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">

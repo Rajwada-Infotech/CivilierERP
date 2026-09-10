@@ -1291,15 +1291,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
   return (<>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent
-        className="max-w-6xl max-h-[92vh] overflow-y-auto thin-scroll border-amber-500/25"
-        style={{
-          borderTopWidth: 3,
-          borderTopColor: "rgba(245,158,11,0.85)",
-          backgroundImage:
-            "radial-gradient(120% 55% at 50% 0%, rgba(245,158,11,0.10), transparent 60%)",
-        }}
-      >
+      <DialogContent accent="crm" className="max-w-6xl max-h-[92vh] overflow-y-auto thin-scroll">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
               <DialogTitle className="font-heading flex items-center gap-2">
@@ -3116,7 +3108,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       document.body,
     )}
     <Dialog open={!!reasonDialog} onOpenChange={(o) => { if (!o) { setReasonDialog(null); setReasonText(""); } }}>
-      <DialogContent hideCloseButton className="max-w-md">
+      <DialogContent accent="crm" hideCloseButton className="max-w-md">
         <DialogHeader>
           <DialogTitle className="text-sm font-semibold">{reasonDialog?.title}</DialogTitle>
         </DialogHeader>

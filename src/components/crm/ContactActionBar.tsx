@@ -25,7 +25,7 @@ export function CallDialog({ applicantName, mobile, onClose }: { applicantName: 
   };
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xs text-center">
+      <DialogContent accent="crm" className="max-w-xs text-center">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center justify-center gap-1.5"><PhoneCall size={16} className="text-primary" /> Call {applicantName}</DialogTitle>
         </DialogHeader>

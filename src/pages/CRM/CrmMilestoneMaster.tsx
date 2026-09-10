@@ -140,7 +140,7 @@ const CrmMilestoneMaster: React.FC = () => {
       />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetForm(); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
               <span>{editingId != null ? "Edit Milestone" : "New Milestone"}</span>

@@ -338,7 +338,7 @@ const CrmServiceTickets: React.FC = () => {
 
       {/* ── Raise Ticket dialog ───────────────────────────────────────────── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent accent="crm" className="max-w-lg">
           <DialogHeader><DialogTitle className="font-heading">Raise Service Ticket</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -399,7 +399,7 @@ const CrmServiceTickets: React.FC = () => {
 
       {/* ── Resolve dialog (replaces window.prompt) ───────────────────────── */}
       <Dialog open={resolveDialog} onOpenChange={(o) => { if (!o) setResolveDialog(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Resolve Ticket</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground -mt-1">Describe what was done to resolve the issue. This is stored permanently on the ticket.</p>
           <Textarea
@@ -422,7 +422,7 @@ const CrmServiceTickets: React.FC = () => {
 
       {/* ── Reopen dialog (replaces window.prompt) ────────────────────────── */}
       <Dialog open={reopenDialog} onOpenChange={(o) => { if (!o) setReopenDialog(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Reopen Ticket</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground -mt-1">Explain why this ticket needs to be reopened. Required for audit trail.</p>
           <Textarea

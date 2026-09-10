@@ -208,7 +208,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent accent="crm" className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">

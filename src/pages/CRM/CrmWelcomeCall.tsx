@@ -181,7 +181,7 @@ const DocPreviewDialog: React.FC<{ doc: any; onClose: () => void }> = ({ doc, on
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent accent="crm" className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             {mimeIcon(doc.MimeType)} {doc.FileName || doc.DocumentType}
@@ -235,7 +235,7 @@ const InvoicePdfDialog: React.FC<{ bookingId: number; invoice: any; onClose: () 
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent accent="crm" className="max-w-2xl">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
             <DialogTitle className="font-heading flex items-center gap-1.5"><FileCheck size={16} className="text-amber-600 dark:text-amber-400" /> {invoice.InvoiceNo}</DialogTitle>
@@ -1250,7 +1250,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
   return (
     <>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto thin-scroll">
+      <DialogContent accent="crm" className="max-w-6xl max-h-[90vh] overflow-y-auto thin-scroll">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             <PhoneCall size={18} className="text-amber-600 dark:text-amber-400" />

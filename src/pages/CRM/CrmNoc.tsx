@@ -130,7 +130,7 @@ function EditNocDialog({ noc, onClose, onSaved }: { noc: any; onClose: () => voi
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-sm">
+      <DialogContent accent="crm" className="max-w-sm">
         <DialogHeader>
           <DialogTitle className="font-heading">Edit NOC Details</DialogTitle>
         </DialogHeader>
@@ -454,7 +454,7 @@ const CrmNoc: React.FC = () => {
 
         {/* ── Request dialog ────────────────────────────────────────────── */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-          <DialogContent className="max-w-md">
+          <DialogContent accent="crm" className="max-w-md">
             <DialogHeader>
               <DialogTitle className="font-heading text-base">Request NOC</DialogTitle>
               <p className="text-xs text-muted-foreground mt-0.5">A single NOC per booking — Bank (loan-financed) or Organisation (self-funded), decided automatically by how the booking is financed</p>
@@ -568,7 +568,7 @@ const CrmNoc: React.FC = () => {
 
         {/* ── Detail dialog ─────────────────────────────────────────────── */}
         <Dialog open={!!detailId} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
-          <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-lg p-0 gap-0 overflow-hidden">
             {detail && (
               <>
                 <DialogHeader className="px-6 py-4 border-b border-border">

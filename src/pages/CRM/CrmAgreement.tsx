@@ -315,7 +315,7 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent accent="crm" className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             {mimeIcon(doc.MimeType)} {doc.Label || doc.DocumentType.replace(/([A-Z])/g, " $1").trim()}
@@ -2064,7 +2064,7 @@ const CrmAgreement: React.FC = () => {
 
       {/* New Agreement Dialog */}
       <Dialog open={agrDialog} onOpenChange={(o) => { if (!o) setAgrDialog(false); }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent accent="crm" className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle className="font-heading">New Agreement</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -2141,7 +2141,7 @@ const CrmAgreement: React.FC = () => {
           picker now (was a bare window.prompt), and pre-fills with the
           agreement's existing company-proposed date on resend. */}
       <Dialog open={sendDialog} onOpenChange={(o) => { if (!o) { setSendDialog(false); setSendDate(""); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Send to Customer Portal</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
@@ -2217,7 +2217,7 @@ const CrmAgreement: React.FC = () => {
           between company and customer. Submitting here always moves the
           negotiation to the customer's turn next (PendingCustomerReview). */}
       <Dialog open={proposeDateDialog} onOpenChange={(o) => { if (!o) { setProposeDateDialog(false); setSendDate(""); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Propose Agreement Date</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
@@ -2249,7 +2249,7 @@ const CrmAgreement: React.FC = () => {
           from the Sub-Registrar (Doc No + date). The physical AFS is registered
           outside the system; this records the outcome of that event. */}
       <Dialog open={regDialog} onOpenChange={(o) => { if (!o) { setRegDialog(false); setRegFeesLocked(false); setRegForm({ AfsRegistrationNo: "", AfsRegistrationDate: "", AfsStampDuty: "", AfsRegistrationFee: "" }); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="font-heading">Mark Agreement Registered</DialogTitle>
           </DialogHeader>
@@ -2342,7 +2342,7 @@ const CrmAgreement: React.FC = () => {
           attached. Pasting an external URL stays available as a fallback
           for links that live outside our own storage. */}
       <Dialog open={docDialog} onOpenChange={(o) => { if (!o) { setDocDialog(false); setShowUrlField(false); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle className="font-heading">Add Document</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -2400,7 +2400,7 @@ const CrmAgreement: React.FC = () => {
           up there immediately as an open request once the agreement is
           sent; their upload flips it to Submitted for review here. */}
       <Dialog open={docRequestDialog} onOpenChange={(o) => { if (!o) setDocRequestDialog(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Request Document from Customer</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -2447,7 +2447,7 @@ const CrmAgreement: React.FC = () => {
           When Allotment Letter is Issued, legal fields are formally committed
           and any change is treated as an amendment: reason becomes mandatory. */}
       <Dialog open={editDialog} onOpenChange={(o) => { if (!o) { setEditDialog(false); setEditLocked(true); } }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent accent="crm" className="max-w-lg">
           {(() => {
             const alIssued = detail?.agreement?.AllotmentLetterStatus === "Issued";
             const alIssuedOn = detail?.agreement?.AllotmentLetterIssuedOn;

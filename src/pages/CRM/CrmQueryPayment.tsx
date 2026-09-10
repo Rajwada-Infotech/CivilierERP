@@ -844,7 +844,7 @@ const CrmQueryPayment: React.FC = () => {
 
         {/* ── Start dialog ────────────────────────────────────────────────── */}
         <Dialog open={startDialog} onOpenChange={o => { if (!o) { setStartDialog(false); setStartBookingId(""); } }}>
-          <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-md p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 shrink-0 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">

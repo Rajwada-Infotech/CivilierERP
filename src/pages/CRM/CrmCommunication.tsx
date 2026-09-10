@@ -233,7 +233,7 @@ function EditLogDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent accent="crm" className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
@@ -822,7 +822,7 @@ const CrmCommunication: React.FC = () => {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, BookingId: bkgFilter }); } }}>
-        <DialogContent className="max-w-lg max-h-[88vh] overflow-y-auto p-4 sm:p-5 gap-3">
+        <DialogContent accent="crm" className="max-w-lg max-h-[88vh] overflow-y-auto p-4 sm:p-5 gap-3">
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="flex items-center gap-2 text-base font-heading font-bold">
               <MessageSquare size={16} className="text-amber-500" /> Log Communication

@@ -616,7 +616,7 @@ const CrmMutation: React.FC = () => {
 
         {/* Start Mutation */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setBookingId(""); } }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader><DialogTitle className="font-heading">Start Mutation</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <div>
@@ -667,7 +667,7 @@ const CrmMutation: React.FC = () => {
 
         {/* Raise Query */}
         <Dialog open={queryOpen} onOpenChange={(o) => !o && setQueryOpen(false)}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader><DialogTitle className="font-heading">Raise Query</DialogTitle></DialogHeader>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">What did the authority flag? *</label>
@@ -683,7 +683,7 @@ const CrmMutation: React.FC = () => {
 
         {/* Approve */}
         <Dialog open={approveOpen} onOpenChange={(o) => !o && setApproveOpen(false)}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader><DialogTitle className="font-heading">Approve Mutation</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <div>
@@ -714,7 +714,7 @@ const CrmMutation: React.FC = () => {
 
         {/* Preview */}
         <Dialog open={!!previewDoc} onOpenChange={(o) => { if (!o) closePreview(); }}>
-          <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-3xl p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-4 py-2.5 border-b border-border">
               <DialogTitle className="text-sm truncate">{previewDoc?.name}</DialogTitle>
             </DialogHeader>

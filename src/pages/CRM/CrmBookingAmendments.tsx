@@ -418,7 +418,7 @@ export default function CrmBookingAmendments() {
       {/* ── Review dialog ─────────────────────────────────────────────────── */}
       {reviewDialog && (
         <Dialog open onOpenChange={() => setReviewDialog(null)}>
-          <DialogContent className="max-w-lg">
+          <DialogContent accent="crm" className="max-w-lg">
             <DialogHeader>
               {/* Coloured header banner */}
               <div

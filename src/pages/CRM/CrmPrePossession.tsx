@@ -255,7 +255,7 @@ function CreateDialog({ onClose, onCreated, onViewGateway, prefillBookingId }: C
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-sm">
+      <DialogContent accent="crm" className="max-w-sm">
         <DialogHeader>
           <DialogTitle className="font-heading">Start Pre-Possession Check</DialogTitle>
         </DialogHeader>

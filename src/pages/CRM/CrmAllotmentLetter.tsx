@@ -674,7 +674,7 @@ const CrmAllotmentLetter: React.FC = () => {
 
         {/* ── Generate dialog ─────────────────────────────────────────────── */}
         <Dialog open={createOpen} onOpenChange={(o) => { if (!o) { setCreateOpen(false); setNewBookingId(""); } }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading">Generate Allotment Letter</DialogTitle>
             </DialogHeader>

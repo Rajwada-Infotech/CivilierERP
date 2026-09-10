@@ -295,7 +295,7 @@ const CrmCancellations: React.FC = () => {
       />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setPolicy(null); setForm({ BookingId: "", Reason: "", DeductionPercent: "" }); } }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Request Cancellation</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -371,7 +371,7 @@ const CrmCancellations: React.FC = () => {
       </Dialog>
 
       <Dialog open={!!refundDialog} onOpenChange={(o) => { if (!o) setRefundDialog(null); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Record Refund</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -441,7 +441,7 @@ const CrmCancellations: React.FC = () => {
 
       {/* ── Refund Confirmation ── shown before the irreversible mark-refunded call */}
       <Dialog open={refundConfirmOpen} onOpenChange={(o) => { if (!o) setRefundConfirmOpen(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2">
               <CheckCircle2 size={16} className="text-amber-500" /> Confirm Refund

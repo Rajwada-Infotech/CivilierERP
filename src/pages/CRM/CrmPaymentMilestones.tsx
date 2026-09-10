@@ -863,7 +863,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Record Payment Dialog */}
         <Dialog open={!!editingId} onOpenChange={(o) => { if (!o) setEditingId(null); }}>
-          <DialogContent className="max-w-md">
+          <DialogContent accent="crm" className="max-w-md">
             <DialogHeader>
               <DialogTitle className="font-heading">Submit Payment for Approval</DialogTitle>
               {editingMilestone && (
@@ -957,7 +957,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Add Milestone Dialog */}
         <Dialog open={addDialog} onOpenChange={(o) => { if (!o) setAddDialog(false); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader><DialogTitle className="font-heading">Add Custom Milestone</DialogTitle></DialogHeader>
             <div className="space-y-3">
               <div>
@@ -1009,7 +1009,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Deposit On Account Dialog */}
         <Dialog open={onAccountDialog} onOpenChange={(o) => { if (!o) setOnAccountDialog(false); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> Submit On-Account Deposit</DialogTitle></DialogHeader>
             <p className="text-xs text-muted-foreground -mt-2">Goes to Finance's Received Payment queue for approval. Once approved, it's held as a credit and auto-applied to the next due milestone in sequence.</p>
             <div className="space-y-3">
@@ -1073,7 +1073,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Apply On Account Dialog */}
         <Dialog open={!!applyDialog} onOpenChange={(o) => { if (!o) setApplyDialog(null); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-1.5">
                 <Wallet size={16} className="text-blue-600" /> Apply On-Account to Milestone
@@ -1161,7 +1161,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Waive Dialog */}
         <Dialog open={!!waiveDialog} onOpenChange={(o) => { if (!o) setWaiveDialog(null); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-1.5 text-amber-700">
                 <AlertTriangle size={16} /> Waive Milestone
@@ -1199,7 +1199,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Remarks Dialog */}
         <Dialog open={!!remarksDialog} onOpenChange={(o) => { if (!o) setRemarksDialog(null); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-1.5">
                 <MessageSquare size={15} /> Payment Remarks

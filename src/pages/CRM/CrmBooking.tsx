@@ -758,7 +758,7 @@ const CrmBooking: React.FC = () => {
           screen without an inner scroller, matching the New Application
           wizard's Step 1 convention. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM, ApplicationId: appFilter }); } }}>
-        <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-3">
+        <DialogContent accent="crm" className="max-w-4xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-3">
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="flex items-center gap-2 text-base font-heading font-bold">
               <Building2 size={16} className="text-amber-500" /> New Booking
@@ -1021,7 +1021,7 @@ const CrmBooking: React.FC = () => {
 
       {unitChangeBooking && (
         <Dialog open onOpenChange={(o) => !o && setUnitChangeBooking(null)}>
-          <DialogContent className="max-w-md">
+          <DialogContent accent="crm" className="max-w-md">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2">
                 <Repeat size={16} className="text-rose-500" /> Change Unit — {unitChangeBooking.BookingNo}

@@ -1000,7 +1000,7 @@ const CrmAfsQueryPayment: React.FC = () => {
 
             {/* Start dialog (list-mode only) */}
             <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setDialogFeesLocked(false); setNewForm({ BookingId: "", StampDuty: "", RegistrationFee: "" }); } }}>
-              <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+              <DialogContent accent="crm" className="max-w-md p-0 gap-0 overflow-hidden">
                 <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
                   <div className="flex items-start gap-3">
                     <div className="w-9 h-9 shrink-0 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
@@ -1080,7 +1080,7 @@ const CrmAfsQueryPayment: React.FC = () => {
 
             {/* Detail dialog (list-mode: row click → dialog) */}
             <Dialog open={!!selectedId && !deepLinkBookingId} onOpenChange={(o) => { if (!o) { setSelectedId(null); setAwaitingSendConfirm(false); setPendingInfoFiles([]); } }}>
-              <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden rounded-xl">
+              <DialogContent accent="crm" className="max-w-lg p-0 gap-0 overflow-hidden rounded-xl">
                 {/* DialogTitle/Description must always be present for a11y */}
                 <DialogTitle className="sr-only">{detail ? `${detail.AfsQPNo} — AFS Query Payment` : "AFS Query Payment"}</DialogTitle>
                 <DialogDescription className="sr-only">{detail ? `${detail.ApplicantName} · ${detail.BookingNo}` : "Loading record…"}</DialogDescription>

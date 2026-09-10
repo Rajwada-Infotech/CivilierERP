@@ -179,7 +179,7 @@ function InvoicePreviewDialog({ invoice, onClose }: { invoice: InvoiceRow; onClo
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent accent="crm" className="max-w-2xl">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
             <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> {invoice.InvoiceNo}</DialogTitle>
@@ -234,7 +234,7 @@ function VoidInvoiceDialog({ invoice, onClose, onVoided }: { invoice: InvoiceRow
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent accent="crm" className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Ban size={16} className="text-red-500" /> Void {invoice.InvoiceNo}</DialogTitle>
           <DialogDescription>
@@ -483,7 +483,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
   }
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto thin-scroll">
+      <DialogContent accent="crm" className="max-w-xl max-h-[85vh] overflow-y-auto thin-scroll">
         <DialogHeader><DialogTitle className="font-heading">Generate Invoice</DialogTitle></DialogHeader>
 
         {!bookingId ? (

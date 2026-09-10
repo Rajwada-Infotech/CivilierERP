@@ -491,7 +491,7 @@ const CrmOcCc: React.FC = () => {
 
       {/* ── Detail / Edit Dialog ── */}
       <Dialog open={!!detailRow} onOpenChange={(o) => { if (!o) closeDetail(); }}>
-        <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto thin-scroll">
+        <DialogContent accent="crm" className="max-w-lg max-h-[92vh] overflow-y-auto thin-scroll">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
               <span className="flex items-center gap-2">
@@ -608,7 +608,7 @@ const CrmOcCc: React.FC = () => {
 
       {/* ── Create Dialog ── */}
       <Dialog open={createOpen} onOpenChange={(o) => { if (!o) { setCreateOpen(false); setCreateForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-md max-h-[92vh] overflow-y-auto thin-scroll">
+        <DialogContent accent="crm" className="max-w-md max-h-[92vh] overflow-y-auto thin-scroll">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2">
               <Plus size={16} /> New OC / CC Application

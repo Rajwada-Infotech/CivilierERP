@@ -345,7 +345,7 @@ const CrmLoanTracking: React.FC = () => {
 
       {/* ── Edit / View Dialog ── */}
       <Dialog open={!!editingRow} onOpenChange={(o) => { if (!o) closeDialog(); }}>
-        <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto thin-scroll">
+        <DialogContent accent="crm" className="max-w-xl max-h-[92vh] overflow-y-auto thin-scroll">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
               <span className="flex items-center gap-2"><Landmark size={16} /> Home Loan Details</span>

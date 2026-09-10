@@ -621,7 +621,7 @@ const ApplicationFormPdfDialog: React.FC<{ applicationId: number; applicationNo:
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent accent="crm" className="max-w-3xl">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
             <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> Application Form — {applicationNo}</DialogTitle>
@@ -1957,15 +1957,7 @@ const CrmApplication: React.FC = () => {
           applying for (unit/parking/KYC/docs). No money changes hands or
           gets recorded here — that's entirely the Booking page's job. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetWizard(); } }}>
-        <DialogContent
-          className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 gap-4 border-amber-500/25"
-          style={{
-            borderTopWidth: 3,
-            borderTopColor: "rgba(245,158,11,0.85)",
-            backgroundImage:
-              "radial-gradient(120% 60% at 50% 0%, rgba(245,158,11,0.10), transparent 60%)",
-          }}
-        >
+        <DialogContent accent="crm" className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 gap-4">
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="font-heading text-base font-bold flex items-center gap-2">
               <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
@@ -2663,7 +2655,7 @@ const CrmApplication: React.FC = () => {
           actions that actually change something (Resume, Approve/Reject,
           View Booking, Generate Invoice) stay on the row itself, not here. ── */}
       <Dialog open={!!viewingAppId} onOpenChange={(o) => { if (!o) closeApplication(); }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent accent="crm" className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2">
               {viewingAppDetail ? (

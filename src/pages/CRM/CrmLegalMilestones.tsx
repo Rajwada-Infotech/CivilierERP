@@ -820,7 +820,7 @@ const CrmLegalMilestones: React.FC = () => {
         </div>
 
         <Dialog open={newDialog} onOpenChange={(o) => { if (!o) setNewDialog(false); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader><DialogTitle className="font-heading">Start Legal Workflow</DialogTitle></DialogHeader>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>

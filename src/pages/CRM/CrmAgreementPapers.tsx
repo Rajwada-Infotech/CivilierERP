@@ -199,7 +199,7 @@ function ReviewDialog({ doc, onClose, onReviewed }: { doc: any; onClose: () => v
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent accent="crm" className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             {mimeIcon(doc.MimeType)} {doc.Label || doc.DocumentType.replace(/([A-Z])/g, " $1").trim()}
@@ -330,7 +330,7 @@ function BulkRejectDialog({ count, onCancel, onConfirm }: { count: number; onCan
   const [remarks, setRemarks] = useState("");
   return (
     <Dialog open onOpenChange={(o) => !o && onCancel()}>
-      <DialogContent className="max-w-sm">
+      <DialogContent accent="crm" className="max-w-sm">
         <DialogHeader><DialogTitle className="font-heading">Reject {count} document{count === 1 ? "" : "s"}</DialogTitle></DialogHeader>
         <div>
           <label className="text-xs text-muted-foreground block mb-1">Remarks (required, applied to all selected)</label>
