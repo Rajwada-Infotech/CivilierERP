@@ -221,11 +221,11 @@
         --sidebar-ring: 258 90% 66%;
     }
 
-    /* BW THEME — premium black & white SaaS / Web3 dashboard.
-       Soft light ground, white cards with hairline borders, near-black
-       primary (buttons, key panels), light sidebar separated by its border.
-       Not an inversion of Dark — its own light-surface palette with a
-       monochrome accent ramp. */
+    /* BW THEME — strictly black & white SaaS / Web3 dashboard.
+       Soft light ground, white cards, near-black primary, BLACK sidebar.
+       Every hue is zero-saturation, and [data-theme="bw"] html also gets a
+       grayscale() filter so hard-coded module accents / chart colours /
+       status badges / avatars all render monochrome — "no other colour". */
     [data-theme="bw"] {
         --background: 0 0% 96%;
         --foreground: 0 0% 9%;
@@ -235,38 +235,45 @@
         --popover-foreground: 0 0% 9%;
         --primary: 0 0% 9%;
         --primary-foreground: 0 0% 98%;
-        --secondary: 0 0% 23%;
+        --secondary: 0 0% 20%;
         --secondary-foreground: 0 0% 98%;
         --muted: 0 0% 93%;
-        --muted-foreground: 0 0% 40%;
+        --muted-foreground: 0 0% 38%;
         --accent: 0 0% 12%;
         --accent-foreground: 0 0% 98%;
-        --destructive: 0 65% 45%;
-        --destructive-foreground: 0 0% 100%;
-        --border: 0 0% 89%;
-        --input: 0 0% 89%;
-        --ring: 0 0% 15%;
+        --destructive: 0 0% 20%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 0 0% 88%;
+        --input: 0 0% 88%;
+        --ring: 0 0% 12%;
         --radius: 0.75rem;
         --surface: 0 0% 100%;
         --accent-1: 0 0% 12%;
         --accent-2: 0 0% 32%;
         --accent-3: 0 0% 46%;
-        --sidebar-background: 0 0% 100%;
-        --sidebar-foreground: 0 0% 25%;
-        --sidebar-primary: 0 0% 9%;
-        --sidebar-primary-foreground: 0 0% 98%;
-        --sidebar-accent: 0 0% 94%;
-        --sidebar-accent-foreground: 0 0% 9%;
-        --sidebar-border: 0 0% 88%;
-        --sidebar-ring: 0 0% 15%;
+        /* Black sidebar — the BW signature (matches the design reference) */
+        --sidebar-background: 0 0% 7%;
+        --sidebar-foreground: 0 0% 72%;
+        --sidebar-primary: 0 0% 100%;
+        --sidebar-primary-foreground: 0 0% 7%;
+        --sidebar-accent: 0 0% 14%;
+        --sidebar-accent-foreground: 0 0% 98%;
+        --sidebar-border: 0 0% 18%;
+        --sidebar-ring: 0 0% 70%;
     }
 }
 
-/* BW theme polish — a few places the token swap alone doesn't reach: card
-   lift/shadow, greyscale charts & scrollbars. Scoped to [data-theme="bw"]. */
+/* BW theme polish. The grayscale() on <html> is what enforces "no other
+   colour" — it desaturates every hard-coded colour the token swap can't
+   reach (module accents, recharts hex fills, status badges, avatars,
+   inline SVG). filter on <html> specifically is safe for position:fixed
+   (the ICB is unchanged); a filter on a <div> wrapper would not be. */
+[data-theme="bw"] {
+    filter: grayscale(1) contrast(1.02);
+}
 [data-theme="bw"] body {
     background:
-        radial-gradient(circle at 50% -10%, rgba(0, 0, 0, 0.03), transparent 45%),
+        radial-gradient(circle at 50% -10%, rgba(0, 0, 0, 0.035), transparent 45%),
         hsl(var(--background));
 }
 [data-theme="bw"] .bg-card {
