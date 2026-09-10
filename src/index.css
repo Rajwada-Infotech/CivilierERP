@@ -526,3 +526,77 @@
 /* Admin — blue */
 [data-module="admin"]       { --ring: 217 91% 60%; --accent-foreground: 217 91% 38%; }
 .dark [data-module="admin"] { --ring: 217 91% 60%; --accent-foreground: 217 91% 76%; }
+
+/* ── CRM dialog theme ──────────────────────────────────────────────────────
+   The shared <DialogContent accent="crm"> gets the `.crm-dialog` class (see
+   src/components/ui/dialog.tsx). Everything below is a descendant selector so
+   every CRM dialog picks up the dark + orange look — near-black surface,
+   #ff920f accent, thin borders — WITHOUT rewriting each dialog's markup.
+   Palette from the CRM design spec. ──────────────────────────────────────── */
+.crm-dialog {
+    background:
+        linear-gradient(135deg, rgba(255, 146, 15, 0.035), transparent 35%),
+        #0c0c10;
+    border-color: #24242c;
+    border-top: 3px solid #ff920f;
+    box-shadow:
+        0 28px 80px rgba(0, 0, 0, 0.7),
+        0 0 0 1px rgba(255, 255, 255, 0.015);
+}
+
+/* Form fields — restyled in place */
+.crm-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+.crm-dialog select,
+.crm-dialog textarea {
+    background: #0b0b0f;
+    border-color: #292932;
+    border-radius: 6px;
+    color: #f7f7f8;
+    transition:
+        border-color 0.2s ease,
+        box-shadow 0.2s ease,
+        background 0.2s ease;
+}
+.crm-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):hover,
+.crm-dialog select:hover,
+.crm-dialog textarea:hover {
+    border-color: #40404a;
+}
+.crm-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+.crm-dialog select:focus,
+.crm-dialog textarea:focus {
+    background: #101014;
+    border-color: #ff920f;
+    box-shadow: 0 0 0 3px rgba(255, 146, 15, 0.12);
+    outline: none;
+}
+.crm-dialog input::placeholder,
+.crm-dialog textarea::placeholder {
+    color: #5c5c66;
+}
+.crm-dialog select option {
+    background: #0c0c10;
+    color: #f7f7f8;
+}
+.crm-dialog input[type="date"],
+.crm-dialog input[type="number"],
+.crm-dialog input[type="datetime-local"],
+.crm-dialog input[type="time"] {
+    color-scheme: dark;
+}
+
+/* Checkboxes / radios pick up the orange accent */
+.crm-dialog input[type="checkbox"],
+.crm-dialog input[type="radio"] {
+    accent-color: #ff920f;
+}
+
+/* Keyboard focus ring — orange, matches the spec */
+.crm-dialog button:focus-visible,
+.crm-dialog input:focus-visible,
+.crm-dialog select:focus-visible,
+.crm-dialog textarea:focus-visible,
+.crm-dialog a:focus-visible {
+    outline: 2px solid #ffad35;
+    outline-offset: 2px;
+}

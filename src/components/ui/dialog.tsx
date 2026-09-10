@@ -33,22 +33,15 @@ interface DialogContentProps extends React.ComponentPropsWithoutRef<
   /** Pass true to hide the built-in close (×) button — use when the dialog
    *  already renders its own close button in the header to avoid duplicates. */
   hideCloseButton?: boolean;
-  /** Module accent. "crm" gives the CRM module's dark + orange dialog look
-   *  (amber top rule, tinted border, faint top glow). Undefined = the plain
-   *  neutral dialog every other module uses. */
+  /** Module accent. "crm" gives the CRM module's dark + orange dialog look —
+   *  the `.crm-dialog` class in src/index.css restyles the surface and every
+   *  form field inside. Undefined = the plain neutral dialog every other
+   *  module uses. */
   accent?: "crm";
 }
 
 const ACCENT_CLASS: Record<NonNullable<DialogContentProps["accent"]>, string> = {
-  crm: "border-amber-500/25",
-};
-const ACCENT_STYLE: Record<NonNullable<DialogContentProps["accent"]>, React.CSSProperties> = {
-  crm: {
-    borderTopWidth: 3,
-    borderTopColor: "rgba(245,158,11,0.85)",
-    backgroundImage:
-      "radial-gradient(120% 55% at 50% 0%, rgba(245,158,11,0.10), transparent 60%)",
-  },
+  crm: "crm-dialog",
 };
 
 // Recursively checks whether a React node tree already contains an element
@@ -74,7 +67,7 @@ function containsType(node: React.ReactNode, type: unknown, depth = 0): boolean 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   DialogContentProps
->(({ className, children, hideCloseButton = false, accent, style, ...props }, ref) => {
+>(({ className, children, hideCloseButton = false, accent, ...props }, ref) => {
   const hasTitle = containsType(children, DialogTitle);
   const hasDescription = containsType(children, DialogDescription);
   return (
@@ -87,7 +80,6 @@ const DialogContent = React.forwardRef<
           accent && ACCENT_CLASS[accent],
           className,
         )}
-        style={accent ? { ...ACCENT_STYLE[accent], ...style } : style}
         {...props}
       >
         {/* Screen-reader-only fallbacks — never rendered visibly, and never
