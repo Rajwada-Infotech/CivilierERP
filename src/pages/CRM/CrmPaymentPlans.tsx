@@ -9,6 +9,7 @@ import { Plus, Trash2, Pencil, Layers, ListChecks, X, Calendar, Building2, Perce
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/payment-plans";
 const MILESTONE_MASTER_API = "/api/crm/milestone-master";
@@ -31,8 +32,23 @@ function parseMilestones(json: string | null | undefined): MilestoneRow[] {
   } catch { return []; }
 }
 
-async function fetchAll(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+const PAGE_SIZE = 20;
+interface PlanListFilters { companyId: string; projectId: string }
+// Plans tag to a Project (no Block dimension), so this list scopes by
+// Company/Project only. Paginated only when ?page= is present — the 5 other
+// callers of /api/crm/payment-plans (Unit Master, Block Master, the
+// Application wizard, CrmBooking, CrmBookingDetail) never send it and keep
+// getting a bare array.
+async function fetchPlansList(filters: PlanListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
 }
 async function fetchMilestoneMaster(): Promise<any[]> {
   try { const r = await fetchWithAuth(MILESTONE_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -113,11 +129,31 @@ const CrmPaymentPlans: React.FC = () => {
 
   const inputCls = "w-full text-sm border border-border rounded px-2 py-1.5 bg-background";
 
-  const { data: plans = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchAll, staleTime: 30_000 });
+  // List-view Company -> Project filter (distinct from the edit form's own
+  // tagging picker further down). Block never applies to a plan.
+  const [filterCompanyId, setFilterCompanyId] = useState("");
+  const [filterProjectId, setFilterProjectId] = useState("");
+  const [page, setPage] = useState(1);
+  const listFilters: PlanListFilters = useMemo(
+    () => ({ companyId: filterCompanyId, projectId: filterProjectId }),
+    [filterCompanyId, filterProjectId],
+  );
+
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-payment-plans", listFilters, page],
+    queryFn: () => fetchPlansList(listFilters, page),
+    staleTime: 30_000,
+  });
+  const plans = listResult?.rows ?? [];
+  const planTotal = listResult?.total ?? 0;
   const { data: milestoneMaster = [] } = useQuery({ queryKey: ["crm-milestone-master"], queryFn: fetchMilestoneMaster, staleTime: 5 * 60_000 });
   const { data: dropdownData } = useQuery({ queryKey: ["business-dropdown"], queryFn: fetchCompanyProjectDropdown, staleTime: 5 * 60_000 });
   const companies = dropdownData?.companies ?? [];
   const projects = dropdownData?.projects ?? [];
+  const filterProjects = useMemo(
+    () => (filterCompanyId ? projects.filter((p) => String(p.company_id) === filterCompanyId) : projects),
+    [projects, filterCompanyId],
+  );
   // Lookups for the dropdown-wise Add-a-Project flow and the selected-chips
   // list below — a plan can legitimately tag Projects across multiple
   // Companies, so Company here is just which list the Project dropdown
@@ -298,6 +334,33 @@ const CrmPaymentPlans: React.FC = () => {
         </div>
       }
     >
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <select
+          value={filterCompanyId}
+          onChange={(e) => { setFilterCompanyId(e.target.value); setFilterProjectId(""); setPage(1); }}
+          className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background"
+        >
+          <option value="">All Companies</option>
+          {companies.map((c) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+        </select>
+        <select
+          value={filterProjectId}
+          onChange={(e) => { setFilterProjectId(e.target.value); setPage(1); }}
+          className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background"
+        >
+          <option value="">All Projects</option>
+          {filterProjects.map((p) => <option key={p.id} value={String(p.id)}>{p.name}</option>)}
+        </select>
+        {(filterCompanyId || filterProjectId) && (
+          <button
+            onClick={() => { setFilterCompanyId(""); setFilterProjectId(""); setPage(1); }}
+            className="text-xs text-muted-foreground hover:text-foreground underline px-1"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {isLoading ? (
           <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
@@ -385,6 +448,7 @@ const CrmPaymentPlans: React.FC = () => {
           );
         })}
       </div>
+      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={planTotal} onPage={setPage} />
 
       {/* Read-only preview — tapping a card opens this instead of dropping
           straight into a greyed-out copy of the edit form. */}

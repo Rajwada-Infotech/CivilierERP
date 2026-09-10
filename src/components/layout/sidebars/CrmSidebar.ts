@@ -1,4 +1,4 @@
-import { ClipboardList, FileText, IndianRupee, Wrench, Scale, HardHat, LayoutDashboard, Grid3x3, Users, Key, Building2 } from "lucide-react";
+import { ClipboardList, FileText, IndianRupee, Wrench, HardHat, LayoutDashboard, Grid3x3, Users, Key, Building2 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Sidebar groups follow the real legal workflow sequence per Transfer of
@@ -47,27 +47,15 @@ export const crmNavItems: NavItem[] = [
     ],
   },
 
-  // ── Pre-Sale Documents ───────────────────────────────────────────────────────
-  // Allotment Letter → Agreement (internal legal steps) → Executed
+  // ── Pre-Sale ─────────────────────────────────────────────────────────────────
+  // Agreement workspace (draft → approve → send → execute → AFS Query Payment →
+  // AFS Registry, all tabs on one page) → Legal Milestones.
   {
     label: "Pre-Sale",
     icon: FileText,
     children: [
-      { label: "Allotment Letter",  path: "/crm/allotment-letter",  pageKey: "crm-allotment-letter" },
-      { label: "Agreements",        path: "/crm/agreements",        pageKey: "crm-agreements"       },
-      { label: "Agreement Papers",  path: "/crm/agreement-papers",  pageKey: "crm-documents"        },
+      { label: "Agreement",         path: "/crm/agreements",        pageKey: "crm-agreements"       },
       { label: "Legal Milestones",  path: "/crm/legal-milestones",  pageKey: "crm-legal-milestones" },
-    ],
-  },
-
-  // ── Sub-Registrar Visit 1 — AFS Registration ─────────────────────────────────
-  // Gate: Agreement Executed. Outcome: Agreement status → Registered
-  {
-    label: "AFS Registration",
-    icon: Scale,
-    children: [
-      { label: "AFS Query Payment", path: "/crm/afs-query-payment", pageKey: "crm-afs-query-payment" },
-      { label: "AFS Registry",      path: "/crm/afs-registry",      pageKey: "crm-afs-registry"      },
     ],
   },
 

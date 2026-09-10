@@ -84,12 +84,13 @@ router.get("/booking/:bookingId", requirePageRight("crm-afs-registry", "view"), 
   try {
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId, 10);
+    if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query(`${AREG_SELECT} WHERE ar.BookingId = @bid`);
     res.json(result.recordset[0] || null);
   } catch (e) {
     console.error("[crm-afs-registry] GET /booking/:id error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 

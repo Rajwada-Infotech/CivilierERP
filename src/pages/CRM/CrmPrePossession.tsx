@@ -347,9 +347,9 @@ function GatewayRow({ g, onStartCheck, navigate }: { g: any; onStartCheck: (book
   const g1FixPath = !g0
     ? `/crm/agreements?bookingId=${g.BookingId}`
     : !g1a
-      ? `/crm/afs-query-payment?bookingId=${g.BookingId}`
+      ? `/crm/agreements?bookingId=${g.BookingId}&tab=afs-payment`
       : !g1b
-        ? `/crm/afs-registry?bookingId=${g.BookingId}`
+        ? `/crm/agreements?bookingId=${g.BookingId}&tab=afs-registry`
         : `/crm/agreements?bookingId=${g.BookingId}`;
 
   const agreementStatusLabel = g.AgreementStatus ? `(${g.AgreementStatus})` : "(no agreement)";

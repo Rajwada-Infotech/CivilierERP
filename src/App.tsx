@@ -9,6 +9,7 @@ import {
   Route,
   Navigate,
   useLocation,
+  useSearchParams,
 } from "react-router-dom";
 
 // Static imports (needed synchronously for auth shell)
@@ -404,8 +405,10 @@ const CrmApplication       = lazy(() => import("./pages/CRM/CrmApplication"));
 // button, both of which now link here instead of the old inline checklist.
 const CrmBooking           = lazy(() => import("./pages/CRM/CrmBooking"));
 const CrmWelcomeCall       = lazy(() => import("./pages/CRM/CrmWelcomeCall"));
+// The Agreement workspace now merges the old Agreement Papers, AFS Query
+// Payment and AFS Registry pages in as tabs — the standalone routes below
+// redirect into it (?tab=…). See CrmAgreement.tsx.
 const CrmAgreement         = lazy(() => import("./pages/CRM/CrmAgreement"));
-const CrmAgreementPapers   = lazy(() => import("./pages/CRM/CrmAgreementPapers"));
 const CrmPaymentMilestones = lazy(() => import("./pages/CRM/CrmPaymentMilestones"));
 const CrmDemands           = lazy(() => import("./pages/CRM/CrmDemands"));
 const CrmMoneyReceipts     = lazy(() => import("./pages/CRM/CrmMoneyReceipts"));
@@ -420,10 +423,7 @@ const CrmLegalMilestones   = lazy(() => import("./pages/CRM/CrmLegalMilestones")
 const CrmNoc               = lazy(() => import("./pages/CRM/CrmNoc"));
 const CrmSalesDeed         = lazy(() => import("./pages/CRM/CrmSalesDeed"));
 const CrmLeads             = lazy(() => import("./pages/CRM/CrmLeads"));
-const CrmAfsQueryPayment   = lazy(() => import("./pages/CRM/CrmAfsQueryPayment"));
-const CrmAfsRegistry       = lazy(() => import("./pages/CRM/CrmAfsRegistry"));
 const CrmOcCc              = lazy(() => import("./pages/CRM/CrmOcCc"));
-const CrmAllotmentLetter   = lazy(() => import("./pages/CRM/CrmAllotmentLetter"));
 const CrmMutation          = lazy(() => import("./pages/CRM/CrmMutation"));
 const CrmQueryPayment      = lazy(() => import("./pages/CRM/CrmQueryPayment"));
 const CrmRegistry          = lazy(() => import("./pages/CRM/CrmRegistry"));
@@ -625,6 +625,17 @@ function ProtectedRoute({
       </ProtectedProviders>
     </RequireAuth>
   );
+}
+
+// Redirects an old standalone pre-sale/AFS route into the merged Agreement
+// workspace, keeping ?bookingId= and forcing the right ?tab=.
+function AgreementTabRedirect({ tab }: { tab: string }) {
+  const [sp] = useSearchParams();
+  const bookingId = sp.get("bookingId");
+  const qs = new URLSearchParams();
+  if (bookingId) qs.set("bookingId", bookingId);
+  qs.set("tab", tab);
+  return <Navigate to={`/crm/agreements?${qs.toString()}`} replace />;
 }
 
 // ─── Auth Session Bridge ──────────────────────────────────────────────────────
@@ -2216,9 +2227,12 @@ function AppRoutes() {
       <Route path="/crm/bookings"        element={<ProtectedRoute pageKey="crm-bookings"><CrmBooking /></ProtectedRoute>} />
       <Route path="/crm/booking-amendments" element={<ProtectedRoute pageKey="crm-bookings"><CrmBookingAmendments /></ProtectedRoute>} />
       <Route path="/crm/welcome-calls"   element={<ProtectedRoute pageKey="crm-welcome-calls"><CrmWelcomeCall /></ProtectedRoute>} />
-      <Route path="/crm/allotment-letter" element={<ProtectedRoute pageKey="crm-allotment-letter"><CrmAllotmentLetter /></ProtectedRoute>} />
       <Route path="/crm/agreements"      element={<ProtectedRoute pageKey="crm-agreements"><CrmAgreement /></ProtectedRoute>} />
-      <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-documents"><CrmAgreementPapers /></ProtectedRoute>} />
+      {/* Merged into the Agreement workspace — redirect old links */}
+      <Route path="/crm/agreement-papers" element={<ProtectedRoute pageKey="crm-agreements"><AgreementTabRedirect tab="papers" /></ProtectedRoute>} />
+      {/* Allotment Letter removed from the CRM workflow — send stale links to the
+          Agreement workspace (keeping ?bookingId= so a per-booking link still lands right) */}
+      <Route path="/crm/allotment-letter" element={<AgreementTabRedirect tab="overview" />} />
       <Route path="/crm/payments"         element={<ProtectedRoute pageKey="crm-payments"><CrmPaymentMilestones /></ProtectedRoute>} />
       <Route path="/crm/demands"          element={<ProtectedRoute pageKey="crm-payments"><CrmDemands /></ProtectedRoute>} />
       <Route path="/crm/money-receipts"   element={<ProtectedRoute pageKey="crm-money-receipts"><CrmMoneyReceipts /></ProtectedRoute>} />
@@ -2234,8 +2248,9 @@ function AppRoutes() {
       <Route path="/crm/legal-milestones"      element={<ProtectedRoute pageKey="crm-legal-milestones"><CrmLegalMilestones /></ProtectedRoute>} />
       <Route path="/crm/noc"                   element={<ProtectedRoute pageKey="crm-noc"><CrmNoc /></ProtectedRoute>} />
       <Route path="/crm/sales-deed"            element={<ProtectedRoute pageKey="crm-sales-deed"><CrmSalesDeed /></ProtectedRoute>} />
-      <Route path="/crm/afs-query-payment"     element={<ProtectedRoute pageKey="crm-afs-query-payment"><CrmAfsQueryPayment /></ProtectedRoute>} />
-      <Route path="/crm/afs-registry"         element={<ProtectedRoute pageKey="crm-afs-registry"><CrmAfsRegistry /></ProtectedRoute>} />
+      {/* Merged into the Agreement workspace — redirect old links */}
+      <Route path="/crm/afs-query-payment"     element={<ProtectedRoute pageKey="crm-afs-query-payment"><AgreementTabRedirect tab="afs-payment" /></ProtectedRoute>} />
+      <Route path="/crm/afs-registry"         element={<ProtectedRoute pageKey="crm-afs-registry"><AgreementTabRedirect tab="afs-registry" /></ProtectedRoute>} />
       <Route path="/crm/query-payment"         element={<ProtectedRoute pageKey="crm-query-payment"><CrmQueryPayment /></ProtectedRoute>} />
       <Route path="/crm/registry"              element={<ProtectedRoute pageKey="crm-registry"><CrmRegistry /></ProtectedRoute>} />
       <Route path="/crm/mutation"              element={<ProtectedRoute pageKey="crm-mutation"><CrmMutation /></ProtectedRoute>} />

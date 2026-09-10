@@ -495,4 +495,69 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
   }
 });
 
+// DELETE /:id — soft-delete a customer (IsActive = 0). CrmCustomer records are
+// never hard-deleted (they anchor Applications/Bookings/ledger history); this
+// just removes them from every customer list/picker, all of which filter
+// IsActive = 1.
+//
+// Guard: only allowed when the customer has NO live booking. A booking counts
+// as live unless its Status is a terminal one (Cancelled / Rejected / Expired)
+// — so an Approved booking, or one still Pending/in approval, blocks the
+// delete. Staff must cancel the booking through the Cancellation flow first.
+// Applications with no booking do not block (they carry no money/allotment on
+// their own); they simply become inactive-customer history.
+router.delete("/:id", requirePageRight("crm-customers", "delete"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid customer id" });
+
+    const cust = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Id, CustomerNo, CustomerName, IsActive FROM dbo.CrmCustomer WHERE Id = @id");
+    if (!cust.recordset.length) return res.status(404).json({ error: "Customer not found" });
+    if (!cust.recordset[0].IsActive) {
+      return res.status(409).json({ error: "This customer has already been deleted" });
+    }
+
+    // Any booking that isn't in a terminal state blocks the delete.
+    const liveBookings = await pool.request().input("id", sql.Int, id).query(`
+      SELECT b.BookingNo, b.Status
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE a.CustomerId = @id
+        AND b.IsActive = 1
+        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired')
+      ORDER BY b.BookingNo
+    `);
+    if (liveBookings.recordset.length) {
+      const list = liveBookings.recordset
+        .map((r) => `${r.BookingNo} (${r.Status})`)
+        .join(", ");
+      return res.status(400).json({
+        error: `Cannot delete ${cust.recordset[0].CustomerNo} — it has ${liveBookings.recordset.length} active or approved booking${liveBookings.recordset.length === 1 ? "" : "s"}: ${list}. Cancel the booking(s) through the Cancellation flow first.`,
+      });
+    }
+
+    // Soft-delete the customer and disable any portal login tied to it, in one
+    // transaction so a deleted customer can never still sign in to the portal.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req))
+        .query("UPDATE dbo.CrmCustomer SET IsActive = 0, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      await tx.request().input("id", sql.Int, id)
+        .query("UPDATE dbo.CrmCustomerPortalUser SET IsActive = 0 WHERE CustomerId = @id");
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
+    }
+
+    res.json({ success: true, message: `Customer ${cust.recordset[0].CustomerNo} deleted` });
+  } catch (e) {
+    console.error("[crm-customers] DELETE error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 module.exports = router;

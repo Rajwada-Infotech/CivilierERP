@@ -67,7 +67,6 @@ const AGR_SELECT = `
     a.ApplicantName, a.Mobile, a.Email,
     cu.name AS CreatedByName,
     pu.Email AS PortalEmail, pu.IsActive AS PortalActive, pu.MustChangePassword AS PortalMustChangePassword,
-    al.Status AS AllotmentLetterStatus, al.IssuedOn AS AllotmentLetterIssuedOn,
     -- AFS Query Payment figures — used to pre-fill the mark-registered dialog so
     -- staff don't re-type the same government figure they already entered and
     -- customer-confirmed on the AFS QP record. ConfirmedAmount wins when set
@@ -89,7 +88,6 @@ const AGR_SELECT = `
   LEFT JOIN dbo.Users cu     ON cu.id = ag.CreatedBy
   LEFT JOIN dbo.Users le     ON le.id = ag.LegalExecutiveId
   LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = a.CustomerId
-  LEFT JOIN dbo.CrmAllotmentLetter al    ON al.BookingId  = b.Id
 `;
 
 // Shared lock check — nothing here previously checked whether the Booking
@@ -262,44 +260,78 @@ router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), a
   }
 });
 
+// Shared builder for the agreement-detail response — the exact
+// { agreement, documents, financialSummary } shape returned by both
+// GET /:id (by agreement id) and GET /booking/:bookingId (by booking id,
+// added for the merged Agreement workspace so a tab can load from a
+// bookingId without scanning the paginated list). Returns null when no
+// agreement matches.
+async function buildAgreementDetail(pool, agreementId) {
+  const id = parseInt(agreementId, 10);
+  if (!Number.isFinite(id)) return null;
+  const [agRes, docRes, milRes, oaRes, mrRes] = await Promise.all([
+    pool.request().input("id", sql.Int, id).query(`${AGR_SELECT} WHERE ag.Id = @id`),
+    pool.request().input("id", sql.Int, id).query(
+      `SELECT d.Id, d.AgreementId, d.DocumentType, d.DocumentUrl, d.FileName, d.IssuedBy, d.Status, d.Remarks,
+              d.UploadedAt, d.CreatedBy, d.CreatedAt, d.VersionNo, d.FileSize, d.MimeType, d.UploadedByType,
+              d.RequestedBy, d.RequestedAt, d.Label, d.IsMandatory,
+              CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS FilePath,
+              cu.name AS CreatedByName
+       FROM dbo.CrmAgreementDocument d LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy WHERE d.AgreementId = @id ORDER BY d.CreatedAt`),
+    pool.request().input("id", sql.Int, id).query(
+      `SELECT ISNULL(SUM(AmountDue),0) AS TotalDue, ISNULL(SUM(AmountPaid),0) AS TotalPaid
+       FROM dbo.CrmPaymentMilestone WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
+    pool.request().input("id", sql.Int, id).query(
+      `SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) AS AvailableBalance
+       FROM dbo.CrmOnAccountPayment WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
+    pool.request().input("id", sql.Int, id).query(
+      `SELECT ISNULL(SUM(Amount),0) AS MRTotal FROM dbo.CrmMoneyReceipt
+       WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id) AND Status IN ('${CrmStatus.PENDING}','${CrmStatus.APPROVED}')`),
+  ]);
+  if (!agRes.recordset[0]) return null;
+  const mil = milRes.recordset[0] || {};
+  const cleared = Number(mil.TotalPaid || 0);
+  const mrReceived = Number(mrRes.recordset[0]?.MRTotal || 0);
+  return {
+    agreement: agRes.recordset[0],
+    documents: docRes.recordset,
+    financialSummary: {
+      cleared,
+      totalDue: Number(mil.TotalDue || 0),
+      approvedOnAccount: Number(oaRes.recordset[0]?.AvailableBalance || 0),
+      mrOnAccount: Math.max(0, mrReceived - cleared),
+    },
+  };
+}
+
+// GET /booking/:bookingId — the agreement (1:1 with a booking, enforced by a
+// UNIQUE constraint on CrmAgreement.BookingId) resolved from its booking.
+// Registered BEFORE GET /:id so "booking" is never parsed as an id. Returns
+// null (200) when the booking has no agreement yet — the merged workspace's
+// tabs render a "start agreement" state in that case.
+router.get("/booking/:bookingId", requirePageRight("crm-agreements", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bid = parseInt(req.params.bookingId, 10);
+    if (!Number.isFinite(bid)) return res.status(400).json({ error: "Invalid bookingId" });
+    const idRow = await pool.request().input("bid", sql.Int, bid)
+      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    if (!idRow.recordset[0]) return res.json(null);
+    const detail = await buildAgreementDetail(pool, idRow.recordset[0].Id);
+    res.json(detail);
+  } catch (e) {
+    console.error("[crm-agreements] GET /booking/:bookingId error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
 // GET /:id — agreement with documents
 router.get("/:id", requirePageRight("crm-agreements", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
-    const [agRes, docRes, milRes, oaRes, mrRes] = await Promise.all([
-      pool.request().input("id", sql.Int, id).query(`${AGR_SELECT} WHERE ag.Id = @id`),
-      pool.request().input("id", sql.Int, id).query(
-        `SELECT d.Id, d.AgreementId, d.DocumentType, d.DocumentUrl, d.FileName, d.IssuedBy, d.Status, d.Remarks,
-                d.UploadedAt, d.CreatedBy, d.CreatedAt, d.VersionNo, d.FileSize, d.MimeType, d.UploadedByType,
-                d.RequestedBy, d.RequestedAt, d.Label, d.IsMandatory,
-                CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS FilePath,
-                cu.name AS CreatedByName
-         FROM dbo.CrmAgreementDocument d LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy WHERE d.AgreementId = @id ORDER BY d.CreatedAt`),
-      pool.request().input("id", sql.Int, id).query(
-        `SELECT ISNULL(SUM(AmountDue),0) AS TotalDue, ISNULL(SUM(AmountPaid),0) AS TotalPaid
-         FROM dbo.CrmPaymentMilestone WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
-      pool.request().input("id", sql.Int, id).query(
-        `SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) AS AvailableBalance
-         FROM dbo.CrmOnAccountPayment WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
-      pool.request().input("id", sql.Int, id).query(
-        `SELECT ISNULL(SUM(Amount),0) AS MRTotal FROM dbo.CrmMoneyReceipt
-         WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id) AND Status IN ('${CrmStatus.PENDING}','${CrmStatus.APPROVED}')`),
-    ]);
-    if (!agRes.recordset[0]) return res.status(404).json({ error: "Agreement not found" });
-    const mil = milRes.recordset[0] || {};
-    const cleared = Number(mil.TotalPaid || 0);
-    const mrReceived = Number(mrRes.recordset[0]?.MRTotal || 0);
-    res.json({
-      agreement: agRes.recordset[0],
-      documents: docRes.recordset,
-      financialSummary: {
-        cleared,
-        totalDue: Number(mil.TotalDue || 0),
-        approvedOnAccount: Number(oaRes.recordset[0]?.AvailableBalance || 0),
-        mrOnAccount: Math.max(0, mrReceived - cleared),
-      },
-    });
+    const detail = await buildAgreementDetail(pool, req.params.id);
+    if (!detail) return res.status(404).json({ error: "Agreement not found" });
+    res.json(detail);
   } catch (e) {
     console.error("[crm-agreements] GET /:id error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -1107,20 +1139,6 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
     // agreement date can only ever come from both sides' proposals matching.
     const touchesLegalContent = b.LegalName != null
       || b.LegalAddress != null || b.PanNo != null || b.AadhaarNo != null;
-
-    // Once the Allotment Letter is Issued, the legal identity fields in this
-    // agreement are formally committed — the customer holds a document citing
-    // them. Any subsequent change is a legal amendment that must carry a
-    // traceable reason, not a silent correction.
-    if (touchesLegalContent && !b.RevisionReason?.trim()) {
-      const alRow = await pool.request().input("bid", sql.Int, oldRow.BookingId)
-        .query("SELECT TOP 1 Status FROM dbo.CrmAllotmentLetter WHERE BookingId = @bid");
-      if (alRow.recordset[0]?.Status === "Issued") {
-        return res.status(400).json({
-          error: "Amendment reason required — the Allotment Letter for this booking has been issued. These legal details are formally committed. You must provide a reason for this amendment.",
-        });
-      }
-    }
 
     const newLegalExecutiveId = b.LegalExecutiveId !== undefined
       ? (b.LegalExecutiveId ? parseInt(b.LegalExecutiveId) : null)

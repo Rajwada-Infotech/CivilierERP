@@ -41,6 +41,22 @@ const DEPOSIT_BANKS_FOR_BOOKING = `
    SELECT DepositBankId FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id AND DepositBankId IS NOT NULL) x
 `;
 
+// The single hard fallback deduction % when no CrmCancellationPolicy slab
+// matches. It was read from an AppSetting row, but dbo.AppSetting does not
+// exist in every deployment — the raw query threw, 500-ing /policy and
+// POST / for any project without a configured slab (and the intended 10%
+// default was never reached). Now: try the setting, fall back to 10 on any
+// failure (missing table included).
+async function resolveDefaultDeductionPct(pool) {
+  try {
+    const r = await pool.request()
+      .query("SELECT TOP 1 Value FROM dbo.AppSetting WHERE [Key] = 'CancellationDefaultPct'");
+    return r.recordset.length ? (parseFloat(r.recordset[0].Value) || 10) : 10;
+  } catch {
+    return 10;
+  }
+}
+
 const CANCEL_SELECT = `
   SELECT
     c.Id, c.CancellationNo, c.BookingId, c.RequestedDate, c.Reason, c.AmountPaidTillDate,
@@ -94,8 +110,8 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
     if (!bookingId) return res.status(400).json({ error: "bookingId is required" });
 
     const bkgRow = await pool.request().input("bid", sql.Int, parseInt(bookingId))
-      .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
-    if (!bkgRow.recordset.length) return res.status(404).json({ error: "Booking not found" });
+      .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
+    if (!bkgRow.recordset.length) return res.status(404).json({ error: "Booking not found or not eligible for cancellation" });
 
     const { ProjectId, BookingDate } = bkgRow.recordset[0];
     const daysSince = BookingDate
@@ -125,12 +141,8 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
       return res.json({ ...slabRes.recordset[0], daysSinceBooking: daysSince, source: "policy" });
     }
 
-    // No slab configured — fall back to AppSetting
-    const settingRes = await pool.request()
-      .query("SELECT TOP 1 Value FROM dbo.AppSetting WHERE [Key] = 'CancellationDefaultPct'");
-    const fallbackPct = settingRes.recordset.length
-      ? parseFloat(settingRes.recordset[0].Value) || 10
-      : 10;
+    // No slab configured — fall back to the app default (10% if unset).
+    const fallbackPct = await resolveDefaultDeductionPct(pool);
     return res.json({ DeductionPercent: fallbackPct, daysSinceBooking: daysSince, source: "default" });
   } catch (e) {
     console.error("[crm-cancellations] GET /policy error:", e.message);
@@ -267,11 +279,7 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
       if (policyRes.recordset.length) {
         deductionPct = Number(policyRes.recordset[0].DeductionPercent);
       } else {
-        const settingRes = await pool.request()
-          .query("SELECT TOP 1 Value FROM dbo.AppSetting WHERE [Key] = 'CancellationDefaultPct'");
-        deductionPct = settingRes.recordset.length
-          ? parseFloat(settingRes.recordset[0].Value) || 10
-          : 10;
+        deductionPct = await resolveDefaultDeductionPct(pool);
       }
     }
     const deductionAmt = Math.round(totalPaid * deductionPct / 100 * 100) / 100;
@@ -397,6 +405,17 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     // we bail before touching any other table.
     const result = await approvalTransition("crm-cancellations", id, CrmStatus.APPROVED, userEmail, req.user?.role);
 
+    // Multi-level approval workflows: approvalTransition returns newStatus
+    // 'Pending' (not 'Approved') until the FINAL level signs off. The whole
+    // booking-cancellation cascade below — cancel booking, reject receipts,
+    // release parking, void brokerage, stamp the RERA refund date — must run
+    // ONLY on that final approval. A first-level approve on a multi-step
+    // workflow previously fell straight through and cancelled the booking
+    // while the request itself was still mid-chain.
+    if (result.newStatus !== CrmStatus.APPROVED) {
+      return res.json({ success: true, status: result.newStatus });
+    }
+
     // ── BEGIN ATOMIC SECTION ─────────────────────────────────────────────────
     // Every downstream state mutation runs inside a single transaction so that
     // a transient DB error in any step rolls back ALL preceding writes —
@@ -479,9 +498,20 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       // this a Finance approver can process and post a payment against a
       // cancelled booking (updates milestone AmountPaid, triggers GL, Sales
       // Deed, brokerage auto-create — all against a dead record).
-      await tx.request().input("bid", sql.Int, bookingId).query(`
+      // NOTE: dbo.ReceivedPayment uses the RP-prefixed column convention
+      // (RPUpdatedAt/RPUpdatedBy/RPRejectedAt) — a bare `UpdatedAt` here threw
+      // "Invalid column name 'UpdatedAt'", which rolled back this entire
+      // cascade: the booking stayed active while the cancellation was left at
+      // Status='Approved' (already committed by approvalTransition), letting
+      // mark-refunded disburse a refund against a still-live sale.
+      await tx.request()
+        .input("bid", sql.Int, bookingId)
+        .input("rb", sql.Int, actorId(req))
+        .query(`
         UPDATE dbo.ReceivedPayment
-        SET RPStatus = 'Rejected', UpdatedAt = SYSDATETIME()
+        SET RPStatus = 'Rejected', RPRejectedBy = @rb, RPRejectedAt = SYSDATETIME(),
+            RPRejectionNote = 'Auto-rejected — booking cancelled',
+            RPUpdatedBy = @rb, RPUpdatedAt = SYSDATETIME()
         WHERE CrmBookingId = @bid AND RPStatus = 'Pending'
       `);
 
@@ -566,6 +596,19 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       await tx.commit();
     } catch (txErr) {
       try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      // approvalTransition already committed Status='Approved' on its own
+      // transaction before this block opened. The downstream cascade just
+      // rolled back, so the booking was NOT actually cancelled — walk the
+      // request back to 'Pending' so it can be retried cleanly and so
+      // mark-refunded (which only checks Status='Approved') can't disburse a
+      // refund against a booking that is still live.
+      try {
+        await pool.request().input("id", sql.Int, id).query(
+          "UPDATE dbo.CrmCancellation SET Status = 'Pending', UpdatedAt = SYSDATETIME() WHERE Id = @id AND Status = 'Approved'",
+        );
+      } catch (compErr) {
+        console.error("[crm-cancellations] approve compensation failed:", compErr.message);
+      }
       throw txErr;
     }
     // ── END ATOMIC SECTION ───────────────────────────────────────────────────
@@ -644,8 +687,14 @@ router.put("/:id/finance-approve", requirePageRight("crm-cancellations", "edit")
             UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);
-    } catch {
-      // Column may not exist yet — run the migration SQL to add it
+    } catch (colErr) {
+      // Only fall back for a genuinely missing column (SQL Server error 207 /
+      // "Invalid column name") — the FinanceClearedBy/At migration may not be
+      // run yet. Any other failure (deadlock, constraint, connection) is real
+      // and must surface, not be masked by a silent second write.
+      if (colErr.number !== 207 && !/invalid column name/i.test(colErr.message || "")) {
+        throw colErr;
+      }
       await pool.request().input("id", sql.Int, id)
         .query("UPDATE dbo.CrmCancellation SET Status = 'Approved', UpdatedAt = SYSDATETIME() WHERE Id = @id");
     }
@@ -715,7 +764,7 @@ router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), 
 
     const cur = await pool.request().input("id", sql.Int, id)
       .query(`
-        SELECT c.Status, b.ProjectId
+        SELECT c.Status, b.ProjectId, b.Status AS BookingStatus
         FROM dbo.CrmCancellation c
         JOIN dbo.CrmBooking b ON b.Id = c.BookingId
         WHERE c.Id = @id
@@ -723,6 +772,13 @@ router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), 
     if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
     if (cur.recordset[0].Status !== CrmStatus.APPROVED) {
       return res.status(400).json({ error: `Cannot mark refunded — cancellation must be Approved (currently '${cur.recordset[0].Status}')` });
+    }
+    // Defence in depth: 'Approved' should only ever exist alongside a Cancelled
+    // booking (the approve cascade cancels the booking in the same flow). If
+    // the booking is somehow still live, the cascade didn't complete — do not
+    // pay out a refund against an active sale.
+    if (cur.recordset[0].BookingStatus !== CrmStatus.CANCELLED) {
+      return res.status(409).json({ error: "The underlying booking is not Cancelled — the cancellation approval did not fully complete. Re-run the approval before recording a refund." });
     }
 
     // Same mandatory-bank rule as every deposit — mirrored for the money
@@ -787,7 +843,7 @@ router.put("/:id/settle", requirePageRight("crm-cancellations", "edit"), async (
     if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation not found" });
     const { Status, SettlementStatus, RefundAmount } = cur.recordset[0];
     if (!["Approved", "FinancePending", "Refunded"].includes(Status)) {
-      return res.status(400).json({ error: `Cannot settle — cancellation must be Approved or FinancePending (currently '${Status}')` });
+      return res.status(400).json({ error: `Cannot settle — cancellation must be Approved, FinancePending or Refunded (currently '${Status}')` });
     }
     if (SettlementStatus === "Settled") {
       return res.status(409).json({ error: "Cancellation is already settled" });

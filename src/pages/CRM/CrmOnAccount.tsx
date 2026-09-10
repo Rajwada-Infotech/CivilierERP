@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { CrmShell } from "@/components/crm/CrmShell";
+import { CrmShell, CrmGlassCard } from "@/components/crm/CrmShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -92,12 +92,20 @@ const modeColor: Record<string, string> = {
   IMPS:   "bg-teal-100 text-teal-700 dark:bg-teal-900/30 dark:text-teal-400",
 };
 
+// Ties each row's left accent bar + the KPI tiles to one shared palette, so
+// the ledger and the stat cards read as the same system at a glance.
+const statusAccent: Record<DepositStatus, string> = {
+  Unapplied: "#d97706",
+  PartiallyApplied: "#2563eb",
+  Applied: "#059669",
+};
+
 function StatusChip({ s }: { s: DepositStatus }) {
   if (s === "Applied")
-    return <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-700 dark:text-emerald-300 whitespace-nowrap"><CheckCircle2 size={9} />Applied</span>;
+    return <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border bg-emerald-50 border-emerald-200 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-700 dark:text-emerald-300 whitespace-nowrap"><CheckCircle2 size={9} />Applied</span>;
   if (s === "PartiallyApplied")
-    return <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-950/30 dark:border-blue-700 dark:text-blue-300 whitespace-nowrap"><SplitSquareHorizontal size={9} />Partial</span>;
-  return <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full border bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/30 dark:border-amber-700 dark:text-amber-300 whitespace-nowrap"><Clock size={9} />Unapplied</span>;
+    return <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-950/30 dark:border-blue-700 dark:text-blue-300 whitespace-nowrap"><SplitSquareHorizontal size={9} />Partial</span>;
+  return <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border bg-amber-50 border-amber-200 text-amber-700 dark:bg-amber-950/30 dark:border-amber-700 dark:text-amber-300 whitespace-nowrap"><Clock size={9} />Unapplied</span>;
 }
 
 // ── Adjust Dialog ─────────────────────────────────────────────────────────────
@@ -152,30 +160,30 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <ArrowRightLeft size={16} className="text-primary" />
+          <DialogTitle className="flex items-center gap-2 text-sm">
+            <ArrowRightLeft size={15} className="text-primary" />
             On Account Adjustment — {deposit.ReceiptNo || `Deposit #${deposit.Id}`}
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 pt-1">
+        <div className="space-y-3 pt-1">
 
           {/* Deposit strip */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-1.5">
             {[
               { label: "Deposited", val: formatINR(deposit.Amount), cls: "border-border bg-muted/20 text-foreground" },
               { label: "Applied",   val: formatINR(deposit.AppliedAmount), cls: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-400" },
               { label: "Available", val: formatINR(deposit.AvailableBalance), cls: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800 dark:bg-blue-950/20 dark:text-blue-400" },
             ].map(({ label, val, cls }) => (
-              <div key={label} className={`rounded-lg border px-3 py-2 text-center ${cls}`}>
-                <div className="text-[10px] text-muted-foreground uppercase tracking-wide mb-0.5">{label}</div>
-                <div className="font-bold text-sm">{val}</div>
+              <div key={label} className={`rounded-lg border px-2.5 py-1.5 text-center ${cls}`}>
+                <div className="text-[9px] text-muted-foreground uppercase tracking-wide mb-0.5">{label}</div>
+                <div className="font-bold text-[13px]">{val}</div>
               </div>
             ))}
           </div>
 
           {/* Booking context */}
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground border border-border rounded-lg px-3 py-2 bg-muted/10">
-            <Building2 size={12} />
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground border border-border rounded-lg px-2.5 py-1.5 bg-muted/10">
+            <Building2 size={11} />
             <span className="font-medium text-foreground">{deposit.ApplicantName}</span>
             <span>·</span>
             <span className="font-mono">{deposit.BookingNo}</span>
@@ -185,7 +193,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
 
           {/* Milestone list */}
           <div>
-            <div className="text-sm font-medium mb-2">Select Milestone to Apply Against</div>
+            <div className="text-xs font-medium mb-1.5 text-muted-foreground uppercase tracking-wide">Select Milestone to Apply Against</div>
             {isLoading ? (
               <div className="flex items-center gap-2 py-5 text-muted-foreground text-sm justify-center">
                 <Loader2 size={14} className="animate-spin" /> Loading…
@@ -195,7 +203,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
                 No outstanding milestones on this booking.
               </div>
             ) : (
-              <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+              <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
                 {outstanding.map((m) => {
                   const due = Number(m.AmountDue) - Number(m.AmountPaid);
                   const pct = Number(m.AmountDue) > 0 ? (Number(m.AmountPaid) / Number(m.AmountDue)) * 100 : 0;
@@ -204,23 +212,24 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
                   return (
                     <button key={m.Id}
                       onClick={() => { setSelId(m.Id); setAmt(String(Math.min(deposit.AvailableBalance, due))); }}
-                      className={`w-full text-left rounded-lg border px-3 py-2.5 transition-all ${sel ? "border-primary bg-primary/5 shadow-sm" : "border-border hover:border-primary/40 hover:bg-muted/20"}`}
+                      className={`w-full text-left rounded-lg border px-2.5 py-2 transition-all relative overflow-hidden ${sel ? "border-primary bg-primary/5 shadow-sm" : "border-border hover:border-primary/40 hover:bg-muted/20"}`}
                     >
-                      <div className="flex items-center justify-between mb-1.5">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] text-muted-foreground font-mono">#{m.MilestoneNo}</span>
-                          <span className="text-sm font-medium">{m.MilestoneName}</span>
-                          {overdue && <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-700">Overdue</span>}
+                      {sel && <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-primary" />}
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[9px] text-muted-foreground font-mono">#{m.MilestoneNo}</span>
+                          <span className="text-[13px] font-medium">{m.MilestoneName}</span>
+                          {overdue && <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-700">Overdue</span>}
                         </div>
                         <div className="text-right shrink-0">
-                          <div className="text-sm font-semibold text-amber-600">{formatINR(due)} due</div>
-                          <div className="text-[10px] text-muted-foreground">of {formatINR(m.AmountDue)}</div>
+                          <div className="text-[13px] font-semibold text-amber-600">{formatINR(due)} due</div>
+                          <div className="text-[9px] text-muted-foreground">of {formatINR(m.AmountDue)}</div>
                         </div>
                       </div>
                       <div className="h-1 rounded-full bg-muted overflow-hidden">
                         <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, pct)}%` }} />
                       </div>
-                      {m.DueDate && <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1"><CalendarDays size={9} />Due {fd(m.DueDate)}</div>}
+                      {m.DueDate && <div className="text-[9px] text-muted-foreground mt-1 flex items-center gap-1"><CalendarDays size={9} />Due {fd(m.DueDate)}</div>}
                     </button>
                   );
                 })}
@@ -231,22 +240,22 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
           {/* Amount input */}
           {selId !== null && (
             <div>
-              <label className="text-sm font-medium block mb-1.5">
-                Amount to Apply <span className="text-muted-foreground font-normal text-xs">(blank = apply full {formatINR(maxAmt)})</span>
+              <label className="text-xs font-medium block mb-1.5">
+                Amount to Apply <span className="text-muted-foreground font-normal text-[11px]">(blank = apply full {formatINR(maxAmt)})</span>
               </label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₹</span>
                 <input type="number" value={amt} onChange={(e) => setAmt(e.target.value)}
                   min={0} max={maxAmt} step={0.01}
-                  className="w-full pl-7 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+                  className="w-full pl-7 pr-3 py-1.5 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
               </div>
             </div>
           )}
 
           <div className="flex justify-end gap-2 pt-1">
-            <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg border border-border hover:bg-muted">Cancel</button>
+            <button onClick={onClose} className="px-3.5 py-1.5 text-sm rounded-lg border border-border hover:bg-muted">Cancel</button>
             <button onClick={apply} disabled={!selId || busy}
-              className="px-4 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
+              className="px-3.5 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
               {busy ? <><Loader2 size={13} className="animate-spin" />Applying…</> : <><ArrowRightLeft size={13} />Apply to Milestone</>}
             </button>
           </div>
@@ -256,7 +265,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
   );
 }
 
-// ── Milestone sub-table (expanded row) ────────────────────────────────────────
+// ── Milestone schedule (expanded row) — compact card strip ─────────────────────
 
 function MilestoneSubTable({ bookingId, deposit }: { bookingId: number; deposit: Deposit }) {
   const { data: bk, isLoading } = useQuery<BookingDetail>({
@@ -276,9 +285,9 @@ function MilestoneSubTable({ bookingId, deposit }: { bookingId: number; deposit:
   const s = bk?.summary;
 
   return (
-    <div className="px-4 py-3 space-y-3">
+    <div className="px-4 py-3 space-y-2.5">
       {/* Deposit meta row */}
-      <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
         {deposit.PaymentMode && <span className="flex items-center gap-1"><CreditCard size={10} />{deposit.PaymentMode}</span>}
         {deposit.TransactionRef && <span className="flex items-center gap-1"><ReceiptText size={10} />Ref: <span className="font-mono text-foreground">{deposit.TransactionRef}</span></span>}
         {deposit.DepositBankName && <span className="flex items-center gap-1"><Building2 size={10} />{deposit.DepositBankName}</span>}
@@ -286,70 +295,59 @@ function MilestoneSubTable({ bookingId, deposit }: { bookingId: number; deposit:
         {deposit.Notes && <span className="italic">"{deposit.Notes}"</span>}
       </div>
 
-      {/* Payment schedule mini-table */}
+      {/* Payment schedule — horizontal card strip */}
       {ms.length > 0 && (
         <>
           <div className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">
             Payment Schedule — {deposit.BookingNo}
           </div>
-          <div className="rounded-lg border border-border overflow-hidden">
-            <table className="w-full text-xs">
-              <thead className="bg-muted/40">
-                <tr>
-                  {["#","Milestone","Due Date","Amount Due","Paid","Balance","Status"].map((h, i) => (
-                    <th key={h} className={`px-2.5 py-1.5 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground ${i >= 3 ? "text-right" : "text-left"}`}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {ms.map((m) => {
-                  const bal = Number(m.AmountDue) - Number(m.AmountPaid);
-                  const overdue = m.DueDate && new Date(m.DueDate) < new Date() && m.Status !== "Paid" && m.Status !== "Waived";
-                  return (
-                    <tr key={m.Id} className="hover:bg-muted/10">
-                      <td className="px-2.5 py-1.5 text-muted-foreground font-mono">{m.MilestoneNo}</td>
-                      <td className="px-2.5 py-1.5 font-medium">{m.MilestoneName}</td>
-                      <td className={`px-2.5 py-1.5 ${overdue ? "text-red-500 font-medium" : "text-muted-foreground"}`}>{fd(m.DueDate)}</td>
-                      <td className="px-2.5 py-1.5 text-right font-mono">{formatINR(m.AmountDue)}</td>
-                      <td className="px-2.5 py-1.5 text-right font-mono text-emerald-600 dark:text-emerald-400">{formatINR(m.AmountPaid)}</td>
-                      <td className={`px-2.5 py-1.5 text-right font-mono font-semibold ${bal > 0 ? "text-amber-600" : "text-muted-foreground"}`}>{bal > 0 ? formatINR(bal) : "—"}</td>
-                      <td className="px-2.5 py-1.5">
-                        {m.Status === "Paid" ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">Paid</span>
-                          : m.Status === "Waived" ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Waived</span>
-                          : overdue ? <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">Overdue</span>
-                          : <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400">Pending</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              {s && (
-                <tfoot className="border-t border-border bg-muted/20">
-                  <tr>
-                    <td colSpan={3} className="px-2.5 py-1.5 text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Total</td>
-                    <td className="px-2.5 py-1.5 text-right font-mono font-bold">{formatINR(s.totalDue)}</td>
-                    <td className="px-2.5 py-1.5 text-right font-mono font-bold text-emerald-600">{formatINR(s.totalPaid)}</td>
-                    <td className="px-2.5 py-1.5 text-right font-mono font-bold text-amber-600">{s.balance > 0 ? formatINR(s.balance) : "—"}</td>
-                    <td />
-                  </tr>
-                </tfoot>
-              )}
-            </table>
+          <div className="flex gap-2 overflow-x-auto pb-1 -mx-0.5 px-0.5">
+            {ms.map((m) => {
+              const paid = Number(m.AmountPaid);
+              const bal = Number(m.AmountDue) - paid;
+              const pct = Number(m.AmountDue) > 0 ? (paid / Number(m.AmountDue)) * 100 : 0;
+              const overdue = m.DueDate && new Date(m.DueDate) < new Date() && m.Status !== "Paid" && m.Status !== "Waived";
+              const barColor = m.Status === "Paid" ? "bg-emerald-500" : overdue ? "bg-red-500" : "bg-amber-500";
+              return (
+                <div key={m.Id}
+                  className="shrink-0 w-[168px] rounded-lg border border-border bg-card px-2.5 py-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[9px] font-mono text-muted-foreground">#{m.MilestoneNo}</span>
+                    {m.Status === "Paid"
+                      ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">Paid</span>
+                      : m.Status === "Waived"
+                      ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Waived</span>
+                      : overdue
+                      ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">Overdue</span>
+                      : <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400">Pending</span>}
+                  </div>
+                  <div className="text-[12px] font-medium truncate mb-1.5" title={m.MilestoneName}>{m.MilestoneName}</div>
+                  <div className="h-1 rounded-full bg-muted overflow-hidden mb-1">
+                    <div className={`h-full rounded-full ${barColor}`} style={{ width: `${Math.min(100, pct)}%` }} />
+                  </div>
+                  <div className="flex justify-between text-[10px] font-mono">
+                    <span className="text-emerald-600 dark:text-emerald-400">{formatINR(paid)}</span>
+                    <span className={bal > 0 ? "text-amber-600 font-semibold" : "text-muted-foreground"}>{bal > 0 ? formatINR(bal) : "—"}</span>
+                  </div>
+                  {m.DueDate && (
+                    <div className={`text-[9px] mt-1 flex items-center gap-1 ${overdue ? "text-red-500 font-medium" : "text-muted-foreground"}`}>
+                      <CalendarDays size={9} />{fd(m.DueDate)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
+          {s && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] pt-0.5 border-t border-border/60 pt-2">
+              <span className="text-muted-foreground uppercase tracking-wide text-[9px] font-semibold">Total</span>
+              <span className="font-mono font-bold">{formatINR(s.totalDue)} due</span>
+              <span className="font-mono font-bold text-emerald-600">{formatINR(s.totalPaid)} paid</span>
+              {s.balance > 0 && <span className="font-mono font-bold text-amber-600">{formatINR(s.balance)} balance</span>}
+            </div>
+          )}
         </>
       )}
-    </div>
-  );
-}
-
-// ── KPI Tile ──────────────────────────────────────────────────────────────────
-
-function KpiTile({ icon, label, value, sub, accent }: { icon: React.ReactNode; label: string; value: string; sub: string; accent: string }) {
-  return (
-    <div className={`rounded-lg border ${accent} bg-card px-3 py-3`}>
-      <div className="flex items-center gap-2 mb-1.5">{icon}<span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">{label}</span></div>
-      <div className="text-lg font-bold leading-tight">{value}</div>
-      <div className="text-[11px] text-muted-foreground mt-0.5">{sub}</div>
     </div>
   );
 }
@@ -455,6 +453,7 @@ export default function CrmOnAccount() {
       <CrmShell
         title="On Account"
         subtitle="Customer advance deposits — every rupee received, applied, and available across all bookings."
+        icon={Wallet}
         action={
           <button onClick={() => { refetch(); refetchSummary(); }} disabled={isFetching}
             className="flex items-center gap-1.5 h-8 px-3 text-sm rounded-lg border border-border hover:bg-muted disabled:opacity-50">
@@ -463,83 +462,80 @@ export default function CrmOnAccount() {
         }
       >
 
-        {/* ── KPI tiles ─────────────────────────────────────────────────────── */}
+        {/* ── KPI glass cards ───────────────────────────────────────────────── */}
         {summary && (
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
-            <KpiTile icon={<BadgeIndianRupee size={14} className="text-primary" />}
-              label="Total Received" value={formatINR(summary.TotalReceived)}
-              sub={`${summary.TotalCount} deposits`} accent="border-border" />
-            <KpiTile icon={<TrendingUp size={14} className="text-emerald-600" />}
-              label="Total Applied" value={formatINR(summary.TotalApplied)}
-              sub={`${summary.AppliedCount} fully settled`} accent="border-emerald-200 dark:border-emerald-800" />
-            <KpiTile icon={<Wallet size={14} className="text-blue-600" />}
-              label="Available Balance" value={formatINR(summary.TotalAvailable)}
-              sub={`${summary.UnappliedCount + summary.PartialCount} open`} accent="border-blue-200 dark:border-blue-800" />
-            <KpiTile icon={<Clock size={14} className="text-amber-600" />}
-              label="Unapplied" value={formatINR(summary.UnappliedBalance)}
-              sub={`${summary.UnappliedCount} not yet applied`} accent="border-amber-200 dark:border-amber-800" />
-
-            {/* Utilisation tile */}
-            <div className="rounded-lg border border-border bg-card px-3 py-3 col-span-2 lg:col-span-1 flex flex-col justify-between">
-              <div className="flex items-center gap-2 mb-2">
-                <SplitSquareHorizontal size={14} className="text-indigo-600" />
-                <span className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Utilisation</span>
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
+            <CrmGlassCard
+              label="Total Received" icon={BadgeIndianRupee} accentColor="#f59e0b"
+              value={formatINR(summary.TotalReceived)} sub={`${summary.TotalCount} deposits`}
+            />
+            <CrmGlassCard
+              label="Total Applied" icon={TrendingUp} accentColor={statusAccent.Applied} trend="up"
+              value={formatINR(summary.TotalApplied)} sub={`${summary.AppliedCount} fully settled`}
+            />
+            <CrmGlassCard
+              label="Available Balance" icon={Wallet} accentColor={statusAccent.PartiallyApplied}
+              value={formatINR(summary.TotalAvailable)} sub={`${summary.UnappliedCount + summary.PartialCount} open`}
+            />
+            <CrmGlassCard
+              label="Unapplied" icon={Clock} accentColor={statusAccent.Unapplied}
+              value={formatINR(summary.UnappliedBalance)} sub={`${summary.UnappliedCount} not yet applied`}
+            />
+            <CrmGlassCard
+              label="Utilisation" icon={SplitSquareHorizontal} accentColor="#6366f1"
+              value={`${util}%`} sub={`${formatINR(summary.PartialBalance)} partial`}
+            >
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden mt-2">
+                <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-indigo-400"
+                  style={{ width: `${Math.min(100, util)}%` }} />
               </div>
-              <div>
-                <div className="flex justify-between mb-1.5">
-                  <span className="font-bold text-lg">{util}%</span>
-                  <span className="text-muted-foreground text-[11px] self-end">{formatINR(summary.PartialBalance)} partial</span>
-                </div>
-                <div className="h-2 rounded-full bg-muted overflow-hidden">
-                  <div className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400"
-                    style={{ width: `${Math.min(100, util)}%` }} />
-                </div>
-              </div>
-            </div>
+            </CrmGlassCard>
           </div>
         )}
 
-        {/* ── Filter bar ────────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap gap-2 items-center">
-          <div className="relative flex-1 min-w-52">
-            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && runSearch()}
-              placeholder="Customer · Booking · Project · Unit…"
-              className="w-full h-8 pl-8 pr-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-          </div>
+        {/* ── Filter panel ──────────────────────────────────────────────────── */}
+        <div className="rounded-xl border border-border bg-card/40 px-3 py-2.5">
+          <div className="flex flex-wrap gap-2 items-center">
+            <div className="relative flex-1 min-w-52">
+              <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                placeholder="Customer · Booking · Project · Unit…"
+                className="w-full h-8 pl-8 pr-3 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+            </div>
 
-          <select value={status} onChange={(e) => setStatus(e.target.value)}
-            className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary">
-            <option value="">All Status</option>
-            <option value="Unapplied">Unapplied</option>
-            <option value="PartiallyApplied">Partial</option>
-            <option value="Applied">Applied</option>
-          </select>
+            <select value={status} onChange={(e) => setStatus(e.target.value)}
+              className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary">
+              <option value="">All Status</option>
+              <option value="Unapplied">Unapplied</option>
+              <option value="PartiallyApplied">Partial</option>
+              <option value="Applied">Applied</option>
+            </select>
 
-          <select value={mode} onChange={(e) => setMode(e.target.value)}
-            className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary">
-            <option value="">All Modes</option>
-            {["Cash","Cheque","NEFT","RTGS","UPI","IMPS","Online"].map((m) => <option key={m}>{m}</option>)}
-          </select>
+            <select value={mode} onChange={(e) => setMode(e.target.value)}
+              className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary">
+              <option value="">All Modes</option>
+              {["Cash","Cheque","NEFT","RTGS","UPI","IMPS","Online"].map((m) => <option key={m}>{m}</option>)}
+            </select>
 
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
-            className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
-            className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+            <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+              className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+            <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+              className="h-8 border border-border rounded-lg px-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
 
-          <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
+            <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
 
-          <button onClick={runSearch}
-            className="h-8 flex items-center gap-1.5 px-3 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90">
-            <Filter size={12} />Search
-          </button>
-          {hasFilters && (
-            <button onClick={clearAll}
-              className="h-8 flex items-center gap-1 px-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted">
-              <X size={12} />Clear
+            <button onClick={runSearch}
+              className="h-8 flex items-center gap-1.5 px-3 rounded-lg bg-primary text-primary-foreground text-sm hover:bg-primary/90">
+              <Filter size={12} />Search
             </button>
-          )}
+            {hasFilters && (
+              <button onClick={clearAll}
+                className="h-8 flex items-center gap-1 px-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted">
+                <X size={12} />Clear
+              </button>
+            )}
+          </div>
         </div>
 
         {/* ── Bank-statement ledger ─────────────────────────────────────────── */}
@@ -547,18 +543,18 @@ export default function CrmOnAccount() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[940px]">
               {/* Column headers */}
-              <thead className="bg-muted/40 border-b border-border">
+              <thead className="bg-muted/40 border-b border-border sticky top-0 z-10 backdrop-blur">
                 <tr>
-                  <th className="w-7" />
-                  <th className="px-3 py-2.5 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Date</th>
-                  <th className="px-3 py-2.5 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Receipt / Ref</th>
-                  <th className="px-3 py-2.5 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Customer & Booking</th>
-                  <th className="px-3 py-2.5 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Mode</th>
-                  <th className="px-3 py-2.5 text-right text-[10px] uppercase tracking-wide font-semibold text-emerald-600">CR Deposited</th>
-                  <th className="px-3 py-2.5 text-right text-[10px] uppercase tracking-wide font-semibold text-amber-600">DR Applied</th>
-                  <th className="px-3 py-2.5 text-right text-[10px] uppercase tracking-wide font-semibold text-blue-600">Balance</th>
-                  <th className="px-3 py-2.5 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Status</th>
-                  <th className="px-3 py-2.5 text-center text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Action</th>
+                  <th className="w-6" />
+                  <th className="px-2.5 py-2 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Date</th>
+                  <th className="px-2.5 py-2 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Receipt / Ref</th>
+                  <th className="px-2.5 py-2 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Customer & Booking</th>
+                  <th className="px-2.5 py-2 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Mode</th>
+                  <th className="px-2.5 py-2 text-right text-[10px] uppercase tracking-wide font-semibold text-emerald-600">CR Deposited</th>
+                  <th className="px-2.5 py-2 text-right text-[10px] uppercase tracking-wide font-semibold text-amber-600">DR Applied</th>
+                  <th className="px-2.5 py-2 text-right text-[10px] uppercase tracking-wide font-semibold text-blue-600">Balance</th>
+                  <th className="px-2.5 py-2 text-left text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Status</th>
+                  <th className="px-2.5 py-2 text-center text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Action</th>
                 </tr>
               </thead>
 
@@ -577,36 +573,38 @@ export default function CrmOnAccount() {
                   const isExp = expanded.has(d.Id);
                   const pct   = d.Amount > 0 ? (d.AppliedAmount / d.Amount) * 100 : 0;
                   const cls   = modeColor[d.PaymentMode || ""] || "bg-muted/50 text-muted-foreground";
+                  const accent = statusAccent[d.Status];
                   return (
                     <React.Fragment key={d.Id}>
                       <tr onClick={() => toggle(d.Id)}
                         className="hover:bg-muted/20 cursor-pointer transition-colors">
 
-                        {/* expand toggle */}
-                        <td className="pl-2 pr-1 text-center text-muted-foreground">
-                          {isExp ? <ChevronDown size={12} /> : <CRight size={12} />}
+                        {/* expand toggle + status accent bar */}
+                        <td className="pl-0 pr-0.5 text-center text-muted-foreground relative">
+                          <div className="absolute left-0 top-0 bottom-0 w-0.5" style={{ background: accent }} />
+                          <span className="pl-1.5">{isExp ? <ChevronDown size={12} /> : <CRight size={12} />}</span>
                         </td>
 
                         {/* Date */}
-                        <td className="px-3 py-3 whitespace-nowrap">
-                          <div className="text-xs font-mono">{fd(d.ReceivedDate)}</div>
-                          <div className="text-[10px] text-muted-foreground">{new Date(d.ReceivedDate).toLocaleDateString("en-IN", { weekday: "short" })}</div>
+                        <td className="px-2.5 py-2 whitespace-nowrap">
+                          <div className="text-[12px] font-mono">{fd(d.ReceivedDate)}</div>
+                          <div className="text-[9px] text-muted-foreground">{new Date(d.ReceivedDate).toLocaleDateString("en-IN", { weekday: "short" })}</div>
                         </td>
 
                         {/* Receipt */}
-                        <td className="px-3 py-3">
-                          <div className="font-mono text-xs font-semibold text-primary">
+                        <td className="px-2.5 py-2">
+                          <div className="font-mono text-[12px] font-semibold text-primary">
                             {d.ReceiptNo || <span className="text-muted-foreground font-normal italic">Pending</span>}
                           </div>
                           {d.TransactionRef && (
-                            <div className="text-[10px] text-muted-foreground font-mono mt-0.5 truncate max-w-[130px]">{d.TransactionRef}</div>
+                            <div className="text-[9px] text-muted-foreground font-mono mt-0.5 truncate max-w-[130px]">{d.TransactionRef}</div>
                           )}
                         </td>
 
                         {/* Customer & Booking */}
-                        <td className="px-3 py-3 max-w-[220px]">
-                          <div className="font-medium text-sm truncate">{d.ApplicantName}</div>
-                          <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                        <td className="px-2.5 py-2 max-w-[220px]">
+                          <div className="font-medium text-[13px] truncate">{d.ApplicantName}</div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
                             <span className="font-mono">{d.BookingNo}</span>
                             {d.ProjectName && <> · {d.ProjectName}</>}
                             {d.UnitNo && <> · {d.UnitNo}</>}
@@ -614,45 +612,44 @@ export default function CrmOnAccount() {
                         </td>
 
                         {/* Mode */}
-                        <td className="px-3 py-3">
+                        <td className="px-2.5 py-2">
                           {d.PaymentMode
-                            ? <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${cls}`}>{d.PaymentMode}</span>
+                            ? <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${cls}`}>{d.PaymentMode}</span>
                             : <span className="text-muted-foreground text-xs">—</span>}
                         </td>
 
                         {/* CR */}
-                        <td className="px-3 py-3 text-right">
-                          <div className="font-semibold text-sm text-emerald-700 dark:text-emerald-400 font-mono">{formatINR(d.Amount)}</div>
-                          {/* utilisation bar */}
-                          <div className="mt-1.5 h-1 w-20 ml-auto rounded-full bg-muted overflow-hidden">
+                        <td className="px-2.5 py-2 text-right">
+                          <div className="font-semibold text-[13px] text-emerald-700 dark:text-emerald-400 font-mono">{formatINR(d.Amount)}</div>
+                          <div className="mt-1 h-1 w-20 ml-auto rounded-full bg-muted overflow-hidden">
                             <div className={`h-full rounded-full transition-all ${pct >= 100 ? "bg-emerald-500" : pct > 0 ? "bg-blue-500" : "bg-muted-foreground/20"}`}
                               style={{ width: `${Math.min(100, pct)}%` }} />
                           </div>
                         </td>
 
                         {/* DR */}
-                        <td className="px-3 py-3 text-right font-mono text-sm">
+                        <td className="px-2.5 py-2 text-right font-mono text-[13px]">
                           {d.AppliedAmount > 0
                             ? <span className="text-amber-600 dark:text-amber-400 font-semibold">{formatINR(d.AppliedAmount)}</span>
                             : <span className="text-muted-foreground">—</span>}
                         </td>
 
                         {/* Balance */}
-                        <td className="px-3 py-3 text-right font-mono text-sm">
+                        <td className="px-2.5 py-2 text-right font-mono text-[13px]">
                           {d.AvailableBalance > 0
                             ? <span className="font-bold text-blue-700 dark:text-blue-400">{formatINR(d.AvailableBalance)}</span>
                             : <span className="text-muted-foreground">—</span>}
                         </td>
 
                         {/* Status */}
-                        <td className="px-3 py-3"><StatusChip s={d.Status} /></td>
+                        <td className="px-2.5 py-2"><StatusChip s={d.Status} /></td>
 
                         {/* Actions */}
-                        <td className="px-3 py-3 text-center" onClick={(e) => e.stopPropagation()}>
+                        <td className="px-2.5 py-2 text-center" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-center gap-1.5">
                             {canEdit && d.Status !== "Applied" && (
                               <button onClick={() => setAdjusting(d)}
-                                className="text-xs px-2.5 py-1 rounded-lg border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 font-medium transition-colors whitespace-nowrap">
+                                className="text-[11px] px-2 py-1 rounded-lg border border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 font-medium transition-colors whitespace-nowrap">
                                 Adjust
                               </button>
                             )}
@@ -669,7 +666,7 @@ export default function CrmOnAccount() {
                       {isExp && (
                         <tr className="bg-muted/5">
                           <td />
-                          <td colSpan={9} className="border-l-2 border-primary/20">
+                          <td colSpan={9} className="border-l-2" style={{ borderLeftColor: `${accent}55` }}>
                             <MilestoneSubTable bookingId={d.BookingId} deposit={d} />
                           </td>
                         </tr>
@@ -683,12 +680,12 @@ export default function CrmOnAccount() {
               {deposits.length > 0 && (
                 <tfoot className="border-t-2 border-border bg-muted/30">
                   <tr>
-                    <td colSpan={5} className="px-3 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    <td colSpan={5} className="px-2.5 py-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
                       Page Total ({deposits.length} entries)
                     </td>
-                    <td className="px-3 py-2.5 text-right font-mono font-bold text-sm text-emerald-700 dark:text-emerald-400">{formatINR(pageCR)}</td>
-                    <td className="px-3 py-2.5 text-right font-mono font-bold text-sm text-amber-600 dark:text-amber-400">{pageDR > 0 ? formatINR(pageDR) : "—"}</td>
-                    <td className="px-3 py-2.5 text-right font-mono font-bold text-sm text-blue-700 dark:text-blue-400">{pageBAL > 0 ? formatINR(pageBAL) : "—"}</td>
+                    <td className="px-2.5 py-2 text-right font-mono font-bold text-[13px] text-emerald-700 dark:text-emerald-400">{formatINR(pageCR)}</td>
+                    <td className="px-2.5 py-2 text-right font-mono font-bold text-[13px] text-amber-600 dark:text-amber-400">{pageDR > 0 ? formatINR(pageDR) : "—"}</td>
+                    <td className="px-2.5 py-2 text-right font-mono font-bold text-[13px] text-blue-700 dark:text-blue-400">{pageBAL > 0 ? formatINR(pageBAL) : "—"}</td>
                     <td colSpan={2} />
                   </tr>
                 </tfoot>
@@ -698,7 +695,7 @@ export default function CrmOnAccount() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="flex items-center justify-between px-4 py-2.5 border-t border-border text-xs text-muted-foreground bg-muted/10">
+            <div className="flex items-center justify-between px-3 py-2 border-t border-border text-xs text-muted-foreground bg-muted/10">
               <span>{(page - 1) * PAGE + 1}–{Math.min(page * PAGE, total)} of {total} deposits</span>
               <div className="flex items-center gap-1">
                 <button onClick={() => setPage((p) => p - 1)} disabled={page <= 1}
