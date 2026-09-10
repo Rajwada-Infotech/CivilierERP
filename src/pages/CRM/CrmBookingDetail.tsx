@@ -1291,12 +1291,24 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
   return (<>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto thin-scroll">
+      <DialogContent
+        className="max-w-6xl max-h-[92vh] overflow-y-auto thin-scroll border-amber-500/25"
+        style={{
+          borderTopWidth: 3,
+          borderTopColor: "rgba(245,158,11,0.85)",
+          backgroundImage:
+            "radial-gradient(120% 55% at 50% 0%, rgba(245,158,11,0.10), transparent 60%)",
+        }}
+      >
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
               <DialogTitle className="font-heading flex items-center gap-2">
-                <Building2 size={16} className="text-amber-600 dark:text-amber-400" />
-                {booking ? `${booking.BookingNo} — ${booking.ApplicantName}` : "Booking Detail"}
+                <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0">
+                  <Building2 size={13} className="text-amber-500" />
+                </span>
+                <span className="bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
+                  {booking ? `${booking.BookingNo} — ${booking.ApplicantName}` : "Booking Detail"}
+                </span>
               </DialogTitle>
               {booking && booking.Status !== 'Cancelled' && booking.DeedStatus === 'Registered' && (
                 <span className="shrink-0 px-3 py-1.5 text-xs text-muted-foreground border border-border rounded-lg" title="Sale deed is Registered — title has legally transferred; standard cancellation is not applicable">
