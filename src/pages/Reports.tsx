@@ -374,6 +374,16 @@ const ALL_REPORTS: ReportDef[] = [
         header: "Doc Date",
         accessor: (r) => (r.EDocDate ? String(r.EDocDate).slice(0, 10) : "—"),
       },
+      {
+        header: "Company",
+        accessor: (r) => (r.ECompanyName ?? "—") as string,
+      },
+      {
+        // Resolved server-side: the booking's EProjectName if set, else the
+        // linked GRN → PO → Project. See expenseBooking.js EProjectDisplayName.
+        header: "Project",
+        accessor: (r) => (r.EProjectDisplayName ?? "—") as string,
+      },
       { header: "Paid To", accessor: (r) => (r.ESupplierName ?? "—") as string },
       {
         header: "Net Amt",
