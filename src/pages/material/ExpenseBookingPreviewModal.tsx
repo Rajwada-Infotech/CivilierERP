@@ -567,7 +567,10 @@ export function ExpenseBookingPreviewModal({
               const fmtGrnDate = (d: string | null) =>
                 d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
               type PostRow = { key: string; label: string; code: string | null; side: "debit" | "credit"; amount: number };
-              type PostGroup = { groupKey: string; docNo: string | null; date: string | null; rows: PostRow[] };
+              type PostGroup = {
+                groupKey: string; docNo: string | null; date: string | null; rows: PostRow[];
+                itemName?: string | null; qty?: number | null; rate?: number | null; uom?: string | null; costCentreName?: string | null;
+              };
               // TDS is withheld from the supplier, not paid out — split the
               // credit side into Supplier (net of TDS) + TDS Payable, same
               // as backend/routes/expenseBooking.js's post-to-gl creditLegs.
@@ -604,6 +607,46 @@ export function ExpenseBookingPreviewModal({
                   : []),
                 ...creditLegs("grn", g.totalAmount),
               ];
+              // Item-wise breakdown — each line item posts its own PGRN
+              // (clearing) + GST Credit pair, same visual language as the
+              // GRN's own Posting tab (src/pages/material/GRN.tsx), instead
+              // of one lumped PGRN row per GRN. The item's own GL Account
+              // still isn't debited here (that substitution already
+              // happened at GRN-posting time) — shown as context only.
+              // Total TDS is subtracted off the single largest item's PGRN
+              // row (display-only simplification of the backend's per-GRN,
+              // per-cost-centre proportional split) so debit still sums
+              // exactly to totalAmount.
+              const itemBreakdownRows: any[] = Array.isArray(invPostingData.itemBreakdown) ? invPostingData.itemBreakdown : [];
+              const itemBreakdownBaseSum = Math.round(itemBreakdownRows.reduce((s, it) => s + (Number(it.baseAmount) || 0), 0) * 100) / 100;
+              const hasItemBreakdown = isGrnLinked && itemBreakdownRows.length > 0 && Math.abs(itemBreakdownBaseSum - baseAmount) < 0.5;
+              type ItemGroup = { groupKey: string; itemName: string | null; qty: number | null; rate: number | null; uom: string | null; costCentreName: string | null; grnNo: string | null; rows: PostRow[] };
+              const itemGroups: ItemGroup[] = hasItemBreakdown
+                ? (() => {
+                    const biggestIdx = itemBreakdownRows.reduce((maxI, it, i, arr) => (Number(it.baseAmount) > Number(arr[maxI].baseAmount) ? i : maxI), 0);
+                    return itemBreakdownRows.map((it: any, idx: number) => ({
+                      groupKey: String(it.itemId ?? idx),
+                      itemName: it.itemName ?? null,
+                      qty: it.qty ?? null,
+                      rate: it.rate ?? null,
+                      uom: it.uom ?? null,
+                      costCentreName: it.costCentre?.name ?? null,
+                      grnNo: isMultiGrn ? it.grnNo ?? null : null,
+                      rows: [
+                        {
+                          key: `pgrn-${idx}`,
+                          label: it.glHeadName ? `${accounts?.pgrn?.label ?? "Provision for Pending GRN A/c"} (was ${it.glHeadName})` : (accounts?.pgrn?.label ?? "Provision for Pending GRN A/c"),
+                          code: accounts?.pgrn?.code ?? null,
+                          side: "debit",
+                          amount: idx === biggestIdx ? Math.round((Number(it.baseAmount) - tdsAmount) * 100) / 100 : Math.round(Number(it.baseAmount) * 100) / 100,
+                        },
+                        ...(Number(it.gstAmount) > 0
+                          ? [{ key: `gst-${idx}`, label: accounts?.gstCredit?.label ?? "GST Credit Available", code: accounts?.gstCredit?.code ?? null, side: "debit" as const, amount: Math.round(Number(it.gstAmount) * 100) / 100 }]
+                          : []),
+                      ],
+                    }));
+                  })()
+                : [];
               // Direct (non-GRN, e.g. DINV) booking. Two possible shapes:
               //  1. Multi Expense Head allocations (migration 303) — these
               //     ARE the real debit legs actually posted, one row per
@@ -631,12 +674,18 @@ export function ExpenseBookingPreviewModal({
               const purchaseLabel = accounts?.purchase?.label ?? "Purchase A/c";
               const purchaseCode = accounts?.purchase?.code ?? null;
               const groups: PostGroup[] = isGrnLinked
-                ? [
-                    ...(isMultiGrn
-                      ? grnBreakdown.map((g: any) => ({ groupKey: String(g.grnId), docNo: g.docNo, date: g.date, rows: grnRows(g) }))
-                      : [{ groupKey: "single", docNo: null, date: null, rows: grnRows({ baseAmount, taxAmount, totalAmount }) }]),
-                    ...(tdsNatureRow.length > 0 ? [{ groupKey: "tds-nature", docNo: null, date: null, rows: tdsNatureRow }] : []),
-                  ]
+                ? hasItemBreakdown
+                  ? [
+                      ...itemGroups.map((g) => ({ groupKey: g.groupKey, docNo: g.grnNo, date: null, rows: g.rows, itemName: g.itemName, qty: g.qty, rate: g.rate, uom: g.uom, costCentreName: g.costCentreName })),
+                      ...(tdsNatureRow.length > 0 ? [{ groupKey: "tds-nature", docNo: null, date: null, rows: tdsNatureRow }] : []),
+                      { groupKey: "credit", docNo: null, date: null, rows: creditLegs("grn", totalAmount) },
+                    ]
+                  : [
+                      ...(isMultiGrn
+                        ? grnBreakdown.map((g: any) => ({ groupKey: String(g.grnId), docNo: g.docNo, date: g.date, rows: grnRows(g) }))
+                        : [{ groupKey: "single", docNo: null, date: null, rows: grnRows({ baseAmount, taxAmount, totalAmount }) }]),
+                      ...(tdsNatureRow.length > 0 ? [{ groupKey: "tds-nature", docNo: null, date: null, rows: tdsNatureRow }] : []),
+                    ]
                 : [
                     {
                       groupKey: "direct",
@@ -737,7 +786,22 @@ export function ExpenseBookingPreviewModal({
                     </div>
                     {groups.map((group) => (
                       <div key={group.groupKey}>
-                        {isMultiGrn && (
+                        {group.itemName ? (
+                          <div className="px-2 sm:px-4 pt-3 pb-1.5 bg-muted/10 flex items-baseline justify-between gap-2 border-b border-border/30">
+                            <span className="text-[11px] sm:text-xs font-semibold text-foreground truncate">
+                              {group.itemName}
+                              {group.costCentreName && <span className="ml-2 text-[10px] font-normal text-muted-foreground">[{group.costCentreName}]</span>}
+                              {group.docNo && <span className="ml-2 text-[10px] font-mono font-normal text-primary">{group.docNo}</span>}
+                            </span>
+                            {(group.qty != null || group.rate != null) && (
+                              <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                                {group.qty != null ? `${group.qty}${group.uom ? ` ${group.uom}` : ""}` : ""}
+                                {group.qty != null && group.rate != null ? " × " : ""}
+                                {group.rate != null ? `₹${fmtAmt(group.rate)}` : ""}
+                              </span>
+                            )}
+                          </div>
+                        ) : isMultiGrn && group.docNo && (
                           <div className="flex items-center gap-2 px-2 sm:px-4 py-1.5 bg-muted/20 border-b border-border/50">
                             <span className="text-[10px] font-mono font-semibold text-primary">{group.docNo}</span>
                             <span className="text-[10px] text-muted-foreground">{fmtGrnDate(group.date)}</span>

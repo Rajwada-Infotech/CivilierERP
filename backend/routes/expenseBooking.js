@@ -217,6 +217,88 @@ async function computeGrnCostCentreBreakdown(pool, grnIds) {
     }));
 }
 
+// Item-wise breakdown (not bucketed) across every GRN feeding an invoice —
+// same source data as computeSingleGrnCostCentreBuckets, kept ungrouped so
+// the invoice's Posting tab can show a per-item row exactly like the GRN's
+// own Posting tab (src/pages/material/GRN.tsx), instead of one lumped PGRN
+// row per GRN. Also carries each item's tagged GL Account for context —
+// the invoice itself still debits PGRN either way (that item-level GL
+// substitution already happened at GRN-posting time), this is display only.
+async function computeGrnItemBreakdown(pool, grnIds) {
+  const { resolveItemGlHeads } = require("../services/itemGlHead");
+  const items = [];
+  for (const grnId of grnIds) {
+    const grnRes = await pool.request().input("GRNID", sql.Int, grnId).query(`SELECT GRNNo, GRNItems, POID FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID`);
+    const row = grnRes.recordset[0];
+    if (!row) continue;
+    const rawItems = JSON.parse(row.GRNItems || "[]");
+    const received = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
+    if (!received.length) continue;
+
+    const itemIds = received.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
+    let masterMap = {}, ccMap = {};
+    if (itemIds.length) {
+      const mReq = pool.request();
+      const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
+      const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
+      for (const r of mRes.recordset) masterMap[r.M_Id]={cgstRate:parseFloat(r.M_CGST)||0,sgstRate:parseFloat(r.M_SGST)||0};
+
+      if (row.POID) {
+        const ccReq = pool.request().input("POID", sql.Int, row.POID);
+        const ph2 = itemIds.map((id,i)=>{ ccReq.input(`ccid${i}`,sql.NVarChar(100),id); return `@ccid${i}`; }).join(",");
+        const ccRes = await ccReq.query(`
+          SELECT CONVERT(NVARCHAR(100), poi.ItemId) AS ItemId, poi.CostCenterId, cc.Name AS CostCenterName, cc.Code AS CostCenterCode
+          FROM dbo.PurchaseOrderItems poi
+          LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = poi.CostCenterId
+          WHERE poi.PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), poi.ItemId) IN (${ph2})
+        `);
+        for (const r of ccRes.recordset) {
+          ccMap[r.ItemId] = r.CostCenterId ? { id: r.CostCenterId, name: r.CostCenterName, code: r.CostCenterCode } : null;
+        }
+      }
+    }
+    const itemGlMap = await resolveItemGlHeads(pool, sql, itemIds);
+
+    for (const it of received) {
+      const itemId = String(it.itemId||it.ItemId||"");
+      const qty = Number(it.receivedQty||it.ReceivedQty||0) || Number(it.quantity||it.Quantity||0);
+      const rate = Number(it.rate||it.Rate||0);
+      const baseAmount = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*qty;
+      const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
+      const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
+      const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
+      const gstAmount = Math.round(baseAmount*(totalGSTRate/100)*100)/100;
+      const glMaster = itemGlMap.get(itemId);
+      items.push({
+        itemId,
+        itemName: it.itemName || it.ItemName || it.description || it.Description || "Item",
+        uom: it.uom || it.UOM || it.uomName || null,
+        qty,
+        rate,
+        baseAmount: Math.round(baseAmount*100)/100,
+        gstAmount,
+        costCentre: ccMap[itemId] ?? null,
+        grnNo: row.GRNNo,
+        glHeadId: glMaster?.glHeadId ?? null,
+      });
+    }
+  }
+
+  const glHeadIds = [...new Set(items.map((it) => it.glHeadId).filter(Boolean))];
+  if (glHeadIds.length) {
+    const req = pool.request();
+    const ph = glHeadIds.map((id, i) => { req.input(`hid${i}`, sql.Int, id); return `@hid${i}`; }).join(",");
+    const res = await req.query(`SELECT LHeadId, LHeadName, LHeadCode FROM dbo.AccountHeadMaster WHERE LHeadId IN (${ph})`);
+    const byId = new Map(res.recordset.map((r) => [r.LHeadId, r]));
+    for (const it of items) {
+      const head = it.glHeadId ? byId.get(it.glHeadId) : null;
+      it.glHeadName = head?.LHeadName ?? null;
+      it.glHeadCode = head?.LHeadCode ?? null;
+    }
+  }
+  return items;
+}
+
 // Resolves every GRN id feeding an invoice — the primary eb.ESourceId, plus
 // every id in eb.ELinkedGrnIds for a multi-GRN combined invoice.
 function resolveGrnIds(eb) {
@@ -938,6 +1020,40 @@ async function ebHasDirectItemsData(pool) {
   return _ebHasDirectItemsData;
 }
 
+// Classifies one Expense Head as "Direct Expense" or "Indirect Expense" for
+// the Expense Register report's per-filter columns — reuses the same rule
+// financialStatements.js's classifyExpenseBucketName() applies for the P&L
+// (a bucket name matching "direct expense" or "project"/"construction" is
+// Direct; everything else, tax included, folds into Indirect there too).
+// Walks the AccountGroup ancestor chain via a recursive CTE to the nearest
+// ancestor that's a direct child of the EXPENSES root, then classifies that
+// bucket's own name — same two-step ("find the Schedule-III bucket, then
+// classify its name") approach, just scoped to one head instead of the
+// whole chart of accounts, since only the currently-filtered head's type
+// is ever needed here.
+async function classifyExpenseHeadType(pool, headId) {
+  const result = await pool.request().input("HeadId", sql.Int, headId).query(`
+    ;WITH grp AS (
+      SELECT AGId, Name, ParentGroupId, 0 AS lvl
+      FROM dbo.AccountGroup
+      WHERE AGId = (SELECT LBelongsTo FROM dbo.AccountHeadMaster WHERE LHeadId = @HeadId)
+      UNION ALL
+      SELECT ag.AGId, ag.Name, ag.ParentGroupId, grp.lvl + 1
+      FROM dbo.AccountGroup ag
+      JOIN grp ON ag.AGId = grp.ParentGroupId
+      WHERE grp.lvl < 20
+    )
+    SELECT TOP 1 g.Name AS BucketName
+    FROM grp g
+    JOIN dbo.AccountGroup rootGrp ON rootGrp.AGId = g.ParentGroupId
+    WHERE rootGrp.Name = 'EXPENSES' AND rootGrp.ParentGroupId IS NULL
+    ORDER BY g.lvl
+  `);
+  const bucketName = (result.recordset[0]?.BucketName || "").toLowerCase();
+  const isDirect = /\bdirect expense/.test(bucketName) || /project|construction/.test(bucketName);
+  return isDirect ? "Direct Expense" : "Indirect Expense";
+}
+
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
   try {
@@ -957,6 +1073,13 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const projectName = (req.query.projectName || "").toString().trim() || null;
     const docNo = (req.query.docNo || "").toString().trim() || null;
     const supplierId = req.query.supplierId ? parseInt(req.query.supplierId, 10) : null;
+    // Accepts either a single id ("12") or a comma-separated list ("12,15,20")
+    // — the Expense Register report's filter is a multi-select.
+    const expenseHeadIds = (req.query.expenseHeadId ? String(req.query.expenseHeadId) : "")
+      .split(",")
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => Number.isInteger(n) && n > 0);
+    const expenseHeadIdsCsv = expenseHeadIds.length ? expenseHeadIds.join(",") : null;
 
     const hasPaymentTermId = await ebHasPaymentTermId(pool);
     const hasDirectItemsCol = await ebHasDirectItemsData(pool);
@@ -984,7 +1107,8 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         .input("CompanyId", sql.Int, companyId)
         .input("ProjectName", sql.NVarChar(255), projectName)
         .input("DocNo", sql.NVarChar(100), docNo ? `%${docNo}%` : null)
-        .input("SupplierId", sql.Int, supplierId).query(`
+        .input("SupplierId", sql.Int, supplierId)
+        .input("ExpenseHeadIds", sql.NVarChar(sql.MAX), expenseHeadIdsCsv).query(`
         SELECT
           eb.Eid, eb.Eid AS id,
           eb.EProjectName, eb.EDocumentType, eb.EDocDate,
@@ -1090,6 +1214,15 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           AND (@ProjectName IS NULL OR ep.name = @ProjectName)
           AND (@DocNo IS NULL OR eb.EDocNo LIKE @DocNo)
           AND (@SupplierId IS NULL OR (${ebSupplierList.idExpr}) = @SupplierId)
+          -- Expense Head lives in one of two places: the multi-head
+          -- ExpenseHeadAllocation table (migration 303, direct bookings
+          -- split across several heads) or the legacy single EGLAccountId
+          -- column — match either. Multi-select: any of the picked heads.
+          AND (@ExpenseHeadIds IS NULL OR eb.EGLAccountId IN (SELECT value FROM STRING_SPLIT(@ExpenseHeadIds, ',')) OR EXISTS (
+            SELECT 1 FROM dbo.ExpenseHeadAllocation eha
+            WHERE eha.SourceType = 'ExpenseBooking' AND eha.SourceId = eb.Eid
+              AND eha.LHeadId IN (SELECT value FROM STRING_SPLIT(@ExpenseHeadIds, ','))
+          ))
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `),
@@ -1113,10 +1246,29 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     // that do have one. Batch-fetched (one query for the whole page) rather
     // than per-row to avoid an N+1.
     const allocMap = await getAllocationsForMany(pool, sql, "ExpenseBooking", rows.map((r) => r.Eid));
-    const rowsWithExpenseHead = rows.map((r) => ({
-      ...r,
-      EExpenseHeadNames: (allocMap.get(r.Eid) || []).map((a) => a.lHeadName).join(", ") || null,
-    }));
+
+    // Expense Register report: every row gets its own GL Name + Direct/
+    // Indirect Expense Type (not just a single filtered head's) — the
+    // "primary" head for classification purposes is the first allocation
+    // row, falling back to the legacy single EGLAccountId. Distinct heads
+    // across the page are classified once each (classifyExpenseHeadType is
+    // a small recursive-CTE call), not per row, to avoid an N+1.
+    const primaryHeadIdOf = (r) => (allocMap.get(r.Eid) || [])[0]?.lHeadId ?? r.EGLAccountId ?? null;
+    const distinctHeadIds = [...new Set(rows.map(primaryHeadIdOf).filter((id) => Number.isInteger(id) && id > 0))];
+    const expenseTypeByHeadId = new Map(
+      await Promise.all(distinctHeadIds.map(async (id) => [id, await classifyExpenseHeadType(pool, id)])),
+    );
+
+    const rowsWithExpenseHead = rows.map((r) => {
+      const allocNames = (allocMap.get(r.Eid) || []).map((a) => a.lHeadName).join(", ") || null;
+      const primaryHeadId = primaryHeadIdOf(r);
+      return {
+        ...r,
+        EExpenseHeadNames: allocNames,
+        ERowGLName: allocNames || r.EGLAccountName || null,
+        ERowExpenseType: primaryHeadId ? (expenseTypeByHeadId.get(primaryHeadId) ?? null) : null,
+      };
+    });
 
     res.json({
       data: rowsWithExpenseHead.map(({ _total, ...r }) => r),
@@ -4084,12 +4236,13 @@ router.get("/:id/posting", async (req, res) => {
 
     // Determine if GRN-linked
     const isGrnLinked = eb.ESourceType === "GRN" && eb.ESourceId;
-    let baseAmount = 0, taxAmount = 0, totalAmount = 0, perGrn = null, costCentreBreakdown = [];
+    let baseAmount = 0, taxAmount = 0, totalAmount = 0, perGrn = null, costCentreBreakdown = [], itemBreakdown = [];
 
     if (isGrnLinked) {
       const grnIds = resolveGrnIds(eb);
       ({ baseAmount, taxAmount, totalAmount, perGrn } = await computeGrnBaseTax(pool, grnIds));
       costCentreBreakdown = await computeGrnCostCentreBreakdown(pool, grnIds);
+      itemBreakdown = await computeGrnItemBreakdown(pool, grnIds);
     } else {
       // Direct (non-GRN) booking: back-derive base/tax from the invoice's
       // own GST rates against the GST-inclusive ENetAmount — MUST exactly
@@ -4155,6 +4308,11 @@ router.get("/:id/posting", async (req, res) => {
       // a 1-row array so the frontend can render one consistent shape.
       grnBreakdown: perGrn,
       costCentreBreakdown,
+      // Per-item rows (itemId, name, qty, rate, base/GST, cost centre, and
+      // the item's own tagged GL Account for context) — lets the Posting
+      // tab show the same item-wise breakdown as the GRN's own Posting tab
+      // instead of one lumped PGRN row per GRN.
+      itemBreakdown,
       supplierName: eb.SupplierName,
       accounts,
       expenseHeadAllocations,
@@ -4281,6 +4439,35 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // never tagged anything.
     const expenseHeadAllocations = isGrnLinked ? [] : await getAllocations(pool, sql, "ExpenseBooking", ebId);
     const debitLedgerId = !isGrnLinked && eb.EGLAccountId ? eb.EGLAccountId : purchaseId;
+
+    // PO/WO_PO-sourced invoices with no per-invoice Expense Head allocation
+    // split the base debit across each PO line item's own tagged GL
+    // Account — the "item's GL Account substitutes Purchase A/c" rule,
+    // weighted by each line's own share of the PO's total value — instead
+    // of lumping the whole invoice onto one flat Purchase A/c leg.
+    // Falls through to the plain debitLedgerId leg when the PO has no
+    // resolvable items (nothing to weight by).
+    let poItemGlShares = null; // Map<lHeadId|null, share 0..1>
+    if (!isGrnLinked && expenseHeadAllocations.length === 0 && eb.ESourceId && (eb.ESourceType === "PO" || eb.ESourceType === "WO_PO")) {
+      const poId = parseInt(eb.ESourceId, 10);
+      if (Number.isFinite(poId)) {
+        const { resolveItemGlHeads } = require("../services/itemGlHead");
+        const poItemsRes = await pool.request().input("PoId", sql.Int, poId).query(
+          `SELECT ItemId, LineAmount FROM dbo.PurchaseOrderItems WHERE PurchaseOrderID = @PoId AND ItemId IS NOT NULL`,
+        );
+        const poItems = poItemsRes.recordset.filter((r) => Number(r.LineAmount) > 0);
+        const poTotal = poItems.reduce((s, r) => s + Number(r.LineAmount), 0);
+        if (poItems.length && poTotal > 0) {
+          const itemGlMap = await resolveItemGlHeads(pool, sql, poItems.map((r) => r.ItemId));
+          poItemGlShares = new Map();
+          for (const r of poItems) {
+            const headId = itemGlMap.get(String(r.ItemId))?.glHeadId ?? null;
+            const share = Number(r.LineAmount) / poTotal;
+            poItemGlShares.set(headId, (poItemGlShares.get(headId) || 0) + share);
+          }
+        }
+      }
+    }
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this invoice's supplier account." });
     if (isGrnLinked && !pgrnId) return res.status(422).json({ error: "Provision for Pending GRN system ledger not configured." });
     if (isGrnLinked && taxAmount > 0 && !gstCreditId) return res.status(422).json({ error: "GST Credit Available system ledger not configured." });
@@ -4430,8 +4617,26 @@ router.post("/:id/post-to-gl", async (req, res) => {
             ...(() => {
               const baseLeg = Math.round((baseAmount - tdsAmount) * 100) / 100;
               const taxLeg = Math.round((totalAmount - tdsAmount - baseLeg) * 100) / 100;
+              let baseLegs;
+              if (poItemGlShares && poItemGlShares.size > 0) {
+                // Split baseLeg by each GL head's share of the PO value;
+                // any paisa left over from rounding lands on the largest
+                // bucket so the legs still sum exactly to baseLeg.
+                const entries = [...poItemGlShares.entries()];
+                let amounts = entries.map(([headId, share]) => ({ headId, amount: Math.round(baseLeg * share * 100) / 100 }));
+                const shortfall = Math.round((baseLeg - amounts.reduce((s, a) => s + a.amount, 0)) * 100) / 100;
+                if (Math.abs(shortfall) > 0) {
+                  const biggest = amounts.reduce((max, a) => (a.amount > max.amount ? a : max), amounts[0]);
+                  biggest.amount = Math.round((biggest.amount + shortfall) * 100) / 100;
+                }
+                baseLegs = amounts
+                  .filter((a) => a.amount !== 0)
+                  .map((a) => ({ LHeadId: a.headId || debitLedgerId, DebitAmount: a.amount, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — ${a.headId ? "GL Account" : "Purchase"}` }));
+              } else {
+                baseLegs = [{ LHeadId: debitLedgerId, DebitAmount: baseLeg, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` }];
+              }
               return [
-                { LHeadId: debitLedgerId, DebitAmount: baseLeg, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — ${eb.EGLAccountId ? "GL Account" : "Purchase"}` },
+                ...baseLegs,
                 ...(taxLeg > 0
                   ? [{ LHeadId: gstCreditId, DebitAmount: taxLeg, CreditAmount: 0, Narration: `Invoice Posting: ${eb.EDocNo} — GST Credit Available` }]
                   : []),

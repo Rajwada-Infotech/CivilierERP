@@ -11,6 +11,7 @@ import {
   GlassSection,
 } from "@/components/dashboard/GlassShell";
 import { ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
+import { TimelineIcon } from "@/components/icons/TimelineIcon";
 import {
   Pickaxe,
   ClipboardList,
@@ -333,7 +334,7 @@ export default function CivilWorkDprDashboard() {
       <GlassShell
         title="Civil Work DPR"
         subtitle="Activities, contractor allocations, and Work Allocation assignments at a glance"
-        icon={Pickaxe}
+        icon={TimelineIcon}
         accentColor={ACCENT}
         secondaryColor={SECONDARY}
         action={

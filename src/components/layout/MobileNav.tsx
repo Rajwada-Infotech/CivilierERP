@@ -45,6 +45,7 @@ import {
   GitBranch,
   XCircle,
   Percent,
+  Wrench,
 } from "lucide-react";
 import {
   Bank,
@@ -63,6 +64,8 @@ import {
   Profile,
   Logout,
   MoneyRecive,
+  Cpu,
+  ShoppingCart,
 } from "iconsax-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -78,6 +81,8 @@ import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 import { engineeringNavItems } from "./sidebars/EngineeringSidebar";
 import { buildFinanceNavItems } from "./sidebars/FinanceSidebar";
 import { materialNavItems } from "./sidebars/MaterialSidebar";
+import { fixedAssetNavItems } from "./sidebars/FixedAssetSidebar";
+import { maintenanceNavItems } from "./sidebars/MaintenanceSidebar";
 import { followupNavItems } from "./sidebars/FollowupSidebar";
 import { buildAdminNavItems } from "./sidebars/AdminSidebar";
 import { dbaNavItems } from "./sidebars/DbaSidebar";
@@ -149,6 +154,14 @@ const MODULE_META: Record<
     label: "Material",
     route: MODULE_DASHBOARD_ROUTES.material,
   },
+  "fixed-asset": {
+    h: 45,
+    s: 93,
+    l: 47,
+    icon: Cpu,
+    label: "Fixed Asset",
+    route: MODULE_DASHBOARD_ROUTES["fixed-asset"],
+  },
   loan: {
     h: 142,
     s: 71,
@@ -188,6 +201,22 @@ const MODULE_META: Record<
     icon: Message2,
     label: "Ticket",
     route: MODULE_DASHBOARD_ROUTES.ticket,
+  },
+  sales: {
+    h: 271,
+    s: 91,
+    l: 65,
+    icon: ShoppingCart,
+    label: "Sales",
+    route: MODULE_DASHBOARD_ROUTES.sales,
+  },
+  maintenance: {
+    h: 84,
+    s: 81,
+    l: 35,
+    icon: Wrench,
+    label: "Maintenance",
+    route: MODULE_DASHBOARD_ROUTES.maintenance,
   },
   records: {
     h: 347,
@@ -385,16 +414,28 @@ const fixedAssetSetupItems: SetupItem[] = [
     color: "text-yellow-500",
     pageKey: "depreciation-setup",
   },
+  {
+    icon: Hash,
+    label: "ID Template Master",
+    path: "/fixed-asset/id-template-master",
+    color: "text-yellow-500",
+    pageKey: "id-template-master",
+  },
+];
+
+const maintenanceSetupItems: SetupItem[] = [
+  {
+    icon: Receipt,
+    label: "Charge Head",
+    path: "/masters/charge-head",
+    color: "text-slate-500",
+    pageKey: "charge-head-master",
+  },
 ];
 
 const followupSetupItems: SetupItem[] = [
-  {
-    icon: ClipboardList,
-    label: "Task Master",
-    path: "/followup/setup/task-master",
-    color: "text-teal-500",
-    pageKey: "task-master",
-  },
+  // "Task Master" moved into the Follow-Up module sidebar (followupNavItems)
+  // — kept out of the Setup sheet so it isn't listed twice on mobile.
   {
     icon: Users,
     label: "Department Master",
@@ -666,6 +707,8 @@ export const MobileNav: React.FC = () => {
       };
     if (activeModule === "crm")
       return { items: crmSetupItems, label: "CRM", available: true };
+    if (activeModule === "maintenance")
+      return { items: maintenanceSetupItems, label: "Maintenance", available: true };
     return { items: [] as SetupItem[], label: "", available: false };
   })();
 
@@ -722,6 +765,10 @@ export const MobileNav: React.FC = () => {
     switch (activeModule) {
       case "material":
         return adaptItems(materialNavItems as DesktopNavItem[]);
+      case "fixed-asset":
+        return adaptItems(fixedAssetNavItems as DesktopNavItem[]);
+      case "maintenance":
+        return adaptItems(maintenanceNavItems as DesktopNavItem[]);
       case "finance":
         return adaptItems(
           buildFinanceNavItems(overdueCount) as DesktopNavItem[],

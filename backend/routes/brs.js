@@ -9,6 +9,42 @@ const { syncBillStatus } = require("../utils/syncBillStatus");
 const { bumpCacheVersion } = require("../redis");
 const { getPool } = require("../db");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
+const { hasPosting, reversePostingBySource } = require("../services/generalLedger");
+
+// Maps a BRS-level sourceType to the GeneralLedgerEntry.SourceType(s) that
+// carry its actual money-movement leg(s), in authority order — the first
+// one found live is reversed. PAYMENT checks 'PaymentPosting' before
+// 'NewPayment' for the same reason the rest of this codebase does (manual/
+// Posting SourceType is authoritative when both exist — see migration 411).
+// CRM_RECEIVED and the LOAN_* types are intentionally left out: bouncing
+// those isn't currently wired to a GL reversal here (a real gap, but a
+// separate, lower-confidence fix — their GL SourceType naming isn't
+// established the way PAYMENT/RECEIVED/FUND_TRANSFER already are).
+const BRS_BOUNCE_GL_SOURCE_TYPES = {
+  PAYMENT: ["PaymentPosting", "NewPayment"],
+  RECEIVED: ["ReceivedPayment"],
+  FUND_TRANSFER_OUT: ["FundTransfer"],
+  FUND_TRANSFER_IN: ["FundTransfer"],
+};
+
+// A bounced cheque/transfer never actually moved the money, so its GL
+// posting must stop counting — otherwise the ledger keeps showing it as
+// paid/received forever (see brs.js bounce endpoint comment history: this
+// was the root cause of a supplier's residual balance after a reissued
+// payment replaced a bounced one, since the bounced payment's own GL leg
+// was never reversed). Mirrors reversePostingBySource's existing
+// audit-trail convention (IsReversed=1, never a physical delete).
+async function reverseGLForBounce(pool, brsSourceType, sourceId) {
+  const candidates = BRS_BOUNCE_GL_SOURCE_TYPES[brsSourceType];
+  if (!candidates) return { reversed: false, reason: `no GL reversal mapping for ${brsSourceType}` };
+  for (const glSourceType of candidates) {
+    if (await hasPosting(pool, glSourceType, sourceId)) {
+      await reversePostingBySource(pool, glSourceType, sourceId);
+      return { reversed: true, glSourceType };
+    }
+  }
+  return { reversed: false, reason: "no live GL posting found for this source" };
+}
 
 router.use(checkPermissionForMethod("Finance", "BRS"));
 
@@ -806,9 +842,17 @@ router.put("/:sourceType/:sourceId/bounce", async (req, res) => {
             (@SourceType, @SourceID, 0, 1, @BounceDate, @BounceReason, @BounceRemarks, GETDATE())
       `);
 
+    // A bounced instrument never actually moved money — reverse its GL
+    // posting now, before the response, so a caller sees the true outcome
+    // instead of the BankReconciliation flag and the ledger disagreeing.
+    const glReversal = await reverseGLForBounce(pool, sourceType, parseInt(sourceId));
+    if (!glReversal.reversed) {
+      console.warn(`BRS bounce: ${sourceType} ${sourceId} — GL not reversed (${glReversal.reason})`);
+    }
+
     await bumpCacheVersion("brs");
     await bumpCacheVersion(sourceType === "PAYMENT" ? "new-payment" : "received-payment");
-    res.json({ message: "Marked as bounced" });
+    res.json({ message: "Marked as bounced", glReversed: glReversal.reversed });
 
     // Fire-and-forget — bounced cheques must not count as paid, update after responding
     if (sourceType === "PAYMENT") {

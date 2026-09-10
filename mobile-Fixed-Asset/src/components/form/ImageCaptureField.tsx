@@ -71,8 +71,9 @@ export function ImageCaptureField({
         <View style={{ flexDirection: "row", gap: 12, alignItems: "center", borderWidth: 1, borderColor: colors.border, borderRadius: 12, padding: 10, backgroundColor: `${colors.card}80` }}>
           <Image source={{ uri: value }} style={{ width: 68, height: 68, borderRadius: 10, borderWidth: 1, borderColor: colors.border }} />
           <View style={{ flex: 1, gap: 8 }}>
-            <View style={{ flexDirection: "row", gap: 8 }}>
-              <SmallBtn icon={RefreshCw} label="Change" onPress={() => pick("library")} />
+            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+              <SmallBtn icon={Camera} label={busy ? "…" : "Retake"} onPress={() => pick("camera")} />
+              <SmallBtn icon={RefreshCw} label="Gallery" onPress={() => pick("library")} />
               <SmallBtn icon={Trash2} label="Remove" danger onPress={() => onChange("")} />
             </View>
           </View>

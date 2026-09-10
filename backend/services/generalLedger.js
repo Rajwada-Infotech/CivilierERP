@@ -204,6 +204,17 @@ async function postGRNApproval(pool, grnId, userEmail) {
   if (await hasPosting(pool, "GRN", grnId))
     return { posted: true, reason: "already posted (idempotent)" };
 
+  // routes/grns.js's POST /:id/post-to-gl (SourceType='GRNPosting') is the
+  // authoritative posting path for a GRN — it independently guards against
+  // re-entry the same way this function does, but neither ever checked for
+  // the OTHER's posting, so a GRN approved (auto-posting here) and later
+  // run through the manual "Post to GL" action got double-posted to GL
+  // under two different accounting treatments (see migration 410's cleanup
+  // of the historical cases this caused). If GRNPosting already handled
+  // this GRN, defer to it entirely.
+  if (await hasPosting(pool, "GRNPosting", grnId))
+    return { posted: true, reason: "already posted via GRNPosting (authoritative)" };
+
   const result = await pool.request().input("GRNID", sql.Int, grnId).query(`
     SELECT grn.GRNID, grn.DocNo, grn.GRNNo, grn.GRNDate, grn.GRNItems,
            grn.TotalAmount, grn.SupplierID, grn.POID, grn.GodownID,
@@ -281,40 +292,42 @@ async function postGRNApproval(pool, grnId, userEmail) {
   // set) instead of falling into Purchase A/c, so a fixed-asset purchase
   // actually shows up under the FIXED ASSETS group in Trial Balance/the
   // Balance Sheet rather than as an ordinary expense.
+  //
+  // Non-fixed-asset items also get this treatment now — any item tagged
+  // with its own GL Account (Item_Master_Group.M_GLHeadId, migration 295)
+  // posts there instead of the shared Purchase A/c. Previously every
+  // ordinary item lumped into Purchase A/c regardless of its own tag, so a
+  // tagged item's GL account never actually appeared in Trial Balance.
+  const { resolveItemGlHeads } = require("./itemGlHead");
   const itemIds = items.map((it) => it.itemId).filter((id) => id != null).map(String);
-  const fixedAssetGlHeadByItemId = new Map();
-  if (itemIds.length) {
-    const req = pool.request();
-    const placeholders = itemIds
-      .map((id, i) => {
-        req.input(`iid${i}`, sql.NVarChar(100), id);
-        return `@iid${i}`;
-      })
-      .join(",");
-    const faRes = await req.query(`
-      SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, M_GLHeadId
-      FROM dbo.Item_Master_Group
-      WHERE CONVERT(NVARCHAR(100), M_Id) IN (${placeholders}) AND M_Type = 'Fixed Asset'
-    `);
-    for (const r of faRes.recordset) fixedAssetGlHeadByItemId.set(r.M_Id, r.M_GLHeadId ?? null);
-  }
+  const itemGlMap = await resolveItemGlHeads(pool, sql, itemIds);
 
-  const defaultFixedAssetHeadId = fixedAssetGlHeadByItemId.size
-    ? await getGLHeadId(pool, GL_ACCOUNTS.FIXED_ASSET)
-    : null;
-
-  let purchaseAmount = 0;
-  const fixedAssetAmountByHead = new Map(); // lHeadId -> amount
+  const purchaseAmountByHead = new Map(); // lHeadId (null = default Purchase A/c) -> { amount, itemNames }
+  const fixedAssetAmountByHead = new Map(); // lHeadId -> { amount, itemNames }
   for (const it of items) {
     const amt = Number(it.totalAmount) || 0;
     const itemId = it.itemId != null ? String(it.itemId) : null;
-    if (itemId && fixedAssetGlHeadByItemId.has(itemId)) {
-      const headId = fixedAssetGlHeadByItemId.get(itemId) || defaultFixedAssetHeadId;
-      fixedAssetAmountByHead.set(headId, (fixedAssetAmountByHead.get(headId) || 0) + amt);
-    } else {
-      purchaseAmount += amt;
-    }
+    const master = itemId ? itemGlMap.get(itemId) : null;
+    const itemName = it.itemName || it.ItemName || it.description || it.Description || null;
+    const target = master?.isFixedAsset
+      ? fixedAssetAmountByHead
+      : purchaseAmountByHead;
+    const headId = master?.isFixedAsset ? master.glHeadId : (master?.glHeadId ?? null);
+    const bucket = target.get(headId) ?? { amount: 0, itemNames: [] };
+    bucket.amount += amt;
+    if (itemName) bucket.itemNames.push(itemName);
+    target.set(headId, bucket);
   }
+  // See services/grnPosting.js's itemNameSuffix — same short "which item
+  // earned this leg" suffix, kept in sync between the two GRN posting
+  // paths so a leg's Narration reads the same regardless of which one
+  // posted it.
+  const itemNameSuffix = (itemNames) => {
+    const unique = [...new Set(itemNames)];
+    if (unique.length === 0) return "";
+    if (unique.length <= 2) return ` — ${unique.join(", ")}`;
+    return ` — ${unique[0]} & ${unique.length - 1} more`;
+  };
 
   const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
   const provisionalCreditHeadId = await getGLHeadId(
@@ -326,10 +339,15 @@ async function postGRNApproval(pool, grnId, userEmail) {
     GL_ACCOUNTS.PENDING_GRN_PROVISION,
   );
 
-  const fixedAssetLegs = Array.from(fixedAssetAmountByHead.entries()).map(([lHeadId, amt]) => ({
+  const purchaseLegs = Array.from(purchaseAmountByHead.entries()).map(([lHeadId, { amount, itemNames }]) => ({
+    lHeadId: lHeadId || purchaseHeadId,
+    debit: amount,
+    narration: `GRN ${docNo} — goods received (base)${itemNameSuffix(itemNames)}`,
+  }));
+  const fixedAssetLegs = Array.from(fixedAssetAmountByHead.entries()).map(([lHeadId, { amount, itemNames }]) => ({
     lHeadId,
-    debit: amt,
-    narration: `GRN ${docNo} — fixed asset received (capitalized)`,
+    debit: amount,
+    narration: `GRN ${docNo} — fixed asset received (capitalized)${itemNameSuffix(itemNames)}`,
   }));
 
   await postVoucher(pool, {
@@ -341,11 +359,7 @@ async function postGRNApproval(pool, grnId, userEmail) {
     projectId: grn.ProjectId ?? null,
     createdBy: userEmail,
     legs: [
-      {
-        lHeadId: purchaseHeadId,
-        debit: purchaseAmount,
-        narration: `GRN ${docNo} — goods received (base)`,
-      },
+      ...purchaseLegs,
       ...fixedAssetLegs,
       {
         lHeadId: provisionalCreditHeadId,
@@ -404,7 +418,8 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
 
   const result = await pool.request().input("Eid", sql.Int, ebId).query(`
     SELECT eb.Eid, eb.EDocNo, eb.EDocDate, eb.EAmount, eb.ENetAmount,
-           eb.ESourceType, eb.ESourceId, eb.EName, eb.ECompanyId, eb.EProjectName
+           eb.ESourceType, eb.ESourceId, eb.EName, eb.ECompanyId, eb.EProjectName,
+           eb.EBillingTermsData, eb.LHeadId
     FROM dbo.ExpenseBooking eb
     WHERE eb.Eid = @Eid
   `);
@@ -438,7 +453,32 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
       };
 
     const grnTotal = Number(grn.TotalAmount) || 0;
-    const delta = netAmount - grnTotal; // billing-term adjustment, can be negative
+    // eb.ENetAmount is the GST-inclusive payable; when it's unset (older/
+    // incompletely-saved bookings) the module-level `netAmount` above falls
+    // back to eb.EAmount — the taxable BASE amount, not tax-inclusive — which
+    // silently credited the supplier only the base amount instead of the
+    // full invoice payable. For a GRN-linked booking the GRN's own
+    // (incl-GST) TotalAmount is the correct fallback instead.
+    //
+    // A SET-but-wrong ENetAmount hits the exact same problem through a
+    // different door: the (delta = effectiveNetAmount - grnTotal) legs
+    // below exist to route a genuine billing-term adjustment (freight,
+    // discount) to Purchase A/c instead of the supplier — but when
+    // EBillingTermsData has no actual terms recorded, there's no legitimate
+    // reason for ENetAmount to differ from the GRN's own total at all, so a
+    // mismatch there is data corruption, not a real adjustment. Trusting it
+    // anyway silently routed the gap (here, the GST portion) to Purchase
+    // A/c instead of the supplier, understating what they're actually owed.
+    let billingTerms = [];
+    try {
+      const parsed = eb.EBillingTermsData ? JSON.parse(eb.EBillingTermsData) : [];
+      if (Array.isArray(parsed)) billingTerms = parsed;
+    } catch { /* malformed — treat as no terms */ }
+    const hasBillingTerms = billingTerms.length > 0;
+    const effectiveNetAmount = eb.ENetAmount != null && (hasBillingTerms || Number(eb.ENetAmount) === grnTotal)
+      ? netAmount
+      : grnTotal;
+    const delta = effectiveNetAmount - grnTotal; // billing-term adjustment, can be negative
 
     const pendingGrnHeadId = await getGLHeadId(
       pool,
@@ -454,7 +494,7 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
       },
       {
         lHeadId: grn.SupplierID,
-        credit: netAmount,
+        credit: effectiveNetAmount,
         narration: `${docNo} — supplier liability booked`,
       },
     ];
@@ -490,32 +530,57 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
   }
 
   // Non-GRN sourced (PO / WO_PO / WORK_DONE / standalone)
-  const supplierHeadId = await getHeadIdByName(pool, eb.EName);
+  // eb.LHeadId is the actual FK to the chosen party — use it directly.
+  // eb.EName is a free-text purpose/description field on a direct (TOD)
+  // booking ("Payment for Shiv Shakti Building Materials"), NOT
+  // necessarily the party's exact ledger name, despite this function's
+  // old assumption that "EName IS the chosen head's label" — an exact
+  // string match against it silently failed (posted:false, no error
+  // surfaced anywhere) for the vast majority of TOD bookings, leaving
+  // their invoice liability permanently unposted even after a payment
+  // against them was posted. Falls back to the EName match only for
+  // older rows saved before LHeadId existed on this table.
+  const supplierHeadId = eb.LHeadId || (await getHeadIdByName(pool, eb.EName));
   // can't determine counter-account — skip rather than guess wrong
   if (!supplierHeadId)
     return {
       posted: false,
-      reason: `ExpenseBooking ${ebId}: EName "${eb.EName}" did not match any AccountHeadMaster head`,
+      reason: `ExpenseBooking ${ebId}: no LHeadId set and EName "${eb.EName}" did not match any AccountHeadMaster head`,
     };
 
   const baseAmount = Number(eb.EAmount) || 0;
   const gstAndTerms = Math.max(0, netAmount - baseAmount);
 
-  const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
-  const provisionalCreditHeadId = await getGLHeadId(
-    pool,
-    GL_ACCOUNTS.PROVISIONAL_CREDIT,
-  );
+  // Multi Expense Head tagging (migration 303, dbo.ExpenseHeadAllocation) —
+  // a direct/TOD booking can tag its own Dr leg(s) to specific GL heads
+  // instead of the generic Purchase A/c, e.g. "Director or Partner
+  // Remuneration" rather than every direct payment lumping into Purchase.
+  // routes/expenseBooking.js's create/update handlers already validate that
+  // these rows sum to the booking's own net (GST-inclusive) amount before
+  // saving — see the comment there: "each row is its own future Dr leg...
+  // together they must add up to exactly what's owed to the supplier". This
+  // function used to ignore the table entirely and always debit Purchase
+  // A/c for the base amount, silently discarding the user's chosen head the
+  // moment the booking got approved.
+  const { getAllocations } = require("./expenseHeadAllocation");
+  const allocations = await getAllocations(pool, sql, "ExpenseBooking", ebId);
+  const allocSum = Math.round(allocations.reduce((s, a) => s + a.amount, 0) * 100) / 100;
+  const useAllocations = allocations.length > 0 && Math.abs(allocSum - netAmount) < 0.5;
 
-  await postVoucher(pool, {
-    voucherNo: docNo,
-    voucherDate,
-    sourceType: "ExpenseBooking",
-    sourceId: ebId,
-    companyId,
-    projectId,
-    createdBy: userEmail,
-    legs: [
+  let debitLegs;
+  if (useAllocations) {
+    debitLegs = allocations.map((a) => ({
+      lHeadId: a.lHeadId,
+      debit: a.amount,
+      narration: `${docNo} — ${a.lHeadName || "expense booked"}`,
+    }));
+  } else {
+    const purchaseHeadId = await getGLHeadId(pool, GL_ACCOUNTS.PURCHASE);
+    const provisionalCreditHeadId = await getGLHeadId(
+      pool,
+      GL_ACCOUNTS.PROVISIONAL_CREDIT,
+    );
+    debitLegs = [
       {
         lHeadId: purchaseHeadId,
         debit: baseAmount,
@@ -526,6 +591,19 @@ async function postExpenseBookingApproval(pool, ebId, userEmail) {
         debit: gstAndTerms,
         narration: `${docNo} — GST / billing terms`,
       },
+    ];
+  }
+
+  await postVoucher(pool, {
+    voucherNo: docNo,
+    voucherDate,
+    sourceType: "ExpenseBooking",
+    sourceId: ebId,
+    companyId,
+    projectId,
+    createdBy: userEmail,
+    legs: [
+      ...debitLegs,
       {
         lHeadId: supplierHeadId,
         credit: netAmount,
@@ -611,6 +689,17 @@ async function resolvePaymentSupplierHeadId(pool, payment) {
 async function postPaymentApproval(pool, paymentId, userEmail) {
   if (await hasPosting(pool, "NewPayment", paymentId))
     return { posted: true, reason: "already posted (idempotent)" };
+
+  // routes/newPayment.js's POST /:id/post-to-gl (SourceType='PaymentPosting')
+  // is the authoritative posting path for a payment — it independently
+  // guards against re-entry the same way this function does, but neither
+  // ever checked for the OTHER's posting, so a payment approved (auto-
+  // posting here) and later run through the manual "Post to GL" action got
+  // double-posted under two different accounting treatments (same bug
+  // class as GRN/GRNPosting and ExpenseBooking/InvoicePosting). If
+  // PaymentPosting already handled this payment, defer to it entirely.
+  if (await hasPosting(pool, "PaymentPosting", paymentId))
+    return { posted: true, reason: "already posted via PaymentPosting (authoritative)" };
 
   const result = await pool
     .request()

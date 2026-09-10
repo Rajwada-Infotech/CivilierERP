@@ -7,10 +7,9 @@ import {
   Bank,
   Box,
   Cpu,
-  Notepad,
+  Grid1,
   Message2,
   ShoppingCart,
-  Building3,
   Chart21,
   Archive,
   VideoPlay,
@@ -18,6 +17,7 @@ import {
   MoneyRecive,
 } from "iconsax-react";
 import { HardHat, Wrench } from "lucide-react";
+import { TimelineIcon } from "@/components/icons/TimelineIcon";
 import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES, Module } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
@@ -90,7 +90,7 @@ const MODULES = [
   },
   {
     id: "civilworkdpr" as Module,
-    icon: Building3,
+    icon: TimelineIcon,
     label: "Civil Work DPR",
     desc: "Internal operations workspace",
     color: "#0891b2",
@@ -99,7 +99,7 @@ const MODULES = [
   },
   {
     id: "followup" as Module,
-    icon: Notepad,
+    icon: Grid1,
     label: "Follow-Up",
     desc: "Sales, agreements & CRM",
     color: "#0d9488",

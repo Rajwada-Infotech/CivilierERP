@@ -1,4 +1,5 @@
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import React, { useState, useCallback, useEffect, useMemo, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -16,6 +17,7 @@ import { WorkerAttendanceLogGroups } from "@/pages/civilworkdpr/WorkerAttendance
 import type { AttendanceReportRow } from "@/api/workerAttendanceApi";
 import { VendorLedgerReportBody } from "@/pages/finance/VendorLedgerReport";
 import { getProjects as fetchProjectOptions } from "@/api/grnApi";
+import { MultiSelectDropdown, type MultiSelectOption } from "@/components/ui/MultiSelectDropdown";
 import {
   Building2,
   Calendar,
@@ -132,6 +134,11 @@ interface ReportDef {
   columns: ExportColumn[];
   defaultParams?: Record<string, string>;
   filterConfig?: FilterConfig;
+  /** When set, the tile is a launcher: clicking it navigates to this route
+   *  (a report that lives as its own page, e.g. the Follow-Up performance
+   *  reports) instead of opening an inline table. `apiPath`/`columns` are
+   *  then unused — pass "" / []. */
+  route?: string;
 }
 
 interface ModuleSection {
@@ -339,7 +346,9 @@ const ALL_REPORTS: ReportDef[] = [
     apiPath: "/api/expense-booking",
     // expenseBooking.js's GET / accepts companyId/projectName(name match)/
     // from/to/finYear(label, not id — skipped here since this catalog's
-    // Financial Year filter sends the numeric FId).
+    // Financial Year filter sends the numeric FId)/expenseHeadId (matches
+    // either the multi-head ExpenseHeadAllocation table or the legacy
+    // single EGLAccountId column).
     filterConfig: {
       companyParam: "companyId",
       finYearParam: null,
@@ -349,27 +358,39 @@ const ALL_REPORTS: ReportDef[] = [
       projectParam: "projectName",
       projectValueType: "name",
     },
+    // Doc No + Paid To (the resolved supplier/contractor, same
+    // ESupplierName expenseBooking.js's GET / already resolves via
+    // expenseBookingSupplierSql — GRN/PO/WO_PO/WORK_DONE -> source doc's
+    // supplier, direct/manual bookings -> eb.LHeadId) + Amount posted to
+    // the Expense Head — an invoice always debits it (there's no
+    // credit-note flow through this table), so "Amount" here is that debit.
+    // Net Amt (eb.EAmount, the pre-GST taxable base) / Tax Amt (Total −
+    // Net) / Total Amount follow the same split MaterialExpenseBooking.tsx
+    // uses (Basic Amt + GST% -> Net Amt there — same numbers, this report
+    // just spells out the tax split instead of a %).
     columns: [
-      { header: "Date", accessor: (r) => (r.EDocDate ? String(r.EDocDate).slice(0, 10) : "—") },
       { header: "Doc No", accessor: (r) => (r.EDocNo ?? "—") as string },
-      { header: "Vendor", accessor: (r) => (r.ESupplierName ?? "—") as string },
-      { header: "Company", accessor: (r) => (r.ECompanyName ?? "—") as string },
-      { header: "Project", accessor: (r) => (r.EProjectDisplayName ?? "—") as string },
-      { header: "Expense Head", accessor: (r) => (r.EExpenseHeadNames ?? r.EGLAccountName ?? "—") as string },
-      { header: "Basic Amount", accessor: (r) => fmt(Number(r.EAmount) || 0) },
       {
-        header: "GST %",
+        header: "Doc Date",
+        accessor: (r) => (r.EDocDate ? String(r.EDocDate).slice(0, 10) : "—"),
+      },
+      { header: "Paid To", accessor: (r) => (r.ESupplierName ?? "—") as string },
+      {
+        header: "Net Amt",
+        accessor: (r) => fmt(Number(r.EAmount) || 0),
+      },
+      {
+        header: "Tax Amt",
         accessor: (r) => {
-          const igst = Number(r.EIgstRate) || 0;
-          if (igst > 0) return `${igst}%`;
-          return `${(Number(r.ECgstRate) || 0) + (Number(r.ESgstRate) || 0)}%`;
+          const total = Number(r.ENetAmount ?? r.EGrnTotalAmount ?? r.EAmount) || 0;
+          const net = Number(r.EAmount) || 0;
+          return fmt(Math.max(0, total - net));
         },
       },
       {
-        header: "Net Amount",
+        header: "Total Amount",
         accessor: (r) => fmt(Number(r.ENetAmount ?? r.EGrnTotalAmount ?? r.EAmount) || 0),
       },
-      { header: "Status", accessor: (r) => (r.EStatus ?? "—") as string },
     ],
   },
   {
@@ -437,28 +458,38 @@ const ALL_REPORTS: ReportDef[] = [
   {
     id: "ledger-report",
     label: "Ledger Report",
-    description: "General ledger entries by account head",
+    description: "Every debit/credit posting — invoices, payments, journal entries — across every GL head, with Direct/Indirect expense type",
     icon: BookOpen,
     color: "#64748b",
-    apiPath: "/api/general-ledger",
+    // GET /api/general-ledger/transactions — the actual GL transaction
+    // feed (unlike GET /api/general-ledger, which is just the account-head
+    // master list). Scoped to LHeadType='GL' so Supplier/Customer/Bank
+    // postings (Vendor Ledger Report's own territory) don't flood this one.
+    apiPath: "/api/general-ledger/transactions",
     filterConfig: {
       companyParam: null,
       finYearParam: null,
-      singleDateParam: null,
-      dateFromParam: null,
-      dateToParam: null,
+      singleDateParam: "from",
+      dateFromParam: "from",
+      dateToParam: "to",
     },
     columns: [
       {
-        header: "Account",
-        accessor: (r) => (r.LHeadName ?? r.label ?? "—") as string,
+        header: "Date",
+        accessor: (r) => (r.VoucherDate ? String(r.VoucherDate).slice(0, 10) : "—"),
       },
+      { header: "GL Name", accessor: (r) => (r.LHeadName ?? "—") as string },
+      { header: "Group", accessor: (r) => (r.GroupName ?? "—") as string },
       {
-        header: "Code",
-        accessor: (r) => (r.LHeadCode ?? r.code ?? "—") as string,
+        header: "Expense Type",
+        accessor: (r) => (r.ExpenseType ?? "—") as string,
       },
-      { header: "Type", accessor: "LHeadType" },
-      { header: "Group", accessor: "GroupName" },
+      { header: "Source", accessor: (r) => (r.SourceType ?? "—") as string },
+      { header: "Doc No", accessor: (r) => (r.DocNo ?? "—") as string },
+      { header: "Paid To", accessor: (r) => (r.PaidTo ?? "—") as string },
+      { header: "Debit", accessor: (r) => fmt(Number(r.DebitAmount) || 0) },
+      { header: "Credit", accessor: (r) => fmt(Number(r.CreditAmount) || 0) },
+      { header: "Narration", accessor: (r) => (r.Narration ?? "—") as string },
     ],
   },
   {
@@ -787,52 +818,106 @@ const ALL_REPORTS: ReportDef[] = [
   {
     id: "grn-register",
     label: "GRN Register",
-    description: "Goods received notes with item details",
+    description:
+      "Audit-ready register of every GRN — document, supplier, tax, amount & created-by details",
     icon: Package,
     color: "#10b981",
-    apiPath: "/api/grns",
-    // GRN accepts companyId ✓ but no date or finYear filters.
+    // Dedicated read-only reporting endpoint (backend/routes/grns.js → GET
+    // /register). One row per GRN header, tax split derived from the posted
+    // total, Created By resolved from the DocNumberSequence audit trail.
+    apiPath: "/api/grns/register",
+    // Company scopes via the linked PO's company (same as the GRN list).
+    // Date From / Date To filter on the GRN date. No financial-year param.
     filterConfig: {
+      companyParam: "companyId",
+      projectParam: "projectId",
       finYearParam: null,
-      singleDateParam: null,
-      dateFromParam: null,
-      dateToParam: null,
+      singleDateParam: "dateFrom",
+      dateFromParam: "dateFrom",
+      dateToParam: "dateTo",
     },
     columns: [
-      { header: "Company", accessor: "CompanyName" },
-      { header: "Project", accessor: "ProjectName" },
-      {
-        header: "Date of GRN",
-        accessor: (r) => (r.GRNDate ? String(r.GRNDate).slice(0, 10) : "—"),
-      },
+      // ── GRN / Document ──────────────────────────────────────────────────
+      { header: "GRN Number", accessor: (r) => (r.GRNNo ?? "—") as string },
       {
         header: "Document Number",
         accessor: (r) => (r.DocNo ?? r.GRNNo ?? "—") as string,
       },
-      { header: "Supplier", accessor: "SupplierName" },
       {
-        header: "Fin Year",
-        accessor: (r) => (r.FinYearName ?? r.FinYear ?? "—") as string,
+        header: "Document Date",
+        accessor: (r) => (r.DocDate ? String(r.DocDate).slice(0, 10) : "—"),
       },
       {
-        header: "Items in the GRN",
+        header: "GRN Date",
+        accessor: (r) => (r.GRNDate ? String(r.GRNDate).slice(0, 10) : "—"),
+      },
+      {
+        header: "Reference No",
+        accessor: (r) => (r.ReferenceNo ?? "—") as string,
+      },
+      { header: "GRN Status", accessor: (r) => (r.GRNStatus ?? "—") as string },
+      { header: "Remarks", accessor: (r) => (r.Remarks ?? "—") as string },
+      // ── Company ─────────────────────────────────────────────────────────
+      { header: "Company", accessor: (r) => (r.CompanyName ?? "—") as string },
+      {
+        header: "Company Code",
+        accessor: (r) => (r.CompanyCode ?? "—") as string,
+      },
+      {
+        header: "Branch/Location",
+        accessor: (r) => (r.BranchLocation ?? "—") as string,
+      },
+      { header: "Project", accessor: (r) => (r.ProjectName ?? "—") as string },
+      // ── Supplier / Vendor ───────────────────────────────────────────────
+      { header: "Supplier", accessor: (r) => (r.SupplierName ?? "—") as string },
+      {
+        header: "Supplier Code",
+        accessor: (r) => (r.SupplierCode ?? "—") as string,
+      },
+      {
+        header: "Supplier GSTIN",
+        accessor: (r) => (r.SupplierGSTIN ?? "—") as string,
+      },
+      {
+        header: "Supplier Address",
+        accessor: (r) => (r.SupplierAddress ?? "—") as string,
+      },
+      // ── Tax ─────────────────────────────────────────────────────────────
+      { header: "Taxable Amount", accessor: (r) => fmt(r.TaxableAmount as number) },
+      { header: "CGST", accessor: (r) => fmt(r.CGSTAmount as number) },
+      { header: "SGST", accessor: (r) => fmt(r.SGSTAmount as number) },
+      { header: "IGST", accessor: (r) => fmt(r.IGSTAmount as number) },
+      { header: "Cess", accessor: (r) => fmt(r.CessAmount as number) },
+      { header: "Other Tax", accessor: (r) => fmt(r.OtherTaxAmount as number) },
+      { header: "Total Tax", accessor: (r) => fmt(r.TotalTaxAmount as number) },
+      // ── Amount ──────────────────────────────────────────────────────────
+      { header: "Round Off", accessor: (r) => fmt(r.RoundOff as number) },
+      { header: "Grand Total", accessor: (r) => fmt(r.GrandTotal as number) },
+      { header: "Net Payable", accessor: (r) => fmt(r.NetPayable as number) },
+      // ── Audit / User ────────────────────────────────────────────────────
+      { header: "Created By", accessor: (r) => (r.CreatedBy ?? "—") as string },
+      {
+        header: "Created Date",
         accessor: (r) =>
-          Array.isArray(r.GRNItems)
-            ? r.GRNItems.map(
-                (it) =>
-                  (it as Record<string, unknown>)?.itemName ??
-                  (it as Record<string, unknown>)?.ItemName ??
-                  (it as Record<string, unknown>)?.name ??
-                  "",
-              )
-                .filter(Boolean)
-                .join(", ")
+          r.CreatedDate
+            ? String(r.CreatedDate).slice(0, 19).replace("T", " ")
             : "—",
       },
-      { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
+      { header: "Modified By", accessor: (r) => (r.ModifiedBy ?? "—") as string },
       {
-        header: "Ref Doc",
-        accessor: (r) => (r.PONumber ?? "—") as string,
+        header: "Modified Date",
+        accessor: (r) =>
+          r.ModifiedDate
+            ? String(r.ModifiedDate).slice(0, 19).replace("T", " ")
+            : "—",
+      },
+      { header: "Posted By", accessor: (r) => (r.PostedBy ?? "—") as string },
+      {
+        header: "Posted Date",
+        accessor: (r) =>
+          r.PostedDate
+            ? String(r.PostedDate).slice(0, 19).replace("T", " ")
+            : "—",
       },
     ],
   },
@@ -1849,6 +1934,42 @@ const ALL_REPORTS: ReportDef[] = [
       { header: "Summary", accessor: (r) => (r.Summary ?? "—") as string },
     ],
   },
+
+  // ── Follow-Up performance reports ─────────────────────────────────────────
+  // These live as their own pages (FollowupShell-wrapped charts/tables), so
+  // the catalog tile is a launcher — clicking it navigates to the route
+  // rather than rendering an inline table. Moved here out of the Follow-Up
+  // module sidebar.
+  {
+    id: "task-performance-report",
+    label: "Task Performance Report",
+    description: "Completion rates, delays & performance by assignee / department",
+    icon: BarChart3,
+    color: "#0d9488",
+    route: "/followup/task-performance-report",
+    apiPath: "",
+    columns: [],
+  },
+  {
+    id: "tag-performance-report",
+    label: "Tag Performance Report",
+    description: "Task volume, turnaround & ageing sliced by tag",
+    icon: Percent,
+    color: "#0d9488",
+    route: "/followup/tag-performance-report",
+    apiPath: "",
+    columns: [],
+  },
+  {
+    id: "entry-type-doc-followup-report",
+    label: "Entry Type & Document Report",
+    description: "Follow-up activity by entry type and linked document",
+    icon: FileText,
+    color: "#0d9488",
+    route: "/followup/entry-type-doc-followup-report",
+    apiPath: "",
+    columns: [],
+  },
 ];
 
 const REPORT_MAP = new Map(ALL_REPORTS.map((r) => [r.id, r]));
@@ -1939,6 +2060,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
     icon: ListChecks,
     reportIds: [
       "task-performance-report",
+      "tag-performance-report",
       "entry-type-doc-followup-report",
     ],
   },
@@ -2193,6 +2315,129 @@ const SectionFilters: React.FC<{
   </div>
 );
 
+// ── Ledger Report: one row per GL head, expand to see its own postings ─────
+// Same "singular head, click to see the postings" shape the user asked for
+// here — modeled on WorkerAttendanceLogGroups' collapsed-group pattern
+// above, just grouped by GL head (LHeadName) instead of by date/activity.
+const LedgerReportGroups: React.FC<{
+  rows: Record<string, unknown>[];
+  onRowClick: (row: Record<string, unknown>) => void;
+}> = ({ rows, onRowClick }) => {
+  const [collapsedHeads, setCollapsedHeads] = useState<Record<string, boolean>>({});
+
+  const groups = useMemo(() => {
+    const byHead = new Map<
+      string,
+      { name: string; groupName: string; expenseType: string; debit: number; credit: number; rows: Record<string, unknown>[] }
+    >();
+    for (const row of rows) {
+      const name = (row.LHeadName as string) || "—";
+      const existing = byHead.get(name);
+      const debit = Number(row.DebitAmount) || 0;
+      const credit = Number(row.CreditAmount) || 0;
+      if (existing) {
+        existing.debit += debit;
+        existing.credit += credit;
+        existing.rows.push(row);
+      } else {
+        byHead.set(name, {
+          name,
+          groupName: (row.GroupName as string) || "—",
+          expenseType: (row.ExpenseType as string) || "—",
+          debit,
+          credit,
+          rows: [row],
+        });
+      }
+    }
+    return Array.from(byHead.values()).sort((a, b) => b.rows.length - a.rows.length);
+  }, [rows]);
+
+  const toggleHead = (name: string) =>
+    setCollapsedHeads((prev) => ({ ...prev, [name]: !prev[name] }));
+
+  return (
+    <div>
+      {groups.map((group) => {
+        const collapsed = collapsedHeads[group.name] !== false; // default collapsed
+        return (
+          <div key={group.name} className="border-b border-border/60 last:border-0">
+            <button
+              type="button"
+              onClick={() => toggleHead(group.name)}
+              className="w-full flex items-center gap-2.5 px-4 sm:px-5 py-3 hover:bg-muted/20 transition-colors text-left"
+            >
+              <span className="text-xs font-medium text-foreground truncate">{group.name}</span>
+              <span className="text-[11px] text-muted-foreground truncate hidden sm:inline">
+                · {group.groupName}
+                {group.expenseType !== "—" && ` · ${group.expenseType}`}
+              </span>
+              <span className="ml-auto flex items-center gap-3 shrink-0">
+                <span className="text-[10px] tabular-nums text-emerald-600 dark:text-emerald-400">
+                  Dr {fmt(group.debit)}
+                </span>
+                <span className="text-[10px] tabular-nums text-rose-600 dark:text-rose-400">
+                  Cr {fmt(group.credit)}
+                </span>
+                <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                  {group.rows.length} txn{group.rows.length === 1 ? "" : "s"}
+                </span>
+              </span>
+            </button>
+
+            {!collapsed && (
+              <div className="overflow-x-auto bg-muted/5">
+                <table className="w-full text-xs min-w-[860px]">
+                  <thead>
+                    <tr className="text-muted-foreground uppercase tracking-wide text-[10px] font-heading">
+                      <th className="text-left pl-11 pr-3 py-2">Date</th>
+                      <th className="text-left px-3 py-2">Source</th>
+                      <th className="text-left px-3 py-2">Doc No</th>
+                      <th className="text-left px-3 py-2">Paid To</th>
+                      <th className="text-left px-3 py-2">Narration</th>
+                      <th className="text-right px-3 py-2">Debit</th>
+                      <th className="text-right px-4 sm:px-5 py-2">Credit</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/40">
+                    {group.rows.map((r, i) => (
+                      <tr
+                        key={i}
+                        onClick={() => onRowClick(r)}
+                        className="hover:bg-muted/20 transition-colors cursor-pointer"
+                      >
+                        <td className="pl-11 pr-3 py-2 whitespace-nowrap text-muted-foreground">
+                          {r.VoucherDate ? String(r.VoucherDate).slice(0, 10) : "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">{(r.SourceType as string) ?? "—"}</td>
+                        <td className="px-3 py-2 whitespace-nowrap font-mono text-muted-foreground">
+                          {(r.DocNo as string) ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-foreground max-w-[180px] truncate" title={(r.PaidTo as string) ?? ""}>
+                          {(r.PaidTo as string) || "—"}
+                        </td>
+                        <td className="px-3 py-2 text-foreground max-w-[280px] truncate" title={(r.Narration as string) ?? ""}>
+                          {(r.Narration as string) ?? "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400">
+                          {Number(r.DebitAmount) > 0 ? fmt(Number(r.DebitAmount)) : "—"}
+                        </td>
+                        <td className="px-4 sm:px-5 py-2 text-right tabular-nums text-rose-600 dark:text-rose-400">
+                          {Number(r.CreditAmount) > 0 ? fmt(Number(r.CreditAmount)) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
 // ── Report data table ─────────────────────────────────────────────────────────
 
 const ReportTable: React.FC<{
@@ -2232,6 +2477,10 @@ const ReportTable: React.FC<{
   //     Worker Attendance page itself uses, instead of a flat table. ─────────
   const isWorkerAttendance = report.id === "worker-attendance";
 
+  // ── Ledger Report renders one row per GL head (click to expand its own
+  //     postings) instead of a flat, repeated-head-per-row table. ───────────
+  const isLedgerReport = report.id === "ledger-report";
+
   // ── Vendor Ledger Report is search-driven (any party/GL head) with its
   //     own internal fetching (search, per-party passbook, all-transactions
   //     default view) — it doesn't fit the generic apiPath+filters+flat-rows
@@ -2250,6 +2499,56 @@ const ReportTable: React.FC<{
       .then((list) => setReasonOptions(Array.isArray(list) ? list : []))
       .catch(() => {});
   }, [isPaymentReasonReport]);
+
+  // ── Expense Head switcher (expense-register only) — nested (grouped by
+  //     parent Account Group) multi-select, so more than one head can be
+  //     picked at once instead of one at a time. ───────────────────────────
+  const isExpenseRegister = report.id === "expense-register";
+  const isGrnRegister = report.id === "grn-register";
+  const [expenseHeadIds, setExpenseHeadIds] = useState<string[]>([]);
+  const [expenseHeadOptions, setExpenseHeadOptions] = useState<MultiSelectOption[]>([]);
+  useEffect(() => {
+    if (!isExpenseRegister) return;
+    fetchWithAuth("/api/general-ledger/options")
+      .then((r) => r.json().catch(() => []))
+      .then((list: { id: number; label: string; code: string | null; groupName: string | null }[]) =>
+        setExpenseHeadOptions(
+          (Array.isArray(list) ? list : []).map((l) => ({
+            id: l.id,
+            label: l.label,
+            hint: l.code || undefined,
+            group: l.groupName || null,
+          })),
+        ),
+      )
+      .catch(() => {});
+  }, [isExpenseRegister]);
+
+  // Always show the richer column set for the Expense Register — every row
+  // carries its own GL Name + Direct/Indirect Expense Type now (resolved
+  // per row server-side, see expenseBooking.js's ERowGLName/
+  // ERowExpenseType), not just a single filtered head's, so this no longer
+  // needs to gate on whether a head is picked.
+  const effectiveColumns = useMemo<ExportColumn[]>(() => {
+    if (!isExpenseRegister) return report.columns;
+    return [
+      ...report.columns,
+      { header: "GL Name", accessor: (r) => (r.ERowGLName ?? "—") as string },
+      { header: "Expense Type", accessor: (r) => (r.ERowExpenseType ?? "—") as string },
+      { header: "Vendor Name", accessor: (r) => (r.ESupplierName ?? "—") as string },
+      {
+        header: "Invoice Amt",
+        accessor: (r) => fmt(Number(r.ENetAmount ?? r.EGrnTotalAmount ?? r.EAmount) || 0),
+      },
+      {
+        header: "Invoice Date",
+        accessor: (r) => {
+          const d = r.EVendorInvoiceDate ?? r.EDocDate;
+          return d ? String(d).slice(0, 10) : "—";
+        },
+      },
+    ];
+  }, [isExpenseRegister, report.columns]);
 
   const buildParams = (): Record<string, string> => {
     const fc = report.filterConfig ?? {};
@@ -2299,6 +2598,10 @@ const ReportTable: React.FC<{
     // Stock summary: pass selected godownId to inventory-master
     if (isStockSummary && godownId) f["godownId"] = godownId;
 
+    // Expense Register: pass every selected Expense Head, comma-separated —
+    // the backend's expenseHeadId param accepts either one id or a list.
+    if (isExpenseRegister && expenseHeadIds.length) f["expenseHeadId"] = expenseHeadIds.join(",");
+
     // Payment Reason Report: scope to a single reason when selected
     if (isPaymentReasonReport && reasonFilter) f["reason"] = reasonFilter;
 
@@ -2346,6 +2649,7 @@ const ReportTable: React.FC<{
     filters.rangeTo,
     godownId,
     reasonFilter,
+    expenseHeadIds,
     projects,
   ]);
 
@@ -2399,7 +2703,7 @@ const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, rows, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, rows, projects]);
 
   const totalPages = Math.ceil(rows.length / PAGE_SIZE);
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -2504,11 +2808,28 @@ const ReportTable: React.FC<{
             </div>
           )}
 
+          {/* Expense Head switcher — expense-register only. Nested (grouped
+              by parent Account Group) multi-select — pick any number of
+              heads at once instead of one at a time. */}
+          {isExpenseRegister && expenseHeadOptions.length > 0 && (
+            <div className="w-56">
+              <MultiSelectDropdown
+                options={expenseHeadOptions}
+                value={expenseHeadIds}
+                onChange={setExpenseHeadIds}
+                placeholder="All Expense Heads"
+                searchPlaceholder="Search expense heads…"
+                itemNoun="expense head"
+                className="h-[30px] py-1"
+              />
+            </div>
+          )}
+
           {!isVendorLedger && (
           <ExportMenu
             data={rows as unknown as Record<string, unknown>[]}
             fetchData={fetchAllForExport}
-            columns={report.columns}
+            columns={effectiveColumns}
             title={report.label}
             filename={report.id}
             disabled={loading || rows.length === 0}
@@ -2549,11 +2870,51 @@ const ReportTable: React.FC<{
         </div>
       )}
 
+      {/* GRN Register summary — recomputed from the currently-filtered rows */}
+      {isGrnRegister && !loading && !error && rows.length > 0 && (
+        (() => {
+          const sum = (k: string) =>
+            rows.reduce((a, r) => a + (Number(r[k]) || 0), 0);
+          const cards: [string, string][] = [
+            ["Total GRNs", String(rows.length)],
+            ["Taxable Amount", fmt(sum("TaxableAmount"))],
+            ["CGST", fmt(sum("CGSTAmount"))],
+            ["SGST", fmt(sum("SGSTAmount"))],
+            ["IGST", fmt(sum("IGSTAmount"))],
+            ["Cess", fmt(sum("CessAmount"))],
+            ["Total Tax", fmt(sum("TotalTaxAmount"))],
+            ["Grand Total", fmt(sum("GrandTotal"))],
+          ];
+          return (
+            <div className="flex flex-wrap gap-2 px-4 py-3 border-b border-border bg-muted/10">
+              {cards.map(([label, value]) => (
+                <div
+                  key={label}
+                  className="flex-1 min-w-[120px] rounded-lg border border-border bg-card px-3 py-2"
+                >
+                  <p className="text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider">
+                    {label}
+                  </p>
+                  <p className="text-sm font-semibold text-foreground tabular-nums mt-0.5">
+                    {value}
+                  </p>
+                </div>
+              ))}
+            </div>
+          );
+        })()
+      )}
+
       {/* Table (or, for Worker Attendance, the same grouped/collapsible log
           the Worker Attendance page itself uses) */}
       {!loading && !error && rows.length > 0 && (
         isWorkerAttendance ? (
           <WorkerAttendanceLogGroups rows={rows as unknown as AttendanceReportRow[]} />
+        ) : isLedgerReport ? (
+          <LedgerReportGroups
+            rows={rows as unknown as Record<string, unknown>[]}
+            onRowClick={setSelectedRow}
+          />
         ) : (
         <>
           <div className="overflow-x-auto">
@@ -2563,7 +2924,7 @@ const ReportTable: React.FC<{
                   <th className="px-4 py-2.5 text-left text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider w-8">
                     #
                   </th>
-                  {report.columns.map((col) => (
+                  {effectiveColumns.map((col) => (
                     <th
                       key={col.header}
                       className="px-4 py-2.5 text-left text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"
@@ -2583,7 +2944,7 @@ const ReportTable: React.FC<{
                     <td className="px-4 py-2.5 text-xs text-muted-foreground">
                       {(page - 1) * PAGE_SIZE + i + 1}
                     </td>
-                    {report.columns.map((col) => (
+                    {effectiveColumns.map((col) => (
                       <td
                         key={col.header}
                         className="px-4 py-2.5 text-xs text-foreground whitespace-nowrap max-w-[200px] truncate"
@@ -2643,7 +3004,7 @@ const ReportTable: React.FC<{
         </DialogHeader>
         {selectedRow && (
           <div className="divide-y divide-border">
-            {report.columns.map((col) => {
+            {effectiveColumns.map((col) => {
               const val = cell(selectedRow, col);
               if (!val || val === "—") return null;
               return (
@@ -2721,6 +3082,7 @@ const MARKETING_HEAD_SECTION_IDS = new Set(["sales-automation", "crm"]);
 
 const Reports: React.FC = () => {
   usePageRights("reports");
+  const navigate = useNavigate();
   const { currentUser } = useAuth();
   const visibleSections =
     currentUser?.role === "marketing_head"
@@ -2841,6 +3203,12 @@ const Reports: React.FC = () => {
   };
 
   const handleTileClick = (reportId: string) => {
+    // Launcher tiles (Follow-Up performance reports) open their own page.
+    const routeTo = REPORT_MAP.get(reportId)?.route;
+    if (routeTo) {
+      navigate(routeTo);
+      return;
+    }
     setActiveReport((prev) => (prev === reportId ? null : reportId));
     setTimeout(
       () =>

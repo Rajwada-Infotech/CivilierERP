@@ -661,6 +661,239 @@ router.get("/by-po/:poId", async (req, res) => {
   }
 });
 
+// ── GET /register ─────────────────────────────────────────────────────────────
+// Audit-ready GRN Register report. One row per GRN header (never per line item —
+// line-level amounts are aggregated in-query so joins to supplier/company/user/
+// audit tables can't fan a GRN out into duplicate register rows).
+//
+// This is a READ-ONLY reporting endpoint. It does NOT touch GRN creation,
+// posting, accounting, inventory, tax or stock logic, introduces no new
+// columns, and never recomputes a posted GRN's stored total:
+//   • Grand Total      = GoodsReceiptNotes.TotalAmount  (the posted value)
+//   • Taxable Amount   = Σ line base, using the SAME keys/formula computeGRNTotal
+//                        used when that stored total was written (totalAmount>0
+//                        ? totalAmount : rate*quantity)
+//   • Total Tax        = Grand Total − Taxable Amount   (so the identity
+//                        GrandTotal = Taxable + Tax ± RoundOff always holds)
+//   • CGST/SGST vs IGST split follows the same intra-/inter-state rule as
+//     /grn-gst-data (supplier LGSTState vs company enterprise.state). Cess /
+//     Other Tax / Round Off have no stored component in this ERP → returned 0.
+//
+// "Created By" comes from dbo.DocNumberSequence.IssuedBy — the email captured
+// when the GRN's DocNo was locked at creation time (utils/docNumberLock.js) —
+// resolved to a display name via dbo.Users. It is NEVER the report-running user.
+// "Posted By" comes from the ActionStatus='Approved' row of dbo.ApprovalAuditLog
+// (TableName 'GRN'); "Modified By" from the latest dbo.Amendments row for the GRN.
+//
+// Filters (all optional, all applied server-side): companyId, projectId,
+// supplierId, status, grnNo, docNo, createdBy (email/name substring),
+// dateFrom / dateTo (against GRN date). Company scoping mirrors the existing
+// GET / list: a chosen company matches via the linked PO's CompanyId.
+// Must be declared before /:id so the literal path wins over the param route.
+router.get("/register", cache("grns", 300), async (req, res) => {
+  try {
+    const pool = getPool();
+
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 500, 1), 1000);
+    const offset = (page - 1) * limit;
+
+    const companyId = parseInt(req.query.companyId, 10) || null;
+    const projectId = parseInt(req.query.projectId, 10) || null;
+    const supplierId = parseInt(req.query.supplierId, 10) || null;
+    const status = (req.query.status || "").trim() || null;
+    const grnNo = (req.query.grnNo || "").trim() || null;
+    const docNo = (req.query.docNo || "").trim() || null;
+    const createdBy = (req.query.createdBy || "").trim() || null;
+    const dateFrom = (req.query.dateFrom || "").trim() || null;
+    const dateTo = (req.query.dateTo || "").trim() || null;
+
+    const result = await pool
+      .request()
+      .input("offset", sql.Int, offset)
+      .input("limit", sql.Int, limit)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .input("supplierId", sql.Int, supplierId)
+      .input("status", sql.NVarChar(50), status)
+      .input("grnNo", sql.NVarChar(100), grnNo)
+      .input("docNo", sql.NVarChar(100), docNo)
+      .input("createdBy", sql.NVarChar(200), createdBy)
+      .input("dateFrom", sql.Date, dateFrom)
+      .input("dateTo", sql.Date, dateTo).query(`
+      WITH grn_base AS (
+        SELECT
+          grn.GRNID,
+          grn.GRNNo,
+          grn.DocNo,
+          grn.GRNDate,
+          grn.DocDate,
+          grn.Status,
+          grn.Remarks,
+          grn.ParentDocNo,
+          grn.CreatedDate,
+          grn.TotalAmount        AS GrandTotalStored,
+          grn.SupplierID,
+          grn.POID,
+          grn.GodownID,
+          p.PurchaseOrderNo      AS PONumber,
+          p.CompanyId,
+          p.ProjectId,
+          co.name                AS CompanyName,
+          co.short_name          AS CompanyCode,
+          co.state               AS CompanyState,
+          pr.name                AS ProjectName,
+          g.GodownName           AS BranchLocation,
+          s.LHeadName            AS SupplierName,
+          s.LHeadCode            AS SupplierCode,
+          s.LGST                 AS SupplierGSTIN,
+          s.LGSTState            AS SupplierState,
+          s.LHeadAddress         AS SupplierAddress,
+          tax.TaxableAmount,
+          tax.GstFromLines,
+          ds.IssuedBy            AS CreatedByEmail,
+          ds.IssuedAt            AS DocIssuedAt,
+          cu.name                AS CreatedByName,
+          amd.CreatedBy          AS ModifiedByEmail,
+          amd.CreatedAt          AS ModifiedAt,
+          mu.name                AS ModifiedByName,
+          appr.ApproverEmail     AS PostedByEmail,
+          appr.ActionAt          AS PostedAt,
+          pu.name                AS PostedByName
+        FROM dbo.GoodsReceiptNotes grn
+        LEFT JOIN dbo.PurchaseOrders     p  ON p.PurchaseOrderID = grn.POID
+        LEFT JOIN dbo.enterprise         co ON co.id = p.CompanyId
+        LEFT JOIN dbo.enterprise         pr ON pr.id = p.ProjectId
+        LEFT JOIN dbo.Godowns            g  ON g.GodownID = grn.GodownID
+        LEFT JOIN dbo.AccountHeadMaster  s  ON s.LHeadId = grn.SupplierID
+        LEFT JOIN dbo.DocNumberSequence  ds ON ds.TableName = 'GoodsReceiptNotes'
+                                            AND ds.DocNo = COALESCE(grn.DocNo, grn.GRNNo)
+        LEFT JOIN dbo.Users cu ON LOWER(cu.email) = LOWER(ds.IssuedBy)
+        OUTER APPLY (
+          SELECT
+            SUM(base) AS TaxableAmount,
+            SUM(base * gstPct / 100.0) AS GstFromLines
+          FROM (
+            SELECT
+              CASE
+                WHEN TRY_CONVERT(DECIMAL(18,4), JSON_VALUE(j.value, '$.totalAmount')) > 0
+                  THEN TRY_CONVERT(DECIMAL(18,4), JSON_VALUE(j.value, '$.totalAmount'))
+                ELSE COALESCE(TRY_CONVERT(DECIMAL(18,4), JSON_VALUE(j.value, '$.rate')), 0)
+                   * COALESCE(TRY_CONVERT(DECIMAL(18,4), JSON_VALUE(j.value, '$.quantity')), 0)
+              END AS base,
+              COALESCE(TRY_CONVERT(DECIMAL(9,4), JSON_VALUE(j.value, '$.gstPct')), 0) AS gstPct
+            FROM OPENJSON(CASE WHEN ISJSON(grn.GRNItems) = 1 THEN grn.GRNItems ELSE '[]' END) j
+          ) lines
+        ) tax
+        OUTER APPLY (
+          SELECT TOP 1 a.CreatedBy, a.CreatedAt
+          FROM dbo.Amendments a
+          WHERE a.RefDocType = 'grn' AND a.RefDocId = grn.GRNID
+            AND ISNULL(a.IsDeleted, 0) = 0
+          ORDER BY a.CreatedAt DESC
+        ) amd
+        LEFT JOIN dbo.Users mu ON LOWER(mu.email) = LOWER(amd.CreatedBy)
+        OUTER APPLY (
+          SELECT TOP 1 aal.ApproverEmail, aal.ActionAt
+          FROM dbo.ApprovalAuditLog aal
+          WHERE aal.TableName = 'GRN' AND aal.RecordId = grn.GRNID
+            AND aal.ActionStatus = 'Approved'
+          ORDER BY aal.ActionAt DESC
+        ) appr
+        LEFT JOIN dbo.Users pu ON LOWER(pu.email) = LOWER(appr.ApproverEmail)
+        WHERE (@companyId  IS NULL OR p.CompanyId = @companyId)
+          AND (@projectId  IS NULL OR p.ProjectId = @projectId)
+          AND (@supplierId IS NULL OR grn.SupplierID = @supplierId)
+          AND (@status     IS NULL OR grn.Status = @status)
+          AND (@grnNo      IS NULL OR grn.GRNNo LIKE '%' + @grnNo + '%')
+          AND (@docNo      IS NULL OR grn.DocNo LIKE '%' + @docNo + '%')
+          AND (@dateFrom   IS NULL OR grn.GRNDate >= @dateFrom)
+          AND (@dateTo     IS NULL OR grn.GRNDate <= @dateTo)
+          AND (
+            @createdBy IS NULL
+            OR ds.IssuedBy LIKE '%' + @createdBy + '%'
+            OR cu.name     LIKE '%' + @createdBy + '%'
+          )
+      ),
+      grn_calc AS (
+        SELECT *,
+          ROUND(COALESCE(TaxableAmount, 0), 2) AS TaxableAmt,
+          ROUND(
+            COALESCE(GrandTotalStored, COALESCE(TaxableAmount, 0) + COALESCE(GstFromLines, 0)),
+          2) AS GrandTotalAmt
+        FROM grn_base
+      ),
+      grn_final AS (
+        SELECT *,
+          CASE WHEN GrandTotalAmt - TaxableAmt > 0
+               THEN ROUND(GrandTotalAmt - TaxableAmt, 2) ELSE 0 END AS TotalTaxAmt,
+          CASE
+            WHEN LTRIM(RTRIM(LOWER(COALESCE(SupplierState, '')))) <> ''
+             AND LTRIM(RTRIM(LOWER(COALESCE(SupplierState, '')))) =
+                 LTRIM(RTRIM(LOWER(COALESCE(CompanyState, ''))))
+            THEN 1 ELSE 0
+          END AS IsIntraState
+        FROM grn_calc
+      )
+      SELECT
+        GRNID,
+        GRNNo,
+        DocNo,
+        DocDate,
+        GRNDate,
+        COALESCE(PONumber, ParentDocNo)          AS ReferenceNo,
+        Status                                   AS GRNStatus,
+        Remarks,
+        CompanyName,
+        CompanyCode,
+        ProjectName,
+        BranchLocation,
+        SupplierName,
+        SupplierCode,
+        SupplierGSTIN,
+        SupplierAddress,
+        TaxableAmt                               AS TaxableAmount,
+        CASE WHEN IsIntraState = 1 THEN ROUND(TotalTaxAmt / 2, 2) ELSE 0 END AS CGSTAmount,
+        CASE WHEN IsIntraState = 1 THEN ROUND(TotalTaxAmt - ROUND(TotalTaxAmt / 2, 2), 2) ELSE 0 END AS SGSTAmount,
+        CASE WHEN IsIntraState = 1 THEN 0 ELSE TotalTaxAmt END AS IGSTAmount,
+        0                                        AS CessAmount,
+        0                                        AS OtherTaxAmount,
+        TotalTaxAmt                              AS TotalTaxAmount,
+        GrandTotalAmt                            AS GrandTotal,
+        0                                        AS RoundOff,
+        GrandTotalAmt                            AS NetPayable,
+        COALESCE(CreatedByName, CreatedByEmail)  AS CreatedBy,
+        COALESCE(CreatedDate, DocIssuedAt)       AS CreatedDate,
+        COALESCE(ModifiedByName, ModifiedByEmail) AS ModifiedBy,
+        ModifiedAt                               AS ModifiedDate,
+        COALESCE(PostedByName, PostedByEmail)    AS PostedBy,
+        PostedAt                                 AS PostedDate,
+        COUNT(*) OVER() AS _total
+      FROM grn_final
+      ORDER BY GRNID DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
+
+    const total = result.recordset[0]?._total ?? 0;
+    res.json({
+      data: result.recordset.map((r) => {
+        const { _total, ...rest } = r;
+        return rest;
+      }),
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (err) {
+    console.error("GET /grns/register ERROR:", err);
+    res.status(500).json({
+      error: "Failed to fetch GRN Register",
+      message: err.message,
+    });
+  }
+});
+
 // GET single GRN by ID
 // This is the authoritative endpoint used by the expense booking form to load
 // GRN items. GRNItems is normalised to a parsed array before returning so the
@@ -1809,8 +2042,30 @@ router.get("/:id/posting", async (req, res) => {
       if (itemIds.length > 0) {
         const mReq = pool.request();
         const ph = itemIds.map((id, i) => { mReq.input(`iid${i}`, sql.NVarChar(100), id); return `@iid${i}`; }).join(",");
-        const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100), M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100), M_Id) IN (${ph})`);
-        for (const row of mRes.recordset) masterMap[row.M_Id] = { cgstRate: parseFloat(row.M_CGST) || 0, sgstRate: parseFloat(row.M_SGST) || 0 };
+        const mRes = await mReq.query(`
+          SELECT CONVERT(NVARCHAR(100), m.M_Id) AS M_Id, ISNULL(m.M_CGST,0) AS M_CGST, ISNULL(m.M_SGST,0) AS M_SGST,
+                 m.M_Type, m.M_GLHeadId, gl.LHeadName AS GLHeadName, gl.LHeadCode AS GLHeadCode
+          FROM dbo.Item_Master_Group m
+          LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = m.M_GLHeadId
+          WHERE CONVERT(NVARCHAR(100), m.M_Id) IN (${ph})
+        `);
+        for (const row of mRes.recordset) masterMap[row.M_Id] = {
+          cgstRate: parseFloat(row.M_CGST) || 0, sgstRate: parseFloat(row.M_SGST) || 0,
+          isFixedAsset: row.M_Type === "Fixed Asset",
+          glHeadId: row.M_GLHeadId ?? null, glHeadName: row.GLHeadName ?? null, glHeadCode: row.GLHeadCode ?? null,
+        };
+      }
+      // Untagged Fixed Asset items fall back to the "Fixed Assets A/c"
+      // capitalization ledger, not the generic "Purchase A/c" — otherwise a
+      // fixed-asset purchase silently posts as an ordinary expense instead
+      // of showing up under FIXED ASSETS in Trial Balance/Balance Sheet.
+      // Mirrors postGRNApproval's (services/generalLedger.js) existing
+      // fixed-asset handling, which the manual "Post to GL" route never had.
+      const needsFixedAssetHead = Object.values(masterMap).some((m) => m.isFixedAsset && !m.glHeadId);
+      let fixedAssetLed = null;
+      if (needsFixedAssetHead) {
+        const faRes = await pool.request().query(`SELECT TOP 1 LHeadId, LHeadName, LHeadCode FROM dbo.AccountHeadMaster WHERE LHeadType='GL' AND IsSystemGenerated=1 AND LHeadStatus=1 AND LHeadName = 'Fixed Assets A/c'`);
+        fixedAssetLed = faRes.recordset[0] ?? null;
       }
       // Per-item Cost Centre — Cost Centre now lives on the PO's own line
       // item (migration 365), not the PO header, since one PO/GRN can mix
@@ -1839,12 +2094,19 @@ router.get("/:id/posting", async (req, res) => {
         const qty = Number(it.quantity || it.Quantity || receivedQty || 0);
         const rate = Number(it.rate || it.Rate || 0);
         const baseAmount = Number(it.totalAmount) > 0 ? Number(it.totalAmount) : rate * qty;
-        const master = masterMap[itemId] || { cgstRate: 0, sgstRate: 0 };
+        const master = masterMap[itemId] || { cgstRate: 0, sgstRate: 0, isFixedAsset: false, glHeadId: null, glHeadName: null, glHeadCode: null };
         const lineGstPct = Number(it.gstPct ?? it.GstPct ?? NaN);
         const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate + master.sgstRate);
         const gstAmount = Math.round(baseAmount * (totalGSTRate / 100) * 100) / 100;
         totalBase += baseAmount;
         totalGST += gstAmount;
+        // Effective posting account: the item's own tagged GL Account
+        // (Item_Master_Group.M_GLHeadId) if set; otherwise "Fixed Assets
+        // A/c" for untagged Fixed Asset items (capitalized, not expensed);
+        // otherwise null, which falls back to the shared "Purchase A/c".
+        const effGlHeadId = master.glHeadId ?? (master.isFixedAsset ? fixedAssetLed?.LHeadId ?? null : null);
+        const effGlHeadName = master.glHeadName ?? (master.isFixedAsset ? fixedAssetLed?.LHeadName ?? null : null);
+        const effGlHeadCode = master.glHeadCode ?? (master.isFixedAsset ? fixedAssetLed?.LHeadCode ?? null : null);
         itemBreakdown.push({
           itemId,
           itemName: it.itemName || it.ItemName || it.description || it.Description || "Item",
@@ -1854,6 +2116,15 @@ router.get("/:id/posting", async (req, res) => {
           baseAmount: Math.round(baseAmount * 100) / 100,
           gstAmount,
           costCentre: itemCostCentreMap[itemId] ?? null,
+          glHeadId: effGlHeadId,
+          glHeadName: effGlHeadName,
+          glHeadCode: effGlHeadCode,
+          // True only when the item itself was explicitly tagged with a GL
+          // Account — false for the Fixed Assets A/c type-based fallback,
+          // which replaces Purchase A/c outright rather than standing
+          // alongside it (a fixed-asset purchase was never a Purchase A/c
+          // candidate to begin with).
+          glHeadIsExplicitTag: !!master.glHeadId,
         });
       }
     }
@@ -1953,58 +2224,28 @@ router.post("/:id/post-to-gl", async (req, res) => {
     `);
     if (alreadyPosted.recordset.length) return res.status(409).json({ error: "This GRN has already been posted to GL." });
 
+    // This route (SourceType='GRNPosting') is the authoritative posting
+    // path for a GRN — postGRNApproval (SourceType='GRN', fires
+    // automatically on approval) independently guards against re-entry the
+    // same way, but neither ever checked for the OTHER's posting, so a GRN
+    // that auto-posted on approval and was later run through this manual
+    // "Post to GL" action got double-posted under two different accounting
+    // treatments (see migration 410's cleanup of the historical cases).
+    // Reverse any stale GRN posting for this GRN before superseding it
+    // here, so GRNPosting always wins going forward.
+    const { reversePostingBySource } = require("../services/generalLedger");
+    await reversePostingBySource(pool, "GRN", grnId);
+
     // Recompute totals — and each item's own Cost Centre (migration 365:
     // Cost Centre lives on the PO's line item now, not the PO header, since
     // one PO/GRN can mix e.g. a fixed-asset item with a consumption item).
-    // Grouping the JV legs by cost centre (instead of one flat Purchase/
-    // PGRN pair for the whole GRN) is what makes the Posting tab's
-    // cost-centre-wise breakdown actually true to what's posted in GL.
-    const rawItems = parseGRNItems(grn.GRNItems);
-    const receivedItems = rawItems.filter((it) => Number(it.receivedQty||it.ReceivedQty||0)>0||Number(it.quantity||it.Quantity||0)>0||Number(it.totalAmount||0)>0);
-    let totalBase = 0, totalGST = 0;
-    const costCentreBuckets = new Map(); // key: CostCenterId ?? "unassigned" -> { costCenterId, base, gst }
-    if (receivedItems.length > 0) {
-      const itemIds = receivedItems.map((it)=>String(it.itemId||it.ItemId||"").trim()).filter(Boolean);
-      let masterMap = {};
-      if (itemIds.length > 0) {
-        const mReq = pool.request();
-        const ph = itemIds.map((id,i)=>{ mReq.input(`iid${i}`,sql.NVarChar(100),id); return `@iid${i}`; }).join(",");
-        const mRes = await mReq.query(`SELECT CONVERT(NVARCHAR(100),M_Id) AS M_Id, ISNULL(M_CGST,0) AS M_CGST, ISNULL(M_SGST,0) AS M_SGST FROM dbo.Item_Master_Group WHERE CONVERT(NVARCHAR(100),M_Id) IN (${ph})`);
-        for (const row of mRes.recordset) masterMap[row.M_Id]={ cgstRate:parseFloat(row.M_CGST)||0, sgstRate:parseFloat(row.M_SGST)||0 };
-      }
-      let itemCostCentreMap = {};
-      if (grn.POID && itemIds.length > 0) {
-        const ccReq = pool.request().input("POID", sql.Int, grn.POID);
-        const ph2 = itemIds.map((id,i)=>{ ccReq.input(`ccid${i}`,sql.NVarChar(100),id); return `@ccid${i}`; }).join(",");
-        const ccRes = await ccReq.query(`
-          SELECT CONVERT(NVARCHAR(100), ItemId) AS ItemId, CostCenterId
-          FROM dbo.PurchaseOrderItems
-          WHERE PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), ItemId) IN (${ph2})
-        `);
-        for (const row of ccRes.recordset) itemCostCentreMap[row.ItemId] = row.CostCenterId ?? null;
-      }
-      for (const it of receivedItems) {
-        const itemId = String(it.itemId||it.ItemId||"");
-        const receivedQty = Number(it.receivedQty||it.ReceivedQty||0);
-        const rate = Number(it.rate||it.Rate||0);
-        const baseAmount = Number(it.totalAmount)>0 ? Number(it.totalAmount) : rate*Number(it.quantity||it.Quantity||receivedQty||0);
-        const master = masterMap[itemId]||{cgstRate:0,sgstRate:0};
-        const lineGstPct = Number(it.gstPct??it.GstPct??NaN);
-        const totalGSTRate = Number.isFinite(lineGstPct) ? lineGstPct : (master.cgstRate+master.sgstRate);
-        const gstAmount = baseAmount*(totalGSTRate/100);
-        totalBase += baseAmount;
-        totalGST += gstAmount;
-
-        const costCenterId = itemCostCentreMap[itemId] ?? null;
-        const bucketKey = costCenterId ?? "unassigned";
-        const bucket = costCentreBuckets.get(bucketKey) ?? { costCenterId, base: 0, gst: 0 };
-        bucket.base += baseAmount;
-        bucket.gst += gstAmount;
-        costCentreBuckets.set(bucketKey, bucket);
-      }
-    }
-    totalBase = Math.round(totalBase*100)/100;
-    totalGST = Math.round(totalGST*100)/100;
+    // Grouping the JV legs by cost centre AND by each item's own GL Account
+    // (instead of one flat Purchase/PGRN pair for the whole GRN) is what
+    // makes the Posting tab's breakdown actually true to what's posted in
+    // GL. Shared with scripts/backfillGrnItemGlHeads.js so a retroactive
+    // backfill can never drift from what a live posting produces.
+    const { computeGrnPostingBuckets, buildGrnPostingLines } = require("../services/grnPosting");
+    const { buckets: costCentreBuckets, totalBase, totalGST } = await computeGrnPostingBuckets(pool, sql, grn);
 
     if (totalBase <= 0) return res.status(400).json({ error: "GRN has no receivable amount to post." });
 
@@ -2017,36 +2258,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const provisionalId = findId((l)=>l.LHeadName.toLowerCase().includes("provisional")&&l.LHeadName.toLowerCase().includes("credit"));
     if (!purchaseId || !pgrnId || !provisionalId) return res.status(422).json({ error: "One or more required system ledgers (Purchase, PGRN, Provisional Credit) are not configured." });
 
-    // JV lines: base amount and tax are posted as two separate self-balancing
-    // pairs rather than one lump PGRN credit —
-    //   1. Purchase A/c Dr (base)         = Provision for Pending GRN A/c Cr (base)
-    //   2. Provisional Credit Available Dr (tax) = Purchase A/c Cr (tax)
-    // The second pair is a same-account repetition of the Purchase ledger
-    // (once as the base-amount debit, once as the tax-amount credit) rather
-    // than crediting PGRN with the GST-inclusive total, so PGRN only ever
-    // reflects the base receivable and the ITC leg nets against Purchase.
-    //
-    // Repeated once per Cost Centre bucket (instead of once for the whole
-    // GRN) so each leg is tagged with the cost centre that actually earned
-    // it — a GRN mixing a fixed-asset item and a consumption item posts two
-    // separate Purchase/PGRN pairs, not one pair with an arbitrary single
-    // cost centre stamped on the whole thing.
-    const lines = [];
-    for (const { costCenterId, base, gst } of costCentreBuckets.values()) {
-      const roundedBase = Math.round(base * 100) / 100;
-      const roundedGst = Math.round(gst * 100) / 100;
-      if (roundedBase <= 0) continue;
-      lines.push(
-        { LHeadId: purchaseId, DebitAmount: roundedBase, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (base)`, CostCenterId: costCenterId },
-        { LHeadId: pgrnId,     DebitAmount: 0, CreditAmount: roundedBase, Narration: `GRN Posting: ${grn.GRNNo} — Provision for Pending GRN`, CostCenterId: costCenterId },
-      );
-      if (roundedGst > 0) {
-        lines.push(
-          { LHeadId: provisionalId, DebitAmount: roundedGst, CreditAmount: 0, Narration: `GRN Posting: ${grn.GRNNo} — Provisional ITC`, CostCenterId: costCenterId },
-          { LHeadId: purchaseId,    DebitAmount: 0, CreditAmount: roundedGst, Narration: `GRN Posting: ${grn.GRNNo} — Purchase (tax offset)`, CostCenterId: costCenterId },
-        );
-      }
-    }
+    const lines = buildGrnPostingLines({ buckets: costCentreBuckets, grnNo: grn.GRNNo, purchaseId, pgrnId, provisionalId });
 
     // Voucher number only — GL posting is independent of the Journal
     // Voucher module. This used to ALSO insert a dbo.JournalVoucher header +

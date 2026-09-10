@@ -32,7 +32,7 @@ import {
   Pickaxe,
   Receipt,
   HeartHandshake,
-  CalendarClock,
+  Table,
   Activity,
   Bell,
   Cpu,
@@ -81,7 +81,7 @@ const MODULE_META: Record<string, { label: string; color: string; icon: React.El
   sales:       { label: "Sales",       color: "#7c3aed", icon: ShoppingCart },
   crm:         { label: "CRM",         color: "#e11d48", icon: HeartHandshake },
   ticket:      { label: "Tickets",     color: "#ef4444", icon: Ticket },
-  followup:    { label: "Follow-Up",   color: "#0d9488", icon: CalendarClock },
+  followup:    { label: "Follow-Up",   color: "#0d9488", icon: Table },
   fixedasset:  { label: "Fixed Asset", color: "#eab308", icon: Cpu },
   admin:       { label: "Admin",       color: "#a855f7", icon: ShieldCheck },
 };
@@ -708,13 +708,13 @@ export default function HomePage() {
   type Sev = "high" | "med" | "low";
   const rawAttn: Array<Attention | false> = [
     access.approvals && { severity: "high" as Sev, label: "Approvals awaiting you", count: pendingApprovals.length, hint: `${new Set(pendingApprovals.map((a: ApprovalInboxItem) => a.Module)).size} module(s) affected`, href: "/admin/approval/inbox", icon: FileCheck },
-    access.followup && { severity: "high" as Sev, label: "Follow-ups overdue", count: fol?.overdue ?? 0, hint: "Past their due date", href: "/followup", icon: CalendarClock },
+    access.followup && { severity: "high" as Sev, label: "Follow-ups overdue", count: fol?.overdue ?? 0, hint: "Past their due date", href: "/followup", icon: Table },
     access.ticket && { severity: "high" as Sev, label: "Urgent tickets open", count: tick?.urgent ?? 0, hint: "High-priority, unresolved", href: "/ticket", icon: TriangleAlert },
     access.crm && { severity: "high" as Sev, label: "CRM payments overdue", count: crmOverdue, hint: "Milestones past due", href: "/crm/dashboard", icon: IndianRupee },
     access.sales && { severity: "med" as Sev, label: "Sale orders pending approval", count: sal?.pendingApproval ?? 0, hint: "Waiting in the approval queue", href: "/sales/sale-order", icon: ShoppingCart },
     access.engineering && { severity: "med" as Sev, label: "Work done pending certification", count: eng?.workDone?.pending ?? 0, hint: "Awaiting engineer sign-off", href: "/engineering", icon: Hammer },
     access.civilworkdpr && { severity: "med" as Sev, label: "DPR entries pending review", count: civilDpr?.progress?.pendingReviewCount ?? 0, hint: "Daily progress awaiting review", href: "/civilworkdpr", icon: Pickaxe },
-    access.followup && { severity: "med" as Sev, label: "Follow-ups due today", count: fol?.dueToday ?? 0, hint: "Scheduled for today", href: "/followup", icon: CalendarClock },
+    access.followup && { severity: "med" as Sev, label: "Follow-ups due today", count: fol?.dueToday ?? 0, hint: "Scheduled for today", href: "/followup", icon: Table },
     access.crm && { severity: "med" as Sev, label: "CRM applications pending", count: crmPendingApps, hint: "Not yet processed", href: "/crm/dashboard", icon: HeartHandshake },
     access.ticket && { severity: "low" as Sev, label: "Tickets open", count: (tick?.pending ?? 0) + (tick?.inProgress ?? 0), hint: "Pending + in progress", href: "/ticket", icon: Ticket },
     access.material && { severity: "low" as Sev, label: "Purchase orders open", count: mat?.purchaseOrders?.open ?? 0, hint: "Not yet closed / cancelled", href: "/material/purchase-order", icon: Package },

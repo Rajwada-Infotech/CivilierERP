@@ -42,6 +42,8 @@ import {
   Car,
   PlusCircle,
   Wallet,
+  Gauge,
+  Zap,
   CalendarClock,
   Wand2,
   Percent,
@@ -275,6 +277,27 @@ const maintenanceSetupItems = [
     color: "text-slate-500",
     pageKey: "charge-head-master",
   },
+  {
+    icon: Gauge,
+    label: "Meter Reading Master",
+    path: "/masters/meter-reading",
+    color: "text-lime-600",
+    pageKey: "meter-reading-master",
+  },
+  {
+    icon: Zap,
+    label: "Electricity Provider Master",
+    path: "/masters/electricity-provider",
+    color: "text-amber-500",
+    pageKey: "electricity-provider-master",
+  },
+  {
+    icon: ReceiptIndianRupee,
+    label: "Electricity Tariff Master",
+    path: "/masters/electricity-tariff",
+    color: "text-emerald-500",
+    pageKey: "electricity-tariff-master",
+  },
 ];
 
 const materialSetupItems = [
@@ -354,13 +377,9 @@ const fixedAssetSetupItems = [
 ];
 
 const followupSetupItems = [
-  {
-    icon: ClipboardList,
-    label: "Task Master",
-    path: "/followup/setup/task-master",
-    color: "text-teal-500",
-    pageKey: "task-master",
-  },
+  // "Task Master" was moved from here into the Follow-Up module sidebar
+  // (see sidebars/FollowupSidebar.ts) — it's the module's core master list,
+  // not a set-and-forget configuration. Route/pageKey unchanged.
   {
     icon: Users,
     label: "Department Master",

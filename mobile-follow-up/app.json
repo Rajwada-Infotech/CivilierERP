@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "Civilier Follow-Up",
+    "slug": "mobile-follow-up",
+    "scheme": "civiliererpfollowup",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rajwadainfotech.civilierfollowup",
+      "infoPlist": {
+        "NSCameraUsageDescription": "CivilierERP Follow-Up uses the camera to attach photos to task follow-up notes.",
+        "NSPhotoLibraryUsageDescription": "CivilierERP Follow-Up needs access to your photo library to attach existing photos to task follow-up notes."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E0F2F1",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.rajwadainfotech.civilierfollowup"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "715b77a7-9a17-4d9d-aafc-c4ac21956d6f"
+      }
+    },
+    "owner": "bonnysaha1988"
+  }
+}
