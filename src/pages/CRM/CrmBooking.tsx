@@ -695,9 +695,6 @@ const CrmBooking: React.FC = () => {
                     <IndianRupee size={14} className="text-amber-600" /> Payments
                   </DropdownMenuItem>
                 )}
-                <DropdownMenuItem onClick={() => navigate(`/crm/communication?bookingId=${b.Id}`)} className="gap-2">
-                  <MessageSquare size={14} className="text-amber-700 dark:text-amber-400" /> Communication
-                </DropdownMenuItem>
                 {b.Status !== CrmStatus.CANCELLED && b.DeedStatus !== "Registered" && (canRequestCancellation || canEdit) && (
                   <>
                     <DropdownMenuSeparator />

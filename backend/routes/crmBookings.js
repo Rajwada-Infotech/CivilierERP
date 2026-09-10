@@ -151,8 +151,6 @@ const BOOKING_SELECT = `
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.AccountNo, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.IfscCode, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.AccountHolderName, ''))), '') IS NOT NULL
-        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.NomineeName, ''))), '') IS NOT NULL
-        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.NomineeRelation, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.PanNo, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.AadhaarNo, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.Occupation, ''))), '') IS NOT NULL
@@ -1539,8 +1537,18 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    const allowedManualTypes = new Set(["Booking", "Milestone", "Maintenance", "Other", "OnAccount"]);
+    const allowedManualTypes = new Set(["Maintenance", "Other", "OnAccount"]);
     if (!allowedManualTypes.has(type)) {
+      // Milestone / Booking-amount invoices are generated exclusively from the
+      // CRM Invoices page (via POST /bookings/invoices/bulk-generate →
+      // generateMilestoneInvoiceForBooking), once the milestone's Demand has
+      // been raised. The Booking page no longer generates invoices at all —
+      // it only raises Demands. This closes the old bypass path where the
+      // Booking-detail page POSTed InvoiceType:"Milestone" here directly and
+      // the two pages disagreed about who owned the Booking-amount invoice.
+      if (type === "Milestone" || type === "Booking") {
+        return res.status(409).json({ error: "Milestone invoices are generated from the CRM Invoices page after the demand is raised." });
+      }
       return res.status(400).json({ error: "Invoice type is not supported for manual generation" });
     }
 

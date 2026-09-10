@@ -150,8 +150,6 @@ router.get("/:bookingId/checklist", requirePageRight("crm-welcome-calls", "view"
           NULLIF(LTRIM(RTRIM(ISNULL(AccountNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(IfscCode, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(AccountHolderName, ''))), '') IS NOT NULL AND
-          NULLIF(LTRIM(RTRIM(ISNULL(NomineeName, ''))), '') IS NOT NULL AND
-          NULLIF(LTRIM(RTRIM(ISNULL(NomineeRelation, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(PanNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(AadhaarNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(Occupation, ''))), '') IS NOT NULL
@@ -481,14 +479,14 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
     }
 
     // Auto-flow: a completed welcome call is one of two prerequisites for
-    // agreement prep — fire the auto-create check (no-op if bank/nominee
+    // agreement prep — fire the auto-create check (no-op if bank/PAN/Aadhaar
     // details aren't in yet) rather than waiting on staff to notice.
     if (b.Outcome === "Welcomed") {
       const created = await maybeAutoCreateAgreement(pool, bookingId, actorId(req));
       if (!created && booking?.AssignedTo) {
         await emitNotification(pool, booking.AssignedTo, "crm_bank_details_due",
           "Customer Details Needed",
-          `Welcome call done for booking ${booking.BookingNo} — collect bank, nominee, PAN, and Aadhaar details to proceed to agreement.`,
+          `Welcome call done for booking ${booking.BookingNo} — collect bank, PAN, and Aadhaar details to proceed to agreement.`,
           bookingId, "crm_booking");
       }
     }

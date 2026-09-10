@@ -19,6 +19,9 @@ const { getGLHeadId, postVoucher, hasPosting } = require("./generalLedger");
 const CRM_COLLECTIONS_ACCOUNT = "CRM Collections A/c";
 const CRM_STAMP_DUTY_ACCOUNT = "Stamp Duty & Registration Expense";
 const CRM_GST_OUTPUT_ACCOUNT = "GST Output Liability - CRM Sales";
+// Income head the company keeps when a cancelled booking is refunded (not
+// re-booked). Seeded by migration 416.
+const CRM_FORFEITURE_ACCOUNT = "Booking Cancellation Forfeiture";
 
 /**
  * Live GST rate for a booking, resolved from its HsnCode against dbo.HSN —
@@ -415,6 +418,152 @@ async function postCrmCancellationRefundToGL(pool, cancellationId, userEmail) {
 }
 
 /**
+ * The FORFEITURE leg of a refund payout (dbo.CrmRefund). The spawned Finance
+ * NewPayment voucher already posts  Dr Customer / Cr <real bank>  for the NET
+ * amount when Finance approves it. This poster adds only the deduction the
+ * company keeps:
+ *   Dr Customer .......................... extinguishes the rest of their credit
+ *   Cr Booking Cancellation Forfeiture ... recognised as other income
+ * No-op when DeductionAmount = 0 (overpayment / manual refunds).
+ */
+async function postCrmRefundPaid(pool, refundId, userEmail) {
+  if (await hasPosting(pool, "CrmRefund", refundId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const r = await pool.request().input("id", sql.Int, refundId).query(`
+    SELECT Id, RefundNo, DeductionAmount, CompanyId, ProjectId, CustomerId, PaidAt
+    FROM dbo.CrmRefund WHERE Id = @id
+  `);
+  const row = r.recordset[0];
+  if (!row) return { posted: false, reason: `CrmRefund ${refundId} not found` };
+  if (!row.CustomerId) return { posted: false, reason: `Refund ${refundId}: no linked CrmCustomer` };
+
+  const deduction = Number(row.DeductionAmount) || 0;
+  if (deduction <= 0) return { none: true, reason: `Refund ${refundId} has no forfeiture — bank leg posted by the NewPayment voucher` };
+
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
+  const forfeitureHeadId = await getGLHeadId(pool, CRM_FORFEITURE_ACCOUNT);
+  const docNo = row.RefundNo || `CRFD-${refundId}`;
+
+  await postVoucher(pool, {
+    voucherNo: `${docNo}-FORF`,
+    voucherDate: row.PaidAt || new Date(),
+    sourceType: "CrmRefund",
+    sourceId: refundId,
+    companyId: row.CompanyId ?? null,
+    projectId: row.ProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: customerHeadId, debit: deduction, narration: `${docNo} — cancellation forfeiture retained` },
+      { lHeadId: forfeitureHeadId, credit: deduction, narration: `${docNo} — booking cancellation forfeiture income` },
+    ],
+  });
+  return { posted: true };
+}
+
+/**
+ * Ledger-only reallocation when held credit is applied to a NEW booking's
+ * fresh on-account row (same company). NO GL voucher — the customer head
+ * already carries this liability from the cancelled booking's original
+ * receipts; this just makes the money show as an available advance on the new
+ * booking via OnAccountLedger + AccountHeadMaster.OnAccountBalance, exactly
+ * like a normal on-account deposit's ledger side. The existing
+ * applyOnAccountToMilestone sweep then DEBITs it back down onto milestones.
+ */
+async function postCrmHeldCreditReallocateLedgerOnly(pool, { customerId, newOnAccountId, amount, companyId, projectId, receiptNo, userEmail, executor }) {
+  const exec = executor || pool;
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, customerId, userEmail);
+  await exec.request()
+    .input("PartyId", sql.Int, customerHeadId)
+    .input("PartyType", sql.NVarChar(20), "A")
+    .input("TxnDate", sql.Date, new Date())
+    .input("TxnType", sql.NVarChar(10), "CREDIT")
+    .input("Amount", sql.Decimal(18, 2), amount)
+    .input("RefType", sql.NVarChar(30), "CrmOnAccountPayment")
+    .input("RefDocNo", sql.NVarChar(100), receiptNo || null)
+    .input("RefId", sql.Int, newOnAccountId)
+    .input("CompanyId", sql.Int, companyId ?? null)
+    .input("ProjectId", sql.Int, projectId ?? null)
+    .input("Notes", sql.NVarChar(500), `Re-booking credit from cancelled booking (${receiptNo || "held"})`)
+    .input("CreatedBy", sql.NVarChar(150), userEmail)
+    .query(`
+      INSERT INTO dbo.OnAccountLedger
+        (PartyId,PartyType,TxnDate,TxnType,Amount,RefType,RefDocNo,RefId,CompanyId,ProjectId,Notes,CreatedBy)
+      VALUES
+        (@PartyId,@PartyType,@TxnDate,@TxnType,@Amount,@RefType,@RefDocNo,@RefId,@CompanyId,@ProjectId,@Notes,@CreatedBy);
+      UPDATE dbo.AccountHeadMaster SET OnAccountBalance = OnAccountBalance + @Amount WHERE LHeadId = @PartyId;
+    `);
+  return { posted: true };
+}
+
+/**
+ * CRM mirror for a CROSS-company re-booking transfer (dbo.CrmRebookingTransfer).
+ * Reclassifies the customer's advance liability from the source company's CRM
+ * books to the target company's, through the CRM Collections proxy:
+ *   Company A voucher:  Dr Customer / Cr "CRM Collections A/c"   (companyId = A)
+ *   Company B voucher:  Dr "CRM Collections A/c" / Cr Customer   (companyId = B)
+ * Net movement on the (single) customer head is zero. The real bank + LOAN-C
+ * bridge is squared separately by the linked Finance Inter-Company FundTransfer.
+ * Same-company transfers do NOT call this (no cross-company reclass needed).
+ */
+async function postCrmHeldCreditCrossCompanyMirror(pool, rebookingTransferId, userEmail) {
+  if (await hasPosting(pool, "CrmRebookingTransfer", rebookingTransferId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const r = await pool.request().input("id", sql.Int, rebookingTransferId).query(`
+    SELECT rt.Id, rt.Amount, rt.FromCompanyId, rt.ToCompanyId, rt.ToBookingId,
+           fb.ProjectId AS FromProjectId, tb.ProjectId AS ToProjectId,
+           ta.CustomerId
+    FROM dbo.CrmRebookingTransfer rt
+    JOIN dbo.CrmOnAccountPayment hc ON hc.Id = rt.HeldOnAccountId
+    JOIN dbo.CrmBooking fb ON fb.Id = hc.BookingId
+    JOIN dbo.CrmBooking tb ON tb.Id = rt.ToBookingId
+    JOIN dbo.CrmApplication ta ON ta.Id = tb.ApplicationId
+    WHERE rt.Id = @id
+  `);
+  const row = r.recordset[0];
+  if (!row) return { posted: false, reason: `CrmRebookingTransfer ${rebookingTransferId} not found` };
+  if (!row.CustomerId) return { posted: false, reason: `Rebooking transfer ${rebookingTransferId}: no linked CrmCustomer` };
+
+  const amount = Number(row.Amount) || 0;
+  if (amount <= 0) return { none: true, reason: `Rebooking transfer ${rebookingTransferId} amount is ${amount}` };
+
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
+  const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  const docNo = `REBK-${rebookingTransferId}`;
+
+  // Company A — liability leaves A's CRM books
+  await postVoucher(pool, {
+    voucherNo: `${docNo}-A`,
+    voucherDate: new Date(),
+    sourceType: "CrmRebookingTransfer",
+    sourceId: rebookingTransferId,
+    companyId: row.FromCompanyId ?? null,
+    projectId: row.FromProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: customerHeadId, debit: amount, narration: `${docNo} — held credit transferred out for re-booking` },
+      { lHeadId: collectionsHeadId, credit: amount, narration: `${docNo} — held credit transferred out` },
+    ],
+  });
+  // Company B — liability arrives in B's CRM books
+  await postVoucher(pool, {
+    voucherNo: `${docNo}-B`,
+    voucherDate: new Date(),
+    sourceType: "CrmRebookingTransfer",
+    sourceId: rebookingTransferId,
+    companyId: row.ToCompanyId ?? null,
+    projectId: row.ToProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: collectionsHeadId, debit: amount, narration: `${docNo} — held credit received for re-booking` },
+      { lHeadId: customerHeadId, credit: amount, narration: `${docNo} — held credit received` },
+    ],
+  });
+  return { posted: true };
+}
+
+/**
  * Stamp duty + registration fee actually paid to the Sub-Registrar Office on
  * deed registration — real statutory cash outlay by the company, previously
  * just plain numbers on CrmSalesDeed with zero financial trail.
@@ -521,6 +670,9 @@ module.exports = {
   postCrmOnAccountApplied,
   postCrmBrokerPaymentToGL,
   postCrmCancellationRefundToGL,
+  postCrmRefundPaid,
+  postCrmHeldCreditReallocateLedgerOnly,
+  postCrmHeldCreditCrossCompanyMirror,
   postCrmSalesDeedStatutoryToGL,
   postCrmParkingPaymentToGL,
 };

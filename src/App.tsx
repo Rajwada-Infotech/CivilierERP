@@ -422,6 +422,7 @@ const CrmInvoices          = lazy(() => import("./pages/CRM/CrmInvoices"));
 const CrmHandover          = lazy(() => import("./pages/CRM/CrmHandover"));
 const CrmServiceTickets    = lazy(() => import("./pages/CRM/CrmServiceTickets"));
 const CrmCancellations     = lazy(() => import("./pages/CRM/CrmCancellations"));
+const CrmRefunds           = lazy(() => import("./pages/CRM/CrmRefunds"));
 const CrmCustomer360       = lazy(() => import("./pages/CRM/CrmCustomer360"));
 const CrmLoanTracking      = lazy(() => import("./pages/CRM/CrmLoanTracking"));
 const CrmLegalMilestones   = lazy(() => import("./pages/CRM/CrmLegalMilestones"));
@@ -435,7 +436,6 @@ const CrmRegistry          = lazy(() => import("./pages/CRM/CrmRegistry"));
 const CrmPrePossession     = lazy(() => import("./pages/CRM/CrmPrePossession"));
 const CrmPossessionNotice  = lazy(() => import("./pages/CRM/CrmPossessionNotice"));
 const CrmConstructionUpdates = lazy(() => import("./pages/CRM/CrmConstructionUpdates"));
-const CrmCommunication     = lazy(() => import("./pages/CRM/CrmCommunication"));
 const CrmDashboard         = lazy(() => import("./pages/CRM/CrmDashboard"));
 const CrmCustomerBankDetails = lazy(() => import("./pages/CRM/CrmCustomerBankDetails"));
 const CrmBookingAmendments = lazy(() => import("./pages/CRM/CrmBookingAmendments"));
@@ -2286,6 +2286,7 @@ function AppRoutes() {
       <Route path="/crm/handover"         element={<ProtectedRoute pageKey="crm-handover"><CrmHandover /></ProtectedRoute>} />
       <Route path="/crm/service-tickets"  element={<ProtectedRoute pageKey="crm-service-tickets"><CrmServiceTickets /></ProtectedRoute>} />
       <Route path="/crm/cancellations"    element={<ProtectedRoute pageKey="crm-cancellations"><CrmCancellations /></ProtectedRoute>} />
+      <Route path="/crm/refunds"          element={<ProtectedRoute pageKey="crm-refunds"><CrmRefunds /></ProtectedRoute>} />
       <Route path="/crm/customer-360"     element={<ProtectedRoute pageKey="crm-customer-360"><CrmCustomer360 /></ProtectedRoute>} />
       <Route path="/crm/loan-details"     element={<ProtectedRoute pageKey="crm-loan-details"><CrmLoanTracking /></ProtectedRoute>} />
       <Route path="/crm/dashboard"             element={<ProtectedRoute pageKey="crm-dashboard"><CrmDashboard /></ProtectedRoute>} />
@@ -2303,7 +2304,8 @@ function AppRoutes() {
       <Route path="/crm/pre-possession"        element={<ProtectedRoute pageKey="crm-pre-possession"><CrmPrePossession /></ProtectedRoute>} />
       <Route path="/crm/possession-notice"     element={<ProtectedRoute pageKey="crm-possession-notice"><CrmPossessionNotice /></ProtectedRoute>} />
       <Route path="/crm/construction-updates"  element={<ProtectedRoute pageKey="crm-construction-updates"><CrmConstructionUpdates /></ProtectedRoute>} />
-      <Route path="/crm/communication"         element={<ProtectedRoute pageKey="crm-communication"><CrmCommunication /></ProtectedRoute>} />
+      {/* Communication Log page removed — stale links land on Bookings */}
+      <Route path="/crm/communication"         element={<Navigate to="/crm/bookings" replace />} />
       <Route path="/crm/customer-bank-details" element={<ProtectedRoute pageKey="crm-customer-bank-details"><CrmCustomerBankDetails /></ProtectedRoute>} />
       <Route path="/crm/unit-matrix"    element={<ProtectedRoute pageKey="crm-unit-matrix"><UnitMatrixPage /></ProtectedRoute>} />
       <Route path="/crm/parking-matrix" element={<ProtectedRoute pageKey="crm-parking-matrix"><ParkingMatrixPage /></ProtectedRoute>} />

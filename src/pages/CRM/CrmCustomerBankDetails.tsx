@@ -8,7 +8,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import {
-  Save, CheckCircle2, Circle, AlertTriangle, ChevronRight, Landmark, Users,
+  Save, CheckCircle2, Circle, AlertTriangle, ChevronRight, Landmark,
   IdCard, Briefcase, Phone, Building2, Search, Lock, Pencil, CreditCard,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -30,7 +30,6 @@ const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
 const EMPTY_FORM = {
   BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
-  NomineeName: "", NomineeRelation: "", NomineeDob: "", NomineeContact: "", NomineeAddress: "",
   PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "", Notes: "",
   FinancingType: "",
 };
@@ -41,21 +40,19 @@ const EMPTY_FORM = {
 // before the record is even saved.
 const REQUIRED_KEYS: (keyof typeof EMPTY_FORM)[] = [
   "BankName", "AccountNo", "IfscCode", "AccountHolderName",
-  "NomineeName", "NomineeRelation", "PanNo", "AadhaarNo", "Occupation",
+  "PanNo", "AadhaarNo", "Occupation",
   "FinancingType",
 ];
 
 const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 const PAN_RE = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
 const AADHAAR_RE = /^\d{12}$/;
-const MOBILE_RE = /^\d{10}$/;
 
 function validate(form: typeof EMPTY_FORM) {
   const errors: Partial<Record<keyof typeof EMPTY_FORM, string>> = {};
   if (form.IfscCode && !IFSC_RE.test(form.IfscCode.toUpperCase())) errors.IfscCode = "Invalid IFSC format (e.g. HDFC0001234)";
   if (form.PanNo && !PAN_RE.test(form.PanNo.toUpperCase())) errors.PanNo = "Invalid PAN format (e.g. ABCDE1234F)";
   if (form.AadhaarNo && !AADHAAR_RE.test(form.AadhaarNo)) errors.AadhaarNo = "Aadhaar must be exactly 12 digits";
-  if (form.NomineeContact && !MOBILE_RE.test(form.NomineeContact)) errors.NomineeContact = "Must be a 10-digit mobile number";
   if (form.AccountNo && !/^\d{6,20}$/.test(form.AccountNo)) errors.AccountNo = "Account number should be 6-20 digits";
   return errors;
 }
@@ -143,9 +140,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
       setForm(d ? {
         BankName: d.BankName || "", BranchName: d.BranchName || "", AccountNo: d.AccountNo || "",
         IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
-        NomineeName: d.NomineeName || "", NomineeRelation: d.NomineeRelation || "",
-        NomineeDob: d.NomineeDob ? String(d.NomineeDob).slice(0,10) : "", NomineeContact: d.NomineeContact || "",
-        NomineeAddress: d.NomineeAddress || "", PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
+        PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
         Occupation: d.Occupation || "", AnnualIncome: d.AnnualIncome != null ? String(d.AnnualIncome) : "",
         Notes: d.Notes || "", FinancingType: d.FinancingType || "",
       } : { ...EMPTY_FORM });
@@ -187,7 +182,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success(isComplete
         ? (checklist?.welcomeCall?.done ? "KYC complete — agreement prep will proceed automatically" : "KYC complete — waiting on the welcome call to proceed")
-        : "Bank & nominee details saved");
+        : "Bank details saved");
       setUiLocked(true);
       qc.invalidateQueries({ queryKey: ["crm-bank-detail", row.BookingId] });
       qc.invalidateQueries({ queryKey: ["crm-welcome-checklist", row.BookingId] });
@@ -222,7 +217,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
-              <Landmark size={16} className="text-primary" /> Bank & Nominee Details
+              <Landmark size={16} className="text-primary" /> Bank Details
             </span>
             {canEdit && uiLocked && bookingAmountPaid && (
               <button onClick={() => setUiLocked(false)}
@@ -250,7 +245,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
             return (
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2">
                 <div className="flex items-center gap-2 text-xs font-medium text-amber-800">
-                  <Lock size={13} /> Bank & Nominee / Financing details unlock once Booking Amount is fully settled
+                  <Lock size={13} /> Bank &amp; Financing details unlock once Booking Amount is fully settled
                 </div>
                 <div className="space-y-1 pl-1">
                   {steps.map((s) => (
@@ -341,21 +336,6 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
             {field("AccountNo", "Account Number", "text", true)}
             {field("IfscCode", "IFSC Code", "text", true)}
             <div className="col-span-2">{field("AccountHolderName", "Account Holder Name", "text", true)}</div>
-          </div>
-        </SectionCard>
-
-        <SectionCard icon={Users} iconClass="bg-violet-500/10 text-violet-600" title="Nominee Details">
-          <div className="grid grid-cols-2 gap-3">
-            {field("NomineeName", "Nominee Name", "text", true)}
-            {field("NomineeRelation", "Relation", "text", true)}
-            {field("NomineeDob", "Date of Birth", "date")}
-            {field("NomineeContact", "Contact Number")}
-          </div>
-          <div>
-            <label className="text-xs text-muted-foreground block mb-1">Nominee Address</label>
-            <textarea value={form.NomineeAddress} readOnly={locked}
-              onChange={(e) => !locked && setForm((f) => ({ ...f, NomineeAddress: e.target.value }))}
-              rows={2} className={`w-full text-sm border border-border rounded-lg px-2.5 py-2 resize-none ${locked ? "bg-muted/30 text-muted-foreground cursor-not-allowed" : "bg-background"}`} />
           </div>
         </SectionCard>
 
@@ -467,7 +447,7 @@ const CrmCustomerBankDetails: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Bank Details"]} />
-      <CrmShell title="CRM — Customer Bank & Nominee Details" subtitle="KYC captured before agreement preparation">
+      <CrmShell title="CRM — Customer Bank Details" subtitle="KYC captured before agreement preparation">
       <div className="space-y-4">
         <div className="flex gap-3 items-center flex-wrap">
           <div className="relative flex-1 min-w-48">

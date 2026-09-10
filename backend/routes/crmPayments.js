@@ -1474,7 +1474,10 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
       .input("offset",   sql.Int, offset);
 
     let where = "WHERE o.BookingId IS NOT NULL";
+    // 'Held' rows are frozen cancellation credit managed from the Refunds page —
+    // keep them out of the normal On Account list unless explicitly asked for.
     if (status)    { where += " AND o.Status = @status";     req_.input("status",    sql.NVarChar(30), status); }
+    else           { where += " AND ISNULL(o.Status,'') <> 'Held'"; }
     if (projectId) { where += " AND b.ProjectId = @pid";     req_.input("pid",       sql.Int, parseInt(projectId)); }
     if (companyId) { where += " AND b.CompanyId = @cid";     req_.input("cid",       sql.Int, parseInt(companyId)); }
     if (blockId)   { where += " AND um.BlockId = @bid2";     req_.input("bid2",      sql.Int, parseInt(blockId)); }
@@ -1511,6 +1514,7 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
     const countReq = pool.request();
     let countWhere = "WHERE o.BookingId IS NOT NULL";
     if (status)    { countWhere += " AND o.Status = @status";     countReq.input("status",    sql.NVarChar(30), status); }
+    else           { countWhere += " AND ISNULL(o.Status,'') <> 'Held'"; }
     if (projectId) { countWhere += " AND b.ProjectId = @pid";     countReq.input("pid",       sql.Int, parseInt(projectId)); }
     if (companyId) { countWhere += " AND b.CompanyId = @cid";     countReq.input("cid",       sql.Int, parseInt(companyId)); }
     if (blockId)   { countWhere += " AND um.BlockId = @bid2";     countReq.input("bid2",      sql.Int, parseInt(blockId)); }

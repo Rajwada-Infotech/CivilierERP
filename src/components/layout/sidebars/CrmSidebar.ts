@@ -32,8 +32,7 @@ export const crmNavItems: NavItem[] = [
       { label: "Applications & Bookings", path: "/crm/bookings",              pageKey: "crm-bookings"            },
       { label: "Welcome Calls",           path: "/crm/welcome-calls",         pageKey: "crm-welcome-calls"       },
       { label: "Booking Amendments",       path: "/crm/booking-amendments",    pageKey: "crm-bookings"            },
-      { label: "Communication Log",       path: "/crm/communication",         pageKey: "crm-communication"       },
-      { label: "Customer Bank & Nominee", path: "/crm/customer-bank-details", pageKey: "crm-customer-bank-details" },
+      { label: "Customer Bank Details", path: "/crm/customer-bank-details", pageKey: "crm-customer-bank-details" },
     ],
   },
 
@@ -109,6 +108,7 @@ export const crmNavItems: NavItem[] = [
       { label: "Demands",            path: "/crm/demands",         pageKey: "crm-payments"        },
       { label: "Money Receipts",     path: "/crm/money-receipts",  pageKey: "crm-money-receipts"  },
       { label: "On Account",         path: "/crm/on-account",      pageKey: "crm-payments"        },
+      { label: "Refunds",            path: "/crm/refunds",         pageKey: "crm-refunds"         },
       { label: "Invoices",           path: "/crm/invoices",        pageKey: "crm-invoices"        },
       { label: "Parking Booking",    path: "/crm/parking-booking", pageKey: "crm-parking-booking" },
       { label: "Brokerage",          path: "/crm/brokerage",       pageKey: "crm-brokerage"       },

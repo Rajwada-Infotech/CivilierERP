@@ -811,8 +811,8 @@ const ChecklistSectionBlock: React.FC<{
 // themselves render, not the gate itself.
 const ChecklistSubmitFooter: React.FC<{
   vc: any; locked: boolean; submitting: boolean; reopening: boolean;
-  onSubmit: () => void; onReopen: () => void; onContinue?: () => void; onPreviewPdf?: () => void;
-}> = ({ vc, locked, submitting, reopening, onSubmit, onReopen, onContinue, onPreviewPdf }) => {
+  onSubmit: () => void; onReopen: () => void; onPreviewPdf?: () => void;
+}> = ({ vc, locked, submitting, reopening, onSubmit, onReopen, onPreviewPdf }) => {
   const rights = usePageRights("crm-welcome-calls");
   if (!vc) return null;
   return (
@@ -825,12 +825,6 @@ const ChecklistSubmitFooter: React.FC<{
               <button type="button" onClick={onPreviewPdf}
                 className="flex items-center gap-1 font-medium text-emerald-700 hover:underline">
                 <FileCheck size={12} /> View PDF
-              </button>
-            )}
-            {onContinue && (
-              <button type="button" onClick={onContinue}
-                className="flex items-center gap-1 font-medium text-emerald-800 hover:underline">
-                <ChevronRight size={12} /> Continue to Communication Log
               </button>
             )}
             {rights.canEdit && (
@@ -1064,7 +1058,6 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
       vcState.refetch();
       invalidateQueue();
       qc.invalidateQueries({ queryKey: ["crm-welcome-calls-history"] });
-      qc.invalidateQueries({ queryKey: ["crm-communication"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
 
@@ -1379,7 +1372,6 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
           vc={vcState.vc} locked={vcState.locked} submitting={vcState.submitting} reopening={vcState.reopening}
           onSubmit={vcState.handleSubmit} onReopen={vcState.handleReopen}
           onPreviewPdf={() => setViewingWelcomeCallPdf({ id: booking.BookingId, no: booking.BookingNo })}
-          onContinue={() => { onClose(); navigate(`/crm/communication?bookingId=${booking.BookingId}`); }}
         />
 
         {/* F3 — Escalation banner: fires when customer has been unreachable 3+ consecutive times */}
@@ -1799,7 +1791,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
               </div>
 
               {/* Bank Preference (home loan) — a genuinely separate record
-                  from the customer's own Nominee & Bank Details below (that's
+                  from the customer's own Bank Details below (that's
                   KYC/refund banking; this is which bank is financing the
                   purchase). Tap to flex open the full loan record, sourced
                   straight from the same GET the Home Loan Tracking page
@@ -1909,7 +1901,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                         checklist.documents.total === 0 ? "blank"
                         : checklist.documents.verified === checklist.documents.total ? "done" : "progress" },
                       { label: "Co-Applicant Added", state: checklist.coApplicants.count > 0 ? "done" : "blank" },
-                      { label: "Bank & Nominee", state: checklist.bankDetails.complete ? "done" : checklist.bankDetails.started ? "progress" : "blank" },
+                      { label: "Bank Details", state: checklist.bankDetails.complete ? "done" : checklist.bankDetails.started ? "progress" : "blank" },
                       { label: "NOC Issued", state: nocIssued ? "done" : hasNoc ? "progress" : "blank" },
                       { label: "Agreement", state: checklist.agreement?.Status === CrmStatus.EXECUTED ? "done" : checklist.agreement ? "progress" : "blank" },
                     ];

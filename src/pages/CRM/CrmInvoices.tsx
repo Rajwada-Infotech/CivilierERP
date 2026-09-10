@@ -160,13 +160,10 @@ function getMilestoneInsight(m: any, existingInvoices: any[]): MilestoneInsight 
   if (existingInv) {
     return { tone: "invoiced", message: `Already invoiced — ${existingInv.InvoiceNo}`, icon: FileText as any };
   }
-  // Booking Amount (Milestone #1) not yet invoiced — visible in the counter
-  // and row list (so the progress bar is accurate), but generated exclusively
-  // from the Booking page's own Payment & Invoice tab to avoid two places
-  // doing the same thing. Show an informational pointer, not a generate button.
-  if (Number(m.MilestoneNo) === 1) {
-    return { tone: "booking", message: "Generated from the Booking page — Payment & Invoice tab", icon: ExternalLink as any };
-  }
+  // Booking Amount (Milestone #1) is invoiced from HERE, exactly like every
+  // other milestone — once its Demand is raised (from the Booking page's
+  // Payment Plan tab). No special case: it falls through to the same
+  // demand-gated "ready to invoice" logic below.
   // Invoice is generated from the demand (billing doc for AmountDue), BEFORE
   // On Account Adjustment settles the milestone. Only gate: demand must exist.
   if (m.DemandStatus === CrmStatus.PENDING) {
@@ -430,8 +427,26 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
         InvoicePrefix: form.NumberMode === "prefix" ? form.InvoicePrefix.trim() : undefined,
         CustomInvoiceNo: form.NumberMode === "custom" ? form.CustomInvoiceNo.trim() : undefined,
       };
-      if (form.InvoiceType === "Milestone") body.MilestoneId = parseInt(form.MilestoneId);
-      else if (form.InvoiceType === "OnAccount") body.OnAccountPaymentId = parseInt(form.OnAccountPaymentId);
+      // Milestone invoices (incl. the Booking Amount / Milestone #1) go
+      // through the shared bulk-generate path — the one sanctioned route for
+      // demand-gated milestone invoicing. POST /:id/invoices only handles
+      // the free-form types (Maintenance / Other / OnAccount) now.
+      if (form.InvoiceType === "Milestone") {
+        const res = await fetchWithAuth(`${BKG_API}/invoices/bulk-generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: [{ bookingId, milestoneId: parseInt(form.MilestoneId) }] }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to generate invoice");
+        const ok = data.succeeded?.[0];
+        const skip = data.skipped?.[0];
+        if (!ok) throw new Error(skip?.reason || "Failed to generate invoice");
+        toast.success(`Invoice ${ok.InvoiceNo} generated`);
+        onGenerated(bookingId as number);
+        return;
+      }
+      if (form.InvoiceType === "OnAccount") body.OnAccountPaymentId = parseInt(form.OnAccountPaymentId);
       else { body.Amount = parseFloat(form.Amount); body.InvoiceDate = form.InvoiceDate; }
       const res = await fetchWithAuth(`${BKG_API}/${bookingId}/invoices`, {
         method: "POST",

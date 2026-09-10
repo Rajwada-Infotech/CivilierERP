@@ -2310,7 +2310,7 @@ const CrmAgreement: React.FC = () => {
               {bookings.length === 0 && (
                 <p className="text-xs text-muted-foreground mt-1">
                   No bookings are eligible yet — a booking needs to be Approved, have its welcome call marked
-                  Welcomed, and have customer bank/nominee/PAN/Aadhaar details on file before an agreement can be created.
+                  Welcomed, and have customer bank/PAN/Aadhaar details on file before an agreement can be created.
                 </p>
               )}
               {bkgFilter && !(bookings as any[]).some((b) => String(b.Id) === String(bkgFilter)) && (
