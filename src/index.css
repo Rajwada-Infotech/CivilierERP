@@ -288,6 +288,19 @@
        regardless of intermediate stacking contexts */
     transform: translateZ(0);
 }
+
+/* The top navbar's own backdrop-blur creates a stacking context that would
+   trap the logo below the greyscale overlay. Lift the whole header above the
+   overlay so its logo (first child) renders in colour, then re-greyscale
+   only the header's non-logo children (search pill, nav, bells, avatar). */
+[data-theme="bw"] header.fixed.top-0 {
+    z-index: 2147483647;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+[data-theme="bw"] header.fixed.top-0 > *:not(:first-child) {
+    filter: grayscale(1) contrast(1.02);
+}
 [data-theme="bw"] body {
     background:
         radial-gradient(circle at 50% -10%, rgba(0, 0, 0, 0.035), transparent 45%),
