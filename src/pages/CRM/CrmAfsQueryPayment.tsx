@@ -10,7 +10,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
 import { promptNextStep } from "@/lib/workflowNav";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Input } from "@/components/ui/input";
 import { formatINR } from "@/utils/formatCurrency";
@@ -348,7 +348,7 @@ const CrmAfsQueryPayment: React.FC = () => {
   const deepLinkBookingId = sp.get("bookingId");
   const { canCreate, canEdit } = usePageRights("crm-afs-query-payment");
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newForm, setNewForm] = useState({ BookingId: "", StampDuty: "", RegistrationFee: "" });

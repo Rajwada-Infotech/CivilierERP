@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -408,7 +408,7 @@ function buildColumns(
 const BankMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const rights = usePageRights("bank-master");
 
   const {

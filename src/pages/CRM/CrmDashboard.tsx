@@ -6,7 +6,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { CrmShell, CrmSection, CrmGlassCard } from "@/components/crm/CrmShell";
 import {
   Select,
@@ -63,7 +63,7 @@ const STATUS_PIE_COLORS: Record<string, string> = {
 // --- Glass panel wrapper for charts ------------------------------------------
 const GlassPanel: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   return (
     <div
       className="rounded-xl overflow-hidden"
@@ -305,7 +305,7 @@ const CrmDashboard: React.FC = () => {
   usePageRights("crm-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const qc = useQueryClient();
   const [projectId, setProjectId] = useState<string>(() => localStorage.getItem("crm_dash_project") || "");
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());

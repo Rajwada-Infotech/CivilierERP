@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Users } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface CrmShellProps {
   title: string;
@@ -26,7 +26,7 @@ export const CrmShell: React.FC<CrmShellProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {
@@ -165,7 +165,7 @@ export const CrmGlassCard: React.FC<{
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.div
@@ -257,7 +257,7 @@ export const CrmSection: React.FC<{
   accentColor?: string;
 }> = ({ title, icon: Icon, action, children, accentColor = "#f59e0b" }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <div className="space-y-2">

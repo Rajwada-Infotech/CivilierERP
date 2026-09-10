@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftFormSync, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -328,7 +328,7 @@ const ChequeMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const rights = usePageRights("cheque-master");
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const { data: chequeData, isLoading: loadingCheques } = useQuery({
     queryKey: ["cheques"],

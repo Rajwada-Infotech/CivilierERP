@@ -1,6 +1,6 @@
 import React from "react";
 import { motion } from "framer-motion";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 // Generic, color-parameterized version of FinanceShell/MaterialShell —
 // those two are pixel-identical aside from hardcoded color constants, so
@@ -29,7 +29,7 @@ export const GlassShell: React.FC<GlassShellProps> = ({
   secondaryColor,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const secondary = secondaryColor || accentColor;
 
   const glassCard = isDark
@@ -154,7 +154,7 @@ export const GlassCard: React.FC<{
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.div

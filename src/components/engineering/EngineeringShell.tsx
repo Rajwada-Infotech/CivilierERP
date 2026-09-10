@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { HardHat } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface EngineeringShellProps {
   title: string;
@@ -26,7 +26,7 @@ export const EngineeringShell: React.FC<EngineeringShellProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {

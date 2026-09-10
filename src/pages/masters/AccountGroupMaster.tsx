@@ -3,7 +3,7 @@ import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -281,7 +281,7 @@ const AccountGroupMaster: React.FC = () => {
   const rights = usePageRights("account-head");
   const queryClient = useQueryClient();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const {
     data: dbData,

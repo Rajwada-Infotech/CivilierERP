@@ -5,7 +5,7 @@ import { LogoFull } from "../Logo";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./layoutContexts";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
 import { SaNotificationBell } from "@/components/navbar/SaNotificationBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
@@ -986,7 +986,7 @@ export const TopNavbar = () => {
 
   // "light" is the only light-background theme; everything else is dark
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   // Track first-mount so remounts skip the entrance animation.
   const isFirstMount = useRef(_pillNavFirstMount);

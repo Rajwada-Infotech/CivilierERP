@@ -10,7 +10,7 @@ import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { promptNextStep } from "@/lib/workflowNav";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import {
   Plus, CalendarClock, CheckCircle2, Search, MoreHorizontal, Eye, Copy,
@@ -127,7 +127,7 @@ const CrmAfsRegistry: React.FC = () => {
   const deepLinkBookingId = sp.get("bookingId");
   const { canCreate } = usePageRights("crm-afs-registry");
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [bookingId, setBookingId] = useState("");

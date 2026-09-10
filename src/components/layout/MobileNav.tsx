@@ -853,6 +853,7 @@ export const MobileNav: React.FC = () => {
     midnight: "#2dd4bf",
     root: "#f59e0b",
     glass: "#fb7185",
+    bw: "#111111",
   };
 
   const tabs: Array<{ id: "nav" | "setup" | "theme"; label: string }> = [

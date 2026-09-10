@@ -2,7 +2,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import * as spApi from "@/api/supplierPortalApi";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
   Mail, Phone, MapPin, User, CreditCard,
   FileText, Globe, Hash, CheckCircle2, RefreshCw,
@@ -39,7 +39,7 @@ function InfoRow({
 
 export default function SupplierCompanyProfile() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const { data: profile, isLoading } = useQuery({
     queryKey: ["supplier-profile"],

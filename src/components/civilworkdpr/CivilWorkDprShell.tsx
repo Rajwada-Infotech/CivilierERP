@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Pickaxe } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface CivilWorkDprShellProps {
   title: string;
@@ -33,7 +33,7 @@ export const CivilWorkDprShell: React.FC<CivilWorkDprShellProps> = ({
   fillHeight,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {
@@ -172,7 +172,7 @@ export const CivilWorkDprGlassCard: React.FC<{
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.div

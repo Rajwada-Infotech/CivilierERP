@@ -5,7 +5,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useTds } from "@/contexts/TdsContext";
 import { Button } from "@/components/ui/button";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -135,7 +135,7 @@ const Payment: React.FC = () => {
   const rights = usePageRights("new-payment");
   const { theme } = useTheme();
   const { tdsRecords } = useTds();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const queryClient = useQueryClient();
   const location = useLocation();
   const [page, setPage] = useState(1);

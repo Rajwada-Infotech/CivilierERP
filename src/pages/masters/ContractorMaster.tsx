@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -384,7 +384,7 @@ function buildContractorColumns(
 const ContractorMaster: React.FC = () => {
   const qc = useQueryClient();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const rights = usePageRights("contractor-master");
 
   const [editingId, setEditingId] = useState<number | null>(null);

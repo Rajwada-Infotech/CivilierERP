@@ -6,7 +6,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatCompactINR } from "@/utils/formatCurrency";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import {
   MaterialShell,
@@ -183,7 +183,7 @@ function StatCard({
   onClick?: () => void;
 }) {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   return (
     <div
       onClick={onClick}
@@ -746,7 +746,7 @@ export default function MaterialDashboard() {
   const rights = usePageRights("material-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [openModal, setOpenModal] = useState<ModalKey>(null);
 
   // Reusable theme-aware glass panel style

@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import * as spApi from "@/api/supplierPortalApi";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import {
   ArrowLeft,
@@ -82,7 +82,7 @@ export default function SupplierQuotationDetail() {
   });
 
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const submitted = detail?.MySubmissionStatus === "Submitted";
   const filledCount = Object.values(rows).filter((r) => r.Rate && Number(r.Rate) > 0).length;
   const totalCount = detail?.items.length ?? 0;

@@ -220,6 +220,68 @@
         --sidebar-border: 240 20% 18%;
         --sidebar-ring: 258 90% 66%;
     }
+
+    /* BW THEME — premium black & white SaaS / Web3 dashboard.
+       Soft light ground, white cards with hairline borders, near-black
+       primary (buttons, key panels), light sidebar separated by its border.
+       Not an inversion of Dark — its own light-surface palette with a
+       monochrome accent ramp. */
+    [data-theme="bw"] {
+        --background: 0 0% 96%;
+        --foreground: 0 0% 9%;
+        --card: 0 0% 100%;
+        --card-foreground: 0 0% 9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 0 0% 9%;
+        --primary: 0 0% 9%;
+        --primary-foreground: 0 0% 98%;
+        --secondary: 0 0% 23%;
+        --secondary-foreground: 0 0% 98%;
+        --muted: 0 0% 93%;
+        --muted-foreground: 0 0% 40%;
+        --accent: 0 0% 12%;
+        --accent-foreground: 0 0% 98%;
+        --destructive: 0 65% 45%;
+        --destructive-foreground: 0 0% 100%;
+        --border: 0 0% 89%;
+        --input: 0 0% 89%;
+        --ring: 0 0% 15%;
+        --radius: 0.75rem;
+        --surface: 0 0% 100%;
+        --accent-1: 0 0% 12%;
+        --accent-2: 0 0% 32%;
+        --accent-3: 0 0% 46%;
+        --sidebar-background: 0 0% 100%;
+        --sidebar-foreground: 0 0% 25%;
+        --sidebar-primary: 0 0% 9%;
+        --sidebar-primary-foreground: 0 0% 98%;
+        --sidebar-accent: 0 0% 94%;
+        --sidebar-accent-foreground: 0 0% 9%;
+        --sidebar-border: 0 0% 88%;
+        --sidebar-ring: 0 0% 15%;
+    }
+}
+
+/* BW theme polish — a few places the token swap alone doesn't reach: card
+   lift/shadow, greyscale charts & scrollbars. Scoped to [data-theme="bw"]. */
+[data-theme="bw"] body {
+    background:
+        radial-gradient(circle at 50% -10%, rgba(0, 0, 0, 0.03), transparent 45%),
+        hsl(var(--background));
+}
+[data-theme="bw"] .bg-card {
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+[data-theme="bw"] .shadow-lg,
+[data-theme="bw"] .shadow-xl,
+[data-theme="bw"] .shadow-2xl {
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.05) !important;
+}
+[data-theme="bw"] .recharts-cartesian-grid line {
+    stroke: rgba(0, 0, 0, 0.08);
+}
+[data-theme="bw"] ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.22);
 }
 
 @layer base {

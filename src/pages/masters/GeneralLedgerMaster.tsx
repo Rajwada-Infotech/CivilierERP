@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import TreeDropdown from "@/components/common/TreeDropdown";
 import { GroupTreePicker } from "@/components/common/GroupTreePicker";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -232,7 +232,7 @@ const GeneralLedgerMaster: React.FC = () => {
   const { currentUser } = useAuth();
   const isSuperAdmin = currentUser?.role === "super_admin";
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useDraftForm<LedgerForm>("general-ledger-master", EMPTY_FORM, {
     skip: editingId !== null,
