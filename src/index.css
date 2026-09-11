@@ -305,6 +305,17 @@
     filter: grayscale(1) contrast(1.02);
 }
 
+/* Lifting the header to the z-index ceiling (above) means NOTHING with a
+   normal z-index (modals, dialogs, dropdowns -- all z-60/70/80 in this app)
+   can cover it anymore under BW, even though every other theme's header
+   sits at a plain z-50 that any modal already clears fine. Full-screen
+   overlay modals opt back in by matching that same ceiling value; DOM
+   order (they mount/portal in *after* the header) breaks the resulting
+   tie in their favour, so they still end up on top like in every theme. */
+[data-theme="bw"] .expense-preview-modal {
+    z-index: 2147483647;
+}
+
 /* Login page: lift the two-column grid above the greyscale overlay so the
    animated logo (rings + mark + wordmark) renders in colour, then re-grey
    everything in that subtree that is NOT the logo. Mirrors the navbar rule. */
