@@ -185,7 +185,7 @@ function AdjustDialog({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4" onClick={onClose}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bw-modal-topmost" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div
         className="relative z-10 w-full max-w-3xl rounded-2xl border border-border bg-card shadow-2xl overflow-hidden max-h-[92dvh] flex flex-col"

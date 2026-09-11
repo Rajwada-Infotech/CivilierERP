@@ -312,7 +312,8 @@
    overlay modals opt back in by matching that same ceiling value; DOM
    order (they mount/portal in *after* the header) breaks the resulting
    tie in their favour, so they still end up on top like in every theme. */
-[data-theme="bw"] .expense-preview-modal {
+[data-theme="bw"] .expense-preview-modal,
+[data-theme="bw"] .bw-modal-topmost {
     z-index: 2147483647;
 }
 
