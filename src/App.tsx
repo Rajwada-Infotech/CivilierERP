@@ -207,6 +207,7 @@ const UnitMatrixPage = lazy(() => import("./pages/CRM/CrmUnitMatrix"));
 const ParkingMatrixPage = lazy(() => import("./pages/CRM/CrmParkingMatrix"));
 const CrmParkingBookingPage = lazy(() => import("./pages/CRM/CrmParkingBooking"));
 const BankMaster = lazy(() => import("./pages/masters/BankMaster"));
+const PartnerMaster = lazy(() => import("./pages/masters/PartnerMaster"));
 const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
 const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
 const ItemGroupMaster = lazy(() => import("./pages/masters/ItemGroupMaster"));
@@ -1169,6 +1170,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="bank-master">
             <BankMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/partners"
+        element={
+          <ProtectedRoute pageKey="partner-master">
+            <PartnerMaster />
           </ProtectedRoute>
         }
       />
