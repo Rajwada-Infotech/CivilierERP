@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
 import {
   GlassShell,
   GlassCard,
@@ -161,7 +161,7 @@ function DonutCard({
 }) {
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <div className="rounded-xl overflow-hidden flex-1 flex flex-col" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden flex-1 flex flex-col bw-color-keep" style={glassStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b shrink-0" style={{ borderColor: `${accentColor}26` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${accentColor}26` }}>
           <Icon size={11} style={{ color: accentColor }} />
@@ -223,7 +223,7 @@ function TrendCard({
 }) {
   const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
   return (
-    <div className="rounded-xl overflow-hidden flex-1 flex flex-col" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden flex-1 flex flex-col bw-color-keep" style={glassStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b shrink-0" style={{ borderColor: `${accentColor}26` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${accentColor}26` }}>
           <Icon size={11} style={{ color: accentColor }} />
@@ -288,7 +288,7 @@ export default function CivilWorkDprDashboard() {
   usePageRights("civilworkdpr-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
+  const isDark = isDarkDashboard(theme);
 
   const {
     data: rawData,
