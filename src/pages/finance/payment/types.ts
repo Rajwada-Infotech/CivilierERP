@@ -211,6 +211,10 @@ export interface PaymentRecord {
   tdsName: string | null;
   tdsPercentage: number | null;
   tdsAmount: number;
+  // Journal Voucher credit line this payment settles (migration 417) — set
+  // when picked from the Payment form's "Journal Vouchers" tab. Stored as
+  // JVLineId on NewPayment; resolves the same LHeadId into partyId below.
+  jvLineId: number | null;
 }
 
 export const PAYMENT_MODES = [

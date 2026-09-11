@@ -2632,68 +2632,15 @@ const ReportTable: React.FC<{
     return f;
   };
 
-  const load = useCallback(async () => {
-    // VendorLedgerReportBody fetches everything it needs itself — nothing
-    // for this generic apiPath flow to do.
-    if (isVendorLedger) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({
-        ...report.defaultParams,
-        ...buildParams(),
-        limit: "500",
-      });
-      const res = await fetchWithAuth(`${report.apiPath}?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      // Some routes return a plain array; others wrap in { data: [...] }.
-      // stock-summary uses { byItem: [...] }. Honour filterConfig.dataKey.
-      const dataKey = report.filterConfig?.dataKey ?? "data";
-      const data: Record<string, unknown>[] = Array.isArray(json)
-        ? json
-        : (json[dataKey] ?? json.data ?? json.records ?? []);
-      setRows(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    report.id,
-    filters.companyId,
-    filters.projectId,
-    filters.finYearId,
-    filters.singleDate,
-    filters.rangeFrom,
-    filters.rangeTo,
-    godownId,
-    reasonFilter,
-    expenseHeadIds,
-    companyIds,
-    projectIds,
-    projects,
-  ]);
-
-  useEffect(() => {
-    load();
-    setPage(1);
-  }, [load]);
-
-  // Export must pull every matching row, not just the 500-row on-screen cap
-  // `load()` uses for the paginated table. A single bigger-limit request
-  // isn't enough on its own — several of these routes (e.g. expense-booking)
-  // hard-cap `limit` server-side regardless of what's asked for — so this
-  // pages through with `page`/`limit` (the same params `load()` already
-  // sends) until a page comes back short of a full page, a `total`/
-  // `totalPages` field in the response says there's no more, or a safety
-  // cap of 100 pages is hit (whichever first), then concatenates everything.
-  const fetchAllForExport = useCallback(async (): Promise<Record<string, unknown>[]> => {
-    if (isVendorLedger) return rows; // has its own export path, not reached here
+  // Pages through with `page`/`limit` until a page comes back short of a
+  // full page, a `total`/`totalPages` field in the response says there's no
+  // more, or a safety cap of 100 pages is hit (whichever first), then
+  // concatenates everything. Needed even for the on-screen table (not just
+  // export) — several of these routes (e.g. expense-booking) hard-cap
+  // `limit` server-side to 100 regardless of what's asked for, so a single
+  // request silently truncated the list to that server cap instead of
+  // "500 rows" the old single-fetch `load()` assumed it was getting.
+  const fetchAllRows = useCallback(async (): Promise<Record<string, unknown>[]> => {
     const dataKey = report.filterConfig?.dataKey ?? "data";
     const baseParams = { ...report.defaultParams, ...buildParams() };
     const pageSize = 500;
@@ -2704,6 +2651,8 @@ const ReportTable: React.FC<{
       const res = await fetchWithAuth(`${report.apiPath}?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
+      // Some routes return a plain array; others wrap in { data: [...] }.
+      // stock-summary uses { byItem: [...] }. Honour filterConfig.dataKey.
       const batch: Record<string, unknown>[] = Array.isArray(json)
         ? json
         : (json[dataKey] ?? json.data ?? json.records ?? []);
@@ -2729,7 +2678,37 @@ const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, rows, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, projects]);
+
+  const load = useCallback(async () => {
+    // VendorLedgerReportBody fetches everything it needs itself — nothing
+    // for this generic apiPath flow to do.
+    if (isVendorLedger) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      setRows(await fetchAllRows());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }, [isVendorLedger, fetchAllRows]);
+
+  useEffect(() => {
+    load();
+    setPage(1);
+  }, [load]);
+
+  // Export reuses the exact same full-pagination fetch as the on-screen
+  // table now uses — no separate "get everything" path needed anymore.
+  const fetchAllForExport = useCallback(async (): Promise<Record<string, unknown>[]> => {
+    if (isVendorLedger) return rows; // has its own export path, not reached here
+    return fetchAllRows();
+  }, [isVendorLedger, rows, fetchAllRows]);
 
   const totalPages = Math.ceil(rows.length / PAGE_SIZE);
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

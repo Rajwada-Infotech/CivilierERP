@@ -133,6 +133,35 @@ export const rejectJournalVoucher = async (id: number, note?: string) => {
   return handleResponse(res);
 };
 
+// A JV's CREDIT line still owed — see backend/routes/journalVoucher.js's
+// GET /payable-lines. Only lines from an Approved, GL-posted JV that still
+// carry an unpaid balance are ever returned; a plain payment (DR LHeadId,
+// CR bank) settles it.
+export interface PayableJVLine {
+  LineID: number;
+  JVID: number;
+  JVNo: string | null;
+  JVDate: string;
+  Narration: string | null;
+  CompanyId: number | null;
+  ProjectId: number | null;
+  CompanyName: string | null;
+  ProjectName: string | null;
+  LHeadId: number;
+  LHeadName: string;
+  LHeadType: string;
+  CreditAmount: number;
+  PaidAmount: number;
+  RemainingAmount: number;
+}
+
+export const getPayableJVLines = async (
+  filters: { companyId?: number | string; projectId?: number | string } = {},
+): Promise<PayableJVLine[]> => {
+  const res = await fetchWithAuth(`${BASE}/payable-lines${toQuery(filters)}`);
+  return handleResponse<PayableJVLine[]>(res);
+};
+
 export interface JournalVoucherYearSummary {
   Year: number;
   JVCount: number;
