@@ -298,7 +298,7 @@ const MetricsDashboard = () => {
         {metrics && (
           <>
             {/* ── RPM Chart ───────────────────────────────────────────────── */}
-            <div className="rounded-2xl border border-border bg-card overflow-hidden col-span-full">
+            <div className="rounded-2xl border border-border bg-card overflow-hidden col-span-full bw-color-keep">
               <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
                 <TrendingUp size={14} className="text-primary" />
                 <span className="text-sm font-heading font-semibold text-foreground">
