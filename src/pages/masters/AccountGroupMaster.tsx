@@ -16,6 +16,8 @@ import {
 import { friendlyErrorMessage } from "@/lib/friendlyError";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import {
   ChevronRight,
   ChevronDown,
@@ -304,6 +306,18 @@ const AccountGroupMaster: React.FC = () => {
   }, [dbData]);
 
   const tree = useMemo(() => buildTree(allGroups), [allGroups]);
+
+  const accountGroupExportColumns: ExportColumn[] = useMemo(
+    () => [
+      { header: "Group Name", accessor: "name" },
+      { header: "Code", accessor: "code" },
+      {
+        header: "Belongs To",
+        accessor: (row: any) => getBelongsTo(row._id, allGroups) || "—",
+      },
+    ],
+    [allGroups],
+  );
 
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -684,6 +698,13 @@ const AccountGroupMaster: React.FC = () => {
                 </button>
               </div>
             )}
+            <ExportMenu
+              data={allGroups as unknown as Record<string, unknown>[]}
+              columns={accountGroupExportColumns}
+              title="Account Group Master"
+              filename="account-group-master"
+              disabled={!rights.canExport || allGroups.length === 0}
+            />
           </div>
 
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
