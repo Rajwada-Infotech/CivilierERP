@@ -18,6 +18,9 @@ export interface DbPayment {
   PSupplierName?: string | null;
   PSupplierContact?: string | null;
   PExpenseRef: string | null;
+  // Journal Voucher this payment settles (JVLineId, migration 417) —
+  // resolved server-side to the JV's own doc number for display.
+  JVNo?: string | null;
   DocNo?: string | null;
   ParentDocNo?: string | null;
   RootExBDocNo?: string | null;
@@ -166,6 +169,10 @@ export interface PaymentRecord {
   projectSite: string;
   expenseRef: string;
   expenseId: string;
+  // Journal Voucher doc number this payment settles, if any (see JVNo on
+  // DbPayment) — shown as its own chip in the list where expenseRef would
+  // otherwise be blank.
+  jvNo: string | null;
   docNo: string;
   parentDocNo: string;
   rootExBDocNo: string;

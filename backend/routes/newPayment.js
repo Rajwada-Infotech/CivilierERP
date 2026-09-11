@@ -262,6 +262,14 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         eb.EDocNo                                          AS RefDoc,
         -- Expense Booking primary key — used by "Pay Remaining" to pre-fill the form
         eb.Eid                                             AS PExpenseId,
+        -- Journal Voucher this payment settles (JVLineId, migration 417) —
+        -- so the list's Expense Ref column can show a JV chip the same way
+        -- it shows an invoice/GRN chip, instead of a bare "—".
+        (
+          SELECT jv.JVNo FROM dbo.JournalVoucherLines jvl
+          JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
+          WHERE jvl.LineID = np.JVLineId
+        )                                                  AS JVNo,
         -- EB DocDate for reference
         eb.EDocDate                                        AS EBDocDate,
         -- Card display info (last 4 digits + network) when PCardId is set
@@ -2331,6 +2339,21 @@ router.get("/:id/posting", async (req, res) => {
     // determines which specific account the posting actually lands in.
     const { resolvePaymentSupplierHeadId, getCashInHandBankId } = require("../services/generalLedger");
     const resolvedSupplierId = await resolvePaymentSupplierHeadId(pool, pmt);
+    // For any payment not resolved via an invoice/ExpenseBooking above —
+    // a direct/on-account payment (PPartyId), or one settling a Journal
+    // Voucher's credit line (JVLineId, migration 417) — supplierName is
+    // still null at this point even though resolvedSupplierId already
+    // points at a real, named party. Falling back to "Supplier / Creditor
+    // A/c" then showed a generic label on the Payment Chain view instead
+    // of the actual party name the money actually posted against (e.g. a
+    // salary/wages JV settled by payment, debited straight to the named
+    // employee/contractor head, not a generic creditor bucket).
+    if (!supplierName && resolvedSupplierId) {
+      const headRes = await pool.request().input("Id", sql.Int, resolvedSupplierId).query(`
+        SELECT ISNULL(DisplayName, LHeadName) AS name FROM dbo.AccountHeadMaster WHERE LHeadId = @Id
+      `);
+      supplierName = headRes.recordset[0]?.name ?? null;
+    }
     // Mirrors postPaymentApproval in services/generalLedger.js: for an
     // invoice-linked payment, pmt.TDSAmount is only an inherited display
     // snapshot (see resolveInvoiceLinkedTds in services/tds.js) — TDS was
@@ -2350,8 +2373,15 @@ router.get("/:id/posting", async (req, res) => {
     }
 
     const accounts = {
+      // Plain party name when one resolved — matches how a Journal
+      // Voucher's own posting display names its ledgers (e.g. "Pinaki
+      // Chandra", not "Supplier/Creditor Payable — Pinaki Chandra"), and
+      // is no longer assuming every resolved party is literally a
+      // Supplier/Creditor (a JV-settling payment can debit any head, e.g.
+      // an employee paid for salary & wages). Only falls back to the
+      // generic label when no name could be resolved at all.
       supplier: resolvedSupplierId
-        ? { id: resolvedSupplierId, label: supplierName ? `Supplier/Creditor Payable — ${supplierName}` : "Supplier / Creditor A/c", code: null }
+        ? { id: resolvedSupplierId, label: supplierName || "Supplier / Creditor A/c", code: null }
         : null,
       bank: bankAccount,
       // TDS (migration 304) — only present when this payment actually
