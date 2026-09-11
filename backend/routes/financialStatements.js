@@ -209,7 +209,7 @@ router.get("/balance-sheet", async (req, res) => {
               -- pooled on-account advance is applied to an invoice — it
               -- always pairs with a dbo.OnAccountLedger DEBIT row for the
               -- same amount, and both are already excluded from this
-              -- head's on-account contribution below (onAccountCreditByHead
+              -- head's on-account contribution below (onAccountAdvanceByHead
               -- only sums CREDIT rows), so counting this GL leg too would
               -- double it. Same fix as vendorLedger.js's fetchOnAccountRows
               -- and trialBalance.js's per-account drill-down.
@@ -230,9 +230,10 @@ router.get("/balance-sheet", async (req, res) => {
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
               AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
           ), 0) AS credit
-          -- Supplier/Contractor on-account advance is folded in separately
-          -- below (onAccountCreditByHead, a live SUM over dbo.OnAccountLedger
-          -- CREDIT rows) instead of the AccountHeadMaster.OnAccountBalance
+          -- Supplier/Contractor on-account advance is folded into the DEBIT
+          -- side separately below (onAccountAdvanceByHead, a live SUM over
+          -- dbo.OnAccountLedger CREDIT rows) instead of the
+          -- AccountHeadMaster.OnAccountBalance
           -- cached column that used to be added here — that column double-
           -- counted every advance (once via this flat total, again via the
           -- GL leg an applied/adjusted portion of it already posts), the
@@ -261,19 +262,23 @@ router.get("/balance-sheet", async (req, res) => {
     // invoice") is deliberately excluded, same reasoning as
     // vendorLedger.js's fetchOnAccountRows: it always pairs with the
     // OnAccountAdjustment GL leg already excluded above, and counting
-    // both/neither keeps the net contribution correct either way.
+    // both/neither keeps the net contribution correct either way. Despite
+    // TxnType='CREDIT' being the SQL column name, this is a DEBIT-side
+    // contribution to the party's own ledger (see the per-head loop below,
+    // and vendorLedger.js's mapOnAccountRow) — paying an advance reduces
+    // what's owed, it doesn't increase it.
     const onAccountRes = await pool
       .request()
       .input("asOf", sql.Date, asOf)
       .query(`
-        SELECT PartyId, SUM(Amount) AS credit
+        SELECT PartyId, SUM(Amount) AS advance
         FROM dbo.OnAccountLedger
         WHERE PartyType IN ('Supplier', 'Contractor') AND TxnType = 'CREDIT'
           AND TxnDate <= @asOf
         GROUP BY PartyId
       `);
-    const onAccountCreditByHead = new Map(
-      onAccountRes.recordset.map((r) => [Number(r.PartyId), Number(r.credit) || 0]),
+    const onAccountAdvanceByHead = new Map(
+      onAccountRes.recordset.map((r) => [Number(r.PartyId), Number(r.advance) || 0]),
     );
 
     // Net P&L (income - expenses, life-to-date through asOf) rolls into
@@ -395,9 +400,16 @@ router.get("/balance-sheet", async (req, res) => {
     let capitalFurther = 0;
 
     for (const h of headsRes.recordset) {
-      const debit = Number(h.debit) || 0;
-      const onAccountCredit = onAccountCreditByHead.get(Number(h.id)) || 0;
-      const credit = (Number(h.credit) || 0) + onAccountCredit;
+      // An OnAccountLedger CREDIT row is the advance itself — paying it
+      // reduces what's owed (or creates a receivable-like position), so it
+      // lands on the DEBIT side of the party's own ledger, not credit. See
+      // vendorLedger.js's mapOnAccountRow: TxnType='CREDIT' rows map to
+      // DebitAmount there. This was flipped to the credit side here
+      // initially, which didn't just fail to fix the Vendor-Ledger-vs-
+      // Balance-Sheet mismatch — it doubled it in the wrong direction.
+      const onAccountAdvance = onAccountAdvanceByHead.get(Number(h.id)) || 0;
+      const debit = (Number(h.debit) || 0) + onAccountAdvance;
+      const credit = Number(h.credit) || 0;
       const net = Math.round((debit - credit) * 100) / 100;
       if (Math.abs(net) < 0.005) continue; // zero-balance heads add no signal
 
