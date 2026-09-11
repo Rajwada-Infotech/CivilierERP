@@ -1502,6 +1502,33 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
 
 // ── Invoice tab ──────────────────────────────────────────────────────────────
 
+// A CrmCustomer set to Non-Invoice (the default — migration 420) must never
+// get an invoice generated for them, from any trigger: manual (POST
+// /:id/invoices), the bulk-generate action, or the milestone helper both of
+// those ultimately call. Checked here, once, off the same
+// Booking -> Application -> Customer chain every other per-booking customer
+// lookup in this file already walks. Returns a user-facing error string (not
+// throwing) so callers can `return`/`throw` it in whichever shape their own
+// error handling expects, same convention as requireActiveBooking.
+async function requireInvoiceableCustomer(pool, bookingId) {
+  const r = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT c.InvoiceMode
+    FROM dbo.CrmBooking b
+    JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    LEFT JOIN dbo.CrmCustomer c ON c.Id = a.CustomerId
+    WHERE b.Id = @bid
+  `);
+  const mode = r.recordset[0]?.InvoiceMode;
+  // No linked CrmCustomer at all (legacy/edge-case data) falls back to
+  // NOT blocking — this gate only ever tightens behavior for customers that
+  // explicitly opted into Non-Invoice, it never invents a new restriction
+  // for records this feature doesn't know about.
+  if (mode === "NonInvoice") {
+    return "This customer is set to Non-Invoice — no invoice can be generated for this booking. Change it on the Customer's record (CRM → Customers) if this is incorrect.";
+  }
+  return null;
+}
+
 // GET /:id/invoices — every invoice generated for this booking
 router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
@@ -1536,6 +1563,9 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
 
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const invoiceableErr = await requireInvoiceableCustomer(pool, id);
+    if (invoiceableErr) return res.status(400).json({ error: invoiceableErr });
 
     const allowedManualTypes = new Set(["Maintenance", "Other", "OnAccount"]);
     if (!allowedManualTypes.has(type)) {
@@ -1735,6 +1765,9 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
 async function generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, actorUserId) {
   const activeErr = await requireActiveBooking(pool, bookingId);
   if (activeErr) { const e = new Error(activeErr); e.status = 400; throw e; }
+
+  const invoiceableErr = await requireInvoiceableCustomer(pool, bookingId);
+  if (invoiceableErr) { const e = new Error(invoiceableErr); e.status = 400; throw e; }
 
   const m = await pool.request().input("mid", sql.Int, milestoneId).input("bid", sql.Int, bookingId).query(`
     SELECT Id, MilestoneName, AmountDue, DemandStatus, DemandRaisedOn FROM dbo.CrmPaymentMilestone WHERE Id = @mid AND BookingId = @bid

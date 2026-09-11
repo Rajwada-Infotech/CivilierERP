@@ -685,8 +685,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
       .query("SELECT TOP 1 Id, BookingNo FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1");
     if (already.recordset.length) {
       booking = { id: already.recordset[0].Id, BookingNo: already.recordset[0].BookingNo, alreadyExists: true };
-      
-      // SYNC edits from Application to the existing Booking
+
       const app = await pool.request().input("id", sql.Int, id).query(`
         SELECT PreferredUnitId, RatePerSqFt, PaymentPlanId, DateOfApply,
                TokenType, TokenValue, BookingAmount, PaymentMode, DepositBankId,
@@ -694,75 +693,102 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         FROM dbo.CrmApplication WHERE Id = @id
       `);
       const a = app.recordset[0];
-      
-      if (a) {
-        await pool.request()
-          .input("bid", sql.Int, booking.id)
-          .input("RatePerSqFt", sql.Decimal(18, 2), a.RatePerSqFt)
-          .input("PaymentPlanId", sql.Int, a.PaymentPlanId)
-          .input("BookingDate", sql.Date, a.DateOfApply)
-          .input("TokenType", sql.NVarChar(50), a.TokenType)
-          .input("TokenValue", sql.Decimal(18, 2), a.TokenValue)
-          .input("BookingAmount", sql.Decimal(18, 2), a.BookingAmount)
-          .input("PaymentMode", sql.NVarChar(50), a.PaymentMode)
-          .input("DepositBankId", sql.Int, a.DepositBankId)
-          .input("AssignedTo", sql.Int, a.AssignedTo)
-          .input("Notes", sql.NVarChar(sql.MAX), a.Notes)
-          .input("BrokerId", sql.Int, a.BrokerId)
-          .input("BrokerageRatePercent", sql.Decimal(5, 2), a.BrokerageRatePercent)
-          .input("BrokeragePaymentPlan", sql.NVarChar(100), a.BrokeragePaymentPlan)
-          .query(`
-            UPDATE dbo.CrmBooking
-            SET RatePerSqFt = @RatePerSqFt,
-                PaymentPlanId = @PaymentPlanId,
-                BookingDate = @BookingDate,
-                TokenType = @TokenType,
-                TokenValue = @TokenValue,
-                BookingAmount = @BookingAmount,
-                PaymentMode = @PaymentMode,
-                AssignedTo = @AssignedTo,
-                Notes = @Notes,
-                BrokerId = @BrokerId,
-                BrokerageRatePercent = @BrokerageRatePercent,
-                BrokeragePaymentPlan = @BrokeragePaymentPlan,
-                UpdatedAt = SYSDATETIME()
-            WHERE Id = @bid
-          `);
-      }
 
-      // Resync Milestone #1 (Booking Amount) to match the updated BookingAmount.
-      // Without this, editing the application's token/booking amount and re-submitting
-      // would update the CrmBooking row but leave the milestone's AmountDue stale.
-      if (a?.BookingAmount) {
+      // SYNC edits from Application to the existing Booking, resync Milestone
+      // #1 to the (possibly changed) BookingAmount, and relink any orphaned
+      // documents — all three in one transaction. Previously these were three
+      // separate pool.request() calls with the milestone-resync step's own
+      // errors only console.error()'d and swallowed: a failure here after the
+      // Booking UPDATE already committed left BookingAmount changed with
+      // Milestone #1's AmountDue silently stale relative to it (the exact
+      // "Milestone-1 stale-due-amount" bug class, reintroduced through this
+      // untransacted path) — and the route still responded 200 {success:true}
+      // either way, so staff had no way to know. Now a failure at any of these
+      // three steps rolls all of them back and surfaces as a real error
+      // response instead of a false success.
+      //
+      // Parking-hold conversion and the totals rollup that follow this block
+      // deliberately stay OUTSIDE this transaction: they already fail-isolate
+      // per hold (one bad slot doesn't block the others or the resync above)
+      // and rollupBookingTotals only ever recomputes from live DB state, so
+      // running it after this commit is correct and matches existing order —
+      // folding them into this atomic boundary would mean a single unrelated
+      // parking hiccup rolls back the Booking/Milestone sync too.
+      if (a) {
+        const tx = pool.transaction();
+        await tx.begin();
         try {
-          const m1Res = await pool.request().input("bid", sql.Int, booking.id)
-            .query("SELECT TOP 1 Id, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
-          const m1 = m1Res.recordset[0];
-          if (m1 && m1.Status !== "Waived") {
-            const newAmountDue = Math.max(parseFloat(a.BookingAmount), Number(m1.AmountPaid || 0));
-            const bkTotals = await pool.request().input("bid", sql.Int, booking.id)
-              .query("SELECT GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @bid");
-            const grandTotal = Number(bkTotals.recordset[0]?.GrandTotal || bkTotals.recordset[0]?.TotalValue || 0);
-            const newPercent = grandTotal > 0 ? Math.round((newAmountDue / grandTotal) * 10000) / 100 : 0;
-            await pool.request()
-              .input("id", sql.Int, m1.Id)
-              .input("amt", sql.Decimal(18, 2), newAmountDue)
-              .input("pct", sql.Decimal(5, 2), newPercent)
-              .query(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, [Percent] = @pct,
-                Status = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
-                UpdatedAt = SYSDATETIME() WHERE Id = @id`);
-            await recalculateRemainingMilestones(pool, booking.id, { fixedMilestoneId: m1.Id });
+          await tx.request()
+            .input("bid", sql.Int, booking.id)
+            .input("RatePerSqFt", sql.Decimal(18, 2), a.RatePerSqFt)
+            .input("PaymentPlanId", sql.Int, a.PaymentPlanId)
+            .input("BookingDate", sql.Date, a.DateOfApply)
+            .input("TokenType", sql.NVarChar(50), a.TokenType)
+            .input("TokenValue", sql.Decimal(18, 2), a.TokenValue)
+            .input("BookingAmount", sql.Decimal(18, 2), a.BookingAmount)
+            .input("PaymentMode", sql.NVarChar(50), a.PaymentMode)
+            .input("DepositBankId", sql.Int, a.DepositBankId)
+            .input("AssignedTo", sql.Int, a.AssignedTo)
+            .input("Notes", sql.NVarChar(sql.MAX), a.Notes)
+            .input("BrokerId", sql.Int, a.BrokerId)
+            .input("BrokerageRatePercent", sql.Decimal(5, 2), a.BrokerageRatePercent)
+            .input("BrokeragePaymentPlan", sql.NVarChar(100), a.BrokeragePaymentPlan)
+            .query(`
+              UPDATE dbo.CrmBooking
+              SET RatePerSqFt = @RatePerSqFt,
+                  PaymentPlanId = @PaymentPlanId,
+                  BookingDate = @BookingDate,
+                  TokenType = @TokenType,
+                  TokenValue = @TokenValue,
+                  BookingAmount = @BookingAmount,
+                  PaymentMode = @PaymentMode,
+                  AssignedTo = @AssignedTo,
+                  Notes = @Notes,
+                  BrokerId = @BrokerId,
+                  BrokerageRatePercent = @BrokerageRatePercent,
+                  BrokeragePaymentPlan = @BrokeragePaymentPlan,
+                  UpdatedAt = SYSDATETIME()
+              WHERE Id = @bid
+            `);
+
+          // Resync Milestone #1 (Booking Amount) to match the updated
+          // BookingAmount. Without this, editing the application's
+          // token/booking amount and re-submitting would update the
+          // CrmBooking row but leave the milestone's AmountDue stale.
+          if (a.BookingAmount) {
+            const m1Res = await tx.request().input("bid", sql.Int, booking.id)
+              .query("SELECT TOP 1 Id, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo");
+            const m1 = m1Res.recordset[0];
+            if (m1 && m1.Status !== "Waived") {
+              const newAmountDue = Math.max(parseFloat(a.BookingAmount), Number(m1.AmountPaid || 0));
+              const bkTotals = await tx.request().input("bid", sql.Int, booking.id)
+                .query("SELECT GrandTotal, TotalValue FROM dbo.CrmBooking WHERE Id = @bid");
+              const grandTotal = Number(bkTotals.recordset[0]?.GrandTotal || bkTotals.recordset[0]?.TotalValue || 0);
+              const newPercent = grandTotal > 0 ? Math.round((newAmountDue / grandTotal) * 10000) / 100 : 0;
+              await tx.request()
+                .input("id", sql.Int, m1.Id)
+                .input("amt", sql.Decimal(18, 2), newAmountDue)
+                .input("pct", sql.Decimal(5, 2), newPercent)
+                .query(`UPDATE dbo.CrmPaymentMilestone SET AmountDue = @amt, [Percent] = @pct,
+                  Status = CASE WHEN AmountPaid >= @amt THEN '${CrmStatus.PAID}' ELSE '${CrmStatus.PENDING}' END,
+                  UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+              await recalculateRemainingMilestones(tx, booking.id, { fixedMilestoneId: m1.Id });
+            }
           }
-        } catch (msErr) {
-          console.error("[crm-applications] milestone resync on edit-submit failed:", msErr.message);
+
+          await tx.request().input("bid", sql.Int, booking.id).input("aid", sql.Int, id).query(`
+            UPDATE dbo.CrmBookingDocument
+            SET BookingId = @bid
+            WHERE ApplicationId = @aid AND BookingId IS NULL
+          `);
+
+          await tx.commit();
+        } catch (txErr) {
+          try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+          console.error("[crm-applications] re-submit Booking/Milestone/Document sync failed, rolled back:", txErr.message);
+          throw txErr;
         }
       }
-
-      await pool.request().input("bid", sql.Int, booking.id).input("aid", sql.Int, id).query(`
-        UPDATE dbo.CrmBookingDocument
-        SET BookingId = @bid
-        WHERE ApplicationId = @aid AND BookingId IS NULL
-      `);
 
       // Convert any active parking holds to allotments on the existing booking.
       // Holds added while the wizard was in Draft/Pending (after the first submit

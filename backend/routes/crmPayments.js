@@ -9,21 +9,12 @@ const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
 const { maybeAutoCreateSalesDeed, maybeAutoCreateBrokerage, requireActiveBooking, recalculateRemainingMilestones, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
-const { postCrmOnAccountToGL, postCrmOnAccountApplied } = require("../services/crmLedger");
+const { postCrmOnAccountToGL, postCrmOnAccountApplied, getGstSplit } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
-
-async function getGstSplit(pool, bookingId, amount) {
-  const r = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal FROM dbo.CrmBooking WHERE Id = @bid");
-  const row = r.recordset[0] || {};
-  const ratio = Number(row.GrandTotal) > 0 ? Number(row.TotalGstAmount) / Number(row.GrandTotal) : 0;
-  const gst = Math.round(amount * ratio * 100) / 100;
-  return { gstAmount: gst, baseAmount: Math.round((amount - gst) * 100) / 100 };
-}
 
 // Spec: "BROKER PAYMENT -> NEXT MILESTONE DUE". Business confirmed this should
 // be a soft warning, not a hard block (a customer's payment must never be
@@ -83,6 +74,32 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
 
   const activeErr = await requireActiveBooking(pool, targetRow.BookingId);
   if (activeErr) return { error: activeErr };
+
+  // Full-booking hold: every rupee a customer pays lands in On Account
+  // first (see the flow comment below) and sits there UNTOUCHED — no
+  // milestone gets adjusted/settled at all — until the customer has paid
+  // 100% of the booking's own GrandTotal. Only once the whole booking is
+  // fully paid does staff start working through the on-account pool,
+  // applying it to milestones one at a time in sequence (the earlier-
+  // milestone-first check above already enforces the "in order" part; this
+  // is the new "not before everything's in" part). Still a manual action —
+  // this only gates whether that click is allowed to succeed, it doesn't
+  // trigger anything automatically.
+  const totals = await pool.request().input("bid", sql.Int, targetRow.BookingId).query(`
+    SELECT
+      ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid), 0) AS TotalReceived,
+      ISNULL(GrandTotal, TotalValue) AS BookingTotal
+    FROM dbo.CrmBooking WHERE Id = @bid
+  `);
+  const { TotalReceived, BookingTotal } = totals.recordset[0] || {};
+  const totalReceived = Number(TotalReceived) || 0;
+  const bookingTotal = Number(BookingTotal) || 0;
+  if (bookingTotal > 0 && totalReceived < bookingTotal) {
+    const shortfall = Math.round((bookingTotal - totalReceived) * 100) / 100;
+    return {
+      error: `Cannot adjust On Account yet — the full booking amount hasn't been received. ₹${shortfall.toLocaleString("en-IN")} is still outstanding out of ₹${bookingTotal.toLocaleString("en-IN")}. All payments are held in On Account until the entire booking is paid in full; adjustment against milestones only begins once that's complete.`,
+    };
+  }
 
   const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
     .query(`

@@ -99,6 +99,7 @@ const fields: FieldDef[] = [
     name: "floorNo",
     label: "Floor No.",
     type: "number",
+    required: true,
   },
   {
     name: "unitType",

@@ -187,6 +187,8 @@ router.get("/:id", async (req, res, next) => {
       selectColumns.push("lh.IsTdsApplicable");
     if (hasColumn(columnMeta, "TdsLimitApplicable"))
       selectColumns.push("lh.TdsLimitApplicable");
+    if (hasColumn(columnMeta, "InvoiceMode"))
+      selectColumns.push("lh.InvoiceMode");
 
     // Login email lives on dbo.users (RoleId -> the 'supplier' row in
     // dbo.Role, LinkedLHeadId -> this row), not on AccountHeadMaster — same
@@ -253,6 +255,8 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       selectColumns.push("lh.IsTdsApplicable");
     if (hasColumn(columnMeta, "TdsLimitApplicable"))
       selectColumns.push("lh.TdsLimitApplicable");
+    if (hasColumn(columnMeta, "InvoiceMode"))
+      selectColumns.push("lh.InvoiceMode");
     if (hasColumn(columnMeta, "CreatedAt")) selectColumns.push("lh.CreatedAt");
     if (hasColumn(columnMeta, "UpdatedAt")) selectColumns.push("lh.UpdatedAt");
     if (hasColumn(columnMeta, "ApprovedBy"))
@@ -335,6 +339,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     LHeadType,
   IsTdsApplicable,
     TdsLimitApplicable,
+    InvoiceMode,
     SupplierPassword: supplierPasswordPlain,
   } = req.body;
 
@@ -524,6 +529,18 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       request.input("TdsLimitApplicable", sql.Bit, TdsLimitApplicable === false ? 0 : 1);
       insertColumns.push("TdsLimitApplicable");
       insertValues.push("@TdsLimitApplicable");
+    }
+    // Invoice / Non-Invoice (migration 420) — only meaningful for
+    // LHeadType='A' (Customer Master) rows, but the column itself is
+    // generic on this shared table, same as every other optional field
+    // here. Defaults to the column's own DB default ('NonInvoice') when
+    // omitted or sent as anything other than the two real values, rather
+    // than trusting an arbitrary client string into a CHECK-constrained
+    // column.
+    if (hasColumn(columnMeta, "InvoiceMode")) {
+      request.input("InvoiceMode", sql.NVarChar(20), InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice");
+      insertColumns.push("InvoiceMode");
+      insertValues.push("@InvoiceMode");
     }
     if (hasColumn(columnMeta, "CreatedBy")) {
       request.input("CreatedBy", sql.NVarChar(100), userName);
@@ -808,6 +825,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     LHeadType,
     IsTdsApplicable,
     TdsLimitApplicable,
+    InvoiceMode,
     SupplierPassword: supplierPasswordPlain,
   } = req.body;
 
@@ -962,6 +980,10 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     if (hasColumn(columnMeta, "TdsLimitApplicable")) {
       request.input("TdsLimitApplicable", sql.Bit, TdsLimitApplicable === false ? 0 : 1);
       updates.push("TdsLimitApplicable=@TdsLimitApplicable");
+    }
+    if (hasColumn(columnMeta, "InvoiceMode")) {
+      request.input("InvoiceMode", sql.NVarChar(20), InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice");
+      updates.push("InvoiceMode=@InvoiceMode");
     }
     if (hasColumn(columnMeta, "UpdatedBy")) {
       request.input("UpdatedBy", sql.NVarChar(100), userName);

@@ -180,6 +180,10 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
   // SuperBuiltUpAreaSqFt is the saleable area used for pricing (Rate × SBU = Total).
   // AreaSqFt is the legacy field kept in sync for backward compat — SBU wins, falls back to raw AreaSqFt.
   // If neither is provided, fall back to the BlockUnitTypeSpec for this Block+UnitType.
+  if (FloorNo == null || FloorNo === "") {
+    return res.status(400).json({ error: "Floor No. is required — every unit must be assigned to a floor." });
+  }
+
   try {
     const pool = getPool();
 
@@ -313,6 +317,9 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
   const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
   const updatedBy = req.user?.userId || null;
   const userName = req.user?.name || req.user?.email || null;
+  if (FloorNo == null || FloorNo === "") {
+    return res.status(400).json({ error: "Floor No. is required — every unit must be assigned to a floor." });
+  }
   try {
     const pool = getPool();
 

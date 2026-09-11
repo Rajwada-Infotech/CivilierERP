@@ -34,7 +34,7 @@ const CUSTOMER_SELECT = `
     c.PanNo, c.AadhaarNo, c.Occupation, c.AnnualIncome,
     c.Address AS PermanentAddress, c.City AS PermanentCity, c.State AS PermanentState, c.Pincode AS PermanentPincode,
     c.CurrentAddress, c.CurrentCity, c.CurrentState, c.CurrentPincode, c.IsCurrentSameAsPermanent,
-    c.DateOfBirth,
+    c.DateOfBirth, c.InvoiceMode,
     c.Notes, c.IsActive, c.CreatedAt, c.UpdatedAt,
     cu.name AS CreatedByName,
     l.LeadUid, l.Classification AS LeadClassification,
@@ -315,6 +315,12 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email);
 
+    // Invoice / Non-Invoice — defaults to NonInvoice (matches the column's
+    // own DB default) when omitted or an unrecognised value is sent, rather
+    // than trusting an arbitrary client string straight into a CHECK-
+    // constrained column.
+    const invoiceMode = b.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice";
+
     const cur = resolveCurrentAddress(b);
     const customerNo = await getNextDocNumber(pool, "CUST", "CUST");
     const result = await pool.request()
@@ -338,6 +344,7 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
       .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
       .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
       .input("dob",       sql.Date,          b.DateOfBirth || null)
+      .input("invmode",   sql.NVarChar(20),  invoiceMode)
       .input("notes",     sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cb",        sql.Int,           actorId(req))
       .query(`
@@ -345,13 +352,13 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
           (CustomerNo, LeadId, CustomerName, Mobile, AltMobile, Email, PanNo, AadhaarNo, Occupation, AnnualIncome,
            Address, City, State, Pincode,
            CurrentAddress, CurrentCity, CurrentState, CurrentPincode, IsCurrentSameAsPermanent,
-           DateOfBirth, Notes,
+           DateOfBirth, InvoiceMode, Notes,
            CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
         VALUES (@no, @lid, @name, @mob, @altmob, @email, @pan, @aadhaar, @occ, @income,
                 @addr, @city, @state, @pin,
                 @curaddr, @curcity, @curstate, @curpin, @cursame,
-                @dob, @notes, @cb, SYSDATETIME())
+                @dob, @invmode, @notes, @cb, SYSDATETIME())
       `);
     const newId = result.recordset[0].Id;
 
@@ -419,6 +426,7 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
         .input("curpin",    sql.NVarChar(10),  cur.currentPincode)
         .input("cursame",   sql.Bit,           cur.sameAsPermanent ? 1 : 0)
         .input("dob",       sql.Date,          b.DateOfBirth || null)
+        .input("invmode",   sql.NVarChar(20),  b.InvoiceMode === "Invoice" || b.InvoiceMode === "NonInvoice" ? b.InvoiceMode : null)
         .input("notes",     sql.NVarChar(sql.MAX), b.Notes ?? null)
         .input("ub",        sql.Int,           actorId(req))
         .query(`
@@ -430,6 +438,7 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
             CurrentAddress = @curaddr, CurrentCity = @curcity, CurrentState = @curstate, CurrentPincode = @curpin,
             IsCurrentSameAsPermanent = @cursame,
             DateOfBirth = ISNULL(@dob, DateOfBirth),
+            InvoiceMode = ISNULL(@invmode, InvoiceMode),
             Notes = @notes, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);
@@ -477,8 +486,15 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     // payment, so an edit here previously left that master record stale
     // forever. No-op if the customer has no ledger head yet.
     try {
+      // Re-read the row's now-current InvoiceMode rather than trusting
+      // whatever the client did or didn't send — the UPDATE above already
+      // applied ISNULL(@invmode, InvoiceMode), so this is the real final
+      // value regardless of whether this PUT touched it at all.
+      const finalMode = await pool.request().input("id", sql.Int, id)
+        .query("SELECT InvoiceMode FROM dbo.CrmCustomer WHERE Id = @id");
       await syncCrmCustomerLedgerHead(pool, id, {
         CustomerName: b.CustomerName, Mobile: b.Mobile, Email: email, Address: b.PermanentAddress, PanNo: b.PanNo,
+        InvoiceMode: finalMode.recordset[0]?.InvoiceMode,
       });
     } catch (ledgerErr) {
       console.error("[crm-customers] ledger head sync failed:", ledgerErr.message);

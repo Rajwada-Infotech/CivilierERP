@@ -27,6 +27,7 @@ const EMPTY_FORM = {
   IsCurrentSameAsPermanent: true,
   CurrentAddress: "", CurrentCity: "", CurrentState: "", CurrentPincode: "",
   CoApplicantName: "", CoApplicantMobile: "", CoApplicantPanNo: "", CoApplicantRelation: "",
+  InvoiceMode: "NonInvoice" as "Invoice" | "NonInvoice",
   Notes: "",
 };
 
@@ -150,6 +151,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
     DateOfBirth: customer.DateOfBirth ? String(customer.DateOfBirth).slice(0, 10) : "",
     CoApplicantName: customer.CoApplicantName || "", CoApplicantMobile: customer.CoApplicantMobile || "",
     CoApplicantPanNo: customer.CoApplicantPanNo || "", CoApplicantRelation: customer.CoApplicantRelation || "",
+    InvoiceMode: (customer.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice") as "Invoice" | "NonInvoice",
     Notes: customer.Notes || "",
   });
   const [saving, setSaving] = useState(false);
@@ -293,6 +295,22 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
             {/* Co-applicants are now managed at the Application level, not on the Customer record.
                  Each Application has its own independent co-applicants — use the Co-Applicant
                  tab in the Application wizard to add them. */}
+
+            <div className="rounded-xl border border-border p-3 space-y-2">
+              <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
+                <FileText size={13} className="text-amber-500" /> Billing
+              </h3>
+              <p className="text-[11px] text-muted-foreground">Non-Invoice (default) — no invoice is ever generated for this customer, in the CRM booking pipeline or the Accounts Sale Invoice module.</p>
+              <div className="flex items-center gap-4">
+                {(["NonInvoice", "Invoice"] as const).map((mode) => (
+                  <label key={mode} className={`flex items-center gap-1.5 text-sm ${locked ? "opacity-70 cursor-not-allowed" : "cursor-pointer"}`}>
+                    <input type="radio" name="invoiceMode" disabled={locked} checked={form.InvoiceMode === mode}
+                      onChange={() => setForm((f) => ({ ...f, InvoiceMode: mode }))} />
+                    {mode === "NonInvoice" ? "Non-Invoice" : "Invoice"}
+                  </label>
+                ))}
+              </div>
+            </div>
 
             <div className="rounded-xl border border-border p-3 space-y-2">
               <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
@@ -757,6 +775,22 @@ const CrmCustomers: React.FC = () => {
               </div>
 
               {/* Co-applicants moved to the Application wizard — Add Co-Applicant tab */}
+
+              <div className="rounded-xl border border-border p-3 space-y-2">
+                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
+                  <FileText size={13} className="text-amber-500" /> Billing
+                </h3>
+                <p className="text-[11px] text-muted-foreground">Non-Invoice (default) — no invoice is ever generated for this customer, in the CRM booking pipeline or the Accounts Sale Invoice module.</p>
+                <div className="flex items-center gap-4">
+                  {(["NonInvoice", "Invoice"] as const).map((mode) => (
+                    <label key={mode} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                      <input type="radio" name="newCustomerInvoiceMode" checked={form.InvoiceMode === mode}
+                        onChange={() => setForm((f) => ({ ...f, InvoiceMode: mode }))} />
+                      {mode === "NonInvoice" ? "Non-Invoice" : "Invoice"}
+                    </label>
+                  ))}
+                </div>
+              </div>
 
               <div className="rounded-xl border border-border p-3 space-y-2">
                 <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
