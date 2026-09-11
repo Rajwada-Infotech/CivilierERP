@@ -50,6 +50,7 @@ import {
   GitBranch,
   ClipboardCheck,
   XCircle,
+  Handshake,
 } from "lucide-react";
 import {
   Crown,
@@ -203,6 +204,13 @@ const financeSetupItems = [
     path: "/masters/banks",
     color: "text-emerald-500",
     pageKey: "bank-master",
+  },
+  {
+    icon: Handshake,
+    label: "Partners",
+    path: "/masters/partners",
+    color: "text-orange-500",
+    pageKey: "partner-master",
   },
   {
     icon: Calendar,

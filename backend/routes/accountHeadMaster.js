@@ -294,6 +294,13 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       if (req.query.type === "C") {
         conditions.push("ISNULL(lh.LHeadCode, '') NOT LIKE '%CUST%'");
       }
+      // Partner Master gives every Partner TWO heads (Capital + Current
+      // Account) — a party picker asking for type=P wants one row per
+      // Partner, not two. Always resolves to the Current Account head; the
+      // Capital side isn't posted to from a generic party picker (yet).
+      if (req.query.type === "P") {
+        conditions.push("lh.LHeadCode LIKE '%-CUR'");
+      }
     }
     if (req.query.groupId) {
       conditions.push("lh.LBelongsTo = @groupId");
@@ -607,8 +614,22 @@ router.get("/options", async (req, res) => {
     // so this exclusion is unconditional rather than gated on the requested
     // type — without it the same project name shows up twice (once as its
     // legitimate Supplier ledger, once as this mislabelled Customer one).
-    let query = `SELECT LHeadId AS id, LHeadName AS label, LHeadContactPerson AS contactPerson, RTRIM(LHeadType) AS type
-                 FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1 AND ISNULL(LHeadCode, '') NOT LIKE '%CUST%'`;
+    // Partner Master (LHeadType='P') gives every Partner TWO heads (Capital
+    // + Current Account) — general party pickers (Invoice Payable To,
+    // Payment Payee/Party, Vendor filter) show a Partner as ONE entry, not
+    // two, and that one entry always resolves to the Current Account head;
+    // the Capital Account side is posted to separately (not from a generic
+    // party picker) once that flow exists. Label stays the plain
+    // LHeadName here (no "(Current Account)" suffix) since there's only
+    // ever one row per partner in this filtered list — the suffix only
+    // earns its keep where both heads legitimately appear together (e.g.
+    // Partner Master's own listing, Trial Balance).
+    let query = `SELECT LHeadId AS id,
+                 CASE WHEN LHeadType = 'P' THEN LHeadName ELSE ISNULL(DisplayName, LHeadName) END AS label,
+                 LHeadContactPerson AS contactPerson, RTRIM(LHeadType) AS type
+                 FROM dbo.AccountHeadMaster
+                 WHERE LHeadStatus = 1 AND ISNULL(LHeadCode, '') NOT LIKE '%CUST%'
+                   AND (LHeadType <> 'P' OR LHeadCode LIKE '%-CUR')`;
     const request = pool.request();
     if (req.query.type) {
       // Accepts a single type ("S") or a comma-separated list ("S,C") —

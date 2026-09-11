@@ -349,6 +349,9 @@ export default function MaterialExpenseBooking() {
   const [customerHeads, setCustomerHeads] = useState<
     { id: number; label: string; paymentTerms: string | null }[]
   >([]);
+  const [partnerHeads, setPartnerHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
   // "Vendor" spans every party type a booking can actually be billed
   // against — Supplier, Contractor, and Customer/Applicant (LHeadType
   // S/C/A) — not just supplierHeads alone.
@@ -371,8 +374,9 @@ export default function MaterialExpenseBooking() {
     if (contractorHeads.some((c) => c.id === id)) return `c:${id}`;
     if (brokerHeads.some((b) => b.id === id)) return `b:${id}`;
     if (customerHeads.some((cu) => cu.id === id)) return `a:${id}`;
+    if (partnerHeads.some((p) => p.id === id)) return `p:${id}`;
     return "";
-  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads]);
+  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads]);
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
@@ -690,6 +694,24 @@ export default function MaterialExpenseBooking() {
           paymentTerms: h.LHeadPaymentTerms ?? null,
         }));
         setCustomerHeads(heads);
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    // Partners (LHeadType='P', Partner Master) — each Partner has TWO
+    // heads sharing one LHeadName (Capital + Current Account); this route
+    // already prefers ISNULL(DisplayName, LHeadName), which disambiguates
+    // them (e.g. "Rajesh Sharma (Current Account)").
+    apiFetch("/api/account-head?type=P")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        }));
+        setPartnerHeads(heads);
       })
       .catch((err) => {
         toast.error(
@@ -1890,6 +1912,7 @@ export default function MaterialExpenseBooking() {
                               prefix === "s" ? supplierHeads
                               : prefix === "c" ? contractorHeads
                               : prefix === "a" ? customerHeads
+                              : prefix === "p" ? partnerHeads
                               : brokerHeads;
                             const head = list.find((h) => h.id === id);
                             const name = head?.label ?? "";
@@ -1957,6 +1980,14 @@ export default function MaterialExpenseBooking() {
                                 <SelectLabel>Customers</SelectLabel>
                                 {customerHeads.map((cu) => (
                                   <SelectItem key={`a-${cu.id}`} value={`a:${cu.id}`}>{cu.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {partnerHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Partners</SelectLabel>
+                                {partnerHeads.map((p) => (
+                                  <SelectItem key={`p-${p.id}`} value={`p:${p.id}`}>{p.label}</SelectItem>
                                 ))}
                               </SelectGroup>
                             )}
@@ -2737,7 +2768,8 @@ export default function MaterialExpenseBooking() {
                                       ? `booking-row-${rec.id}`
                                       : `booking-row-${index}`
                                   }
-                                  className={`hover:bg-muted/30 transition-colors border-b border-border/50 last:border-0 ${rec.status === "Draft" ? "opacity-70" : ""}`}
+                                  className={`hover:bg-muted/30 transition-colors border-b border-border/50 last:border-0 cursor-pointer ${rec.status === "Draft" ? "opacity-70" : ""}`}
+                                  onClick={() => openPreview(rec)}
                                 >
                                   <TableCell className="py-3">
                                     {rec.status === "Draft" ? (
@@ -2867,7 +2899,7 @@ export default function MaterialExpenseBooking() {
                                       fallback={<StatusBadge status={rec.status} className="text-[10px] px-2 py-0.5" />}
                                     />
                                   </TableCell>
-                                  <TableCell className="py-3">
+                                  <TableCell className="py-3" onClick={(e) => e.stopPropagation()}>
                                     <div className="flex gap-1 items-center justify-end">
                                       <ApprovalActions
                                         status={rec.status}

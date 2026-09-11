@@ -147,9 +147,19 @@ const RE_CURRENT_LIAB = /current liab/i;
 const RE_INVESTMENT = /investment/i;
 const RE_FICTITIOUS = /fictitious|deferred revenue/i;
 const RE_INTANGIBLE = /intangible/i;
-const RE_TANGIBLE = /\btangible\b|work.?in.?progress/i;
+const RE_TANGIBLE = /\btangible\b/i;
 const RE_LOANS_ADVANCES_GIVEN = /loans?\s*(and|&)?\s*advances?/i;
 const RE_CURRENT_ASSET = /current asset/i;
+// Work-in-Progress used to be folded into RE_TANGIBLE (treating it as
+// "Capital WIP", a self-constructed fixed asset) — wrong for this business:
+// a construction/real-estate developer's WIP is unsold project inventory
+// (Construction Cost - Labour/Land/Materials sit under CURRENT ASSETS
+// already), not a fixed asset. Checked ahead of, and independent of, the
+// group's actual static AccountGroup parent (which may still sit under
+// FIXED ASSETS in the chart of accounts) — same "classify by name,
+// regardless of where the group happens to be nested" precedent every
+// other regex in this file already follows.
+const RE_WIP = /work.?in.?progress/i;
 
 function classifyLiabilitySection(groupMap, groupId, rootId) {
   const names = chainNames(groupMap, groupId);
@@ -166,6 +176,7 @@ function classifyLiabilitySection(groupMap, groupId, rootId) {
 function classifyAssetSection(groupMap, groupId, rootId) {
   const names = chainNames(groupMap, groupId);
   if (chainMatches(names, RE_FICTITIOUS)) return "fictitiousAssets";
+  if (chainMatches(names, RE_WIP)) return "currentAssets";
   if (chainMatches(names, RE_INVESTMENT)) return "investments";
   if (chainMatches(names, RE_LOANS_ADVANCES_GIVEN)) return "investments"; // spec's own "Loans & Advances Given" example
   if (chainMatches(names, RE_INTANGIBLE)) return "fixedAssetsIntangible";
@@ -270,11 +281,15 @@ router.get("/balance-sheet", async (req, res) => {
     const onAccountRes = await pool
       .request()
       .input("asOf", sql.Date, asOf)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
       .query(`
         SELECT PartyId, SUM(Amount) AS advance
         FROM dbo.OnAccountLedger
         WHERE PartyType IN ('Supplier', 'Contractor') AND TxnType = 'CREDIT'
           AND TxnDate <= @asOf
+          AND (@companyId IS NULL OR CompanyId = @companyId)
+          AND (@projectId IS NULL OR ProjectId = @projectId)
         GROUP BY PartyId
       `);
     const onAccountAdvanceByHead = new Map(

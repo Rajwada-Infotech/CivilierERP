@@ -46,6 +46,7 @@ import {
   XCircle,
   Percent,
   Wrench,
+  Handshake,
 } from "lucide-react";
 import {
   Bank,
@@ -288,6 +289,13 @@ const financeSetupItems: SetupItem[] = [
     path: "/masters/banks",
     color: "text-emerald-500",
     pageKey: "bank-master",
+  },
+  {
+    icon: Handshake,
+    label: "Partners",
+    path: "/masters/partners",
+    color: "text-orange-500",
+    pageKey: "partner-master",
   },
   {
     icon: Calendar,

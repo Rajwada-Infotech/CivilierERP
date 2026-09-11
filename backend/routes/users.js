@@ -387,7 +387,6 @@ router.put(
           SET name=@name,
               email=@email,
               RoleId=@RoleId,
-              role=(SELECT RName FROM dbo.Role WHERE RId = @RoleId),
               discontinue=@discontinue,
               can_accept_tickets=COALESCE(@can_accept_tickets, can_accept_tickets),
               DepartmentId=@DepartmentId
