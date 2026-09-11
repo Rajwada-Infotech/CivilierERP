@@ -2,7 +2,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
 import * as spApi from "@/api/supplierPortalApi";
 import {
   RefreshCw,
@@ -34,7 +34,7 @@ const isDueSoon = (due?: string | null) =>
 export default function SupplierDashboard() {
   const { currentUser } = useAuth();
   const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
+  const isDark = isDarkDashboard(theme);
   const uid = currentUser?.id ?? "";
 
   const { data: quotations = [], isLoading: loadingQ } = useQuery({

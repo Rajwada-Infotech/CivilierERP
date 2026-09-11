@@ -268,9 +268,12 @@
    A full-viewport backdrop-filter overlay (not a plain `filter` on <html>)
    greyscales everything painted beneath it — module accents, recharts hex
    fills, status badges, avatars, inline SVG — while anything stacked ABOVE
-   it keeps its colour. The CivilierERP logo opts back into colour via
-   `.bw-color-keep` (a very high z-index + its own stacking context), so it
-   is the one thing that stays full-colour under BW. */
+   it keeps its colour. Two things opt back into colour via `.bw-color-keep`
+   (a very high z-index + its own stacking context): the CivilierERP logo,
+   and each dashboard's chart card (DonutCard/TrendCard/GlassPanel/
+   ChartCardShell) — status pies and trend lines stay legible in their real
+   red/green/amber colours instead of collapsing to indistinguishable grey,
+   while the rest of the app stays strictly monochrome. */
 [data-theme="bw"]::after {
     content: "";
     position: fixed;

@@ -42,7 +42,7 @@ import {
 } from "recharts";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatCompactINR } from "@/utils/formatCurrency";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
 import {
   FinanceShell,
   FinanceGlassCard,
@@ -141,7 +141,7 @@ const DonutCard: React.FC<{
 }> = ({ title, icon: Icon, accentColor, data, isDark, glassStyle, formatValue = fmt }) => {
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <div className="rounded-xl overflow-hidden" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
       <div
         className="flex items-center gap-2 px-4 py-3 border-b"
         style={{
@@ -243,7 +243,7 @@ const TrendCard: React.FC<{
 }> = ({ title, icon: Icon, accentColor, data, series, isDark, glassStyle }) => {
   const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
   return (
-    <div className="rounded-xl overflow-hidden" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
       <div
         className="flex items-center gap-2 px-4 py-3 border-b"
         style={{
@@ -345,7 +345,7 @@ const MonthlyIncomeCard: React.FC<{
 }> = ({ data, isDark, glassStyle, isLoading }) => {
   const hasData = data.some((d) => Math.abs(d.income) > 0.005);
   return (
-    <div className="rounded-xl overflow-hidden" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
       <div
         className="flex items-center gap-2 px-4 py-3 border-b"
         style={{
@@ -519,7 +519,7 @@ const FinanceDashboard = () => {
   usePageRights("finance-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
+  const isDark = isDarkDashboard(theme);
 
   const {
     data: rawData,
