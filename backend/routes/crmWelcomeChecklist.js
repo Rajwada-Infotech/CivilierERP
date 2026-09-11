@@ -157,6 +157,54 @@ async function loadItems(pool, bookingId) {
   return { items, sections, totalCount, checkedCount, openRecheckCount, canSubmit: checkedCount === totalCount && openRecheckCount === 0 };
 }
 
+const { renderWelcomeCallPdfBuffer } = require("../services/welcomeCallPdf");
+
+router.get("/:bookingId/pdf", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId);
+    
+    // Fetch booking & company details
+    const bkg = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT b.BookingNo, b.UnitNo, a.ApplicantName, proj.name AS ProjectName,
+             comp.logo AS CompanyLogo
+      FROM dbo.CrmBooking b
+      LEFT JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
+      LEFT JOIN dbo.enterprise comp ON comp.id = b.CompanyId AND comp.business_type = 'C'
+      WHERE b.Id = @bid
+    `);
+    if (!bkg.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const bData = bkg.recordset[0];
+
+    // Fetch submission details
+    const sub = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT s.SubmittedAt, u.name AS SubmittedByName
+      FROM dbo.CrmWelcomeCallSubmission s
+      LEFT JOIN dbo.Users u ON u.id = s.SubmittedBy
+      WHERE s.BookingId = @bid
+    `);
+    const subData = sub.recordset[0] || {};
+
+    // Fetch checklist state
+    const state = await loadItems(pool, bookingId);
+    
+    const pdfData = {
+      ...bData,
+      ...subData,
+      sections: state.sections,
+    };
+
+    const buffer = await renderWelcomeCallPdfBuffer(pdfData);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="WelcomeCall_Verification_${bData.BookingNo}.pdf"`);
+    res.send(buffer);
+  } catch (e) {
+    console.error("[crm-welcome-checklist] GET /:bookingId/pdf error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /:bookingId — full checklist state + submission/lock status
 router.get("/:bookingId", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
@@ -421,7 +469,15 @@ router.post("/:bookingId/reopen", requirePageRight("crm-welcome-calls", "edit"),
 router.get("/recheck/queue", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const conds = [`ci.RecheckStatus = '${CrmStatus.OPEN}'`];
+    const req0 = pool.request();
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,
         COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
@@ -433,7 +489,8 @@ router.get("/recheck/queue", requirePageRight("crm-welcome-calls", "view"), asyn
       JOIN dbo.CrmBooking b ON b.Id = ci.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
-      WHERE ci.RecheckStatus = '${CrmStatus.OPEN}'
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      WHERE ${conds.join(" AND ")}
       GROUP BY b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo), COALESCE(bn.ProjectName, b.ProjectName), a.ApplicantName, a.Mobile
       ORDER BY MIN(ci.RecheckRequestedAt)
     `);

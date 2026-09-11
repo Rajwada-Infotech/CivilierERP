@@ -6,7 +6,7 @@ import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, ShieldAlert, IndianRupee, Lock, Unlock } from "lucide-react";
+import { Plus, ShieldAlert, IndianRupee, Lock, Unlock, Search } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -14,6 +14,8 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useTds } from "@/contexts/TdsContext";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/brokerage";
 const BKG_API = "/api/crm/bookings";
@@ -29,6 +31,27 @@ const EMPTY_FORM = { BookingId: "", BrokerId: "", BrokerFirm: "", RateType: "Per
 
 async function fetchAll(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+}
+
+const PAGE_SIZE = 20;
+interface BrokerageListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchBrokerageList(filters: BrokerageListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
 }
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -61,8 +84,25 @@ const CrmBrokerage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const isApprover = CRM_APPROVER_ROLES.includes(getUserRole() ?? "") || hasApprovalInboxEdit;
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
 
-  const { data: records = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-brokerage"], queryFn: fetchAll, staleTime: 30_000 });
+  const listFilters: BrokerageListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-brokerage", listFilters, page],
+    queryFn: () => fetchBrokerageList(listFilters, page),
+    staleTime: 30_000,
+  });
+  const records = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["broker-master"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { tdsRecords } = useTds();
@@ -288,6 +328,17 @@ const CrmBrokerage: React.FC = () => {
         </button>
       </div>
 
+      <div className="flex gap-3 flex-wrap items-center mt-3 mb-3">
+        <div className="relative flex-1 min-w-48">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+            placeholder="Search customer, booking, broker... (Enter to search)"
+            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+        </div>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+      </div>
+
       <DataTable
         data={records}
         columns={columns}
@@ -295,9 +346,10 @@ const CrmBrokerage: React.FC = () => {
         emptyMessage="No brokerage records"
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
+      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle className="font-heading">{editingId ? "Customize Brokerage" : "Add Broker Involvement"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>

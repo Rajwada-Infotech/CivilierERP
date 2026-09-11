@@ -9,6 +9,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const allowRoles = require("../middleware/role");
 const { actorId, requireUserEmail, isSaAdmin } = require("../services/saAccess");
+const { applyPagination } = require("../services/crmListPagination");
 const { logCrmAudit } = require("../services/crmAudit");
 const { emitNotification } = require("../services/notify");
 const { getIo } = require("../socket");
@@ -150,8 +151,6 @@ const BOOKING_SELECT = `
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.AccountNo, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.IfscCode, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.AccountHolderName, ''))), '') IS NOT NULL
-        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.NomineeName, ''))), '') IS NOT NULL
-        AND NULLIF(LTRIM(RTRIM(ISNULL(bd.NomineeRelation, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.PanNo, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.AadhaarNo, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.Occupation, ''))), '') IS NOT NULL
@@ -197,8 +196,10 @@ const BOOKING_SELECT = `
 router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, applicationId, includeCancelled, deleted } = req.query;
+    const { status, applicationId, includeCancelled, deleted, search } = req.query;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const showDeleted = deleted === "1" || deleted === "true";
     const conds = [showDeleted ? "b.IsActive = 0" : "b.IsActive = 1"];
@@ -210,8 +211,46 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
     }
     if (applicationId) { req0.input("appId", sql.Int, parseInt(applicationId)); conds.push("b.ApplicationId = @appId"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
-    const result = await req0.query(`${BOOKING_SELECT} WHERE ${conds.join(" AND ")} ORDER BY b.CreatedAt DESC`);
-    res.json(result.recordset);
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR a.Mobile LIKE @search OR b.BookingNo LIKE @search OR um.UnitName LIKE @search)");
+    }
+    const where = `WHERE ${conds.join(" AND ")}`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${BOOKING_SELECT} ${where} ORDER BY b.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${BOOKING_SELECT} ${where} ORDER BY b.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("st2", sql.NVarChar(30), status || null)
+        .input("appId2", sql.Int, applicationId ? parseInt(applicationId) : null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmBooking b
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE ${showDeleted ? "b.IsActive = 0" : "b.IsActive = 1"}
+            AND (@st2 IS NULL AND (${includeCancelled ? "1=1" : "b.Status NOT IN ('Cancelled', 'Rejected')"}) OR b.Status = @st2)
+            AND (@appId2 IS NULL OR b.ApplicationId = @appId2)
+            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR a.Mobile LIKE @search2 OR b.BookingNo LIKE @search2 OR um.UnitName LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-bookings] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -400,7 +439,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         .input("ub",    sql.Int,           actorId(req))
         .query(`
           UPDATE dbo.CrmBooking SET
-            ProjectId = @pid, ProjectName = ISNULL(@pname, ProjectName),
+            ProjectId = ISNULL(@pid, ProjectId), ProjectName = ISNULL(@pname, ProjectName),
             UnitNo = ISNULL(@unit, UnitNo), BlockName = @blk, FloorName = @flr,
             RatePerSqFt = ISNULL(@rate, RatePerSqFt),
             TotalValue = ISNULL(@tot, TotalValue),
@@ -1498,8 +1537,18 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
-    const allowedManualTypes = new Set(["Booking", "Milestone", "Maintenance", "Other", "OnAccount"]);
+    const allowedManualTypes = new Set(["Maintenance", "Other", "OnAccount"]);
     if (!allowedManualTypes.has(type)) {
+      // Milestone / Booking-amount invoices are generated exclusively from the
+      // CRM Invoices page (via POST /bookings/invoices/bulk-generate →
+      // generateMilestoneInvoiceForBooking), once the milestone's Demand has
+      // been raised. The Booking page no longer generates invoices at all —
+      // it only raises Demands. This closes the old bypass path where the
+      // Booking-detail page POSTed InvoiceType:"Milestone" here directly and
+      // the two pages disagreed about who owned the Booking-amount invoice.
+      if (type === "Milestone" || type === "Booking") {
+        return res.status(409).json({ error: "Milestone invoices are generated from the CRM Invoices page after the demand is raised." });
+      }
       return res.status(400).json({ error: "Invoice type is not supported for manual generation" });
     }
 

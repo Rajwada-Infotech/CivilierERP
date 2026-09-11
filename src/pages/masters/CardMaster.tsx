@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef } from "react";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftFormSync, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -461,7 +461,7 @@ const CardMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const rights = usePageRights("card-master");
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const { data: dbData, isLoading: loadingCards } = useQuery({
     queryKey: ["cards"],
     queryFn: getCards,

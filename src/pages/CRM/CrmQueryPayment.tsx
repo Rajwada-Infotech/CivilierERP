@@ -21,6 +21,7 @@ import {
 import { ProxyActionDialog, type ProxyMethod } from "@/components/crm/ProxyActionDialog";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/query-payment";
 
@@ -196,8 +197,17 @@ function StagedItem({ f, onRemove }: { f: StagedFile; onRemove: () => void }) {
 }
 
 // ── API ───────────────────────────────────────────────────────────────────────
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
+interface QueryPaymentCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — statusCounts are computed
+// client-side from the whole set (see below), same as CrmDemands.
+// Company/Project/Block narrows the set server-side instead.
+async function fetchAll(cpb?: QueryPaymentCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed");
   return r.json();
 }
@@ -256,9 +266,11 @@ const CrmQueryPayment: React.FC = () => {
   const proofRef = useRef<HTMLInputElement>(null);
   const proxyRef = useRef<HTMLInputElement>(null);
 
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+
   // ── queries ────────────────────────────────────────────────────────────────
   const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch: refetchList } =
-    useQuery({ queryKey: ["crm-query-payment"], queryFn: fetchAll, staleTime: 30_000 });
+    useQuery({ queryKey: ["crm-query-payment", cpb], queryFn: () => fetchAll(cpb), staleTime: 30_000 });
   const { data: eligible = [] } =
     useQuery({ queryKey: ["crm-query-payment-eligible"], queryFn: fetchEligible, staleTime: 60_000 });
   const { data: detail, refetch: refetchDetail } = useQuery({
@@ -804,6 +816,7 @@ const CrmQueryPayment: React.FC = () => {
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search…"
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-xl bg-background focus:outline-none focus:ring-1 focus:ring-primary/40" />
             </div>
+            <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
 
             {/* Status filter pills */}
             <div className="flex gap-1 flex-wrap shrink-0">
@@ -844,7 +857,7 @@ const CrmQueryPayment: React.FC = () => {
 
         {/* ── Start dialog ────────────────────────────────────────────────── */}
         <Dialog open={startDialog} onOpenChange={o => { if (!o) { setStartDialog(false); setStartBookingId(""); } }}>
-          <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-md p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 shrink-0 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">

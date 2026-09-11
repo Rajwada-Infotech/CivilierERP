@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Megaphone } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 const ACCENT = "#f59e0b";
 const ACCENT_DARK_BG = "rgba(15, 12, 3, 0.45)";
@@ -23,7 +23,7 @@ export const SalesAutoShell: React.FC<SalesAutoShellProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {
@@ -148,7 +148,7 @@ export const SalesAutoGlassCard: React.FC<{
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.div
@@ -223,7 +223,7 @@ export const SalesAutoSection: React.FC<{
   accentColor?: string;
 }> = ({ title, icon: Icon, action, children, accentColor = ACCENT }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <div className="space-y-3">

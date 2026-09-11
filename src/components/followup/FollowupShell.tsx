@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { CalendarClock } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface FollowupShellProps {
   title: string;
@@ -25,7 +25,7 @@ export const FollowupShell: React.FC<FollowupShellProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {

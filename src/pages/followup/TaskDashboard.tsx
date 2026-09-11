@@ -33,7 +33,7 @@ import { FollowupShell } from "@/components/followup/FollowupShell";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { GlassCard, GlassSection, GlassCardSkeleton } from "@/components/dashboard/GlassShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 
@@ -146,7 +146,7 @@ async function fetchReport(filters: Filters): Promise<ReportRow[]> {
 
 function useGlass() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const cardStyle = {
     background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
     border: `1px solid ${ACCENT}26`,

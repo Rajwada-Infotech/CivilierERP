@@ -111,6 +111,7 @@ const MODULE_MAP = {
   "crm-agreement-date": { table: "dbo.CrmAgreement", pk: "Id", status: "DateApprovalStatus" },
   "crm-brokerage": { table: "dbo.CrmBrokerageMaster", pk: "Id", status: "Status" },
   "crm-cancellations": { table: "dbo.CrmCancellation", pk: "Id", status: "Status" },
+  "crm-refunds": { table: "dbo.CrmRefund", pk: "Id", status: "Status" },
   "crm-noc": { table: "dbo.CrmNoc", pk: "Id", status: "Status" },
   contracts: { table: "dbo.Contract", pk: "ContractId", status: "Status" },
   // Same ApprovalAuditLog caveat as crm-agreement-date above: no Module
@@ -180,6 +181,7 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   "crm-sales-deed-director": ["super_admin"],
   "crm-brokerage": CRM_APPROVER_ROLES,
   "crm-cancellations": CRM_APPROVER_ROLES,
+  "crm-refunds": CRM_APPROVER_ROLES,
   "crm-noc": CRM_APPROVER_ROLES,
   // Same default CRM approver set as crm-brokerage/crm-cancellations/crm-noc
   // — no legal_head carve-out here, that's specific to crm-agreements (see

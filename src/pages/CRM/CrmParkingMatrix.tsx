@@ -95,7 +95,7 @@ function ActionChoiceDialog({
 }: { slot: MatrixSlot; onClose: () => void; onSell: () => void; onHold: () => void }) {
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-sm">
+      <DialogContent accent="crm" className="max-w-sm">
         <DialogHeader><DialogTitle className="font-heading">Parking Slot {slot.SlotNo}</DialogTitle></DialogHeader>
         <div className="grid grid-cols-1 gap-2 pt-1">
           <button onClick={onSell} className="px-4 py-2.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 text-left">
@@ -180,7 +180,7 @@ function BookParkingDialog({
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent accent="crm" className="max-w-md">
         <DialogHeader><DialogTitle className="font-heading">Book Parking Slot {slot.SlotNo}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="rounded-lg bg-muted/30 border border-border p-3 text-sm">
@@ -267,7 +267,7 @@ function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; proje
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent accent="crm" className="max-w-md">
         <DialogHeader><DialogTitle className="font-heading">Hold Parking Slot {slot.SlotNo}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div>
@@ -376,7 +376,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent accent="crm" className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             <Car size={18} className="text-primary" />

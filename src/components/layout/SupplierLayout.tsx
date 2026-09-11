@@ -3,7 +3,7 @@ import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { useAuth } from "@/contexts/AuthContext";
 import { LogoFull } from "@/components/Logo";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { FileSpreadsheet, ListChecks, Building2, Bell, ReceiptText } from "lucide-react";
 import { Logout } from "iconsax-react";
@@ -124,7 +124,7 @@ export function SupplierLayout({ children }: { children: React.ReactNode }) {
   const { handleLogout, overlay } = useGracefulLogout();
   const location = useLocation();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
 

@@ -7,7 +7,7 @@ import {
   Folder,
   Layers,
 } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -175,7 +175,7 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const recalcPosition = useCallback(() => {
     if (!triggerRef.current) return;

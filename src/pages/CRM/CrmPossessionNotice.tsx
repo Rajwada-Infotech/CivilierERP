@@ -19,6 +19,7 @@ import { promptNextStep } from "@/lib/workflowNav";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { cn } from "@/lib/utils";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/possession-notice";
 const DELIVERY_MODES = ["Email", "Post", "Courier", "InPerson"];
@@ -53,8 +54,17 @@ const STATUS_CONFIG: Record<string, {
 };
 
 // ── Fetchers ──────────────────────────────────────────────────────────────────
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
+interface PossessionNoticeCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — status-tab counts are computed
+// client-side from the whole set (see `counts` below), same as CrmDemands.
+// Company/Project/Block narrows the set server-side instead.
+async function fetchAll(cpb?: PossessionNoticeCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
   if (!r.ok) { const d = await r.json().catch(() => null); throw new Error(d?.error || `HTTP ${r.status}`); }
   return r.json();
 }
@@ -108,7 +118,7 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent accent="crm" className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-heading text-base flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -412,9 +422,10 @@ const CrmPossessionNotice: React.FC = () => {
   const [proxyAckTarget,       setProxyAckTarget]       = useState<number | null>(null);
   const [proxyDisputeTarget,   setProxyDisputeTarget]   = useState<number | null>(null);
   const [proxySaving,          setProxySaving]          = useState(false);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
   const { data: notices = [], isLoading, dataUpdatedAt, isFetching, refetch } =
-    useQuery({ queryKey: ["crm-possession-notice"], queryFn: fetchAll, staleTime: 30_000 });
+    useQuery({ queryKey: ["crm-possession-notice", cpb], queryFn: () => fetchAll(cpb), staleTime: 30_000 });
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["crm-possession-notice"] });
@@ -650,6 +661,7 @@ const CrmPossessionNotice: React.FC = () => {
                   </button>
                 )}
               </div>
+              <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
             </div>
 
             {/* Notice cards */}
@@ -735,7 +747,7 @@ const CrmPossessionNotice: React.FC = () => {
 
         {/* ── Mark-Sent dialog ── */}
         <Dialog open={!!sentTarget} onOpenChange={(o) => { if (!o) { setSentTarget(null); setSentMode(""); } }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2 text-base">
                 <Send size={16} className="text-blue-600" /> Mark Notice Sent
@@ -774,7 +786,7 @@ const CrmPossessionNotice: React.FC = () => {
 
         {/* ── Edit dialog ── */}
         <Dialog open={!!editTarget} onOpenChange={(o) => { if (!o) setEditTarget(null); }}>
-          <DialogContent className="max-w-md">
+          <DialogContent accent="crm" className="max-w-md">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2 text-base">
                 <Pencil size={15} /> Edit Draft — {editTarget?.NoticeNo}
@@ -829,7 +841,7 @@ const CrmPossessionNotice: React.FC = () => {
 
         {/* ── Delete confirmation ── */}
         <Dialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2 text-base text-red-600">
                 <Trash2 size={16} /> Delete Notice
@@ -854,7 +866,7 @@ const CrmPossessionNotice: React.FC = () => {
 
         {/* ── Dispute dialog ── */}
         <Dialog open={!!disputeDialog} onOpenChange={(o) => { if (!o) { setDisputeDialog(null); setDisputeReason(""); } }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2 text-base">
                 <AlertTriangle size={16} className="text-red-500" /> Mark Disputed
@@ -880,7 +892,7 @@ const CrmPossessionNotice: React.FC = () => {
 
         {/* ── Retract dispute ── */}
         <Dialog open={!!retractDialog} onOpenChange={(o) => { if (!o) { setRetractDialog(null); setRetractReason(""); } }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2 text-base">
                 <RotateCcw size={16} className="text-amber-600" /> Retract Dispute

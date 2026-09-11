@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/payments";
 
@@ -76,10 +77,27 @@ function fmtDate(v?: string | null) {
 // filter, which meant the summary strip's OTHER counts silently collapsed
 // to 0 whenever a filter was active (e.g. filtering to "Demanded" made the
 // backend compute pendingCount from an already-Demanded-only row set).
-async function fetchDemands(search: string): Promise<{ demands: DemandRow[] }> {
+interface DemandListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+// NOTE on scale: this endpoint is still fetched in full (view=all), not
+// paginated — each row is a MILESTONE, bucketed into 4 tabs and grouped into
+// per-booking cards entirely client-side (see `tabbed` below). Naively
+// paginating the raw milestone rows would silently split a booking's
+// milestones across pages and break both the grouping and the tab counts.
+// Company/Project/Block narrows the set server-side (same as every other
+// page), which is the scalability lever that actually applies here without
+// a larger redesign of the tab/group model itself.
+async function fetchDemands(filters: DemandListFilters): Promise<{ demands: DemandRow[] }> {
   const q = new URLSearchParams();
   q.set("view", "all");
-  if (search) q.set("search", search);
+  if (filters.search) q.set("search", filters.search);
+  if (filters.companyId) q.set("companyId", filters.companyId);
+  if (filters.projectId) q.set("projectId", filters.projectId);
+  if (filters.blockId) q.set("blockId", filters.blockId);
   const res = await fetchWithAuth(`${API}/demands?${q}`);
   if (!res.ok) throw new Error("Failed to load demands");
   return res.json();
@@ -257,6 +275,7 @@ const CrmDemands: React.FC = () => {
   const { canDoAction } = useAuth();
   const [search, setSearch] = useState("");
   const [searchInput, setSearchInput] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [activeTab, setActiveTab] = useState<TabKey>("overdue");
   const [density, setDensity] = useState<"grouped" | "compact">("grouped");
   const [raiseRow, setRaiseRow] = useState<DemandRow | null>(null);
@@ -274,9 +293,13 @@ const CrmDemands: React.FC = () => {
   // poking at pagePermissions' internal shape myself.
   const canEdit = canDoAction("crm-payments", "edit");
 
+  const listFilters: DemandListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
   const { data, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-demands", search],
-    queryFn: () => fetchDemands(search),
+    queryKey: ["crm-demands", listFilters],
+    queryFn: () => fetchDemands(listFilters),
     placeholderData: (prev) => prev,
     staleTime: 30_000,
   });
@@ -469,6 +492,7 @@ const CrmDemands: React.FC = () => {
           <button onClick={() => { setSearch(""); setSearchInput(""); }}
             className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Clear</button>
         )}
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
         <div className="ml-auto flex items-center gap-1 rounded-lg border border-border p-0.5">
           <button
             onClick={() => setDensity("grouped")}
@@ -542,7 +566,7 @@ const CrmDemands: React.FC = () => {
 
       {/* Raise Demand Dialog */}
       <Dialog open={!!raiseRow} onOpenChange={(o) => { if (!o) { setRaiseRow(null); setRaiseNotes(""); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle>Raise Payment Demand</DialogTitle></DialogHeader>
           {raiseRow && (
             <div className="space-y-3">
@@ -606,7 +630,7 @@ const CrmDemands: React.FC = () => {
       </AlertDialog>
       {/* Bulk Raise Dialog */}
       <Dialog open={bulkOpen} onOpenChange={(o) => { if (!o) { setBulkOpen(false); setBulkProject(""); setBulkMilestone(""); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle className="flex items-center gap-2"><Zap size={16} /> Raise All Eligible Demands</DialogTitle></DialogHeader>
           <div className="space-y-3 text-sm">
             <p className="text-xs text-muted-foreground">

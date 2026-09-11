@@ -48,10 +48,19 @@ router.get("/", requirePageRight("crm-afs-query-payment", "view"), async (req, r
   try {
     const pool = getPool();
     const { status } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const where = [];
     if (status) { req0.input("st", sql.NVarChar(20), status); where.push("aqp.Status = @st"); }
-    const result = await req0.query(`${AQP_SELECT} ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY aqp.CreatedAt DESC`);
+    // Not paginated — status counts are computed client-side from the full
+    // set (see CrmAfsQueryPayment.tsx), same reasoning as CrmDemands.
+    // Company/Project/Block narrows the set server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("um.BlockId = @blockId"); }
+    const result = await req0.query(`${AQP_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY aqp.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-afs-query-payment] GET error:", e.message);
@@ -63,12 +72,13 @@ router.get("/booking/:bookingId", requirePageRight("crm-afs-query-payment", "vie
   try {
     const pool = getPool();
     const bookingId = parseInt(req.params.bookingId, 10);
+    if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query(`${AQP_SELECT} WHERE aqp.BookingId = @bid`);
     res.json(result.recordset[0] || null);
   } catch (e) {
     console.error("[crm-afs-query-payment] GET /booking/:id error:", e.message);
-    res.status(500).json({ error: e.message });
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 
@@ -150,16 +160,11 @@ router.post("/", requirePageRight("crm-afs-query-payment", "create"), async (req
       return res.status(400).json({ error: `AFS Query Payment requires the Agreement for Sale to be Executed or Registered first (current status: ${agr.Status})` });
     }
 
-    // Unlike crmQueryPayment.js (which reads the amount live from an
-    // upstream table), this amount is typed in right here — but nothing
-    // stopped it being typed in as blank. A tracker with no real Stamp
-    // Duty/Registration Fee is indistinguishable from one correctly showing
-    // "nothing owed", which is never actually true for AFS registration.
-    const stampIn = b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : 0;
-    const regFeeIn = b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : 0;
-    if (stampIn + regFeeIn <= 0) {
-      return res.status(400).json({ error: "Enter a Stamp Duty or Registration Fee amount before starting AFS Query Payment tracking." });
-    }
+    // The amount may be left blank at creation (the UI now lets staff open the
+    // tracker first and fill the government-calculated figure in before it is
+    // sent to the customer). It is instead enforced at POST /:id/info below —
+    // paperwork cannot be sent to the customer with no fee on record — so a
+    // tracker with a blank amount can never actually reach them.
 
     const aqpNo = await getNextDocNumber(pool, "AQP", "AQP");
     const result = await pool.request()
@@ -228,11 +233,20 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
     const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId, Status FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
+      .query("SELECT BookingId, Status, StampDuty, RegistrationFee FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
     const row = cur.recordset[0];
     const activeErr = await requireApprovedBooking(pool, row.BookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
+
+    // The fee amount is optional at creation but mandatory here — the customer
+    // is being told what to pay at the Sub-Registrar, so there must be a
+    // figure on record before the paperwork goes out.
+    if (row.Status === CrmStatus.PENDING
+        && (row.StampDuty == null || Number(row.StampDuty) === 0)
+        && (row.RegistrationFee == null || Number(row.RegistrationFee) === 0)) {
+      return res.status(400).json({ error: "Enter the Stamp Duty or Registration Fee amount before sending the details to the customer." });
+    }
 
     const rawFiles = Array.isArray(req.body.files) ? req.body.files : [];
     if (!rawFiles.length) return res.status(400).json({ error: "At least one file is required" });

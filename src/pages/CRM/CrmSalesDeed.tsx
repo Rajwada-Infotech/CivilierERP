@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -22,6 +22,8 @@ import {
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { RefreshButton } from "@/components/ui/RefreshButton";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 
 const API = "/api/crm/sales-deed";
@@ -491,6 +493,27 @@ const EMPTY_FORM = {
 async function fetchAll(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
 }
+
+const PAGE_SIZE = 20;
+interface DeedListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchDeedsList(filters: DeedListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
+}
 async function fetchEligible(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/eligible-bookings`); return r.ok ? r.json() : []; } catch { return []; }
 }
@@ -515,6 +538,13 @@ const CrmSalesDeed: React.FC = () => {
   const deepLinkBookingId = sp.get("bookingId");
   const deedIdFilter = sp.get("deedId");
   const [deedDeepLinkOpened, setDeedDeepLinkOpened] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -583,9 +613,15 @@ const CrmSalesDeed: React.FC = () => {
   };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: deeds = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-sales-deed"], queryFn: fetchAll, staleTime: 30_000,
+  const listFilters: DeedListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-sales-deed", listFilters, page], queryFn: () => fetchDeedsList(listFilters, page), staleTime: 30_000,
   });
+  const deeds = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: eligible = [] } = useQuery({
     queryKey: ["crm-sales-deed-eligible"], queryFn: fetchEligible, staleTime: 60_000,
   });
@@ -918,7 +954,6 @@ const CrmSalesDeed: React.FC = () => {
     } catch (e: any) { toast.error(translateError(e.message)); }
   };
 
-  const [search, setSearch] = useState("");
   const handleCancelDeed = async () => {
     if (!detailId) return;
     try {
@@ -935,13 +970,7 @@ const CrmSalesDeed: React.FC = () => {
     }
   };
 
-  const filtered = (deeds as any[]).filter(d => 
-    !search || 
-    d.ApplicantName?.toLowerCase().includes(search.toLowerCase()) || 
-    d.DeedNo?.toLowerCase().includes(search.toLowerCase()) ||
-    d.BookingNo?.toLowerCase().includes(search.toLowerCase()) ||
-    d.UnitNo?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = deeds as any[];
 
   return (
     <>
@@ -966,10 +995,12 @@ const CrmSalesDeed: React.FC = () => {
           <div className="w-80 shrink-0 flex flex-col gap-2">
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search deeds..."
+              <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+                placeholder="Search deeds... (Enter to search)"
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
+            <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
             <div className="flex-1 overflow-y-auto thin-scroll space-y-1.5">
               {isLoading ? (
                 <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
@@ -1005,6 +1036,7 @@ const CrmSalesDeed: React.FC = () => {
                 );
               })}
             </div>
+            <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
           </div>
 
           {/* Detail (Right Pane) */}
@@ -1895,7 +1927,7 @@ const CrmSalesDeed: React.FC = () => {
         </div>
 
         <Dialog open={!!previewDoc} onOpenChange={(o) => { if (!o) closePreview(); }}>
-          <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-3xl p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-4 py-2.5 border-b border-border">
               <DialogTitle className="text-sm truncate">{previewDoc?.name}</DialogTitle>
             </DialogHeader>
@@ -1911,7 +1943,7 @@ const CrmSalesDeed: React.FC = () => {
 
         {/* Keep the New Deed creation Dialog and Proxy Dialogs below everything */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-          <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-lg p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-6 py-4 border-b border-border">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">

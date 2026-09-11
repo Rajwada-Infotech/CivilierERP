@@ -9,7 +9,7 @@ import { TaskDrawer } from "@/components/followup/TaskDrawer";
 import { ProgressBar } from "@/components/followup/ProgressBar";
 import { ExportMenu } from "@/components/ExportMenu";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import type { ExportColumn } from "@/lib/export";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -123,7 +123,7 @@ const PRIORITY_COLORS: Record<(typeof PRIORITIES)[number], string> = {
 
 function useGlass() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const glassCard = isDark
     ? {
         background: "rgba(6, 20, 19, 0.45)",

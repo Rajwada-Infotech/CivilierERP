@@ -7,9 +7,17 @@ import React, {
   useMemo,
 } from "react";
 
-export type Theme = "dark" | "light" | "midnight" | "root" | "glass";
+export type Theme = "dark" | "light" | "midnight" | "root" | "glass" | "bw";
 
-const themes: Theme[] = ["dark", "light", "midnight", "root", "glass"];
+const themes: Theme[] = ["dark", "light", "midnight", "root", "glass", "bw"];
+
+/**
+ * Themes whose surface is light (white/near-white background). Components that
+ * branch on light vs dark for decorative fills / glass cards should use this
+ * instead of `theme === "light"` so the BW theme (light background, black
+ * accents) is treated correctly.
+ */
+export const isLightTheme = (t: Theme): boolean => t === "light" || t === "bw";
 
 // Dot colors that represent each theme visually
 export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
@@ -18,6 +26,7 @@ export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
   midnight: { bg: "#2dd4bf", label: "Midnight" },
   root: { bg: "#f0a500", label: "Root" },
   glass: { bg: "#a5b4fc", label: "Glass" },
+  bw: { bg: "#111111", label: "BW" },
 };
 
 interface ThemeContextType {

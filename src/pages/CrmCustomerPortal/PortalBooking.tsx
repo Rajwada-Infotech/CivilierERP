@@ -80,7 +80,7 @@ const PortalBooking: React.FC = () => {
             </span>
           </div>
           <p className="text-xs" style={{ color: TEXT_MUTED }}>
-            Bank account, nominee, PAN and Aadhaar details are collected by our sales team before agreement preparation.
+            Bank account, PAN and Aadhaar details are collected by our sales team before agreement preparation.
             {!detailsDone && " Please have these ready when they call."}
           </p>
         </div>

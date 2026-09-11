@@ -7,7 +7,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Plus, Search, Phone, X, FileCheck, Users, ChevronRight, Check, Upload, FileImage, File as FileIcon, FileSpreadsheet, Eye, Trash2, IndianRupee, Landmark, ClipboardCheck, Wallet, Pencil, Lock, Timer, PhoneCall, CalendarClock, StickyNote, ListPlus, Building2, Car, AlertTriangle, Download, ShieldCheck, ShieldAlert, RotateCcw, ClipboardList, Send, Unlock, MapPin } from "lucide-react";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -15,6 +15,8 @@ import { ContactActionBar } from "@/components/crm/ContactActionBar";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useAuth } from "@/contexts/AuthContext";
 import { translateError } from "@/lib/translateError";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/welcome-calls";
 const CO_API = "/api/crm/co-applicants";
@@ -50,11 +52,34 @@ const nowLocal = () => {
   return d.toISOString().slice(0, 16);
 };
 
-async function fetchQueue(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${API}/queue`); return r.ok ? r.json() : []; } catch { return []; }
+interface WelcomeCpbFilters { companyId: string; projectId: string; blockId: string }
+function cpbParams(f: WelcomeCpbFilters): URLSearchParams {
+  const q = new URLSearchParams();
+  if (f.companyId) q.set("companyId", f.companyId);
+  if (f.projectId) q.set("projectId", f.projectId);
+  if (f.blockId) q.set("blockId", f.blockId);
+  return q;
 }
-async function fetchCalls(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+// Queue is naturally bounded to "still needs a call" bookings, not the full
+// historical volume — Company/Project/Block narrows it, no pagination needed.
+async function fetchQueue(cpb: WelcomeCpbFilters): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${API}/queue?${cpbParams(cpb)}`); return r.ok ? r.json() : []; } catch { return []; }
+}
+
+const PAGE_SIZE = 20;
+// Call History is a genuine, ever-growing audit log — the one view here
+// that actually needs pagination.
+async function fetchCallsList(cpb: WelcomeCpbFilters, search: string, page: number): Promise<{ rows: any[]; total: number }> {
+  const q = cpbParams(cpb);
+  q.set("page", String(page));
+  q.set("pageSize", String(PAGE_SIZE));
+  if (search) q.set("search", search);
+  try {
+    const r = await fetchWithAuth(`${API}?${q}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
 }
 async function fetchUsers(): Promise<{ value: string; label: string }[]> {
   try {
@@ -148,8 +173,8 @@ type VcState = {
 async function fetchVerificationChecklist(bookingId: number): Promise<VcState | null> {
   try { const r = await fetchWithAuth(`${VC_API}/${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
 }
-async function fetchRecheckQueue(): Promise<any[]> {
-  try { const r = await fetchWithAuth(`${VC_API}/recheck/queue`); return r.ok ? r.json() : []; } catch { return []; }
+async function fetchRecheckQueue(cpb: WelcomeCpbFilters): Promise<any[]> {
+  try { const r = await fetchWithAuth(`${VC_API}/recheck/queue?${cpbParams(cpb)}`); return r.ok ? r.json() : []; } catch { return []; }
 }
 
 function mimeIcon(mime: string | null | undefined) {
@@ -181,7 +206,7 @@ const DocPreviewDialog: React.FC<{ doc: any; onClose: () => void }> = ({ doc, on
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent accent="crm" className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             {mimeIcon(doc.MimeType)} {doc.FileName || doc.DocumentType}
@@ -216,6 +241,46 @@ const DocPreviewDialog: React.FC<{ doc: any; onClose: () => void }> = ({ doc, on
 // DocPreviewDialog above, pointed at the actual invoice PDF route
 // (CrmBookingDetail.tsx's Payment & Invoice tab uses the identical
 // component) instead of the old plain-text Type/Amount/Date summary.
+const WelcomeCallPdfDialog: React.FC<{ bookingId: number; bookingNo: string; onClose: () => void }> = ({ bookingId, bookingNo, onClose }) => {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let objectUrl: string | null = null;
+    let cancelled = false;
+    fetchWithAuth(`${VC_API}/${bookingId}/pdf`)
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((blob) => {
+        if (cancelled || !blob) return;
+        objectUrl = URL.createObjectURL(blob);
+        setBlobUrl(objectUrl);
+      })
+      .catch(() => setBlobUrl(null));
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [bookingId]);
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <div className="flex items-start justify-between">
+            <DialogTitle className="font-heading flex items-center gap-1.5"><FileCheck size={16} className="text-amber-600 dark:text-amber-400" /> Welcome Call Verification - {bookingNo}</DialogTitle>
+            {blobUrl && (
+              <a href={blobUrl} download={`WelcomeCall_Verification_${bookingNo}.pdf`}
+                className="shrink-0 px-3 py-1.5 text-sm text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg font-medium hover:shadow-lg hover:shadow-amber-500/20 flex items-center gap-1.5">
+                <Download size={14} /> Download PDF
+              </a>
+            )}
+          </div>
+        </DialogHeader>
+        <div className="flex items-center justify-center min-h-[300px] bg-muted/20 rounded-lg overflow-hidden border border-border">
+          {!blobUrl ? <span className="text-sm text-muted-foreground">Loading preview...</span>
+            : <iframe src={blobUrl} title={`WelcomeCall_${bookingNo}`} className="w-full h-[60vh] border-0" />}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 const InvoicePdfDialog: React.FC<{ bookingId: number; invoice: any; onClose: () => void }> = ({ bookingId, invoice, onClose }) => {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
@@ -235,7 +300,7 @@ const InvoicePdfDialog: React.FC<{ bookingId: number; invoice: any; onClose: () 
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent accent="crm" className="max-w-2xl">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
             <DialogTitle className="font-heading flex items-center gap-1.5"><FileCheck size={16} className="text-amber-600 dark:text-amber-400" /> {invoice.InvoiceNo}</DialogTitle>
@@ -746,20 +811,20 @@ const ChecklistSectionBlock: React.FC<{
 // themselves render, not the gate itself.
 const ChecklistSubmitFooter: React.FC<{
   vc: any; locked: boolean; submitting: boolean; reopening: boolean;
-  onSubmit: () => void; onReopen: () => void; onContinue?: () => void;
-}> = ({ vc, locked, submitting, reopening, onSubmit, onReopen, onContinue }) => {
+  onSubmit: () => void; onReopen: () => void; onPreviewPdf?: () => void;
+}> = ({ vc, locked, submitting, reopening, onSubmit, onReopen, onPreviewPdf }) => {
   const rights = usePageRights("crm-welcome-calls");
   if (!vc) return null;
   return (
-    <div className="rounded-xl border border-border p-3.5 space-y-2">
+    <div className="rounded-xl border border-border p-3.5 space-y-2 bg-muted/10">
       {locked ? (
         <div className="flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
           <span className="flex items-center gap-1.5 font-medium"><Lock size={12} /> Submitted and locked{vc.submission?.SubmittedAt ? ` — ${String(vc.submission.SubmittedAt).slice(0, 16).replace("T", " ")}` : ""}</span>
           <div className="flex items-center gap-3">
-            {onContinue && (
-              <button type="button" onClick={onContinue}
-                className="flex items-center gap-1 font-medium text-emerald-800 hover:underline">
-                <ChevronRight size={12} /> Continue to Communication Log
+            {onPreviewPdf && (
+              <button type="button" onClick={onPreviewPdf}
+                className="flex items-center gap-1 font-medium text-emerald-700 hover:underline">
+                <FileCheck size={12} /> View PDF
               </button>
             )}
             {rights.canEdit && (
@@ -861,6 +926,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
   // just the one-line teaser.
   const [expandedCard, setExpandedCard] = useState<"plan" | "bank" | null>(null);
   const [viewingInvoice, setViewingInvoice] = useState<any | null>(null);
+  const [viewingWelcomeCallPdf, setViewingWelcomeCallPdf] = useState<{ id: number, no: string } | null>(null);
   // Was a fixed 300px sidebar + narrow column crammed into max-w-6xl with
   // 11px fonts everywhere — genuinely well-architected underneath (single
   // shared checklist source, verify-next-to-the-real-data placement, a live
@@ -992,7 +1058,6 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
       vcState.refetch();
       invalidateQueue();
       qc.invalidateQueries({ queryKey: ["crm-welcome-calls-history"] });
-      qc.invalidateQueries({ queryKey: ["crm-communication"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
 
@@ -1250,7 +1315,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
   return (
     <>
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto thin-scroll">
+      <DialogContent accent="crm" className="max-w-6xl max-h-[90vh] overflow-y-auto thin-scroll">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             <PhoneCall size={18} className="text-amber-600 dark:text-amber-400" />
@@ -1306,7 +1371,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
         <ChecklistSubmitFooter
           vc={vcState.vc} locked={vcState.locked} submitting={vcState.submitting} reopening={vcState.reopening}
           onSubmit={vcState.handleSubmit} onReopen={vcState.handleReopen}
-          onContinue={() => { onClose(); navigate(`/crm/communication?bookingId=${booking.BookingId}`); }}
+          onPreviewPdf={() => setViewingWelcomeCallPdf({ id: booking.BookingId, no: booking.BookingNo })}
         />
 
         {/* F3 — Escalation banner: fires when customer has been unreachable 3+ consecutive times */}
@@ -1726,7 +1791,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
               </div>
 
               {/* Bank Preference (home loan) — a genuinely separate record
-                  from the customer's own Nominee & Bank Details below (that's
+                  from the customer's own Bank Details below (that's
                   KYC/refund banking; this is which bank is financing the
                   purchase). Tap to flex open the full loan record, sourced
                   straight from the same GET the Home Loan Tracking page
@@ -1836,7 +1901,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                         checklist.documents.total === 0 ? "blank"
                         : checklist.documents.verified === checklist.documents.total ? "done" : "progress" },
                       { label: "Co-Applicant Added", state: checklist.coApplicants.count > 0 ? "done" : "blank" },
-                      { label: "Bank & Nominee", state: checklist.bankDetails.complete ? "done" : checklist.bankDetails.started ? "progress" : "blank" },
+                      { label: "Bank Details", state: checklist.bankDetails.complete ? "done" : checklist.bankDetails.started ? "progress" : "blank" },
                       { label: "NOC Issued", state: nocIssued ? "done" : hasNoc ? "progress" : "blank" },
                       { label: "Agreement", state: checklist.agreement?.Status === CrmStatus.EXECUTED ? "done" : checklist.agreement ? "progress" : "blank" },
                     ];
@@ -2130,6 +2195,9 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
     {previewDoc && <DocPreviewDialog doc={previewDoc} onClose={() => setPreviewDoc(null)} />}
 
     {/* Invoice PDF preview — real generated PDF, same as CrmBookingDetail.tsx's Payment & Invoice tab */}
+    {viewingWelcomeCallPdf && (
+      <WelcomeCallPdfDialog bookingId={viewingWelcomeCallPdf.id} bookingNo={viewingWelcomeCallPdf.no} onClose={() => setViewingWelcomeCallPdf(null)} />
+    )}
     {viewingInvoice && (
       <InvoicePdfDialog bookingId={booking.BookingId} invoice={viewingInvoice} onClose={() => setViewingInvoice(null)} />
     )}
@@ -2141,7 +2209,10 @@ const CrmWelcomeCall: React.FC = () => {
   const navigate = useNavigate();
   const [sp] = useSearchParams();
   const bkgFilter = sp.get("bookingId");
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [historyPage, setHistoryPage] = useState(1);
   const [view, setView] = useState<"queue" | "recheck" | "history">("queue");
   const [activeBooking, setActiveBooking] = useState<any | null>(null);
   // Set only when opening a booking from Call History for a specific past
@@ -2150,6 +2221,7 @@ const CrmWelcomeCall: React.FC = () => {
   // rows never set this, so they always open in normal logging mode.
   const [activeCall, setActiveCall] = useState<any | null>(null);
   const [deepLinkOpened, setDeepLinkOpened] = useState(false);
+  const [viewingWelcomeCallPdf, setViewingWelcomeCallPdf] = useState<{ id: number; no: string } | null>(null);
 
   // Opening from a row click used to only ever set local state — the URL
   // stayed plain /crm/welcome-calls, so refreshing lost the open dialog and
@@ -2164,8 +2236,8 @@ const CrmWelcomeCall: React.FC = () => {
   };
 
   const { data: queue = [], isLoading: queueLoading } = useQuery({
-    queryKey: ["crm-welcome-queue"],
-    queryFn: fetchQueue,
+    queryKey: ["crm-welcome-queue", cpb],
+    queryFn: () => fetchQueue(cpb),
     staleTime: 30_000,
   });
 
@@ -2183,26 +2255,29 @@ const CrmWelcomeCall: React.FC = () => {
       fetchBookingById(id).then((b) => { if (b) setActiveBooking(b); });
     }
   }, [bkgFilter, deepLinkOpened, queue]);
-  const { data: history = [], isLoading: historyLoading, refetch: refetchHistory } = useQuery({
-    queryKey: ["crm-welcome-calls-history"],
-    queryFn: fetchCalls,
+  const { data: historyResult, isLoading: historyLoading, refetch: refetchHistory } = useQuery({
+    queryKey: ["crm-welcome-calls-history", cpb, search, historyPage],
+    queryFn: () => fetchCallsList(cpb, search, historyPage),
     staleTime: 60_000,
   });
+  const history = historyResult?.rows ?? [];
+  const historyTotal = historyResult?.total ?? 0;
   const { data: recheckQueue = [], isLoading: recheckLoading } = useQuery({
-    queryKey: ["crm-welcome-recheck-queue"],
-    queryFn: fetchRecheckQueue,
+    queryKey: ["crm-welcome-recheck-queue", cpb],
+    queryFn: () => fetchRecheckQueue(cpb),
     staleTime: 30_000,
   });
 
+  // Queue and Recheck are already server-filtered by Company/Project/Block;
+  // their local search box still narrows client-side since both lists are
+  // small and bounded (open work items, not a growing log).
   const filteredQueue = useMemo(() =>
     (queue as any[]).filter((c: any) =>
       !search || c.ApplicantName?.toLowerCase().includes(search.toLowerCase()) || c.BookingNo?.includes(search)
     ), [queue, search]);
 
-  const filteredHistory = useMemo(() =>
-    (history as any[]).filter((c: any) =>
-      !search || c.ApplicantName?.toLowerCase().includes(search.toLowerCase()) || c.BookingNo?.includes(search)
-    ), [history, search]);
+  // History is now server-paginated/searched — no client-side re-filtering.
+  const filteredHistory = history;
 
   const overdueCount = useMemo(() =>
     (queue as any[]).filter((c: any) => c.NextCallDate && new Date(c.NextCallDate) <= new Date()).length,
@@ -2271,7 +2346,7 @@ const CrmWelcomeCall: React.FC = () => {
   ];
 
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const glassStyle: React.CSSProperties = {
     background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
     border: isDark ? "1px solid rgba(245,158,11,0.15)" : "1px solid rgba(245,158,11,0.18)",
@@ -2307,10 +2382,12 @@ const CrmWelcomeCall: React.FC = () => {
         <div className="flex gap-3 items-center flex-wrap px-3.5 py-3 border-b" style={{ borderColor }}>
           <div className="relative flex-1 min-w-48">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by customer or booking no..."
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { setSearch(searchInput); setHistoryPage(1); } }}
+              placeholder="Search by customer or booking no... (Enter to search)"
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
           </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setHistoryPage(1); }} />
           <div className="flex items-center gap-1 rounded-lg bg-muted/20 p-1 shrink-0">
             <button onClick={() => setView("queue")}
               className={`px-3 py-1.5 text-xs font-heading font-medium rounded-lg transition-all ${
@@ -2374,16 +2451,28 @@ const CrmWelcomeCall: React.FC = () => {
                     </div>
                     <div className="text-xs text-muted-foreground mt-0.5">{c.Mobile} · {c.ProjectName || c.UnitNo}</div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {c.Outcome && (
-                      <span className={`text-xs px-2 py-0.5 rounded-full border font-medium ${outcomeColor[c.Outcome] || ""}`}>
-                        {c.Outcome}
-                      </span>
+                  <div className="flex flex-col items-end gap-2">
+                    <div className="flex items-center gap-2">
+                      {c.Outcome && (
+                        <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full border ${c.Outcome === "Welcomed" ? "border-emerald-200 bg-emerald-50 text-emerald-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+                          {c.Outcome}
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">{c.CallDate ? String(c.CallDate).slice(0, 16).replace("T", " ") : "—"}</span>
+                      <ChevronRight size={14} className="text-muted-foreground ml-1" />
+                    </div>
+                    {!!c.HasSubmittedChecklist && (
+                      <div
+                        role="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setViewingWelcomeCallPdf({ id: c.BookingId, no: c.BookingNo });
+                        }}
+                        className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-md hover:bg-emerald-100 transition-colors cursor-pointer"
+                      >
+                        <FileCheck size={12} /> View PDF
+                      </div>
                     )}
-                    <span className="text-xs text-muted-foreground">
-                      {c.CallDate ? String(c.CallDate).slice(0, 16).replace("T", " ") : "—"}
-                    </span>
-                    <ChevronRight size={14} className="text-muted-foreground" />
                   </div>
                 </div>
                 {(c.Notes || c.DurationSeconds || c.NextCallDate || c.PreferredAgreementDate || custom.length > 0) && (
@@ -2401,6 +2490,7 @@ const CrmWelcomeCall: React.FC = () => {
           })}
           </div>
         )}
+        {view === "history" && <CrmPaginationBar page={historyPage} pageSize={PAGE_SIZE} total={historyTotal} onPage={setHistoryPage} />}
       </div>
 
       {/* Same pattern as CrmBooking.tsx's own ?applicationId= deep link:
@@ -2422,6 +2512,9 @@ const CrmWelcomeCall: React.FC = () => {
         />
       )}
     </CrmShell>
+    {viewingWelcomeCallPdf && (
+      <WelcomeCallPdfDialog bookingId={viewingWelcomeCallPdf.id} bookingNo={viewingWelcomeCallPdf.no} onClose={() => setViewingWelcomeCallPdf(null)} />
+    )}
     </>
   );
 };

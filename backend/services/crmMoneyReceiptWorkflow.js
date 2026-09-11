@@ -20,6 +20,44 @@ function cleanString(v) {
   return v == null ? null : String(v).trim() || null;
 }
 
+// ── GST split (pure math, no DB/IO) ─────────────────────────────────────────
+//
+// Two callers need this and previously each had their own copy-pasted
+// version of the same round-to-cents logic. Pulled out here unchanged —
+// same inputs produce the same outputs as before, this only removes the
+// duplication.
+
+// Extracts GST from a tax-inclusive amount using the booking's explicit
+// per-line rate when one is set (UnitParkingGstRate: 1 or 5, for the
+// unit/parking milestone), falling back to the booking's blended
+// TotalGstAmount/GrandTotal ratio when it isn't.
+// e.g. ₹10,000 at 1% -> GST = 10000×1/101 = ₹99.01, base = ₹9,900.99.
+function splitGstByRateOrBlend(amount, { gstRate, totalGstAmount, grandTotal }) {
+  const rate = Number(gstRate || 0);
+  const ratio = rate > 0
+    ? rate / (100 + rate)
+    : blendedGstRatio(totalGstAmount, grandTotal);
+  return roundGstSplit(amount, ratio);
+}
+
+// Same math, blended-ratio only — used when there's no per-line rate to key
+// off (e.g. an arbitrary top-up/on-account payment against the booking).
+function splitGstByBlend(amount, { totalGstAmount, grandTotal }) {
+  return roundGstSplit(amount, blendedGstRatio(totalGstAmount, grandTotal));
+}
+
+function blendedGstRatio(totalGstAmount, grandTotal) {
+  return Number(grandTotal) > 0 ? Number(totalGstAmount) / Number(grandTotal) : 0;
+}
+
+function roundGstSplit(amount, ratio) {
+  const gstAmount = Math.round(amount * ratio * 100) / 100;
+  const baseAmount = Math.round((amount - gstAmount) * 100) / 100;
+  return { gstAmount, baseAmount };
+}
+
+// ── Eligibility / lookups ────────────────────────────────────────────────────
+
 async function assertDataReviewComplete(pool, bookingId) {
   const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT Id, ApplicationId, WorkflowStage, Status, IsActive
@@ -68,6 +106,14 @@ async function getBookingReceiptDefaults(pool, bookingId) {
   return row;
 }
 
+async function getBookingGstInputs(pool, bookingId) {
+  const gstRow = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal, ISNULL(UnitParkingGstRate,0) AS UnitParkingGstRate FROM dbo.CrmBooking WHERE Id = @bid");
+  return gstRow.recordset[0] || { TotalGstAmount: 0, GrandTotal: 0, UnitParkingGstRate: 0 };
+}
+
+// ── Create (Booking Amount's first Money Receipt) ───────────────────────────
+
 async function createMoneyReceiptForBooking(pool, bookingId, data = {}, actorUserId, { skipIfExists = false } = {}) {
   await assertDataReviewComplete(pool, bookingId);
 
@@ -87,20 +133,12 @@ async function createMoneyReceiptForBooking(pool, bookingId, data = {}, actorUse
     : Number(defaults.TokenValue != null ? defaults.TokenValue : defaults.BookingAmount);
   if (!amount || amount <= 0) throw new MoneyReceiptError("Amount must be greater than 0");
 
-  // Use the booking's explicit GST rate (UnitParkingGstRate: 1 or 5 for unit/parking,
-  // which is the applicable rate for the booking amount milestone). Applying it as
-  // rate/(100+rate) extracts the GST portion from the tax-inclusive payment correctly:
-  // e.g. ₹10,000 at 1% → GST = 10000×1/101 = ₹99.01, base = ₹9,900.99.
-  // If the rate is not set, fall back to the blended TotalGstAmount/GrandTotal ratio.
-  const gstRow = await pool.request().input("bid", sql.Int, bookingId)
-    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal, ISNULL(UnitParkingGstRate,0) AS UnitParkingGstRate FROM dbo.CrmBooking WHERE Id = @bid");
-  const { TotalGstAmount: totalGstAmt, GrandTotal: grandTotal, UnitParkingGstRate: gstRate } = gstRow.recordset[0] || {};
-  const rate = Number(gstRate || 0);
-  const gstRatio = rate > 0
-    ? rate / (100 + rate) // extract GST from tax-inclusive amount: e.g. 5% → 5/105
-    : (grandTotal > 0 ? Number(totalGstAmt) / Number(grandTotal) : 0);
-  const gstAmount = Math.round(amount * gstRatio * 100) / 100;
-  const baseAmount = Math.round((amount - gstAmount) * 100) / 100;
+  const gstInputs = await getBookingGstInputs(pool, bookingId);
+  const { gstAmount, baseAmount } = splitGstByRateOrBlend(amount, {
+    gstRate: gstInputs.UnitParkingGstRate,
+    totalGstAmount: gstInputs.TotalGstAmount,
+    grandTotal: gstInputs.GrandTotal,
+  });
 
   const paymentMode = cleanString(data.PaymentMode) || cleanString(defaults.PaymentMode) || "Other";
   const transactionRef = cleanString(data.TransactionRef) || cleanString(defaults.TransactionRef);
@@ -142,6 +180,8 @@ async function createMoneyReceiptForBooking(pool, bookingId, data = {}, actorUse
 async function createMoneyReceiptAfterDataReview(pool, bookingId, actorUserId) {
   return createMoneyReceiptForBooking(pool, bookingId, {}, actorUserId, { skipIfExists: true });
 }
+
+// ── Edit / resubmit / bounce (Pending <-> Bounced, pre-approval only) ──────
 
 async function updateMoneyReceipt(pool, receiptId, data, actorUserId) {
   const cur = await pool.request().input("id", sql.Int, receiptId).query(`
@@ -229,6 +269,8 @@ async function bounceMoneyReceipt(pool, receiptId, reason, actorUserId) {
   await generateMoneyReceiptPdf(pool, receiptId);
   return result.recordset[0];
 }
+
+// ── Approve (Booking Amount's Pending MR -> Finance Approval Inbox) ────────
 
 async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
   const tx = new sql.Transaction(pool);
@@ -333,6 +375,8 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
   return { success: true, ReceivedPaymentId: rp.RPPaymentID, RPDocNo: rp.RPDocNo };
 }
 
+// ── Auto-generate a receipt for every other approved payment ───────────────
+
 // Every CRM payment gets its own Money Receipt document, not just the
 // Booking Amount's first payment — called once from receivedPayment.js's
 // PUT /:id/approve, right after applyCrmMilestonePaymentApproval or
@@ -367,21 +411,23 @@ async function ensureMoneyReceiptForApprovedPayment(pool, receivedPaymentId, act
   const row = cur.recordset[0];
   if (!row || !row.CrmBookingId) return { existing: false, skipped: true };
 
-  // Derive GST split from booking's overall ratio (same logic as crmPayments.js getGstSplit)
-  const gstR = await pool.request().input("bid", sql.Int, row.CrmBookingId)
-    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal FROM dbo.CrmBooking WHERE Id = @bid");
-  const bkGst = gstR.recordset[0] || {};
-  const gstRatio = Number(bkGst.GrandTotal) > 0 ? Number(bkGst.TotalGstAmount) / Number(bkGst.GrandTotal) : 0;
-  const gstAmt  = Math.round(Number(row.RPAmount) * gstRatio * 100) / 100;
-  const baseAmt = Math.round((Number(row.RPAmount) - gstAmt) * 100) / 100;
+  // Derive GST split from booking's overall blended ratio (same helper the
+  // Booking Amount path falls back to when there's no per-line rate — this
+  // payment isn't tied to a specific milestone line, so there's no rate to
+  // key off in the first place).
+  const gstInputs = await getBookingGstInputs(pool, row.CrmBookingId);
+  const { gstAmount, baseAmount } = splitGstByBlend(Number(row.RPAmount), {
+    totalGstAmount: gstInputs.TotalGstAmount,
+    grandTotal: gstInputs.GrandTotal,
+  });
 
   const receiptNo = await getNextDocNumber(pool, "MR", "MR");
   const result = await pool.request()
     .input("no",   sql.NVarChar(30),  receiptNo)
     .input("bid",  sql.Int,           row.CrmBookingId)
     .input("amt",  sql.Decimal(18, 2), row.RPAmount)
-    .input("base", sql.Decimal(18, 2), baseAmt)
-    .input("gst",  sql.Decimal(18, 2), gstAmt)
+    .input("base", sql.Decimal(18, 2), baseAmount)
+    .input("gst",  sql.Decimal(18, 2), gstAmount)
     .input("mode", sql.NVarChar(30),  row.RPMode || "Other")
     .input("chq",  sql.NVarChar(50),  row.RPMode === "Cheque" ? row.RPCheckNumber : null)
     .input("chqDt", sql.Date,         row.RPMode === "Cheque" ? row.RPChequeDate : null)

@@ -1067,9 +1067,18 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
     const finYear = (req.query.finYear || "").toString().trim() || null;
     const dateFrom = (req.query.from || "").toString().trim() || null;
     const dateTo = (req.query.to || "").toString().trim() || null;
-    const companyId = req.query.companyId
-      ? parseInt(req.query.companyId, 10) || null
-      : null;
+    // companyId / projectId accept either a single id or a comma-separated
+    // list — the Expense Register report's Company / Project filters are
+    // multi-selects (same shape as expenseHeadId below).
+    const toIdCsv = (v) => {
+      const ids = (v ? String(v) : "")
+        .split(",")
+        .map((x) => parseInt(x.trim(), 10))
+        .filter((n) => Number.isInteger(n) && n > 0);
+      return ids.length ? ids.join(",") : null;
+    };
+    const companyIdsCsv = toIdCsv(req.query.companyId);
+    const projectIdsCsv = toIdCsv(req.query.projectId);
     const projectName = (req.query.projectName || "").toString().trim() || null;
     const docNo = (req.query.docNo || "").toString().trim() || null;
     const supplierId = req.query.supplierId ? parseInt(req.query.supplierId, 10) : null;
@@ -1104,7 +1113,8 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         .input("FinYear", sql.NVarChar(20), finYear)
         .input("DateFrom", sql.Date, dateFrom)
         .input("DateTo", sql.Date, dateTo)
-        .input("CompanyId", sql.Int, companyId)
+        .input("CompanyIds", sql.NVarChar(sql.MAX), companyIdsCsv)
+        .input("ProjectIds", sql.NVarChar(sql.MAX), projectIdsCsv)
         .input("ProjectName", sql.NVarChar(255), projectName)
         .input("DocNo", sql.NVarChar(100), docNo ? `%${docNo}%` : null)
         .input("SupplierId", sql.Int, supplierId)
@@ -1206,12 +1216,13 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
           AND (@DateFrom IS NULL OR eb.EDocDate >= @DateFrom)
           AND (@DateTo IS NULL OR eb.EDocDate <= @DateTo)
-          AND (@CompanyId IS NULL OR eb.ECompanyId = @CompanyId)
+          AND (@CompanyIds IS NULL OR eb.ECompanyId IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@CompanyIds, ',')))
           -- EProjectName is a misnomer — it stores the enterprise ID as text,
-          -- not the name (see ExpenseBooking/helpers.ts). The frontend filter
-          -- sends the project's actual name, so this has to match against the
-          -- already-joined ep.name, not the raw id column.
+          -- not the name (see ExpenseBooking/helpers.ts). @ProjectName (legacy
+          -- single filter) matches the resolved name; @ProjectIds (multi-select)
+          -- matches the resolved project id, GRN -> PO fallback included.
           AND (@ProjectName IS NULL OR ep.name = @ProjectName)
+          AND (@ProjectIds IS NULL OR COALESCE(ep.id, epo_proj.id) IN (SELECT TRY_CAST(value AS INT) FROM STRING_SPLIT(@ProjectIds, ',')))
           AND (@DocNo IS NULL OR eb.EDocNo LIKE @DocNo)
           AND (@SupplierId IS NULL OR (${ebSupplierList.idExpr}) = @SupplierId)
           -- Expense Head lives in one of two places: the multi-head

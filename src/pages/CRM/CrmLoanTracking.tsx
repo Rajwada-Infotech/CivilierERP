@@ -17,6 +17,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const BKG_API = "/api/crm/bookings";
 const WC_API  = "/api/crm/welcome-calls";
@@ -45,9 +46,18 @@ const EMPTY_FORM = {
 const fmt = (n: number | null | undefined) =>
   n != null && n !== 0 ? `₹${Number(n).toLocaleString("en-IN")}` : "—";
 
-async function fetchLoanSummary(): Promise<any[]> {
+interface LoanCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — status-tab counts and disbursed
+// totals are computed client-side from the whole set (see `stats` below),
+// same as CrmDemands. Company/Project/Block narrows the set server-side.
+async function fetchLoanSummary(cpb?: LoanCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
   try {
-    const r = await fetchWithAuth("/api/crm/loan-summary");
+    const r = await fetchWithAuth(`/api/crm/loan-summary${qs ? `?${qs}` : ""}`);
     return r.ok ? r.json() : [];
   } catch { return []; }
 }
@@ -129,6 +139,7 @@ const CrmLoanTracking: React.FC = () => {
   const [form, setForm]     = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
   const [locked, setLocked] = useState(false);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
   const inputCls = `w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary/40 ${
     locked ? "opacity-60 cursor-not-allowed bg-muted/20" : ""
@@ -136,8 +147,8 @@ const CrmLoanTracking: React.FC = () => {
 
   // ── Data ────────────────────────────────────────────────────────────────────
   const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-loan-summary"],
-    queryFn: fetchLoanSummary,
+    queryKey: ["crm-loan-summary", cpb],
+    queryFn: () => fetchLoanSummary(cpb),
     staleTime: 30_000,
   });
 
@@ -313,6 +324,9 @@ const CrmLoanTracking: React.FC = () => {
       )}
 
       {/* ── Status filter tabs ── */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
+      </div>
       <div className="flex items-center gap-1 overflow-x-auto pb-1 thin-scroll">
         {TABS.map((tab) => (
           <button
@@ -345,7 +359,7 @@ const CrmLoanTracking: React.FC = () => {
 
       {/* ── Edit / View Dialog ── */}
       <Dialog open={!!editingRow} onOpenChange={(o) => { if (!o) closeDialog(); }}>
-        <DialogContent className="max-w-xl max-h-[92vh] overflow-y-auto thin-scroll">
+        <DialogContent accent="crm" className="max-w-xl max-h-[92vh] overflow-y-auto thin-scroll">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
               <span className="flex items-center gap-2"><Landmark size={16} /> Home Loan Details</span>

@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { ShoppingCart } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface SalesShellProps {
   title: string;
@@ -25,7 +25,7 @@ export const SalesShell: React.FC<SalesShellProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {
@@ -165,7 +165,7 @@ export const SalesGlassCard: React.FC<{
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.div
@@ -251,7 +251,7 @@ export const SalesSection: React.FC<{
   accentColor?: string;
 }> = ({ title, icon: Icon, action, children, accentColor = "#a855f7" }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <div className="space-y-3">

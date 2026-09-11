@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Calendar, Download, ChevronDown, ChevronRight } from "lucide-react";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/reports";
 
@@ -185,6 +186,7 @@ const CrmReports: React.FC = () => {
   const [activeId, setActiveId] = useState("booking-register");
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [openCats, setOpenCats] = useState<Record<string, boolean>>({
     Operations: true,
     Financial: true,
@@ -196,11 +198,14 @@ const CrmReports: React.FC = () => {
   const active = ALL_REPORTS.find((r) => r.id === activeId)!;
 
   const { data = [], isLoading } = useQuery<any[]>({
-    queryKey: ["crm-reports", activeId, fromDate, toDate],
+    queryKey: ["crm-reports", activeId, fromDate, toDate, cpb],
     queryFn: async () => {
       const p = new URLSearchParams();
       if (fromDate) p.set("from", fromDate);
       if (toDate) p.set("to", toDate);
+      if (cpb.companyId) p.set("companyId", cpb.companyId);
+      if (cpb.projectId) p.set("projectId", cpb.projectId);
+      if (cpb.blockId) p.set("blockId", cpb.blockId);
       const r = await fetchWithAuth(`${API}/${activeId}?${p}`);
       return r.ok ? r.json() : [];
     },
@@ -290,6 +295,8 @@ const CrmReports: React.FC = () => {
                   )}
                 </div>
               )}
+
+              <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
 
               {/* export */}
               <button

@@ -12,6 +12,8 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API         = "/api/crm/service-tickets";
 const BKG_API     = "/api/crm/bookings";
@@ -38,8 +40,27 @@ const statusColor: Record<string, string> = {
 
 const EMPTY_FORM = { BookingId: "", Category: "Complaint", Priority: "Normal", Subject: "", Description: "", AssignedTo: "" };
 
-async function fetchTickets(): Promise<any[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+const PAGE_SIZE = 20;
+interface TicketListFilters {
+  search: string;
+  status: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchTicketsList(filters: TicketListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.status !== "All") params.set("status", filters.status);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
 }
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -55,8 +76,11 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 
 const CrmServiceTickets: React.FC = () => {
   const qc = useQueryClient();
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch]           = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen]   = useState(false);
   const [form, setForm]               = useState({ ...EMPTY_FORM });
   const [saving, setSaving]           = useState(false);
@@ -71,17 +95,24 @@ const CrmServiceTickets: React.FC = () => {
   const [reopenTicketId, setReopenTicketId] = useState<number | null>(null);
   const [reopenReason, setReopenReason]   = useState("");
 
-  const { data: tickets = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-service-tickets"], queryFn: fetchTickets, staleTime: 30_000 });
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
+  const listFilters: TicketListFilters = useMemo(
+    () => ({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, statusFilter, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-service-tickets", listFilters, page],
+    queryFn: () => fetchTicketsList(listFilters, page),
+    staleTime: 30_000,
+  });
+  const tickets = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: bookings = [] }           = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
   const { data: users = [] }             = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
 
-  const filtered = useMemo(() =>
-    (tickets as any[]).filter((t: any) => {
-      const s = !search || t.ApplicantName?.toLowerCase().includes(search.toLowerCase())
-        || t.TicketNo?.includes(search) || t.Subject?.toLowerCase().includes(search.toLowerCase());
-      const st = statusFilter === "All" || t.Status === statusFilter;
-      return s && st;
-    }), [tickets, search, statusFilter]);
+  const filtered = tickets;
 
   const handleCreate = async () => {
     if (!form.BookingId || !form.Subject.trim()) { toast.error("Booking and Subject are required"); return; }
@@ -315,15 +346,17 @@ const CrmServiceTickets: React.FC = () => {
       <div className="flex gap-3 flex-wrap">
         <div className="relative flex-1 min-w-48">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <input value={search} onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search ticket, customer, subject..."
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+            placeholder="Search ticket, customer, subject... (Enter to search)"
             className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
         </div>
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}
+        <select value={statusFilter} onChange={(e) => updateFilter(setStatusFilter)(e.target.value)}
           className="px-3 py-2 text-sm border border-border rounded-lg bg-background">
           <option value="All">All Statuses</option>
           {STATUSES.map((s) => <option key={s}>{s}</option>)}
         </select>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
       </div>
 
       <DataTable
@@ -335,10 +368,11 @@ const CrmServiceTickets: React.FC = () => {
         rowClassName={(row) => isOverdue(row.original) ? "bg-red-50/30" : ""}
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
+      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       {/* ── Raise Ticket dialog ───────────────────────────────────────────── */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-lg">
+        <DialogContent accent="crm" className="max-w-lg">
           <DialogHeader><DialogTitle className="font-heading">Raise Service Ticket</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
@@ -399,7 +433,7 @@ const CrmServiceTickets: React.FC = () => {
 
       {/* ── Resolve dialog (replaces window.prompt) ───────────────────────── */}
       <Dialog open={resolveDialog} onOpenChange={(o) => { if (!o) setResolveDialog(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Resolve Ticket</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground -mt-1">Describe what was done to resolve the issue. This is stored permanently on the ticket.</p>
           <Textarea
@@ -422,7 +456,7 @@ const CrmServiceTickets: React.FC = () => {
 
       {/* ── Reopen dialog (replaces window.prompt) ────────────────────────── */}
       <Dialog open={reopenDialog} onOpenChange={(o) => { if (!o) setReopenDialog(false); }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent accent="crm" className="max-w-sm">
           <DialogHeader><DialogTitle className="font-heading">Reopen Ticket</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground -mt-1">Explain why this ticket needs to be reopened. Required for audit trail.</p>
           <Textarea

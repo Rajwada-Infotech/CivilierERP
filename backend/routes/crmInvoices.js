@@ -59,14 +59,12 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
       if (dateFrom) { where += " AND EXISTS (SELECT 1 FROM dbo.CrmInvoice inv3 WHERE inv3.BookingId = b.Id AND inv3.InvoiceDate >= @df)"; req_.input("df", sql.Date, dateFrom); }
       if (dateTo)   { where += " AND EXISTS (SELECT 1 FROM dbo.CrmInvoice inv4 WHERE inv4.BookingId = b.Id AND inv4.InvoiceDate <= @dt)"; req_.input("dt", sql.Date, dateTo); }
 
-      // Milestone counts exclude MilestoneNo=1 (Booking Amount) — it's
-      // invoiced from the Booking page itself, not part of this flow, same
-      // exclusion the Generate Invoice modal's own eligibility check uses.
+      // MilestoneTotal counts ALL milestones (including MilestoneNo=1, the
+      // Booking Amount) — the Booking Amount invoice is now visible and
+      // generatable from this page as well as the Booking page.
       // SQL Server can't reference a SELECT-list alias for a correlated
-      // subquery inside HAVING (aliases aren't bound yet at that point in
-      // query evaluation) — wrap the aggregation in a derived table and
-      // filter that with a plain WHERE instead, same technique already used
-      // below for the count query.
+      // subquery inside HAVING — wrap in a derived table and filter with
+      // a plain WHERE instead.
       const outerFilter = (() => {
         if (invoicedStatus === "full") return "WHERE x.MilestoneTotal > 0 AND x.MilestoneInvoiced = x.MilestoneTotal";
         if (invoicedStatus === "partial") return "WHERE x.MilestoneInvoiced > 0 AND x.MilestoneInvoiced < x.MilestoneTotal";
@@ -80,14 +78,14 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
                  COALESCE(proj.name, b.ProjectName) AS ProjectName,
                  COALESCE(um.UnitName, b.UnitNo) AS UnitNo,
                  a.ApplicantName, a.Mobile,
-                 (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.MilestoneNo <> 1) AS MilestoneTotal,
+                 (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id) AS MilestoneTotal,
                  (SELECT COUNT(DISTINCT m.Id) FROM dbo.CrmPaymentMilestone m
-                   WHERE m.BookingId = b.Id AND m.MilestoneNo <> 1
+                   WHERE m.BookingId = b.Id
                      AND EXISTS (SELECT 1 FROM dbo.CrmInvoice inv WHERE inv.MilestoneId = m.Id AND inv.Status <> 'Void')
                  ) AS MilestoneInvoiced
           FROM dbo.CrmBooking b
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId AND um.IsActive = 1
           LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
           ${where}
         ) x
@@ -116,14 +114,14 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
       const countResult = await countReq.query(`
         SELECT COUNT(*) AS Total FROM (
           SELECT b.Id,
-                 (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.MilestoneNo <> 1) AS MilestoneTotal,
+                 (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id) AS MilestoneTotal,
                  (SELECT COUNT(DISTINCT m.Id) FROM dbo.CrmPaymentMilestone m
-                   WHERE m.BookingId = b.Id AND m.MilestoneNo <> 1
+                   WHERE m.BookingId = b.Id
                      AND EXISTS (SELECT 1 FROM dbo.CrmInvoice inv WHERE inv.MilestoneId = m.Id AND inv.Status <> 'Void')
                  ) AS MilestoneInvoiced
           FROM dbo.CrmBooking b
           JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId AND um.IsActive = 1
           LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
           ${countWhere}
         ) x
@@ -167,7 +165,21 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
 
     // Flat mode — paginated invoice rows across every booking, for
     // reconciliation. Same filter set, minus invoicedStatus (meaningless per
-    // individual invoice row).
+    // individual invoice row). Sort is server-side so it applies across ALL
+    // pages, not just the current 20 rows.
+    const FLAT_SORT_COLS = {
+      InvoiceNo:     "inv.InvoiceNo",
+      BookingNo:     "b.BookingNo",
+      ApplicantName: "a.ApplicantName",
+      ProjectName:   "COALESCE(proj.name, b.ProjectName)",
+      InvoiceType:   "inv.InvoiceType",
+      Amount:        "inv.Amount",
+      InvoiceDate:   "inv.InvoiceDate",
+      CreatedAt:     "inv.CreatedAt",
+    };
+    const sortCol = FLAT_SORT_COLS[req.query.sortKey] || "inv.CreatedAt";
+    const sortDir = req.query.sortDir === "asc" ? "ASC" : "DESC";
+
     const req_ = pool.request().input("pageSize", sql.Int, pageSizeNum).input("offset", sql.Int, offset);
     let where = "WHERE 1=1";
     if (type)       { where += " AND inv.InvoiceType = @t"; req_.input("t", sql.NVarChar(30), type); }
@@ -190,11 +202,11 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
       FROM dbo.CrmInvoice inv
       JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId AND um.IsActive = 1
       LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
       LEFT JOIN dbo.Users cu ON cu.id = inv.CreatedBy
       ${where}
-      ORDER BY inv.CreatedAt DESC
+      ORDER BY ${sortCol} ${sortDir}
       OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
     `);
 
@@ -214,7 +226,7 @@ router.get("/", requirePageRight("crm-invoices", "view"), async (req, res) => {
       FROM dbo.CrmInvoice inv
       JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId AND um.IsActive = 1
       LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
       ${countWhere}
     `);
