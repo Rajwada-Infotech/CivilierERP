@@ -33,7 +33,7 @@ import { FollowupShell } from "@/components/followup/FollowupShell";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { GlassCard, GlassSection, GlassCardSkeleton } from "@/components/dashboard/GlassShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 
@@ -146,7 +146,7 @@ async function fetchReport(filters: Filters): Promise<ReportRow[]> {
 
 function useGlass() {
   const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
+  const isDark = isDarkDashboard(theme);
   const cardStyle = {
     background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
     border: `1px solid ${ACCENT}26`,
@@ -175,7 +175,7 @@ const DonutCard: React.FC<{
 }> = ({ title, icon: Icon, data, isDark, cardStyle }) => {
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <div className="rounded-xl overflow-hidden" style={cardStyle}>
+    <div className="rounded-xl overflow-hidden bw-color-keep" style={cardStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
           <Icon size={11} style={{ color: ACCENT }} />
@@ -249,7 +249,7 @@ const UserPerformanceChart: React.FC<{ data: UserPerf[]; isDark: boolean; cardSt
 }) => {
   const chartData = [...data].sort((a, b) => b.assigned - a.assigned).slice(0, 10);
   return (
-    <div className="rounded-xl overflow-hidden" style={cardStyle}>
+    <div className="rounded-xl overflow-hidden bw-color-keep" style={cardStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
           <TrendingUp size={11} style={{ color: ACCENT }} />

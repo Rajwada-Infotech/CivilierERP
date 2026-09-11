@@ -6,7 +6,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
 import { CrmShell, CrmSection, CrmGlassCard } from "@/components/crm/CrmShell";
 import {
   Select,
@@ -63,10 +63,10 @@ const STATUS_PIE_COLORS: Record<string, string> = {
 // --- Glass panel wrapper for charts ------------------------------------------
 const GlassPanel: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => {
   const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
+  const isDark = isDarkDashboard(theme);
   return (
     <div
-      className="rounded-xl overflow-hidden"
+      className="rounded-xl overflow-hidden bw-color-keep"
       style={{
         background: isDark ? "rgba(15,12,3,0.45)" : "rgba(255,255,255,0.72)",
         border: "1px solid rgba(245,158,11,0.18)",
@@ -305,7 +305,7 @@ const CrmDashboard: React.FC = () => {
   usePageRights("crm-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
+  const isDark = isDarkDashboard(theme);
   const qc = useQueryClient();
   const [projectId, setProjectId] = useState<string>(() => localStorage.getItem("crm_dash_project") || "");
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());

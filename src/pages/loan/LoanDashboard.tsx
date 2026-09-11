@@ -29,7 +29,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { getCompanyOptions, type CompanyOption } from "@/api/bankMasterApi";
 import { CompanyFilterCombo } from "@/components/CompanyFilterCombo";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
 
 const ACCENT = "#22c55e";
 
@@ -85,7 +85,7 @@ function ChartCardShell({
 }) {
   return (
     <div
-      className="rounded-xl overflow-hidden"
+      className="rounded-xl overflow-hidden bw-color-keep"
       style={{
         background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
         border: isDark ? "1px solid rgba(34,197,94,0.15)" : "1px solid rgba(34,197,94,0.18)",
@@ -256,7 +256,7 @@ export default function LoanDashboard() {
     .slice(0, 5);
 
   const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
+  const isDark = isDarkDashboard(theme);
 
   const loanTypeDonutData: DonutPoint[] = (Object.keys(LOAN_TYPE_COLORS) as LoanType[])
     .map((t) => ({

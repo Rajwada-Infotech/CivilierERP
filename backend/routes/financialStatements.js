@@ -223,7 +223,17 @@ router.get("/balance-sheet", async (req, res) => {
           + CASE WHEN ahm.LHeadType IN ('S', 'C') THEN ISNULL(ahm.OnAccountBalance, 0) ELSE 0 END
             AS credit
         FROM dbo.AccountHeadMaster ahm
-        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1
+        -- No LHeadStatus filter — same universe of heads and the same
+        -- opening/txn balance computation trialBalance.js's own main query
+        -- uses (routes/trialBalance.js's headsRes), so a head's balance
+        -- here is never anything other than what Trial Balance would show
+        -- for the same head. Previously this filtered to LHeadStatus = 1,
+        -- which silently dropped any inactive head still carrying a
+        -- nonzero balance — Trial Balance never had that filter, so the
+        -- two statements could show different "Total Assets"/"Total
+        -- Liabilities" even when every individual figure was internally
+        -- correct.
+        WHERE ahm.LBelongsTo IS NOT NULL
       `);
 
     // Net P&L (income - expenses, life-to-date through asOf) rolls into
@@ -246,7 +256,8 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL(SUM(gle.CreditAmount), 0) AS credit
         FROM dbo.AccountHeadMaster ahm
         JOIN dbo.GeneralLedgerEntry gle ON gle.LHeadId = ahm.LHeadId
-        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1 AND gle.IsReversed = 0
+        -- No LHeadStatus filter — see the headsRes query above for why.
+        WHERE ahm.LBelongsTo IS NOT NULL AND gle.IsReversed = 0
           AND gle.VoucherDate < @fyStart
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -267,7 +278,8 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL(SUM(gle.CreditAmount), 0) AS credit
         FROM dbo.AccountHeadMaster ahm
         JOIN dbo.GeneralLedgerEntry gle ON gle.LHeadId = ahm.LHeadId
-        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1 AND gle.IsReversed = 0
+        -- No LHeadStatus filter — see the headsRes query above for why.
+        WHERE ahm.LBelongsTo IS NOT NULL AND gle.IsReversed = 0
           AND gle.VoucherDate >= @fyStart AND gle.VoucherDate <= @asOf
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -312,7 +324,8 @@ router.get("/balance-sheet", async (req, res) => {
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@projectId IS NULL OR gle.ProjectId = @projectId)
           AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
-        WHERE ahm.LBelongsTo IS NOT NULL AND ahm.LHeadStatus = 1
+        -- No LHeadStatus filter — see the headsRes query above for why.
+        WHERE ahm.LBelongsTo IS NOT NULL
         GROUP BY ahm.LHeadId
       `);
     const movementByHeadId = new Map(movementRes.recordset.map((r) => [Number(r.id), r]));

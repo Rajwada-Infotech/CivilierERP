@@ -10,7 +10,7 @@ import { GlassCard, GlassSection } from "@/components/dashboard/GlassShell";
 import { MaintenanceShell, MAINTENANCE_ACCENT as ACCENT } from "@/components/maintenance/MaintenanceShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
 import { getMaintenanceDirectory } from "@/api/maintenanceApi";
 import { getActiveChargeHeads } from "@/api/chargeHeadApi";
 import { formatCompactINR } from "@/utils/formatCurrency";
@@ -36,7 +36,7 @@ function DonutCard({
     WebkitBackdropFilter: "blur(16px) saturate(150%)",
   };
   return (
-    <div className="rounded-xl overflow-hidden" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: `${ACCENT}20` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
           <Icon size={11} style={{ color: ACCENT }} />
@@ -97,7 +97,7 @@ function TrendCard({
     WebkitBackdropFilter: "blur(16px) saturate(150%)",
   };
   return (
-    <div className="rounded-xl overflow-hidden" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: `${ACCENT}20` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
           <Icon size={11} style={{ color: ACCENT }} />
@@ -148,7 +148,7 @@ export default function MaintenanceDashboard() {
   usePageRights("maintenance-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = !isLightTheme(theme);
+  const isDark = isDarkDashboard(theme);
 
   const { data: directory, isLoading: directoryLoading } = useQuery({
     queryKey: ["maintenance-directory", ""],

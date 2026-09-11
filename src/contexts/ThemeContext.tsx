@@ -19,6 +19,17 @@ const themes: Theme[] = ["dark", "light", "midnight", "root", "glass", "bw"];
  */
 export const isLightTheme = (t: Theme): boolean => t === "light" || t === "bw";
 
+/**
+ * Analytics/KPI dashboard pages (the glass chart-card + donut/bar-chart
+ * layouts, e.g. CrmDashboard's "Bookings by Status" panels) use a dark
+ * glass-card look everywhere except the plain Light theme -- including BW,
+ * which is otherwise treated as a light surface by `isLightTheme` for
+ * sidebars/shells. Use this instead of `!isLightTheme(theme)` for that one
+ * "should this dashboard's cards render dark?" decision so BW dashboards
+ * get the premium dark-card treatment the design calls for.
+ */
+export const isDarkDashboard = (t: Theme): boolean => t !== "light";
+
 // Dot colors that represent each theme visually
 export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
   dark: { bg: "#4f46e5", label: "Dark" },

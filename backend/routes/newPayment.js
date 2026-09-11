@@ -680,6 +680,10 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // Party ID (AccountHeadMaster LHeadId) for direct-invoice payments.
     // Migration 180 adds PPartyId column; resolvePartyFromRef reads it as fallback.
     partyId,
+    // Journal Voucher credit line this payment settles (migration 417) —
+    // set alongside partyId (the JV line's own LHeadId) when the payment
+    // is made from the Payment page's "Journal Vouchers" tab.
+    JVLineId,
     // "Keep the balance on his on account" checkbox — see migration 188.
     oaSkipAutoApply,
     // Direct Expense Payment (migration 303) — pay one or more Expense
@@ -896,6 +900,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("BounceCharge", sql.Decimal(18, 2), BounceCharge ? parseFloat(BounceCharge) : null)
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
       .input("PPartyId", sql.Int, partyId ? parseInt(partyId, 10) : null)
+      .input("JVLineId", sql.Int, JVLineId ? parseInt(JVLineId, 10) : null)
       .input("OASkipAutoApply", sql.Bit, oaSkipAutoApply ? 1 : 0)
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
@@ -913,7 +918,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
           DocNo, DocTypeId, DocYear, DocSerial, PFinYearId, ParentDocNo, RootExBDocNo,
-          ReplacesPaymentId, BounceCharge, ContractId, PPartyId, OASkipAutoApply,
+          ReplacesPaymentId, BounceCharge, ContractId, PPartyId, JVLineId, OASkipAutoApply,
           PCreatedAt, PCreatedBy, PApprovedBy, Status,
           TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount
         )
@@ -925,7 +930,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @PFinYearId, @ParentDocNo, @RootExBDocNo,
-          @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId, @OASkipAutoApply,
+          @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId, @JVLineId, @OASkipAutoApply,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status,
           @TDSId, @TDSNature, @TDSName, @TDSPercentage, @TDSAmount
         )
