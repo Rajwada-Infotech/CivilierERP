@@ -33,7 +33,7 @@ import { FollowupShell } from "@/components/followup/FollowupShell";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { GlassCard, GlassSection, GlassCardSkeleton } from "@/components/dashboard/GlassShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 
@@ -173,6 +173,7 @@ const DonutCard: React.FC<{
   isDark: boolean;
   cardStyle: React.CSSProperties;
 }> = ({ title, icon: Icon, data, isDark, cardStyle }) => {
+  const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
     <div className="rounded-xl overflow-hidden bw-color-keep" style={cardStyle}>
@@ -191,7 +192,7 @@ const DonutCard: React.FC<{
               <PieChart>
                 <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2} strokeWidth={0}>
                   {data.map((d, i) => (
-                    <Cell key={i} fill={d.color} />
+                    <Cell key={i} fill={bwChartColor(theme, i, d.color)} />
                   ))}
                 </Pie>
                 <Tooltip
@@ -211,11 +212,11 @@ const DonutCard: React.FC<{
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-2 w-full sm:w-auto shrink-0">
-              {data.map((d) => {
+              {data.map((d, i) => {
                 const pct = total > 0 ? ((d.value / total) * 100).toFixed(1) : "0";
                 return (
                   <div key={d.name} className="flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: bwChartColor(theme, i, d.color) }} />
                     <span className="text-xs text-foreground whitespace-nowrap">{d.name}</span>
                     <span className="text-xs text-muted-foreground ml-auto sm:ml-3">
                       {d.value} <span className="opacity-60">({pct}%)</span>
@@ -247,6 +248,7 @@ const UserPerformanceChart: React.FC<{ data: UserPerf[]; isDark: boolean; cardSt
   isDark,
   cardStyle,
 }) => {
+  const { theme } = useTheme();
   const chartData = [...data].sort((a, b) => b.assigned - a.assigned).slice(0, 10);
   return (
     <div className="rounded-xl overflow-hidden bw-color-keep" style={cardStyle}>
@@ -282,9 +284,9 @@ const UserPerformanceChart: React.FC<{ data: UserPerf[]; isDark: boolean; cardSt
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              <Bar dataKey="completed" name="Completed" fill="#22c55e" radius={[0, 3, 3, 0]} />
-              <Bar dataKey="pending" name="Pending" fill="#f59e0b" radius={[0, 3, 3, 0]} />
-              <Bar dataKey="overdue" name="Overdue" fill="#ef4444" radius={[0, 3, 3, 0]} />
+              <Bar dataKey="completed" name="Completed" fill={theme === "bw" ? "#008000" : "#22c55e"} radius={[0, 3, 3, 0]} />
+              <Bar dataKey="pending" name="Pending" fill={theme === "bw" ? "#FFA500" : "#f59e0b"} radius={[0, 3, 3, 0]} />
+              <Bar dataKey="overdue" name="Overdue" fill={theme === "bw" ? "#800000" : "#ef4444"} radius={[0, 3, 3, 0]} />
             </BarChart>
           </ResponsiveContainer>
         )}

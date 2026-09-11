@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useTheme } from "@/contexts/ThemeContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
@@ -65,8 +66,16 @@ const chartConfig = {
   rpm: { label: "RPM", color: "hsl(var(--primary))" },
   predicted: { label: "Predicted", color: "hsl(var(--muted))" },
 } as const;
+// BW theme swaps in the fixed maroon/green/orange chart palette instead of
+// the primary/muted token colours (which would otherwise render as plain
+// black/grey, since that's what those tokens resolve to under BW).
+const BW_CHART_CONFIG = {
+  rpm: { label: "RPM", color: "#008000" },
+  predicted: { label: "Predicted", color: "#FFA500" },
+} as const;
 
 const MetricsDashboard = () => {
+  const { theme } = useTheme();
   const rights = usePageRights("admin-dashboard");
   const [baseURL, setBaseURL] = useState(
     API_BASE_URL.replace(/\/api$/, "") || "http://localhost:5000",
@@ -309,7 +318,7 @@ const MetricsDashboard = () => {
                 </p>
               </div>
               <div className="p-6 aspect-video">
-                <ChartContainer config={chartConfig}>
+                <ChartContainer config={theme === "bw" ? BW_CHART_CONFIG : chartConfig}>
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={chartData} margin={{ left: -20 }}>
                       <CartesianGrid vertical={false} strokeDasharray="3 3" />

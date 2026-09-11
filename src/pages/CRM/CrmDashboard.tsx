@@ -6,7 +6,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Skeleton } from "@/components/ui/skeleton";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 import { CrmShell, CrmSection, CrmGlassCard } from "@/components/crm/CrmShell";
 import {
   Select,
@@ -684,15 +684,15 @@ const CrmDashboard: React.FC = () => {
                     <ResponsiveContainer width="55%" height={180}>
                       <PieChart>
                         <Pie data={bookingPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
-                          {bookingPie.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                          {bookingPie.map((entry, i) => <Cell key={i} fill={bwChartColor(theme, i, entry.color)} />)}
                         </Pie>
                         <Tooltip content={<PieTooltip />} />
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="flex-1 space-y-2 min-w-0">
-                      {bookingPie.map((entry) => (
+                      {bookingPie.map((entry, i) => (
                         <div key={entry.name} className="flex items-center gap-2 text-xs">
-                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: entry.color }} />
+                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: bwChartColor(theme, i, entry.color) }} />
                           <span className="text-muted-foreground truncate flex-1">{entry.name}</span>
                           <span className="font-semibold tabular-nums">{entry.value}</span>
                         </div>
@@ -711,15 +711,15 @@ const CrmDashboard: React.FC = () => {
                     <ResponsiveContainer width="55%" height={180}>
                       <PieChart>
                         <Pie data={appPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={40} paddingAngle={2}>
-                          {appPie.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                          {appPie.map((entry, i) => <Cell key={i} fill={bwChartColor(theme, i, entry.color)} />)}
                         </Pie>
                         <Tooltip content={<PieTooltip />} />
                       </PieChart>
                     </ResponsiveContainer>
                     <div className="flex-1 space-y-2 min-w-0">
-                      {appPie.map((entry) => (
+                      {appPie.map((entry, i) => (
                         <div key={entry.name} className="flex items-center gap-2 text-xs">
-                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: entry.color }} />
+                          <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: bwChartColor(theme, i, entry.color) }} />
                           <span className="text-muted-foreground truncate flex-1">{entry.name}</span>
                           <span className="font-semibold tabular-nums">{entry.value}</span>
                         </div>
@@ -746,8 +746,8 @@ const CrmDashboard: React.FC = () => {
                       <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
                       <Tooltip contentStyle={{ background: isDark ? "#1c1408" : "#fff", border: `1px solid ${gridColor}`, borderRadius: 8, fontSize: 11 }} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Line type="monotone" dataKey="Applications" stroke="#f59e0b" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                      <Line type="monotone" dataKey="Bookings" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="Applications" stroke={theme === "bw" ? "#FFA500" : "#f59e0b"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="Bookings" stroke={theme === "bw" ? "#008000" : "#22c55e"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                     </LineChart>
                   </ResponsiveContainer>
                 )}
@@ -768,7 +768,7 @@ const CrmDashboard: React.FC = () => {
                         contentStyle={{ background: isDark ? "#1c1408" : "#fff", border: `1px solid ${gridColor}`, borderRadius: 8, fontSize: 11 }} />
                       <Bar dataKey="Collected" name="Collected (₹)" radius={[4, 4, 0, 0]}>
                         {(data?.monthlyTrend ?? []).map((_: any, i: number) => (
-                          <Cell key={i} fill={PROJECT_COLORS[i % PROJECT_COLORS.length]} />
+                          <Cell key={i} fill={bwChartColor(theme, i, PROJECT_COLORS[i % PROJECT_COLORS.length])} />
                         ))}
                       </Bar>
                     </BarChart>

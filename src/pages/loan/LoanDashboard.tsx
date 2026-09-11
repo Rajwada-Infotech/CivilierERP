@@ -29,7 +29,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { getCompanyOptions, type CompanyOption } from "@/api/bankMasterApi";
 import { CompanyFilterCombo } from "@/components/CompanyFilterCombo";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 
 const ACCENT = "#22c55e";
 
@@ -116,6 +116,7 @@ interface DonutPoint {
 }
 
 function LoanTypeDonut({ data, isDark }: { data: DonutPoint[]; isDark: boolean }) {
+  const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
     <ChartCardShell title="Sanctioned by Loan Type" icon={PieChartIcon} accentColor="#8b5cf6" isDark={isDark}>
@@ -127,7 +128,7 @@ function LoanTypeDonut({ data, isDark }: { data: DonutPoint[]; isDark: boolean }
             <PieChart>
               <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2} strokeWidth={0}>
                 {data.map((d, i) => (
-                  <Cell key={i} fill={d.color} />
+                  <Cell key={i} fill={bwChartColor(theme, i, d.color)} />
                 ))}
               </Pie>
               <Tooltip
@@ -145,9 +146,9 @@ function LoanTypeDonut({ data, isDark }: { data: DonutPoint[]; isDark: boolean }
             </PieChart>
           </ResponsiveContainer>
           <div className="space-y-2 w-full sm:w-auto shrink-0">
-            {data.map((d) => (
+            {data.map((d, i) => (
               <div key={d.name} className="flex items-center gap-2">
-                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: bwChartColor(theme, i, d.color) }} />
                 <span className="text-xs text-foreground whitespace-nowrap">{d.name}</span>
                 <span className="text-xs text-muted-foreground ml-auto sm:ml-3">{fmt(d.value)}</span>
               </div>
@@ -165,6 +166,7 @@ interface MonthlyPoint {
 }
 
 function SanctionTrendCard({ data, isDark }: { data: MonthlyPoint[]; isDark: boolean }) {
+  const { theme } = useTheme();
   const hasData = data.some((d) => d.Sanctioned > 0);
   return (
     <ChartCardShell title="Sanctioned Amount — Last 6 Months" icon={TrendingUp} accentColor="#22c55e" isDark={isDark}>
@@ -200,7 +202,7 @@ function SanctionTrendCard({ data, isDark }: { data: MonthlyPoint[]; isDark: boo
                 fontSize: 12,
               }}
             />
-            <Line type="monotone" dataKey="Sanctioned" stroke="#22c55e" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+            <Line type="monotone" dataKey="Sanctioned" stroke={theme === "bw" ? "#008000" : "#22c55e"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
           </LineChart>
         </ResponsiveContainer>
       )}

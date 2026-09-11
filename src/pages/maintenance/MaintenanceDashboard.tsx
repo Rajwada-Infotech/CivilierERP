@@ -10,7 +10,7 @@ import { GlassCard, GlassSection } from "@/components/dashboard/GlassShell";
 import { MaintenanceShell, MAINTENANCE_ACCENT as ACCENT } from "@/components/maintenance/MaintenanceShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 import { getMaintenanceDirectory } from "@/api/maintenanceApi";
 import { getActiveChargeHeads } from "@/api/chargeHeadApi";
 import { formatCompactINR } from "@/utils/formatCurrency";
@@ -28,6 +28,7 @@ function DonutCard({
   title: string; icon: React.ElementType; data: DonutPoint[]; isDark: boolean;
   formatValue?: (n: number) => string;
 }) {
+  const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   const glassStyle: React.CSSProperties = {
     background: isDark ? "rgba(10,15,8,0.45)" : "rgba(255,255,255,0.72)",
@@ -51,7 +52,7 @@ function DonutCard({
             <ResponsiveContainer width="100%" height={180}>
               <PieChart>
                 <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={2} strokeWidth={0}>
-                  {data.map((d, i) => <Cell key={i} fill={d.color} />)}
+                  {data.map((d, i) => <Cell key={i} fill={bwChartColor(theme, i, d.color)} />)}
                 </Pie>
                 <Tooltip
                   content={({ active, payload }) => {
@@ -68,9 +69,9 @@ function DonutCard({
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-2 w-full sm:w-auto shrink-0">
-              {data.map((d) => (
+              {data.map((d, i) => (
                 <div key={d.name} className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: d.color }} />
+                  <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: bwChartColor(theme, i, d.color) }} />
                   <span className="text-xs text-foreground whitespace-nowrap">{d.name}</span>
                   <span className="text-xs text-muted-foreground ml-auto sm:ml-3">{formatValue(d.value)}</span>
                 </div>
@@ -89,6 +90,7 @@ function TrendCard({
   title: string; icon: React.ElementType;
   data: { date: string; amount: number }[]; isDark: boolean;
 }) {
+  const { theme } = useTheme();
   const hasData = data.some((d) => d.amount > 0);
   const glassStyle: React.CSSProperties = {
     background: isDark ? "rgba(10,15,8,0.45)" : "rgba(255,255,255,0.72)",
@@ -132,7 +134,7 @@ function TrendCard({
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              <Line type="monotone" dataKey="amount" name="Billed Amount" stroke={ACCENT} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+              <Line type="monotone" dataKey="amount" name="Billed Amount" stroke={bwChartColor(theme, 0, ACCENT)} strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
             </LineChart>
           </ResponsiveContainer>
         )}
