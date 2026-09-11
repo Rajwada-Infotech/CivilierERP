@@ -431,8 +431,6 @@ const CrmSalesDeed         = lazy(() => import("./pages/CRM/CrmSalesDeed"));
 const CrmLeads             = lazy(() => import("./pages/CRM/CrmLeads"));
 const CrmOcCc              = lazy(() => import("./pages/CRM/CrmOcCc"));
 const CrmMutation          = lazy(() => import("./pages/CRM/CrmMutation"));
-const CrmQueryPayment      = lazy(() => import("./pages/CRM/CrmQueryPayment"));
-const CrmRegistry          = lazy(() => import("./pages/CRM/CrmRegistry"));
 const CrmPrePossession     = lazy(() => import("./pages/CRM/CrmPrePossession"));
 const CrmPossessionNotice  = lazy(() => import("./pages/CRM/CrmPossessionNotice"));
 const CrmConstructionUpdates = lazy(() => import("./pages/CRM/CrmConstructionUpdates"));
@@ -454,7 +452,6 @@ const PortalBooking        = lazy(() => import("./pages/CrmCustomerPortal/Portal
 const PortalAgreement      = lazy(() => import("./pages/CrmCustomerPortal/PortalAgreement"));
 const PortalPayments       = lazy(() => import("./pages/CrmCustomerPortal/PortalPayments"));
 const PortalConstruction   = lazy(() => import("./pages/CrmCustomerPortal/PortalConstruction"));
-const PortalDocuments      = lazy(() => import("./pages/CrmCustomerPortal/PortalDocuments"));
 const PortalTickets        = lazy(() => import("./pages/CrmCustomerPortal/PortalTickets"));
 const PortalActivity       = lazy(() => import("./pages/CrmCustomerPortal/PortalActivity"));
 const PortalProfile        = lazy(() => import("./pages/CrmCustomerPortal/PortalProfile"));
@@ -643,6 +640,18 @@ function AgreementTabRedirect({ tab }: { tab: string }) {
   return <Navigate to={`/crm/agreements?${qs.toString()}`} replace />;
 }
 
+// Registry and Query Payment were both merged into the Sale Deed page as
+// their own dedicated tabs ("Registry" / "Query Payment") — redirect old
+// standalone links to the matching tab, keeping ?bookingId=.
+function SalesDeedTabRedirect({ tab }: { tab: string }) {
+  const [sp] = useSearchParams();
+  const bookingId = sp.get("bookingId");
+  const qs = new URLSearchParams();
+  if (bookingId) qs.set("bookingId", bookingId);
+  qs.set("tab", tab);
+  return <Navigate to={`/crm/sales-deed?${qs.toString()}`} replace />;
+}
+
 // ─── Auth Session Bridge ──────────────────────────────────────────────────────
 function AuthSessionBridge({ children }: { children: React.ReactNode }) {
   const { recordLogin, recordLogout } = useActivityBrowser();
@@ -667,7 +676,6 @@ function AppRoutes() {
         <Route path="booking" element={<PortalBooking />} />
         <Route path="agreement" element={<PortalAgreement />} />
         <Route path="payments" element={<PortalPayments />} />
-        <Route path="documents" element={<PortalDocuments />} />
         <Route path="construction" element={<PortalConstruction />} />
         <Route path="tickets" element={<PortalTickets />} />
         <Route path="activity" element={<PortalActivity />} />
@@ -2297,8 +2305,9 @@ function AppRoutes() {
       {/* Merged into the Agreement workspace — redirect old links */}
       <Route path="/crm/afs-query-payment"     element={<ProtectedRoute pageKey="crm-afs-query-payment"><AgreementTabRedirect tab="afs-payment" /></ProtectedRoute>} />
       <Route path="/crm/afs-registry"         element={<ProtectedRoute pageKey="crm-afs-registry"><AgreementTabRedirect tab="afs-registry" /></ProtectedRoute>} />
-      <Route path="/crm/query-payment"         element={<ProtectedRoute pageKey="crm-query-payment"><CrmQueryPayment /></ProtectedRoute>} />
-      <Route path="/crm/registry"              element={<ProtectedRoute pageKey="crm-registry"><CrmRegistry /></ProtectedRoute>} />
+      {/* Merged into the Sale Deed page's "Registration" tab — redirect old links */}
+      <Route path="/crm/query-payment"         element={<ProtectedRoute pageKey="crm-query-payment"><SalesDeedTabRedirect tab="Query Payment" /></ProtectedRoute>} />
+      <Route path="/crm/registry"              element={<ProtectedRoute pageKey="crm-registry"><SalesDeedTabRedirect tab="Registry" /></ProtectedRoute>} />
       <Route path="/crm/mutation"              element={<ProtectedRoute pageKey="crm-mutation"><CrmMutation /></ProtectedRoute>} />
       <Route path="/crm/oc-cc"                 element={<ProtectedRoute pageKey="crm-oc-cc"><CrmOcCc /></ProtectedRoute>} />
       <Route path="/crm/pre-possession"        element={<ProtectedRoute pageKey="crm-pre-possession"><CrmPrePossession /></ProtectedRoute>} />

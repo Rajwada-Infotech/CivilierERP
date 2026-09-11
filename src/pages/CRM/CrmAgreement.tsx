@@ -26,7 +26,7 @@ const API = "/api/crm/agreements";
 // which wasn't available. If it's mounted elsewhere, this is a one-line fix.
 const USERS_API = "/api/users";
 
-const DOC_TYPES = ["SaleAgreement", "AllotmentLetter", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
+const DOC_TYPES = ["SaleAgreement", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
 
 const agrStatusColor: Record<string, string> = {
   Draft:      "text-muted-foreground bg-muted/50 border-border",
@@ -2674,112 +2674,75 @@ const CrmAgreement: React.FC = () => {
           The revision reason is optional context, saved into version history. */}
       <Dialog open={editDialog} onOpenChange={(o) => { if (!o) { setEditDialog(false); setEditLocked(true); } }}>
         <DialogContent className="max-w-lg">
-          {(() => {
-            const alIssued = false;
-            const alIssuedOn = null;
-            return (
+          <DialogHeader>
+            <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
+              <span className="flex items-center gap-1.5">Edit Agreement Details</span>
+              {editLocked && (
+                <button onClick={() => setEditLocked(false)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
+                  <Pencil size={12} /> Edit
+                </button>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+          {editLocked && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
+              <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
+            </div>
+          )}
+          <div className="space-y-3">
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
+              <select value={editForm.LegalExecutiveId} disabled={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
+                className={editInputCls}>
+                <option value="">— Unassigned —</option>
+                {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Legal Name</label>
+                <input type="text" value={editForm.LegalName} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalName: e.target.value }))}
+                  className={editInputCls} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">PAN No.</label>
+                <input type="text" value={editForm.PanNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value.toUpperCase() }))}
+                  className={editInputCls} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Aadhaar No.</label>
+                <input type="text" value={editForm.AadhaarNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
+                  className={editInputCls} />
+              </div>
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Legal Address</label>
+              <textarea value={editForm.LegalAddress} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalAddress: e.target.value }))}
+                rows={2} className={`${editInputCls} resize-none`} />
+            </div>
+            {!editLocked && (
+              <div>
+                <label className="text-xs block mb-1 text-muted-foreground">Reason for this revision</label>
+                <input type="text" value={editForm.RevisionReason} onChange={(e) => setEditForm((f) => ({ ...f, RevisionReason: e.target.value }))}
+                  placeholder="e.g. Customer requested recheck — corrected spelling"
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            {editLocked ? (
+              <button onClick={() => { setEditDialog(false); setEditLocked(true); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
+            ) : (
               <>
-                <DialogHeader>
-                  <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
-                    <span className="flex items-center gap-1.5">
-                      {alIssued && <Lock size={14} className="text-amber-600 shrink-0" />}
-                      {alIssued ? "Amend Agreement Details" : "Edit Agreement Details"}
-                    </span>
-                    {editLocked && (
-                      <button onClick={() => setEditLocked(false)}
-                        className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border rounded-lg hover:bg-muted transition-colors shrink-0 ${
-                          alIssued ? "border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100" : "border-border"
-                        }`}>
-                        <Pencil size={12} /> {alIssued ? "Unlock for Amendment" : "Edit"}
-                      </button>
-                    )}
-                  </DialogTitle>
-                </DialogHeader>
-                {editLocked ? (
-                  alIssued ? (
-                    <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 -mt-1">
-                      <Lock size={12} className="shrink-0 mt-0.5" />
-                      <span>
-                        Allotment Letter issued{alIssuedOn ? ` on ${String(alIssuedOn).slice(0, 10)}` : ""} — legal details are formally committed.
-                        Any change is a recorded amendment and requires a stated reason.
-                      </span>
-                    </div>
-                  ) : (
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/30 border border-border rounded-lg px-3 py-1.5 -mt-1">
-                      <Lock size={11} /> Locked for viewing — click "Edit" above to make changes.
-                    </div>
-                  )
-                ) : alIssued ? (
-                  <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 -mt-1">
-                    <ShieldAlert size={12} className="shrink-0 mt-0.5" />
-                    <span>
-                      <strong>Amendment mode</strong> — the Allotment Letter has been issued. Any changes to legal details
-                      (name, PAN, Aadhaar, address) will be version-stamped and require a reason.
-                      This is recorded in the audit trail.
-                    </span>
-                  </div>
-                ) : null}
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Legal Executive <span className="text-muted-foreground font-normal">(the person preparing the paperwork)</span></label>
-                    <select value={editForm.LegalExecutiveId} disabled={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalExecutiveId: e.target.value }))}
-                      className={editInputCls}>
-                      <option value="">— Unassigned —</option>
-                      {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Legal Name</label>
-                      <input type="text" value={editForm.LegalName} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalName: e.target.value }))}
-                        className={editInputCls} />
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground block mb-1">PAN No.</label>
-                      <input type="text" value={editForm.PanNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, PanNo: e.target.value.toUpperCase() }))}
-                        className={editInputCls} />
-                    </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground block mb-1">Aadhaar No.</label>
-                      <input type="text" value={editForm.AadhaarNo} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, AadhaarNo: e.target.value }))}
-                        className={editInputCls} />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-xs text-muted-foreground block mb-1">Legal Address</label>
-                    <textarea value={editForm.LegalAddress} readOnly={editLocked} onChange={(e) => setEditForm((f) => ({ ...f, LegalAddress: e.target.value }))}
-                      rows={2} className={`${editInputCls} resize-none`} />
-                  </div>
-                  {!editLocked && (
-                    <div>
-                      <label className={`text-xs block mb-1 ${alIssued ? "text-amber-700 font-medium" : "text-muted-foreground"}`}>
-                        {alIssued ? <>Amendment Reason <span className="text-red-500">*</span></> : "Reason for this revision"}
-                      </label>
-                      <input type="text" value={editForm.RevisionReason} onChange={(e) => setEditForm((f) => ({ ...f, RevisionReason: e.target.value }))}
-                        placeholder={alIssued ? "Required — e.g. Customer requested name correction (affidavit attached)" : "e.g. Customer requested recheck — corrected spelling"}
-                        className={`w-full text-sm border rounded px-2 py-1.5 bg-background ${alIssued ? "border-amber-300 focus:border-amber-500" : "border-border"}`} />
-                      {alIssued && <p className="text-[11px] text-amber-600 mt-1">Required when legal details change after Allotment Letter is issued. Saved permanently in version history.</p>}
-                    </div>
-                  )}
-                </div>
-                <div className="flex justify-end gap-2 pt-3 border-t border-border">
-                  {editLocked ? (
-                    <button onClick={() => { setEditDialog(false); setEditLocked(true); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
-                  ) : (
-                    <>
-                      <button onClick={() => { setEditDialog(false); setEditLocked(true); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                      <button onClick={handleSaveEdit} disabled={saving}
-                        className={`px-4 py-1.5 text-sm rounded-lg font-medium disabled:opacity-40 ${
-                          alIssued ? "bg-amber-600 text-white hover:bg-amber-700" : "bg-primary text-primary-foreground hover:bg-primary/90"
-                        }`}>
-                        {saving ? "Saving..." : alIssued ? "Save Amendment" : "Save"}
-                      </button>
-                    </>
-                  )}
-                </div>
+                <button onClick={() => { setEditDialog(false); setEditLocked(true); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={handleSaveEdit} disabled={saving}
+                  className="px-4 py-1.5 text-sm rounded-lg font-medium disabled:opacity-40 bg-primary text-primary-foreground hover:bg-primary/90">
+                  {saving ? "Saving..." : "Save"}
+                </button>
               </>
-            );
-          })()}
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </CrmShell>

@@ -5,6 +5,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useAuth } from "@/contexts/AuthContext";
 import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { cn } from "@/lib/utils";
@@ -103,7 +104,7 @@ function fmtBytes(n: number | null | undefined) {
 }
 // ── Deed Stepper ────────────────────────────────────────────────────────────
 type StepState = "done" | "current" | "upcoming";
-type DeedTab = "Overview" | "Documents" | "Legal & Approval" | "Registration" | "History";
+type DeedTab = "Timeline" | "Overview" | "Documents" | "Legal & Approval" | "Query Payment" | "Registry" | "History";
 
 function deedDocumentProgress(documents: any[] | undefined): { required: number; uploaded: number; percent: number } {
   const mandatory = (documents || []).filter((d) => d.IsMandatory);
@@ -145,9 +146,9 @@ function deedStepStates(d: any, documents: any[] | undefined, context: any): { l
     { label: "Senior Approve", done: senior, tab: "Legal & Approval" },
     { label: "Customer Review", done: custApproved, tab: "Legal & Approval" },
     { label: "Director Approve", done: dirApproved, tab: "Legal & Approval" },
-    { label: "Stamp Duty", done: qpConfirmed, tab: "Registration" },
-    { label: "Execution", done: executed, tab: "Registration" },
-    { label: "Registered", done: registered, tab: "Registration" },
+    { label: "Stamp Duty", done: qpConfirmed, tab: "Query Payment" },
+    { label: "Execution", done: executed, tab: "Legal & Approval" },
+    { label: "Registered", done: registered, tab: "Registry" },
   ];
 
   let blocked = false;
@@ -193,6 +194,41 @@ function DeedStepper({ steps, activeTab, onStepClick }: { steps: { label: string
         </React.Fragment>
       ))}
     </div>
+  );
+}
+
+// ── Timeline tab (mirrors CrmAgreement.tsx's own Timeline tab) — the same
+// step data the horizontal DeedStepper above already computes, presented as
+// a vertical jump-to-tab list so the two most-used CRM detail pages feel
+// like one consistent system.
+function SDTlRow({ n, title, detailText, state, badge, onJump, last }: {
+  n: number; title: string; detailText?: string; state: StepState; badge?: string;
+  onJump: () => void; last?: boolean;
+}) {
+  const ring =
+    state === "done" ? "bg-emerald-500 text-white" :
+    state === "current" ? "bg-primary text-primary-foreground" :
+    "bg-muted text-muted-foreground";
+  return (
+    <button onClick={onJump} className="w-full text-left flex gap-3 group">
+      <div className="flex flex-col items-center">
+        <span className={cn("w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0", ring)}>
+          {state === "done" ? <Check size={13} /> : n}
+        </span>
+        {!last && <span className={cn("w-px flex-1 my-1", state === "done" ? "bg-emerald-400" : "bg-border")} />}
+      </div>
+      <div className={cn("flex-1 min-w-0", last ? "pb-0" : "pb-4")}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={cn("text-sm font-semibold",
+            state === "done" ? "text-emerald-700 dark:text-emerald-400"
+            : state === "current" ? "text-foreground"
+            : "text-muted-foreground")}>{title}</span>
+          {badge && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full border border-border bg-muted/50 text-muted-foreground">{badge}</span>}
+          <ArrowRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+        {detailText && <p className="text-[11px] text-muted-foreground mt-0.5">{detailText}</p>}
+      </div>
+    </button>
   );
 }
 
@@ -532,11 +568,13 @@ async function fetchUsers(): Promise<{ value: string; label: string }[]> {
 
 const CrmSalesDeed: React.FC = () => {
   const rights = usePageRights("crm-sales-deed");
+  const { currentUser, canDoAction } = useAuth();
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
   const deedIdFilter = sp.get("deedId");
+  const tabDeepLink = sp.get("tab");
   const [deedDeepLinkOpened, setDeedDeepLinkOpened] = useState(false);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -563,8 +601,67 @@ const CrmSalesDeed: React.FC = () => {
   const [execSaving, setExecSaving] = useState(false);
   const [execEditing, setExecEditing] = useState(false);
 
+  // Registry (Sub-Registrar Office appointment/registration tracker) — merged
+  // in from the former standalone Registry page/API; this is the same
+  // workflow as before (start → schedule → reschedule → complete/cancel),
+  // now scoped to the current deed's booking instead of its own list.
+  const [regStarting, setRegStarting] = useState(false);
+  const [regScheduleOpen, setRegScheduleOpen] = useState<"first" | "reschedule" | null>(null);
+  const [regScheduledDate, setRegScheduledDate] = useState("");
+  const [regAppointmentTime, setRegAppointmentTime] = useState("");
+  const [regAppointmentOffice, setRegAppointmentOffice] = useState("");
+  const [regRescheduleReason, setRegRescheduleReason] = useState("");
+  const [regCompleteOpen, setRegCompleteOpen] = useState(false);
+  const [regCompleteForm, setRegCompleteForm] = useState({
+    RegistrationNo: "", BookNo: "", PartNo: "", SubRegistrarOffice: "",
+    RegistrationDate: new Date().toISOString().slice(0, 10),
+    WitnessNames: "", BuyerAttended: false, SellerAttended: false,
+  });
+  const [regCancelOpen, setRegCancelOpen] = useState(false);
+  const [regCancelReason, setRegCancelReason] = useState("");
+  const [regNewDocType, setRegNewDocType] = useState("Other");
+  const [regNewDocLabel, setRegNewDocLabel] = useState("");
+  const [regUploadingDoc, setRegUploadingDoc] = useState(false);
+  const [regRequestingDoc, setRegRequestingDoc] = useState(false);
+  const regFileInputRef = useRef<HTMLInputElement>(null);
+  const CRM_REGISTRY_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "legal_head"];
+
+  // Query Payment (stamp duty / registration fee communicated to and paid by
+  // the customer) — merged in from the former standalone Query Payment page/
+  // API; same two-step workflow (send fee details → confirm paid), now
+  // scoped to the current deed's booking.
+  interface QPStagedFile { name: string; size: number; type: string; base64: string; dataUri: string; }
+  const qpFileToStaged = (f: File): Promise<QPStagedFile> => new Promise((res, rej) => {
+    const r = new FileReader(); r.onerror = () => rej(r.error);
+    r.onload = () => { const uri = r.result as string; res({ name: f.name, size: f.size, type: f.type, base64: uri.slice(uri.indexOf(",") + 1), dataUri: uri }); };
+    r.readAsDataURL(f);
+  });
+  const QP_MAX_FILE = 4 * 1024 * 1024;
+  const QP_MAX_TOTAL = 6 * 1024 * 1024;
+  const [qpStarting, setQpStarting] = useState(false);
+  const [qpStep, setQpStep] = useState<1 | 2>(1);
+  const [qpPendingFiles, setQpPendingFiles] = useState<QPStagedFile[]>([]);
+  const [qpSendConfirm, setQpSendConfirm] = useState(false);
+  const [qpSending, setQpSending] = useState(false);
+  const [qpConfirmAmt, setQpConfirmAmt] = useState("");
+  const [qpConfirmRem, setQpConfirmRem] = useState("");
+  const [qpProofFile, setQpProofFile] = useState<QPStagedFile | null>(null);
+  const [qpConfirming, setQpConfirming] = useState(false);
+  const [qpProxyFile, setQpProxyFile] = useState<File | null>(null);
+  const [qpProxyDialog, setQpProxyDialog] = useState(false);
+  const [qpProxySaving, setQpProxySaving] = useState(false);
+  const [qpEditingRemarks, setQpEditingRemarks] = useState(false);
+  const [qpRemarksText, setQpRemarksText] = useState("");
+  const [qpRemarksSaving, setQpRemarksSaving] = useState(false);
+  const qpInfoRef = useRef<HTMLInputElement>(null);
+  const qpProofRef = useRef<HTMLInputElement>(null);
+  const qpProxyRef = useRef<HTMLInputElement>(null);
+  const canConfirmQueryPayment =
+    CRM_REGISTRY_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase()) ||
+    canDoAction("approval-inbox" as any, "edit");
+
   // State management additions
-  const [activeTab, setActiveTab] = useState<'Overview'|'Documents'|'Legal & Approval'|'Registration'|'History'>('Overview');
+  const [activeTab, setActiveTab] = useState<DeedTab>('Timeline');
   const [assigningLegal, setAssigningLegal] = useState(false);
   const [selectedLegalExec, setSelectedLegalExec] = useState('');
   const [uploadingDoc, setUploadingDoc] = useState(false);
@@ -653,6 +750,102 @@ const CrmSalesDeed: React.FC = () => {
     enabled: !!detail?.BookingId,
   });
 
+  // Registry tracker for the currently-selected deed's booking — one
+  // GET /registry/booking/:bookingId call gives the tracker row plus (via a
+  // second, id-scoped call once we know the id) its documents and history.
+  const { data: regByBooking, refetch: refetchRegByBooking } = useQuery({
+    queryKey: ["crm-sales-deed-registry-by-booking", detail ? String(detail.BookingId) : ""],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/registry/booking/${detail?.BookingId}`);
+      if (!r.ok) return null;
+      return r.json();
+    },
+    enabled: !!detail?.BookingId,
+    staleTime: 15_000,
+  });
+  const registryId = regByBooking?.Id ?? null;
+  const { data: regDetailData, refetch: refetchRegDetail } = useQuery({
+    queryKey: ["crm-sales-deed-registry-detail", registryId],
+    queryFn: async () => {
+      if (!registryId) return null;
+      const r = await fetchWithAuth(`${API}/registry/${registryId}`);
+      if (!r.ok) return null;
+      return r.json();
+    },
+    enabled: !!registryId,
+    staleTime: 15_000,
+  });
+  const { data: regEligibleBookings = [] } = useQuery({
+    queryKey: ["crm-sales-deed-registry-eligible"],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/registry/eligible-bookings`);
+      if (!r.ok) return [];
+      return r.json();
+    },
+    staleTime: 60_000,
+  });
+  const registry = regDetailData?.registry ?? regByBooking ?? null;
+  const registryDocuments: any[] = regDetailData?.documents || [];
+  const registryHistory: any[] = regDetailData?.history || [];
+  const registryRequired = registryDocuments.filter((d) => d.IsMandatory);
+  const registrySupporting = registryDocuments.filter((d) => !d.IsMandatory);
+  const registryVerifiedCount = registryRequired.filter((d) => d.Status === 'Verified').length;
+  const registryLocked = registry && ["Completed", "Cancelled"].includes(registry.Status);
+  const canCompleteOrCancelRegistry =
+    CRM_REGISTRY_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase()) ||
+    canDoAction("approval-inbox" as any, "edit");
+  const registryStartEligible = detail?.BookingId
+    ? (regEligibleBookings as any[]).some((b: any) => String(b.Id) === String(detail.BookingId))
+    : false;
+  const invalidateRegistry = () => {
+    qc.invalidateQueries({ queryKey: ["crm-sales-deed-registry-by-booking"] });
+    qc.invalidateQueries({ queryKey: ["crm-sales-deed-registry-detail", registryId] });
+    qc.invalidateQueries({ queryKey: ["crm-sales-deed-registry-eligible"] });
+    refetchRegByBooking();
+    if (registryId) refetchRegDetail();
+  };
+
+  // Query Payment tracker for the currently-selected deed's booking.
+  const { data: qpDetail, refetch: refetchQp } = useQuery({
+    queryKey: ["crm-sales-deed-qp-by-booking", detail ? String(detail.BookingId) : ""],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/query-payment/booking/${detail?.BookingId}`);
+      if (!r.ok) return null;
+      const row = await r.json();
+      if (!row) return null;
+      const r2 = await fetchWithAuth(`${API}/query-payment/${row.Id}`);
+      if (!r2.ok) return row;
+      return r2.json();
+    },
+    enabled: !!detail?.BookingId,
+    staleTime: 15_000,
+  });
+  const { data: qpEligibleBookings = [] } = useQuery({
+    queryKey: ["crm-sales-deed-qp-eligible"],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/query-payment/eligible-bookings`);
+      if (!r.ok) return [];
+      return r.json();
+    },
+    staleTime: 60_000,
+  });
+  const qpStartEligible = detail?.BookingId
+    ? (qpEligibleBookings as any[]).some((b: any) => String(b.Id) === String(detail.BookingId))
+    : false;
+  const qpInfoAttachments = (qpDetail?.attachments || []).filter((a: any) => a.DocType === "Info");
+  const qpProofAttachments = (qpDetail?.attachments || []).filter((a: any) => a.DocType === "Proof");
+  const qpConfirmed = qpDetail?.Status === "Confirmed";
+  const invalidateQp = () => {
+    qc.invalidateQueries({ queryKey: ["crm-sales-deed-qp-by-booking"] });
+    qc.invalidateQueries({ queryKey: ["crm-sales-deed-qp-eligible"] });
+    refetchQp();
+  };
+  useEffect(() => {
+    if (!qpDetail) return;
+    setQpStep(qpDetail.Status === CrmStatus.PENDING ? 1 : 2);
+    setQpPendingFiles([]); setQpProofFile(null); setQpSendConfirm(false); setQpEditingRemarks(false);
+  }, [qpDetail?.Id]);
+
   const agreementRegistered = context?.agreement?.Status === "Registered";
   const isLoanFinanced = context?.booking?.FinancingType === "LoanFinanced";
   const loanCleared = !context?.loanBlockReason;
@@ -678,6 +871,18 @@ const CrmSalesDeed: React.FC = () => {
     if (match) { setDeedDeepLinkOpened(true); selectDetail(match.Id); }
   }, [deedIdFilter, deedDeepLinkOpened, deeds]);
 
+  // Deep-link by BookingId straight to an existing deed (used by the former
+  // standalone Registry page's links, e.g. /crm/sales-deed?bookingId=…&tab=Registration).
+  useEffect(() => {
+    if (!deepLinkBookingId || deedDeepLinkOpened || !(deeds as any[]).length) return;
+    const match = (deeds as any[]).find((d: any) => String(d.BookingId) === deepLinkBookingId);
+    if (match) { setDeedDeepLinkOpened(true); selectDetail(match.Id); }
+  }, [deepLinkBookingId, deedDeepLinkOpened, deeds]);
+
+  useEffect(() => {
+    if (tabDeepLink && detailId) setActiveTab(tabDeepLink as DeedTab);
+  }, [tabDeepLink, detailId]);
+
   useEffect(() => {
     if (!context?.agreement) return;
     const credit = Number(context.agreement.AfsStampDuty ?? 0) || 0;
@@ -695,6 +900,279 @@ const CrmSalesDeed: React.FC = () => {
     qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
     if (detailId) invalidateDetail();
+  };
+
+  // ── Registry handlers ──────────────────────────────────────────────────
+  const handleStartRegistry = async () => {
+    if (!detail?.BookingId) return;
+    setRegStarting(true);
+    try {
+      const res = await fetchWithAuth(`${API}/registry`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ BookingId: detail.BookingId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(`${data.RegNo} started`);
+      invalidate(); invalidateRegistry();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setRegStarting(false); }
+  };
+
+  const handleRegSchedule = async () => {
+    if (!registryId || !regScheduledDate) { toast.error("Date is required"); return; }
+    const isReschedule = regScheduleOpen === "reschedule";
+    if (!isReschedule && !regAppointmentOffice.trim()) { toast.error("Sub-Registrar Office is required"); return; }
+    if (isReschedule && !regRescheduleReason.trim()) { toast.error("A reason is required to reschedule"); return; }
+    try {
+      const res = await fetchWithAuth(`${API}/registry/${registryId}/${isReschedule ? "reschedule" : "schedule"}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(isReschedule
+          ? { ScheduledDate: regScheduledDate, AppointmentTime: regAppointmentTime, AppointmentOffice: regAppointmentOffice, Reason: regRescheduleReason.trim() }
+          : { ScheduledDate: regScheduledDate, AppointmentTime: regAppointmentTime, AppointmentOffice: regAppointmentOffice.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(isReschedule ? "Appointment rescheduled" : "Appointment scheduled");
+      setRegScheduleOpen(null); setRegScheduledDate(""); setRegAppointmentTime(""); setRegAppointmentOffice(""); setRegRescheduleReason("");
+      invalidateRegistry();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+  };
+
+  const handleRegComplete = async () => {
+    if (!registryId) return;
+    if (!regCompleteForm.RegistrationNo.trim()) { toast.error("Registration No. is required"); return; }
+    if (!regCompleteForm.WitnessNames.trim()) { toast.error("Witness names are required"); return; }
+    if (!regCompleteForm.BuyerAttended || !regCompleteForm.SellerAttended) { toast.error("Both parties' attendance must be confirmed"); return; }
+    try {
+      const res = await fetchWithAuth(`${API}/registry/${registryId}/complete`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(regCompleteForm),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Registry completed — Sale Deed marked Registered");
+      setRegCompleteOpen(false);
+      setRegCompleteForm({ RegistrationNo: "", BookNo: "", PartNo: "", SubRegistrarOffice: "", RegistrationDate: new Date().toISOString().slice(0, 10), WitnessNames: "", BuyerAttended: false, SellerAttended: false });
+      invalidate(); invalidateRegistry();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+  };
+
+  const handleRegCancel = async () => {
+    if (!registryId || !regCancelReason.trim()) { toast.error("A reason is required"); return; }
+    try {
+      const res = await fetchWithAuth(`${API}/registry/${registryId}/cancel`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Reason: regCancelReason.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Registry cancelled");
+      setRegCancelOpen(false); setRegCancelReason("");
+      invalidateRegistry();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+  };
+
+  const handleRegUploadDoc = async (file: File, documentType: string, label?: string) => {
+    if (!registryId) return;
+    setRegUploadingDoc(true);
+    try {
+      const formData = new FormData();
+      formData.append('files', file);
+      formData.append('DocumentType', documentType);
+      if (label) formData.append('Label', label);
+      const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/upload`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Document uploaded");
+      invalidateRegistry();
+      setRegNewDocLabel('');
+      if (regFileInputRef.current) regFileInputRef.current.value = '';
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setRegUploadingDoc(false); }
+  };
+
+  const handleRegRequestDoc = async (documentType: string, label?: string) => {
+    if (!registryId) return;
+    setRegRequestingDoc(true);
+    try {
+      const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/request`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ DocumentType: documentType, Label: label, IsMandatory: true }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Document requested");
+      invalidateRegistry();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setRegRequestingDoc(false); }
+  };
+
+  const handleRegVerifyDoc = async (docId: number) => {
+    if (!registryId) return;
+    try {
+      const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/${docId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ Status: 'Verified' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Document verified");
+      invalidateRegistry();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+  };
+
+  const handleRegRejectDoc = async (docId: number) => {
+    if (!registryId) return;
+    const remarks = window.prompt("Describe what's wrong with this document (required):");
+    if (!remarks?.trim()) return;
+    try {
+      const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/${docId}`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ Status: 'Rejected', Remarks: remarks.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Document rejected");
+      invalidateRegistry();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+  };
+
+  const handleRegPreviewDoc = async (doc: any) => {
+    setPreviewLoading(doc.Id);
+    try {
+      const res = await fetchWithAuth(`${API}/registry/documents/file/${doc.Id}`);
+      if (!res.ok) throw new Error("Could not load file");
+      const blob = await res.blob();
+      setPreviewDoc({ url: URL.createObjectURL(blob), mime: doc.MimeType, name: doc.FileName || doc.DocumentType });
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setPreviewLoading(null); }
+  };
+  const handleRegDownloadDoc = async (doc: any) => {
+    try {
+      const res = await fetchWithAuth(`${API}/registry/documents/file/${doc.Id}`);
+      if (!res.ok) throw new Error("Could not download file");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = doc.FileName || doc.DocumentType || 'document';
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e: any) { toast.error(translateError(e.message)); }
+  };
+
+  // ── Query Payment handlers ─────────────────────────────────────────────
+  const qpStageFiles = async (files: FileList | null, multi = true) => {
+    if (!files?.length) return;
+    const arr = Array.from(files);
+    const big = arr.find((f) => f.size > QP_MAX_FILE);
+    if (big) { toast.error(`${big.name} is too large (max 4 MB)`); return; }
+    const total = qpPendingFiles.reduce((s, f) => s + f.size, 0) + arr.reduce((s, f) => s + f.size, 0);
+    if (total > QP_MAX_TOTAL) { toast.error("Total files can't exceed 6 MB"); return; }
+    try {
+      const staged = await Promise.all(arr.map(qpFileToStaged));
+      if (multi) setQpPendingFiles((p) => [...p, ...staged]);
+      else setQpProofFile(staged[0]);
+    } catch { toast.error("Failed to read file"); }
+  };
+
+  const handleStartQp = async () => {
+    if (!detail?.BookingId) return;
+    setQpStarting(true);
+    try {
+      const res = await fetchWithAuth(`${API}/query-payment`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ BookingId: detail.BookingId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(`${data.QPNo} started`);
+      invalidate(); invalidateQp();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setQpStarting(false); }
+  };
+
+  const handleQpSendInfo = async () => {
+    if (!qpDetail?.Id || !qpPendingFiles.length) return;
+    setQpSending(true);
+    try {
+      const res = await fetchWithAuth(`${API}/query-payment/${qpDetail.Id}/info`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ files: qpPendingFiles.map((f) => ({ fileName: f.name, mimeType: f.type, base64: f.base64 })) }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Payment details sent to customer");
+      setQpPendingFiles([]); setQpSendConfirm(false);
+      invalidateQp(); invalidate();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setQpSending(false); }
+  };
+
+  const handleQpConfirm = async () => {
+    if (!qpDetail?.Id) return;
+    setQpConfirming(true);
+    try {
+      const res = await fetchWithAuth(`${API}/query-payment/${qpDetail.Id}/confirm`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ConfirmedAmount: qpConfirmAmt || undefined,
+          Remarks: qpConfirmRem || undefined,
+          proof: qpProofFile ? { fileName: qpProofFile.name, mimeType: qpProofFile.type, base64: qpProofFile.base64 } : undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Government payment confirmed");
+      setQpConfirmAmt(""); setQpConfirmRem(""); setQpProofFile(null);
+      invalidateQp(); invalidate();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setQpConfirming(false); }
+  };
+
+  const handleQpSaveRemarks = async () => {
+    if (!qpDetail?.Id) return;
+    setQpRemarksSaving(true);
+    try {
+      const res = await fetchWithAuth(`${API}/query-payment/${qpDetail.Id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ Remarks: qpRemarksText }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Remarks saved");
+      setQpEditingRemarks(false);
+      invalidateQp();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setQpRemarksSaving(false); }
+  };
+
+  const handleQpProxyProof = async (method: ProxyMethod, remarks: string) => {
+    if (!qpDetail?.Id || !qpProxyFile) return;
+    setQpProxySaving(true);
+    try {
+      const fd = new FormData(); fd.append("file", qpProxyFile); fd.append("ProxyMethod", method); fd.append("ProxyRemarks", remarks);
+      const res = await fetchWithAuth(`${API}/query-payment/${qpDetail.Id}/proxy-proof`, { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success("Proof uploaded on customer's behalf");
+      setQpProxyDialog(false); setQpProxyFile(null);
+      if (qpProxyRef.current) qpProxyRef.current.value = "";
+      invalidateQp();
+    } catch (e: any) { toast.error(translateError(e.message)); }
+    finally { setQpProxySaving(false); }
+  };
+
+  const qpOpenAttachment = async (a: any) => {
+    try {
+      const res = await fetchWithAuth(`${API}/query-payment/attachment/${a.AttachmentId}`);
+      if (!res.ok) throw new Error("Failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const win = window.open(url, "_blank");
+      if (!win) { const anchor = document.createElement("a"); anchor.href = url; anchor.download = a.FileName; anchor.click(); }
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch { toast.error("Could not open attachment"); }
   };
 
   const handleCreate = async () => {
@@ -729,7 +1207,7 @@ const CrmSalesDeed: React.FC = () => {
     setExecEditing(false);
     setDetailId(id);
     setSp((p) => { p.set("deedId", String(id)); return p; }, { replace: true });
-    setActiveTab('Overview');
+    setActiveTab('Timeline');
   };
 
   const saveFields = async (fields: Record<string, any>) => {
@@ -1108,7 +1586,7 @@ const CrmSalesDeed: React.FC = () => {
                     } else {
                       variant = "action";
                       text = "All checks passed — ready to mark this deed executed.";
-                      cta = { label: "Mark Executed", onClick: () => { setActiveTab('Registration'); setExecEditing(true); } };
+                      cta = { label: "Mark Executed", onClick: () => { setActiveTab('Legal & Approval'); setExecEditing(true); } };
                     }
                     type VariantDef = { card: string; text: string; sub: string; icon: React.ReactNode };
                     const variantDef: Record<BannerVariant, VariantDef> = {
@@ -1210,7 +1688,7 @@ const CrmSalesDeed: React.FC = () => {
                 
                 {/* Tab bar — same visual pattern as CrmAgreement.tsx */}
                 <div className="flex items-center gap-x-1 border-b border-border px-1 -mt-1">
-                  {(['Overview', 'Documents', 'Legal & Approval', 'Registration', 'History'] as const).map((t, i) => (
+                  {(['Timeline', 'Overview', 'Documents', 'Legal & Approval', 'Query Payment', 'Registry', 'History'] as const).map((t, i) => (
                     <button key={t} onClick={() => setActiveTab(t)}
                       className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                         activeTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
@@ -1223,6 +1701,34 @@ const CrmSalesDeed: React.FC = () => {
                 </div>
 
                 {/* Tab content renders below */}
+
+                  {activeTab === 'Timeline' && (() => {
+                    const steps = deedStepStates(detail, deedDetail?.documents, detailContext);
+                    const stepBadges: (string | undefined)[] = [
+                      detail.Status,
+                      undefined,
+                      deedDocumentProgress(deedDetail?.documents).required > 0 ? `${deedDocumentProgress(deedDetail?.documents).percent}%` : undefined,
+                      detail.SeniorApprovalStatus,
+                      detail.CustomerApprovalStatus,
+                      detail.DirectorApprovalStatus,
+                      qpDetail?.Status,
+                      undefined,
+                      registry?.Status,
+                    ];
+                    return (
+                      <div className="rounded-xl border border-border bg-card p-5">
+                        <h3 className="text-sm font-semibold mb-4 flex items-center gap-1.5">
+                          <ScrollText size={15} className="text-primary" /> Workflow Timeline
+                        </h3>
+                        <div>
+                          {steps.map((s, i) => (
+                            <SDTlRow key={s.label} n={i + 1} title={s.label} state={s.state}
+                              badge={stepBadges[i]} onJump={() => setActiveTab(s.tab)} last={i === steps.length - 1} />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {activeTab === 'Overview' && (
                     <div className="space-y-4">
@@ -1576,76 +2082,13 @@ const CrmSalesDeed: React.FC = () => {
                           );
                         })()}
                       </div>
-                    </div>
-                  )}
 
-                  {activeTab === 'Registration' && (
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading mb-3">Registration & Execution</p>
-
-                      {/* Step 9: Stamp Duty Payment */}
-                      {(() => {
-                        const qpStatus = detailContext?.queryPaymentStatus;
-                        const qpConfirmed = qpStatus === "Confirmed";
-                        return (
-                          <AutoStep n={9} label="Stamp Duty Payment"
-                            done={qpConfirmed}
-                            status={qpStatus ? <StatusBadge status={qpStatus} /> : undefined}
-                          >
-                            {!qpStatus && (
-                              <p className="text-xs text-muted-foreground">
-                                {detail.DirectorApprovalStatus === CrmStatus.APPROVED
-                                  ? "Not started yet."
-                                  : "Unlocks once Director Approval (Step 8) is complete."}
-                              </p>
-                            )}
-                            {qpStatus && !qpConfirmed && (
-                              <p className="text-xs text-amber-600">Paperwork sent, awaiting confirmation that the customer paid the government.</p>
-                            )}
-                            {qpConfirmed && detailContext?.queryPaymentConfirmedAmount != null && (
-                              <p className="text-xs text-emerald-600">Confirmed — {formatINR(detailContext.queryPaymentConfirmedAmount)}</p>
-                            )}
-                            <button onClick={() => navigate(`/crm/query-payment?bookingId=${detail.BookingId}`)}
-                              className="flex items-center gap-1 text-xs text-primary hover:underline mt-1">
-                              Go to Query Payment <ExternalLink size={10} />
-                            </button>
-                          </AutoStep>
-                        );
-                      })()}
-
-                      {/* Step 10: SRO Appointment */}
-                      {(() => {
-                        const regStatus = detailContext?.registryStatus;
-                        const regDone = regStatus === "Completed";
-                        return (
-                          <AutoStep n={10} label="Sub-Registrar Appointment"
-                            done={regDone}
-                            status={regStatus ? <StatusBadge status={regStatus} cfg={{ Pending: STATUS_CFG.Draft, Scheduled: { text: "text-blue-700", bar: "bg-blue-500" }, Completed: { text: "text-emerald-700", bar: "bg-emerald-500" } }} /> : undefined}
-                          >
-                            {!regStatus && (
-                              <p className="text-xs text-muted-foreground">
-                                {detailContext?.queryPaymentStatus === "Confirmed"
-                                  ? "Not started yet."
-                                  : "Unlocks once Stamp Duty Payment (Step 9) is Confirmed."}
-                              </p>
-                            )}
-                            {regStatus && regStatus !== "Completed" && detailContext?.registryScheduledDate && (
-                              <p className="text-xs text-blue-600">Scheduled for {fmtDate(detailContext.registryScheduledDate)}</p>
-                            )}
-                            <button onClick={() => navigate(`/crm/registry?bookingId=${detail.BookingId}`)}
-                              className="flex items-center gap-1 text-xs text-primary hover:underline mt-1">
-                              Go to Registry <ExternalLink size={10} />
-                            </button>
-                          </AutoStep>
-                        );
-                      })()}
-
-                      {/* Step 11: Execution — gated on the full Senior → Customer →
-                          Director approval chain (and, server-side, every mandatory
-                          document actually Verified). This used to be reachable the
-                          moment staff typed a name into ExecutedBy, regardless of
-                          whether any approval had happened — the button now reflects
-                          the real prerequisite instead of just "not Registered yet". */}
+                      {/* Deed Execution — the culmination of the Senior → Customer →
+                          Director approval chain above (and, server-side, every
+                          mandatory document actually Verified). Lives here, right
+                          after Director Approval, rather than on the Registry tab —
+                          Registry only covers the physical Sub-Registrar visit that
+                          happens after the deed is already executed. */}
                       {(() => {
                         const executed = !!detail.ExecutedBy;
                         const readyToExecute = detail.SeniorApprovalStatus === "Approved"
@@ -1655,10 +2098,16 @@ const CrmSalesDeed: React.FC = () => {
                           ? `Requires Senior, Customer and Director approval first — currently Senior: ${detail.SeniorApprovalStatus || "not requested"}, Customer: ${detail.CustomerApprovalStatus || "not sent"}, Director: ${detail.DirectorApprovalStatus || "not requested"}`
                           : null;
                         return (
-                          <AutoStep n={11} label="Deed Execution"
-                            done={executed}
-                            status={executed ? <span className="text-xs text-emerald-600">Executed</span> : undefined}
-                          >
+                          <div className="rounded-xl border border-border overflow-hidden">
+                            <div className="px-4 py-3 bg-muted/30 border-b border-border flex items-center justify-between">
+                              <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                                <FileText size={15} className="text-primary" /> Deed Execution
+                              </h3>
+                              {executed
+                                ? <span className="text-[11px] text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">Executed</span>
+                                : <span className="text-[11px] text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full font-semibold">Not executed</span>}
+                            </div>
+                            <div className="px-4 py-3">
                             {!progressLocked && (
                               <>
                                 {!execEditing && !executed && notReadyReason ? (
@@ -1729,12 +2178,396 @@ const CrmSalesDeed: React.FC = () => {
                                 {detail.BookNo && <p>Book/Part: {detail.BookNo}/{detail.PartNo}</p>}
                               </div>
                             )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {activeTab === 'Query Payment' && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-semibold">Stamp Duty & Registration Fee</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">Communicate the government fee to the customer, then confirm once it's paid at the Sub-Registrar.</p>
+                        </div>
+                        {qpDetail?.Status && <StatusBadge status={qpDetail.Status} cfg={{ Pending: STATUS_CFG.Draft, InfoSent: { text: "text-blue-700", bar: "bg-blue-500" }, Confirmed: { text: "text-emerald-700", bar: "bg-emerald-500" } }} />}
+                      </div>
+
+                      {/* Former standalone Query Payment page, embedded here as its own
+                          full tab (matching CrmAgreement.tsx's AFS Payment tab pattern)
+                          so communicating/confirming the government fee happens without
+                          leaving the deed. */}
+                      {(() => {
+                        const qpStatus = qpDetail?.Status;
+                        return (
+                          <AutoStep n={1} label="Stamp Duty Payment"
+                            done={qpConfirmed}
+                            status={qpStatus ? <StatusBadge status={qpStatus} cfg={{ Pending: STATUS_CFG.Draft, InfoSent: { text: "text-blue-700", bar: "bg-blue-500" }, Confirmed: { text: "text-emerald-700", bar: "bg-emerald-500" } }} /> : undefined}
+                          >
+                            {!qpDetail && (
+                              <div className="mt-1">
+                                {detail.DirectorApprovalStatus !== CrmStatus.APPROVED ? (
+                                  <p className="text-xs text-muted-foreground">Unlocks once Director Approval (on the Legal & Approval tab) is complete.</p>
+                                ) : (
+                                  <button onClick={handleStartQp} disabled={qpStarting || !qpStartEligible}
+                                    className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted font-medium disabled:opacity-40">
+                                    {qpStarting ? "Starting…" : "Start Query Payment"}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {qpDetail && (
+                              <div className="mt-2 space-y-3">
+                                {/* Fee breakdown */}
+                                {(() => {
+                                  const stamp = Number(qpDetail.StampDuty || 0);
+                                  const reg = Number(qpDetail.RegistrationFee || 0);
+                                  const credit = Number(qpDetail.StampDutyCredit || 0);
+                                  const net = Number(qpDetail.RequiredAmount || 0);
+                                  if (!stamp && !reg) return null;
+                                  return (
+                                    <div className="grid grid-cols-4 gap-2 text-xs">
+                                      <div className="rounded-lg border border-border bg-muted/20 px-2.5 py-2"><p className="text-[10px] text-muted-foreground">Stamp Duty</p><p className="font-mono font-semibold">{formatINR(stamp)}</p></div>
+                                      <div className="rounded-lg border border-border bg-muted/20 px-2.5 py-2"><p className="text-[10px] text-muted-foreground">Reg. Fee</p><p className="font-mono font-semibold">{formatINR(reg)}</p></div>
+                                      {credit > 0 && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2"><p className="text-[10px] text-emerald-700">AFS Credit</p><p className="font-mono font-semibold text-emerald-700">{formatINR(credit)}</p></div>}
+                                      <div className="rounded-lg border-2 border-primary/30 bg-primary/5 px-2.5 py-2"><p className="text-[10px] text-primary font-bold">Net Payable</p><p className="font-mono font-semibold text-primary">{formatINR(net)}</p></div>
+                                    </div>
+                                  );
+                                })()}
+
+                                {/* Remarks */}
+                                {qpEditingRemarks ? (
+                                  <div className="rounded-lg border border-primary/30 bg-primary/[0.03] p-2.5 space-y-1.5">
+                                    <Input autoFocus value={qpRemarksText} onChange={(e) => setQpRemarksText(e.target.value)}
+                                      onKeyDown={(e) => { if (e.key === "Enter") handleQpSaveRemarks(); if (e.key === "Escape") setQpEditingRemarks(false); }}
+                                      className="h-7 text-xs" placeholder="Optional note…" />
+                                    <div className="flex gap-2 justify-end">
+                                      <button onClick={() => setQpEditingRemarks(false)} disabled={qpRemarksSaving} className="px-2 py-1 text-[11px] rounded border border-border hover:bg-muted">Cancel</button>
+                                      <button onClick={handleQpSaveRemarks} disabled={qpRemarksSaving} className="px-2 py-1 text-[11px] font-semibold text-primary-foreground rounded bg-primary hover:bg-primary/90 disabled:opacity-40">{qpRemarksSaving ? "Saving…" : "Save"}</button>
+                                    </div>
+                                  </div>
+                                ) : qpDetail.Remarks ? (
+                                  <div className="flex items-start gap-2 text-[11px] text-muted-foreground italic bg-muted/30 rounded px-2.5 py-1.5">
+                                    <span className="flex-1">"{qpDetail.Remarks}"</span>
+                                    {qpDetail.Status === CrmStatus.PENDING && <button onClick={() => { setQpRemarksText(qpDetail.Remarks || ""); setQpEditingRemarks(true); }} className="text-muted-foreground hover:text-foreground shrink-0"><Pencil size={10} /></button>}
+                                  </div>
+                                ) : qpDetail.Status === CrmStatus.PENDING ? (
+                                  <button onClick={() => { setQpRemarksText(""); setQpEditingRemarks(true); }} className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"><Pencil size={9} /> Add remarks</button>
+                                ) : null}
+
+                                {qpConfirmed ? (
+                                  <div className="space-y-2">
+                                    <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5">
+                                      <p className="text-xs font-semibold text-emerald-800">Government payment confirmed</p>
+                                      <p className="text-[11px] text-emerald-700 mt-0.5">{fmtDate(qpDetail.ConfirmedAt)}{qpDetail.ConfirmedAmount ? ` · ${formatINR(qpDetail.ConfirmedAmount)} paid` : ""}</p>
+                                    </div>
+                                    {qpProofAttachments.length > 0 && (
+                                      <div className="space-y-1">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Payment Proof</p>
+                                        {qpProofAttachments.map((a: any) => (
+                                          <button key={a.AttachmentId} onClick={() => qpOpenAttachment(a)} className="w-full flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] hover:bg-muted/50 text-left">
+                                            <FileText size={12} className="text-primary shrink-0" /><span className="truncate flex-1">{a.FileName}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                    {qpInfoAttachments.length > 0 && (
+                                      <div className="space-y-1">
+                                        <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sent to Customer</p>
+                                        {qpInfoAttachments.map((a: any) => (
+                                          <button key={a.AttachmentId} onClick={() => qpOpenAttachment(a)} className="w-full flex items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] hover:bg-muted/50 text-left">
+                                            <FileText size={12} className="text-primary shrink-0" /><span className="truncate flex-1">{a.FileName}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <>
+                                    {/* Step 1: Send fee details */}
+                                    {qpStep === 1 && (
+                                      <div className="rounded-lg border border-primary/20 bg-primary/[0.02] p-2.5 space-y-2">
+                                        <p className="text-[11px] font-semibold">1. Send Fee Details to Customer</p>
+                                        {qpInfoAttachments.length > 0 && (
+                                          <div className="space-y-1">
+                                            {qpInfoAttachments.map((a: any) => (
+                                              <button key={a.AttachmentId} onClick={() => qpOpenAttachment(a)} className="w-full flex items-center gap-2 rounded border border-border bg-card px-2 py-1 text-[11px] hover:bg-muted/50 text-left">
+                                                <FileText size={11} className="text-primary shrink-0" /><span className="truncate flex-1">{a.FileName}</span>
+                                              </button>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {qpPendingFiles.map((f, i) => (
+                                          <div key={i} className="flex items-center gap-2 rounded border border-primary/20 bg-primary/5 px-2 py-1 text-[11px]">
+                                            <span className="truncate flex-1 font-medium">{f.name}</span>
+                                            <button onClick={() => setQpPendingFiles((p) => p.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-rose-500"><X size={9} /></button>
+                                          </div>
+                                        ))}
+                                        <input type="file" multiple ref={qpInfoRef} className="hidden" onChange={(e) => qpStageFiles(e.target.files)} />
+                                        {!qpSendConfirm ? (
+                                          <div className="flex items-center gap-2">
+                                            <button onClick={() => qpInfoRef.current?.click()} className="flex items-center gap-1 px-2.5 py-1 text-[11px] border border-dashed border-border rounded hover:bg-muted text-muted-foreground"><Upload size={10} /> Attach files</button>
+                                            {qpPendingFiles.length > 0 && <button onClick={() => setQpSendConfirm(true)} className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold text-primary-foreground rounded bg-primary hover:bg-primary/90"><Send size={10} /> Send ({qpPendingFiles.length})</button>}
+                                          </div>
+                                        ) : (
+                                          <div className="rounded border border-primary/30 bg-primary/5 px-2.5 py-1.5 flex items-center justify-between gap-2">
+                                            <p className="text-[11px] text-muted-foreground">Send {qpPendingFiles.length} file(s)?</p>
+                                            <div className="flex gap-1.5">
+                                              <button onClick={() => setQpSendConfirm(false)} disabled={qpSending} className="px-2 py-1 text-[11px] rounded border border-border hover:bg-muted">Cancel</button>
+                                              <button onClick={handleQpSendInfo} disabled={qpSending} className="px-2 py-1 text-[11px] font-semibold text-primary-foreground rounded bg-primary hover:bg-primary/90 disabled:opacity-40">{qpSending ? "Sending…" : "Confirm Send"}</button>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* Step 2: Confirm paid */}
+                                    {(qpStep === 2 || qpDetail.Status === "InfoSent") && (
+                                      <div className="rounded-lg border border-emerald-200/60 bg-emerald-500/[0.02] p-2.5 space-y-2">
+                                        <div className="flex items-center justify-between">
+                                          <p className="text-[11px] font-semibold">2. Confirm Customer Paid</p>
+                                          {qpStep === 1 && <button onClick={() => setQpStep(2)} className="text-[11px] text-emerald-600 font-semibold hover:underline">Open →</button>}
+                                        </div>
+                                        {qpStep === 2 && (
+                                          <>
+                                            <div className="grid grid-cols-2 gap-2">
+                                              <Input className="h-8 text-xs font-mono" placeholder={qpDetail.RequiredAmount ? String(qpDetail.RequiredAmount) : "Amount paid"} value={qpConfirmAmt} onChange={(e) => setQpConfirmAmt(e.target.value)} />
+                                              <Input className="h-8 text-xs" placeholder="Remarks (optional)" value={qpConfirmRem} onChange={(e) => setQpConfirmRem(e.target.value)} />
+                                            </div>
+                                            {qpProofFile ? (
+                                              <div className="flex items-center gap-2 text-[11px] bg-muted/30 border border-border rounded px-2 py-1.5">
+                                                <span className="truncate flex-1">{qpProofFile.name}</span>
+                                                <button onClick={() => { setQpProofFile(null); if (qpProofRef.current) qpProofRef.current.value = ""; }} className="text-muted-foreground hover:text-rose-600"><X size={10} /></button>
+                                              </div>
+                                            ) : (
+                                              <>
+                                                <input type="file" ref={qpProofRef} className="hidden" onChange={(e) => qpStageFiles(e.target.files, false)} />
+                                                <button onClick={() => qpProofRef.current?.click()} className="w-full flex items-center justify-center gap-1 px-2.5 py-1.5 text-[11px] border border-dashed border-border rounded hover:bg-muted text-muted-foreground"><Upload size={10} /> Attach receipt / challan</button>
+                                              </>
+                                            )}
+                                            {qpDetail.Status === "InfoSent" && (
+                                              <div className="rounded border border-border bg-muted/20 px-2.5 py-2 space-y-1.5">
+                                                <p className="text-[10px] font-semibold text-muted-foreground">Customer not on portal?</p>
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                  <input type="file" ref={qpProxyRef} className="hidden" onChange={(e) => setQpProxyFile(e.target.files?.[0] || null)} />
+                                                  <button onClick={() => qpProxyRef.current?.click()} className="text-[11px] px-2 py-1 border border-border rounded font-medium hover:bg-muted flex items-center gap-1"><Upload size={9} /> {qpProxyFile ? qpProxyFile.name : "Select their proof…"}</button>
+                                                  <button onClick={() => qpProxyFile && setQpProxyDialog(true)} disabled={!qpProxyFile} className="text-[11px] px-2 py-1 bg-amber-50 border border-amber-300 text-amber-800 rounded font-semibold hover:bg-amber-100 disabled:opacity-40">Upload on Their Behalf</button>
+                                                </div>
+                                              </div>
+                                            )}
+                                            {canConfirmQueryPayment ? (
+                                              <button onClick={handleQpConfirm} disabled={qpConfirming} className="w-full px-3 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg disabled:opacity-40">{qpConfirming ? "Confirming…" : "Confirm — Government Fees Paid"}</button>
+                                            ) : (
+                                              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">Confirmation requires Legal Head or CRM Administrator</p>
+                                            )}
+                                          </>
+                                        )}
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            )}
+                          </AutoStep>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {activeTab === 'Registry' && (
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="text-sm font-semibold">Sub-Registrar Office Registration</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">Both parties appear at the Sub-Registrar Office to officially register the Sale Deed — legally transfers ownership to the buyer.</p>
+                        </div>
+                        {registry?.Status && <StatusBadge status={registry.Status} cfg={{ Pending: STATUS_CFG.Draft, Scheduled: { text: "text-blue-700", bar: "bg-blue-500" }, Completed: { text: "text-emerald-700", bar: "bg-emerald-500" }, Cancelled: { text: "text-rose-700", bar: "bg-rose-500" } }} />}
+                      </div>
+
+                      {/* Former standalone Registry page, embedded here as its own full
+                          tab (matching CrmAgreement.tsx's AFS Registry tab pattern) so
+                          scheduling/completing the Sub-Registrar appointment happens
+                          without leaving the deed. */}
+                      {(() => {
+                        const regStatus = registry?.Status;
+                        const regDone = regStatus === "Completed";
+                        const qpConfirmedForReg = detailContext?.queryPaymentStatus === "Confirmed";
+                        return (
+                          <AutoStep n={1} label="Sub-Registrar Appointment"
+                            done={regDone}
+                            status={regStatus ? <StatusBadge status={regStatus} cfg={{ Pending: STATUS_CFG.Draft, Scheduled: { text: "text-blue-700", bar: "bg-blue-500" }, Completed: { text: "text-emerald-700", bar: "bg-emerald-500" }, Cancelled: { text: "text-rose-700", bar: "bg-rose-500" } }} /> : undefined}
+                          >
+                            {!registry && (
+                              <div className="mt-1">
+                                {!qpConfirmedForReg ? (
+                                  <p className="text-xs text-muted-foreground">Unlocks once Stamp Duty Payment (Query Payment tab) is Confirmed.</p>
+                                ) : (
+                                  <button onClick={handleStartRegistry} disabled={regStarting || !registryStartEligible}
+                                    className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted font-medium disabled:opacity-40">
+                                    {regStarting ? "Starting…" : "Start Registry"}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            {registry && (
+                              <div className="mt-2 space-y-3">
+                                {regStatus === "Pending" && (
+                                  <div className="border border-orange-200 bg-orange-50 rounded-lg p-3 flex items-center justify-between gap-3">
+                                    <p className="text-xs text-orange-700">No appointment scheduled yet.</p>
+                                    <button onClick={() => { setRegScheduleOpen("first"); setRegScheduledDate(""); }} className="shrink-0 text-xs bg-orange-600 text-white px-3 py-1.5 rounded hover:bg-orange-700 font-medium">Schedule</button>
+                                  </div>
+                                )}
+                                {regStatus === "Scheduled" && (
+                                  <div className="border border-blue-200 bg-blue-50 rounded-lg p-3">
+                                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                                      <div>
+                                        <p className="text-xs font-semibold text-blue-800">Appointment: {fmtDate(registry.ScheduledDate)}{registry.AppointmentTime && ` · ${registry.AppointmentTime}`}</p>
+                                        {registry.AppointmentOffice && <p className="text-xs text-blue-700 mt-0.5">{registry.AppointmentOffice}</p>}
+                                        <p className="text-xs text-blue-700 mt-0.5">
+                                          {registryRequired.length > 0 ? `${registryVerifiedCount}/${registryRequired.length} mandatory documents verified.` : "No mandatory document requested yet."}
+                                        </p>
+                                      </div>
+                                      <div className="flex items-center gap-2 shrink-0">
+                                        <button onClick={() => { setRegScheduleOpen("reschedule"); setRegScheduledDate(registry.ScheduledDate ? String(registry.ScheduledDate).slice(0, 10) : ""); setRegAppointmentTime(registry.AppointmentTime || ""); setRegAppointmentOffice(registry.AppointmentOffice || ""); setRegRescheduleReason(""); }}
+                                          className="text-xs border border-blue-300 text-blue-700 px-3 py-1.5 rounded hover:bg-blue-100 font-medium">Reschedule</button>
+                                        {canCompleteOrCancelRegistry ? (
+                                          <button onClick={() => { setRegCompleteOpen(true); setRegCompleteForm((f) => ({ ...f, SubRegistrarOffice: registry.AppointmentOffice || registry.SubRegistrarOffice || "" })); }}
+                                            disabled={registryRequired.length > 0 && registryVerifiedCount < registryRequired.length}
+                                            className="text-xs bg-emerald-600 text-white px-3 py-1.5 rounded hover:bg-emerald-700 font-medium disabled:opacity-50">
+                                            Mark Completed
+                                          </button>
+                                        ) : (
+                                          <span className="text-[11px] text-amber-600 border border-amber-200 bg-amber-50 px-2 py-1.5 rounded">Requires Legal Head / Admin</span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                )}
+                                {regStatus === "Completed" && (
+                                  <div className="border border-emerald-200 bg-emerald-50 rounded-lg p-3">
+                                    <p className="text-xs font-semibold text-emerald-800">Registered {fmtDate(registry.RegistrationDate)}</p>
+                                    <p className="text-xs text-emerald-700 mt-0.5">Reg No. {registry.RegistrationNo} · Book {registry.BookNo || "—"} / Part {registry.PartNo || "—"} · {registry.SubRegistrarOffice || "—"}</p>
+                                    {registry.WitnessNames && <p className="text-xs text-emerald-700 mt-1">Witnesses: {registry.WitnessNames}</p>}
+                                    <p className="text-xs text-emerald-700 mt-0.5">Attendance: Buyer {registry.BuyerAttended ? "✓" : "✗"} · Seller/Builder rep {registry.SellerAttended ? "✓" : "✗"}</p>
+                                  </div>
+                                )}
+                                {regStatus === "Cancelled" && (
+                                  <div className="border border-rose-200 bg-rose-50 rounded-lg p-3">
+                                    <p className="text-xs font-semibold text-rose-800">Registry Cancelled</p>
+                                    {registry.CancelledReason && <p className="text-xs text-rose-700 mt-0.5">{registry.CancelledReason}</p>}
+                                  </div>
+                                )}
+                                {!registryLocked && canCompleteOrCancelRegistry && (
+                                  <button onClick={() => setRegCancelOpen(true)} className="text-[11px] border border-rose-200 text-rose-600 px-2 py-1 rounded hover:bg-rose-50 font-medium">Cancel Registry</button>
+                                )}
+
+                                {/* Government dues */}
+                                {(registry.DeedStampDuty || registry.DeedRegistrationFee || registry.QPConfirmedAmount) && (
+                                  <div className="border border-border rounded-lg p-3 grid grid-cols-3 gap-3 text-xs bg-muted/20">
+                                    <div><p className="text-muted-foreground">Stamp Duty</p><p className="font-medium">{registry.DeedStampDuty != null ? formatINR(registry.DeedStampDuty) : "—"}</p></div>
+                                    <div><p className="text-muted-foreground">Registration Fee</p><p className="font-medium">{registry.DeedRegistrationFee != null ? formatINR(registry.DeedRegistrationFee) : "—"}</p></div>
+                                    <div>
+                                      <p className="text-muted-foreground">Query Payment</p>
+                                      <p className="font-medium">{registry.QPConfirmedAmount != null ? formatINR(registry.QPConfirmedAmount) : "—"} {registry.QPStatus && <span className="ml-1 text-[10px]">({registry.QPStatus})</span>}</p>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Documents */}
+                                <div>
+                                  <div className="flex items-center justify-between mb-1.5">
+                                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Registry Documents</p>
+                                    {registryRequired.length > 0 && <span className={cn("text-[11px] font-semibold", registryVerifiedCount === registryRequired.length ? "text-emerald-600" : "text-amber-600")}>{registryVerifiedCount}/{registryRequired.length} verified</span>}
+                                  </div>
+                                  {registryRequired.length === 0 ? (
+                                    <div className="border border-amber-200 bg-amber-50 rounded-lg p-2.5 flex items-center justify-between gap-2">
+                                      <p className="text-[11px] text-amber-800">No mandatory document requested yet.</p>
+                                      {!registryLocked && (
+                                        <button onClick={() => handleRegRequestDoc('RegistrationReceipt', 'Registration Receipt / Challan')} disabled={regRequestingDoc}
+                                          className="shrink-0 text-[11px] bg-amber-600 text-white px-2.5 py-1 rounded hover:bg-amber-700 disabled:opacity-50 font-medium">
+                                          {regRequestingDoc ? "Requesting..." : "Request Receipt"}
+                                        </button>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <div className="space-y-1.5">
+                                      {[...registryRequired, ...registrySupporting].map((doc: any) => (
+                                        <div key={doc.Id} className="border border-border rounded-lg p-2.5 text-xs bg-card">
+                                          <div className="flex items-start gap-2">
+                                            <div className="mt-0.5">{mimeIcon(doc.MimeType)}</div>
+                                            <div className="flex-1 min-w-0">
+                                              <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
+                                                <span className="font-medium">{doc.Label || doc.DocumentType}</span>
+                                                <span className={cn("text-[9px] px-1.5 py-0.5 rounded-full border font-medium", DOC_STATUS_COLOR[doc.Status] || "bg-muted border-border text-muted-foreground")}>{doc.Status}</span>
+                                                {!!doc.Remarks?.startsWith('Synced automatically') && (
+                                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full border font-medium text-indigo-600 bg-indigo-50 border-indigo-200">Synced from Sale Deed</span>
+                                                )}
+                                              </div>
+                                              <p className="text-[11px] text-muted-foreground">{docNextStep(doc)}</p>
+                                              {doc.HasFile && <p className="text-[10px] text-muted-foreground/80 truncate mt-0.5">{doc.FileName} · {fmtBytes(doc.FileSize)}</p>}
+                                              {doc.Status === 'Rejected' && doc.Remarks && <p className="text-[11px] text-red-600 mt-1 bg-red-50 border border-red-200 rounded px-2 py-1">"{doc.Remarks}"</p>}
+                                            </div>
+                                          </div>
+                                          <div className="flex items-center gap-2 mt-1.5 pl-6">
+                                            {doc.HasFile && (doc.MimeType?.startsWith('image/') || doc.MimeType === 'application/pdf') && (
+                                              <button onClick={() => handleRegPreviewDoc(doc)} disabled={previewLoading === doc.Id} className="text-[11px] text-primary hover:underline flex items-center gap-1 disabled:opacity-50">
+                                                {previewLoading === doc.Id ? <Loader2 size={11} className="animate-spin" /> : <Eye size={11} />} Preview
+                                              </button>
+                                            )}
+                                            {doc.HasFile && (
+                                              <button onClick={() => handleRegDownloadDoc(doc)} className="text-[11px] text-primary hover:underline flex items-center gap-1"><Download size={11} /> Download</button>
+                                            )}
+                                            {['Requested', 'Rejected'].includes(doc.Status) && !registryLocked && (
+                                              <>
+                                                <input type="file" className="hidden" id={`reg-doc-attach-${doc.Id}`} onChange={(e) => e.target.files?.[0] && handleRegUploadDoc(e.target.files[0], doc.DocumentType, doc.Label)} />
+                                                <button onClick={() => document.getElementById(`reg-doc-attach-${doc.Id}`)?.click()} className="text-[11px] bg-primary text-primary-foreground px-2 py-0.5 rounded font-medium hover:bg-primary/90">
+                                                  {doc.Status === 'Rejected' ? 'Re-attach' : 'Attach File'}
+                                                </button>
+                                              </>
+                                            )}
+                                            {doc.HasFile && doc.Status === 'Uploaded' && !registryLocked && (
+                                              <>
+                                                <button onClick={() => handleRegVerifyDoc(doc.Id)} className="text-[11px] bg-green-50 text-green-700 border border-green-200 px-2 py-0.5 rounded hover:bg-green-100 font-medium">Verify</button>
+                                                <button onClick={() => handleRegRejectDoc(doc.Id)} className="text-[11px] bg-red-50 text-red-700 border border-red-200 px-2 py-0.5 rounded hover:bg-red-100 font-medium">Reject</button>
+                                              </>
+                                            )}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {!registryLocked && (
+                                    <div className="border border-dashed border-border rounded-lg p-2.5 bg-muted/20 mt-1.5">
+                                      <p className="text-[11px] font-semibold mb-1 text-foreground">Add a Supporting Document</p>
+                                      <div className="flex items-end gap-1.5">
+                                        <select value={regNewDocType} onChange={(e) => setRegNewDocType(e.target.value)} className="flex-1 h-7 text-[11px] border border-border rounded px-1.5 bg-background">
+                                          <option value="StampedDeedCopy">Stamped Deed Copy</option>
+                                          <option value="Other">Other</option>
+                                        </select>
+                                        <Input className="flex-1 h-7 text-[11px]" value={regNewDocLabel} onChange={(e) => setRegNewDocLabel(e.target.value)} placeholder="Label (optional)" />
+                                        <input type="file" className="hidden" ref={regFileInputRef} onChange={(e) => e.target.files?.[0] && handleRegUploadDoc(e.target.files[0], regNewDocType, regNewDocLabel)} />
+                                        <button onClick={() => regFileInputRef.current?.click()} disabled={regUploadingDoc}
+                                          className="h-7 px-2 text-[11px] bg-primary text-primary-foreground rounded hover:bg-primary/90 flex items-center gap-1 font-medium disabled:opacity-50">
+                                          <Upload size={11} /> {regUploadingDoc ? "…" : "Upload"}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            )}
                           </AutoStep>
                         );
                       })()}
 
-                      {/* Step 12: Registration & Index II */}
-                      <AutoStep n={12} label="Deed Registration"
+                      {/* Deed Execution now lives on the Legal & Approval tab, right
+                          after the Director Approval step it's gated on — Registry
+                          only handles the physical Sub-Registrar registration event. */}
+                      <AutoStep n={2} label="Deed Registration"
                         done={!!detail.RegistrationNo}
                         status={detail.RegistrationNo ? <span className="text-xs text-emerald-600 font-mono">{detail.RegistrationNo}</span> : undefined}
                       >
@@ -1919,12 +2752,138 @@ const CrmSalesDeed: React.FC = () => {
                       ) : (
                         <div className="text-center py-8 text-xs text-muted-foreground">No approval actions recorded yet.</div>
                       )}
+
+                      {registryHistory.length > 0 && (
+                        <div className="mt-6">
+                          <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading mb-3">Registry (Sub-Registrar Office)</p>
+                          <div className="relative border-l border-border ml-3 pl-4 space-y-4 py-2">
+                            {registryHistory.map((log: any) => (
+                              <div key={log.Id} className="relative">
+                                <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-border ring-4 ring-card" />
+                                <div className="text-sm">
+                                  <div className="flex items-baseline gap-2">
+                                    <span className="font-medium">{log.Action}</span>
+                                    <span className="text-xs text-muted-foreground">{fmtDate(log.CreatedAt)}</span>
+                                  </div>
+                                  <div className="text-xs text-muted-foreground mt-0.5">By {log.ActorName || "System"} ({log.ActorType})</div>
+                                  {log.Remarks && <div className="text-xs bg-muted/30 border border-border rounded p-2 mt-1.5 text-foreground">{log.Remarks}</div>}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
               </>
             )}
           </div>
         </div>
+
+        {/* Registry: Schedule / Reschedule */}
+        <Dialog open={!!regScheduleOpen} onOpenChange={(o) => !o && setRegScheduleOpen(null)}>
+          <DialogContent className="max-w-xs">
+            <DialogHeader><DialogTitle className="font-heading">{regScheduleOpen === "reschedule" ? "Reschedule Appointment" : "Schedule Registration"}</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">{regScheduleOpen === "reschedule" ? "New Date *" : "Appointment Date *"}</label>
+                  <input type="date" value={regScheduledDate} onChange={(e) => setRegScheduledDate(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Time</label>
+                  <Input value={regAppointmentTime} onChange={(e) => setRegAppointmentTime(e.target.value)} placeholder="e.g. 11:30 AM" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">{regScheduleOpen === "reschedule" ? "Sub-Registrar Office" : "Sub-Registrar Office *"}</label>
+                <Input value={regAppointmentOffice} onChange={(e) => setRegAppointmentOffice(e.target.value)} placeholder="e.g. Sonarpur SRO" />
+              </div>
+              {regScheduleOpen === "reschedule" && (
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Reason *</label>
+                  <textarea value={regRescheduleReason} onChange={(e) => setRegRescheduleReason(e.target.value)} placeholder="Why is this being rescheduled?"
+                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background min-h-[70px]" />
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-border">
+              <button onClick={() => setRegScheduleOpen(null)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              <button onClick={handleRegSchedule} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">Save</button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Registry: Complete */}
+        <Dialog open={regCompleteOpen} onOpenChange={(o) => !o && setRegCompleteOpen(false)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader><DialogTitle className="font-heading">Mark Registry Completed</DialogTitle></DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Registration No. *</label>
+                <Input value={regCompleteForm.RegistrationNo} onChange={(e) => setRegCompleteForm((f) => ({ ...f, RegistrationNo: e.target.value }))} placeholder="e.g. 1234/2026" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Book No.</label>
+                  <Input value={regCompleteForm.BookNo} onChange={(e) => setRegCompleteForm((f) => ({ ...f, BookNo: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground block mb-1">Part No.</label>
+                  <Input value={regCompleteForm.PartNo} onChange={(e) => setRegCompleteForm((f) => ({ ...f, PartNo: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Sub-Registrar Office</label>
+                <Input value={regCompleteForm.SubRegistrarOffice} onChange={(e) => setRegCompleteForm((f) => ({ ...f, SubRegistrarOffice: e.target.value }))} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Registration Date</label>
+                <input type="date" value={regCompleteForm.RegistrationDate} onChange={(e) => setRegCompleteForm((f) => ({ ...f, RegistrationDate: e.target.value }))}
+                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Witness Names *</label>
+                <Input value={regCompleteForm.WitnessNames} onChange={(e) => setRegCompleteForm((f) => ({ ...f, WitnessNames: e.target.value }))} placeholder="e.g. Ramesh Das, Sunita Roy" />
+                <p className="text-[11px] text-muted-foreground mt-1">The Registration Act requires two identifying witnesses at the office.</p>
+              </div>
+              <div className="border border-border rounded-lg p-3 space-y-2">
+                <p className="text-xs font-semibold text-foreground">Attendance Confirmation *</p>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={regCompleteForm.BuyerAttended} onChange={(e) => setRegCompleteForm((f) => ({ ...f, BuyerAttended: e.target.checked }))} />
+                  Buyer (or authorized POA holder) was present
+                </label>
+                <label className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={regCompleteForm.SellerAttended} onChange={(e) => setRegCompleteForm((f) => ({ ...f, SellerAttended: e.target.checked }))} />
+                  Seller / builder representative was present
+                </label>
+              </div>
+            </div>
+            <DialogFooter className="pt-3 border-t border-border">
+              <button onClick={() => setRegCompleteOpen(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+              <button onClick={handleRegComplete}
+                disabled={!regCompleteForm.RegistrationNo.trim() || !regCompleteForm.WitnessNames.trim() || !regCompleteForm.BuyerAttended || !regCompleteForm.SellerAttended}
+                className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed">
+                Confirm Completed
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Registry: Cancel */}
+        <Dialog open={regCancelOpen} onOpenChange={(o) => !o && setRegCancelOpen(false)}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader><DialogTitle className="font-heading">Cancel Registry</DialogTitle></DialogHeader>
+            <div>
+              <label className="text-xs text-muted-foreground block mb-1">Reason *</label>
+              <textarea value={regCancelReason} onChange={(e) => setRegCancelReason(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background min-h-[80px]" />
+            </div>
+            <div className="flex justify-end gap-2 pt-3 border-t border-border">
+              <button onClick={() => setRegCancelOpen(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Back</button>
+              <button onClick={handleRegCancel} className="px-4 py-1.5 text-sm bg-rose-600 text-white rounded-lg font-medium hover:bg-rose-700">Confirm Cancel</button>
+            </div>
+          </DialogContent>
+        </Dialog>
 
         <Dialog open={!!previewDoc} onOpenChange={(o) => { if (!o) closePreview(); }}>
           <DialogContent className="max-w-3xl p-0 gap-0 overflow-hidden">
@@ -2069,6 +3028,16 @@ const CrmSalesDeed: React.FC = () => {
           saving={proxySaving}
           onClose={() => setProxyRecheckDialog(false)}
           onConfirm={handleProxyRecheck}
+        />
+      )}
+      {qpProxyDialog && (
+        <ProxyActionDialog
+          title="Upload Proof on Customer's Behalf — Query Payment"
+          description="Staff uploading the government payment receipt the customer provided."
+          confirmLabel="Submit Proof"
+          saving={qpProxySaving}
+          onClose={() => setQpProxyDialog(false)}
+          onConfirm={handleQpProxyProof}
         />
       )}
     </CrmShell>

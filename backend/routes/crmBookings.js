@@ -2422,7 +2422,11 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
       },
       {
         // Single "Registry" chip covers: Query Payment → Registry appointment
-        // → completion. Query Payment detail is on its own dedicated page.
+        // → completion — both are now tabs on the Sale Deed page itself.
+        // Link to whichever of the two is actually the live step, so the
+        // chip lands on the step that needs attention instead of always the
+        // Registry tab (which would show empty/not-started while Query
+        // Payment is still the one actually in progress).
         key: "registry",
         label: "Registry",
         status: regDone ? "done"
@@ -2433,7 +2437,7 @@ router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (re
                : "locked",
         date: reg ? d(reg.CompletedDate || reg.ScheduledDate || reg.CreatedAt)
              : qp ? d(qp.CreatedAt) : null,
-        link: `/crm/registry?bookingId=${id}`,
+        link: `/crm/sales-deed?bookingId=${id}&tab=${(qp && !reg) ? "Query+Payment" : "Registry"}`,
         blockedBy: sd ? null : "Sale Deed must be created first",
       },
       {

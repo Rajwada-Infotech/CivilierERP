@@ -8,7 +8,7 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Plus, CheckCircle2, Circle, ExternalLink, Lock, FileCheck, ChevronRight } from "lucide-react";
+import { Plus, CheckCircle2, Circle, ExternalLink, Lock, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
@@ -147,27 +147,6 @@ function buildWorkflowModel(t: any): WorkflowModel {
     : null;
 
   const phases: Phase[] = [
-    // ── Allotment Letter ──────────────────────────────────────────────────
-    {
-      key: "allotment",
-      title: "Allotment Letter",
-      isApplicable: true,
-      description: "Issued to the buyer after at least 10% of the total consideration has been received. The buyer signs and returns it; this acknowledgement starts the 30-day Agreement for Sale clock under RERA.",
-      stages: [
-        {
-          key: "allotmentLetter",
-          label: "Allotment Letter",
-          sublabel: "Issued after 10% payment; buyer acknowledges receipt",
-          path: "/crm/allotment-letter",
-          no: t.AlNo || null,
-          status: t.AllotmentLetterStatus || null,
-          isDone: t.AllotmentLetterStatus === "Acknowledged",
-          isLocked: false,
-          unlockedHint: "",
-        },
-      ],
-    },
-
     // ── Sub-Registrar Visit 1 — AFS Registration ─────────────────────────
     {
       key: "afsVisit1",
@@ -325,9 +304,9 @@ function buildWorkflowModel(t: any): WorkflowModel {
       stages: [
         {
           key: "queryPayment",
-          label: "Sale Deed Registration Fees",
+          label: "Query Payment (Stamp Duty & Reg. Fee)",
           sublabel: "Net stamp duty & registration fee due before Visit 2 (AFS credit applied)",
-          path: "/crm/query-payment",
+          path: "/crm/sales-deed?tab=Query+Payment",
           no: t.QPNo || null,
           status: t.QueryPaymentStatus || null,
           isDone: t.QueryPaymentStatus === "Confirmed",
@@ -336,14 +315,14 @@ function buildWorkflowModel(t: any): WorkflowModel {
         },
         {
           key: "registry",
-          label: "Sale Deed Registration Visit",
+          label: "Registry (Sub-Registrar Visit)",
           sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 2) — ownership transferred",
-          path: "/crm/registry",
+          path: "/crm/sales-deed?tab=Registry",
           no: t.RegNo || null,
           status: t.RegistryStatus || null,
           isDone: t.RegistryStatus === "Completed",
           isLocked: !t.SalesDeedId || t.QueryPaymentStatus !== "Confirmed",
-          unlockedHint: "Requires Sale Deed Registration Fees to be Confirmed first",
+          unlockedHint: "Requires Query Payment to be Confirmed first",
         },
       ],
     },
@@ -791,19 +770,6 @@ const CrmLegalMilestones: React.FC = () => {
                       <div className="text-[11px] text-muted-foreground mt-0.5">{selected.BookingNo} · {selected.UnitNo}</div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                      {selected.AllotmentLetterId && (
-                        <button
-                          onClick={() => navigate(`/crm/allotment-letter?bookingId=${selected.BookingId}`)}
-                          className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border font-semibold transition-colors ${
-                            selected.AllotmentLetterStatus === "Acknowledged"
-                              ? "border-green-300 text-green-700 bg-green-50 dark:bg-green-900/30 dark:border-green-800"
-                              : "border-amber-300 text-amber-700 bg-amber-50 dark:bg-amber-900/30 dark:border-amber-800"
-                          }`}
-                        >
-                          <FileCheck size={11} />
-                          Allotment Letter · {selected.AllotmentLetterStatus ?? "Issued"}
-                        </button>
-                      )}
                       <button
                         onClick={() => navigate(`/crm/agreements?bookingId=${selected.BookingId}`)}
                         className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-border text-muted-foreground hover:bg-muted font-semibold"
