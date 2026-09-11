@@ -21,10 +21,10 @@ const GL_ACCOUNTS = {
   // AccountGroup wiring in 230) — was seeded but never actually posted to
   // until postOnAccountAdjustment/postPaymentApproval below.
   ON_ACCOUNT: "Company On Account A/c",
-  // Singleton counter-account for Cash-mode Direct Payments (migration 339)
-  // — Cash payments never carry a PBankID (Payment.tsx disables the Bank
-  // field for Cash), so this stands in for the bank leg on the credit side.
-  CASH_IN_HAND: "Cash-in-Hand A/c",
+  // Cash-mode counter-account is NOT listed here — since migration 418 it's
+  // a real, user-selectable Bank (LHeadType='B'), resolved via
+  // getCashInHandBankId() by LHeadCode='CASH-IN-HAND', not this
+  // GL-only-lookup name map (see getGLHeadId's LHeadType='GL' filter).
   // Singleton counter-account for Debit Note value adjustments (migration
   // 359) — see postDebitNoteAdjustment below.
   DEBIT_NOTE_ADJUSTMENT: "Debit Note Adjustment A/c",
@@ -67,6 +67,26 @@ async function getGLHeadId(pool, name) {
     );
   }
   glHeadIdCache.set(name, id);
+  return id;
+}
+
+// Cash-in-Hand (migration 418) is LHeadType='B' — unlike every other
+// GL_ACCOUNTS singleton, it's meant to be user-selectable as a real Bank on
+// the Payment page (picking it there locks Payment Mode to Cash), not just
+// an invisible fallback — so getGLHeadId's LHeadType='GL' filter can never
+// find it. Resolved by LHeadCode instead, same sentinel-lookup convention
+// 'DUMMY-BANK' already uses (see newPayment.js's IsInterCompanyTransfer
+// handling) rather than a name match.
+let cashInHandBankIdCache = null;
+async function getCashInHandBankId(pool) {
+  if (cashInHandBankIdCache != null) return cashInHandBankIdCache;
+  const result = await pool
+    .request()
+    .query(
+      `SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = 'CASH-IN-HAND' AND Status = 'Approved'`,
+    );
+  const id = result.recordset[0]?.LHeadId ?? null;
+  if (id) cashInHandBankIdCache = id;
   return id;
 }
 
@@ -719,7 +739,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   // leg instead of hard-failing for lack of one.
   let bankId = payment.PBankID;
   if (!bankId && payment.PMode === "Cash") {
-    bankId = await getGLHeadId(pool, GL_ACCOUNTS.CASH_IN_HAND).catch(() => null);
+    bankId = await getCashInHandBankId(pool).catch(() => null);
   }
   if (!bankId)
     return { posted: false, reason: `Payment ${paymentId} has no PBankID (bank account)` };
@@ -1394,6 +1414,7 @@ async function postFundTransferApproval(pool, ftId, userEmail) {
 module.exports = {
   GL_ACCOUNTS,
   getGLHeadId,
+  getCashInHandBankId,
   getHeadIdByName,
   hasPosting,
   postVoucher,

@@ -2329,7 +2329,7 @@ router.get("/:id/posting", async (req, res) => {
     // system-generated placeholder (there isn't one; every vendor has
     // their own ledger). The row label stays generic; only the LHeadId
     // determines which specific account the posting actually lands in.
-    const { resolvePaymentSupplierHeadId, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
+    const { resolvePaymentSupplierHeadId, getCashInHandBankId } = require("../services/generalLedger");
     const resolvedSupplierId = await resolvePaymentSupplierHeadId(pool, pmt);
     // Mirrors postPaymentApproval in services/generalLedger.js: for an
     // invoice-linked payment, pmt.TDSAmount is only an inherited display
@@ -2339,14 +2339,14 @@ router.get("/:id/posting", async (req, res) => {
     const tdsAmount = pmt.PExpenseRef ? 0 : Number(pmt.TDSAmount) || 0;
 
     // Cash-mode payments never carry a PBankID (Payment.tsx disables the
-    // Bank field for Cash) — Cash-in-Hand (migration 339) stands in for the
-    // bank/credit leg instead of leaving it unresolved.
+    // Bank field for Cash) — the seeded Cash in Hand bank (migration 418)
+    // stands in for the bank/credit leg instead of leaving it unresolved.
     let bankAccount = pmt.PBankID
       ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null }
       : null;
     if (!bankAccount && pmt.PMode === "Cash") {
-      const cashHeadId = await getGLHeadId(pool, GL_ACCOUNTS.CASH_IN_HAND).catch(() => null);
-      if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash-in-Hand A/c", code: null };
+      const cashHeadId = await getCashInHandBankId(pool).catch(() => null);
+      if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash in Hand", code: "CASH-IN-HAND" };
     }
 
     const accounts = {
@@ -2424,7 +2424,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
   try {
     const pool = getPool();
     const userEmail = req.user?.email || req.user?.upn || "system";
-    const { postVoucher, resolvePaymentSupplierHeadId, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
+    const { postVoucher, resolvePaymentSupplierHeadId, getGLHeadId, getCashInHandBankId } = require("../services/generalLedger");
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
@@ -2470,10 +2470,10 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const isCash = pmt.PMode === "Cash";
     let bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
     // Cash-mode payments never carry a PBankID (Payment.tsx disables the
-    // Bank field for Cash) — Cash-in-Hand (migration 339) stands in for the
-    // bank leg instead of hard-failing for lack of one.
+    // Bank field for Cash) — the seeded Cash in Hand bank (migration 418)
+    // stands in for the bank leg instead of hard-failing for lack of one.
     if (!bankId && isCash) {
-      bankId = await getGLHeadId(pool, GL_ACCOUNTS.CASH_IN_HAND).catch(() => null);
+      bankId = await getCashInHandBankId(pool).catch(() => null);
     }
 
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });

@@ -56,6 +56,10 @@ export interface BankOption {
   // dropdown to the payment's selected company, same convention
   // ReceivedPayment.tsx already uses.
   companyName?: string | null;
+  // AccountHeadMaster.LHeadCode — used to reliably pick out sentinel heads
+  // like the seeded "Cash in Hand" bank (LHeadCode='CASH-IN-HAND') without
+  // matching on a display label that could be renamed.
+  code?: string | null;
 }
 
 export interface CardOption {
