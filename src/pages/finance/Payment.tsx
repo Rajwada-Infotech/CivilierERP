@@ -119,6 +119,7 @@ import { ExpenseHeadAllocationEditor } from "@/pages/material/ExpenseBooking/Exp
 import { getUndisbursedLoans, postLoanToGL, disburseLoan, type UndisbursedLoan } from "@/api/loanSanctionApi";
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
+import { getPayableJVLines, type PayableJVLine } from "@/api/journalVoucherApi";
 
 // Same helper ReceivedPayment.tsx uses to compare company names for the
 // bank-company scoping filter below — tolerant of casing/whitespace so
@@ -925,6 +926,57 @@ const Payment: React.FC = () => {
   // ── Contract source ─────────────────────────────────────────────────────────
   const [selectedContract, setSelectedContract] = useState<any | null>(null);
 
+  // ── Journal Voucher source ───────────────────────────────────────────────────
+  // Settle a JV's unpaid liability leg (DR that same head, CR bank — the
+  // GL posting is identical to any other payment; see
+  // backend/routes/journalVoucher.js's GET /payable-lines for eligibility).
+  const [selectedJVLine, setSelectedJVLine] = useState<PayableJVLine | null>(null);
+  const { data: jvLineOptions = [], isLoading: jvLinesLoading } = useQuery<PayableJVLine[]>({
+    queryKey: ["payment-payable-jv-lines"],
+    queryFn: () => getPayableJVLines(),
+    staleTime: 30_000,
+  });
+  const handleJVLineSelect = (line: PayableJVLine) => {
+    setSelectedContract(null);
+    setLinkedGRNs([]);
+    setSelectedJVLine(line);
+    const companyOpt = companyOptions.find((c) => c.id === line.CompanyId);
+    const projectOpt = projectOptions.find((p) => p.id === line.ProjectId);
+    const companyLabel = companyOpt?.label || line.CompanyName || String(line.CompanyId || "");
+    const projectLabel = projectOpt?.label || line.ProjectName || String(line.ProjectId || "");
+    setForm((prev) => ({
+      ...prev,
+      paymentName: `Payment against ${line.JVNo || `JV-${line.JVID}`} — ${line.LHeadName}`,
+      expenseId: "",
+      expenseRef: "",
+      parentDocNo: "",
+      rootExBDocNo: "",
+      docType: "",
+      contractId: "",
+      jvLineId: line.LineID,
+      company: companyLabel,
+      project: projectLabel,
+      projectSite: projectLabel,
+      partyId: line.LHeadId,
+      paidTo: line.LHeadName,
+      amount: Math.max(Number(line.RemainingAmount) || 0, 0),
+    }));
+  };
+  const clearJVLineLink = () => {
+    setSelectedJVLine(null);
+    setForm((prev) => ({
+      ...prev,
+      paymentName: "",
+      jvLineId: null,
+      company: "",
+      project: "",
+      projectSite: "",
+      partyId: null,
+      paidTo: "",
+      amount: null,
+    }));
+  };
+
   // TDS — invoice-linked payment. Live preview of exactly what will be
   // inherited (or what will block the save) once an invoice is picked —
   // calls the exact same resolver the save itself uses.
@@ -1144,6 +1196,7 @@ const Payment: React.FC = () => {
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setSelectedContract(null);
+    setSelectedJVLine(null);
     setFormLiveRemaining(null);
     setFormKnownTotalPaid(null);
     setFormKnownTdsAmount(null);
@@ -1159,6 +1212,7 @@ const Payment: React.FC = () => {
 
   const openEdit = (rec: PaymentRecord) => {
     setSelectedContract(null);
+    setSelectedJVLine(null);
     setEditingId(rec.id);
     refetchExpenseOptions();
     const { id, ...rest } = rec;
@@ -1184,6 +1238,7 @@ const Payment: React.FC = () => {
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setSelectedContract(null);
+    setSelectedJVLine(null);
   };
 
   const blank = blankForm();
@@ -1996,6 +2051,7 @@ const Payment: React.FC = () => {
       cardReference: form.cardReference || null,
       cardId: form.cardId ?? null,
       ContractId: form.contractId ? Number(form.contractId) : null,
+      JVLineId: form.jvLineId ?? null,
       // Direct Expense Payment (migration 303) — pay one or more Expense
       // Heads straight from the bank instead of a Party/Invoice.
       EExpenseHeadAllocations:
@@ -2047,6 +2103,7 @@ const Payment: React.FC = () => {
       }
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+      queryClient.invalidateQueries({ queryKey: ["payment-payable-jv-lines"] });
       setDisbursingCustomerLoan(null);
       cancelForm();
     } catch (err: any) {
@@ -2064,6 +2121,7 @@ const Payment: React.FC = () => {
       toast.success("Payment deleted.");
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+      queryClient.invalidateQueries({ queryKey: ["payment-payable-jv-lines"] });
       setDeleteId(null);
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -2428,6 +2486,11 @@ const Payment: React.FC = () => {
                           selectedContract={selectedContract}
                           onContractSelect={handleContractSelect}
                           onContractClear={clearContractLink}
+                          jvLines={jvLineOptions}
+                          jvLinesLoading={jvLinesLoading}
+                          selectedJVLine={selectedJVLine}
+                          onJVLineSelect={handleJVLineSelect}
+                          onJVLineClear={clearJVLineLink}
                         />
                         <div className="flex items-center gap-2 pt-1">
                           {filteredOptions.length === 0 && !loadingExpense && (

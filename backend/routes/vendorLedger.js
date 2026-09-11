@@ -137,7 +137,7 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
         MAX(gle.VoucherDate) AS LastTransactionDate
       FROM dbo.GeneralLedgerEntry gle
       WHERE gle.LHeadId = @Id AND gle.IsReversed = 0
-        AND gle.SourceType NOT IN ('GRN', 'GRNPosting')
+        AND gle.SourceType NOT IN ('GRN', 'GRNPosting', 'OnAccountAdjustment')
     `);
 
     const row = result.recordset[0] || {};
@@ -195,11 +195,20 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
 // Contractor only for that reason.
 const ON_ACCOUNT_PARTY_TYPES = ["Supplier", "Contractor"];
 
+// Only CREDIT rows (the advance/excess payment itself) are ever surfaced on
+// this report. A DEBIT row ("applied to invoice") and its paired real
+// OnAccountAdjustment GeneralLedgerEntry (excluded below wherever GL rows
+// are queried) always land on the same date for the same amount and net to
+// zero — showing both add a wash pair that inflates Total Debit/Total
+// Credit without changing any balance. The application itself is an
+// internal bookkeeping move, not a transaction the vendor's passbook needs
+// to itemize.
 async function fetchOnAccountRows(pool, headId) {
   const result = await pool.request().input("Id", sql.Int, headId).query(`
     SELECT OAId, PartyId, TxnDate, TxnType, Amount, RefType, RefDocNo, Notes, CompanyId, ProjectId
     FROM dbo.OnAccountLedger
     WHERE PartyId = @Id AND PartyType IN ('${ON_ACCOUNT_PARTY_TYPES.join("','")}')
+      AND TxnType = 'CREDIT'
   `);
   return result.recordset;
 }
@@ -267,7 +276,7 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
                SELECT SUM(g.DebitAmount) - SUM(g.CreditAmount)
                FROM dbo.GeneralLedgerEntry g
                WHERE g.LHeadId = @Id AND g.IsReversed = 0
-                 AND g.SourceType NOT IN ('GRN', 'GRNPosting')
+                 AND g.SourceType NOT IN ('GRN', 'GRNPosting', 'OnAccountAdjustment')
                  AND @From IS NOT NULL AND g.VoucherDate < @From
              ), 0) AS WindowOpening
       FROM dbo.AccountHeadMaster ahm
@@ -314,7 +323,7 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
       LEFT JOIN dbo.LoanSanction ls
         ON gle.SourceType = 'LoanPosting' AND ls.LoanId = gle.SourceId
       WHERE gle.LHeadId = @Id AND gle.IsReversed = 0
-        AND gle.SourceType NOT IN ('GRN', 'GRNPosting')
+        AND gle.SourceType NOT IN ('GRN', 'GRNPosting', 'OnAccountAdjustment')
         AND (@From IS NULL OR gle.VoucherDate >= @From)
         AND (@To IS NULL OR gle.VoucherDate <= @To)
     `);
@@ -414,7 +423,7 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
       LEFT JOIN dbo.LoanSanction ls
         ON gle.SourceType = 'LoanPosting' AND ls.LoanId = gle.SourceId
       WHERE gle.IsReversed = 0
-        AND gle.SourceType NOT IN ('GRN', 'GRNPosting')
+        AND gle.SourceType NOT IN ('GRN', 'GRNPosting', 'OnAccountAdjustment')
         AND (@From IS NULL OR gle.VoucherDate >= @From)
         AND (@To IS NULL OR gle.VoucherDate <= @To)
     `);
@@ -432,6 +441,7 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
       FROM dbo.OnAccountLedger oal
       JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oal.PartyId AND ahm.LHeadType IN (${VENDOR_HEAD_TYPES_SQL})
       WHERE oal.PartyType IN (${ON_ACCOUNT_PARTY_TYPES.map((t) => `'${t}'`).join(",")})
+        AND oal.TxnType = 'CREDIT'
         AND (@From IS NULL OR oal.TxnDate >= @From)
         AND (@To IS NULL OR oal.TxnDate <= @To)
     `);

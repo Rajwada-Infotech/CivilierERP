@@ -481,6 +481,15 @@ router.get("/:lheadId/transactions", async (req, res) => {
 
         WHERE gle.LHeadId = @LHeadId
           AND gle.IsReversed = 0
+          -- 'OnAccountAdjustment' is the real GL leg postOnAccountAdjustment
+          -- writes when a pooled on-account advance is applied to an
+          -- invoice — it always lands on the same date, for the same
+          -- amount, as a paired OnAccountLedger DEBIT row (directOnAccount
+          -- below, now CREDIT-only for the same reason). Showing both is a
+          -- wash that inflates this list's Total Debit/Credit without
+          -- changing any balance — see vendorLedger.js's fetchOnAccountRows
+          -- for the report where this was first reported and fixed.
+          AND gle.SourceType <> 'OnAccountAdjustment'
           AND gle.VoucherDate >= @from AND gle.VoucherDate <= @to
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
@@ -676,17 +685,22 @@ router.get("/:lheadId/transactions", async (req, res) => {
           SELECT OAId, TxnDate, TxnType, Amount, RefType, RefDocNo, Notes
           FROM dbo.OnAccountLedger
           WHERE PartyId = @PartyId AND PartyType = @PartyType
+            AND TxnType = 'CREDIT'
             AND TxnDate >= @from AND TxnDate <= @to
           ORDER BY TxnDate DESC
         `);
 
+      // Only CREDIT (the advance itself) is ever shown — its paired DEBIT
+      // ("applied to invoice") row and the matching real OnAccountAdjustment
+      // GL leg excluded above always net to zero together; see the WHERE
+      // clause comment on the main GL query for why both are hidden.
       directOnAccount = oaRes.recordset.map((r) => ({
         entryId: null,
         voucherNo: r.RefDocNo,
         date: r.TxnDate ? new Date(r.TxnDate).toISOString().slice(0, 10) : null,
-        debit: r.TxnType === "DEBIT" ? Number(r.Amount) || 0 : 0,
-        credit: r.TxnType === "CREDIT" ? Number(r.Amount) || 0 : 0,
-        narration: r.Notes || `On Account ${r.TxnType === "CREDIT" ? "credit" : "adjustment"}${r.RefType ? ` — ${r.RefType}` : ""}`,
+        debit: 0,
+        credit: Number(r.Amount) || 0,
+        narration: r.Notes || `On Account credit${r.RefType ? ` — ${r.RefType}` : ""}`,
         sourceType: "OnAccountLedger",
         sourceId: null,
         docNo: r.RefDocNo,
