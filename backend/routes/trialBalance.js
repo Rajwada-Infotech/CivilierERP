@@ -108,6 +108,16 @@ router.get("/", async (req, res) => {
             FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId
               AND gle.IsReversed = 0
+              -- 'OnAccountAdjustment' is the real GL leg posted when a
+              -- pooled on-account advance is applied to an invoice — it
+              -- always pairs with a dbo.OnAccountLedger DEBIT row for the
+              -- same amount, both excluded here the same way
+              -- vendorLedger.js's fetchOnAccountRows and this route's own
+              -- per-account drill-down (below) already exclude them. Left
+              -- in here before, this main report could double-count that
+              -- wash pair for any Supplier/Contractor with an applied
+              -- advance.
+              AND gle.SourceType <> 'OnAccountAdjustment'
               AND gle.VoucherDate < @from
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
@@ -123,30 +133,20 @@ router.get("/", async (req, res) => {
             FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId
               AND gle.IsReversed = 0
+              AND gle.SourceType <> 'OnAccountAdjustment'
               AND gle.VoucherDate < @from
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
               AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
-          ), 0)
-          -- Supplier/Contractor on-account advances (dbo.OnAccountLedger,
-          -- cached on AccountHeadMaster.OnAccountBalance) never post a
-          -- GeneralLedgerEntry leg — the payment-approval flow that creates
-          -- them (newPayment.js) only ever writes OnAccountLedger. Folded
-          -- straight into the credit side here (same treatment as Banks'
-          -- BankOpeningBalance above) since it's what the party is
-          -- currently holding against the company. Scoped to S/C only: the
-          -- CRM customer-side on-account flow (crmLedger.js) DOES post a
-          -- matching GL voucher already, so including type 'A' here would
-          -- double-count.
-          + CASE WHEN ahm.LHeadType IN ('S', 'C') THEN ISNULL(ahm.OnAccountBalance, 0) ELSE 0 END
-            AS opening_credit,
+          ), 0) AS opening_credit,
 
           ISNULL((
             SELECT SUM(gle.DebitAmount)
             FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId
               AND gle.IsReversed = 0
+              AND gle.SourceType <> 'OnAccountAdjustment'
               AND gle.VoucherDate BETWEEN @from AND @to
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
@@ -159,6 +159,7 @@ router.get("/", async (req, res) => {
             FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId
               AND gle.IsReversed = 0
+              AND gle.SourceType <> 'OnAccountAdjustment'
               AND gle.VoucherDate BETWEEN @from AND @to
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
@@ -171,6 +172,49 @@ router.get("/", async (req, res) => {
       `);
 
     const heads = headsRes.recordset;
+
+    // Live per-head on-account advance (dbo.OnAccountLedger CREDIT rows —
+    // a standalone advance/excess payment pooled against "Company On
+    // Account A/c", not yet applied to any invoice), split into the same
+    // opening/txn windows as the GL amounts above. Replaces the old
+    // AccountHeadMaster.OnAccountBalance flat cached-column addition,
+    // which (a) could go stale and (b) was added to the CREDIT side —
+    // backwards: paying an advance reduces what's owed, so per
+    // vendorLedger.js's mapOnAccountRow (the verified-correct reference)
+    // it belongs on DEBIT. Both bugs together meant this report's own
+    // numbers for a Supplier/Contractor with on-account activity could
+    // diverge sharply from that same head's Vendor Ledger closing balance
+    // — the exact class of bug already fixed for Vendor Ledger and
+    // Balance Sheet. Never posts a GeneralLedgerEntry leg on its own (the
+    // payment-approval flow that creates it only ever writes
+    // OnAccountLedger), and scoped to Supplier/Contractor only — the CRM
+    // customer-side on-account flow already posts a real GL voucher, so
+    // including PartyType 'Customer' here would double-count.
+    const onAccountRes = await pool
+      .request()
+      .input("from", sql.Date, from)
+      .input("to", sql.Date, to)
+      .input("companyId", sql.Int, companyId)
+      .input("enterpriseId", sql.Int, enterpriseId)
+      .input("projectId", sql.Int, projectId)
+      .query(`
+        SELECT PartyId,
+          SUM(CASE WHEN TxnDate < @from THEN Amount ELSE 0 END) AS openingAdvance,
+          SUM(CASE WHEN TxnDate >= @from AND TxnDate <= @to THEN Amount ELSE 0 END) AS txnAdvance
+        FROM dbo.OnAccountLedger
+        WHERE PartyType IN ('Supplier', 'Contractor') AND TxnType = 'CREDIT'
+          AND TxnDate <= @to
+          AND (@companyId IS NULL OR CompanyId = @companyId)
+          AND (@enterpriseId IS NULL OR CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
+          AND (@projectId IS NULL OR ProjectId = @projectId)
+        GROUP BY PartyId
+      `);
+    const onAccountByHead = new Map(
+      onAccountRes.recordset.map((r) => [
+        Number(r.PartyId),
+        { opening: Number(r.openingAdvance) || 0, txn: Number(r.txnAdvance) || 0 },
+      ]),
+    );
 
     // ── 3. Build group map ───────────────────────────────────────────────────
     // LHeadType 'C' is still overloaded for one remaining source:
@@ -229,9 +273,10 @@ router.get("/", async (req, res) => {
       const g = groupMap.get(Number(h.groupId));
       if (!g) continue;
 
-      const od = Number(h.opening_debit || 0);
+      const onAccount = onAccountByHead.get(Number(h.id));
+      const od = Number(h.opening_debit || 0) + (onAccount?.opening || 0);
       const oc = Number(h.opening_credit || 0);
-      const td = Number(h.txn_debit || 0);
+      const td = Number(h.txn_debit || 0) + (onAccount?.txn || 0);
       const tc = Number(h.txn_credit || 0);
 
       const typeLabel =
@@ -309,9 +354,10 @@ router.get("/", async (req, res) => {
       openingDebit = 0,
       openingCredit = 0;
     for (const h of heads) {
-      totalDebit += Number(h.txn_debit || 0);
+      const onAccount = onAccountByHead.get(Number(h.id));
+      totalDebit += Number(h.txn_debit || 0) + (onAccount?.txn || 0);
       totalCredit += Number(h.txn_credit || 0);
-      openingDebit += Number(h.opening_debit || 0);
+      openingDebit += Number(h.opening_debit || 0) + (onAccount?.opening || 0);
       openingCredit += Number(h.opening_credit || 0);
     }
 
@@ -694,13 +740,21 @@ router.get("/:lheadId/transactions", async (req, res) => {
       // ("applied to invoice") row and the matching real OnAccountAdjustment
       // GL leg excluded above always net to zero together; see the WHERE
       // clause comment on the main GL query for why both are hidden.
+      //
+      // Despite TxnType='CREDIT' being the column value, the advance itself
+      // is a DEBIT-side contribution to the party's own ledger (paying an
+      // advance reduces what's owed, it doesn't increase it) — see
+      // vendorLedger.js's mapOnAccountRow, the verified-correct reference:
+      // TxnType='CREDIT' rows map to DebitAmount there. This was flipped
+      // here initially, which would have shown a Supplier/Contractor's
+      // advance on the wrong side of their own Trial Balance drill-down.
       directOnAccount = oaRes.recordset.map((r) => ({
         entryId: null,
         voucherNo: r.RefDocNo,
         date: r.TxnDate ? new Date(r.TxnDate).toISOString().slice(0, 10) : null,
-        debit: 0,
-        credit: Number(r.Amount) || 0,
-        narration: r.Notes || `On Account credit${r.RefType ? ` — ${r.RefType}` : ""}`,
+        debit: Number(r.Amount) || 0,
+        credit: 0,
+        narration: r.Notes || `On Account advance${r.RefType ? ` — ${r.RefType}` : ""}`,
         sourceType: "OnAccountLedger",
         sourceId: null,
         docNo: r.RefDocNo,

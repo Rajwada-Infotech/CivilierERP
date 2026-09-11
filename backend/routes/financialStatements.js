@@ -270,11 +270,15 @@ router.get("/balance-sheet", async (req, res) => {
     const onAccountRes = await pool
       .request()
       .input("asOf", sql.Date, asOf)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
       .query(`
         SELECT PartyId, SUM(Amount) AS advance
         FROM dbo.OnAccountLedger
         WHERE PartyType IN ('Supplier', 'Contractor') AND TxnType = 'CREDIT'
           AND TxnDate <= @asOf
+          AND (@companyId IS NULL OR CompanyId = @companyId)
+          AND (@projectId IS NULL OR ProjectId = @projectId)
         GROUP BY PartyId
       `);
     const onAccountAdvanceByHead = new Map(
