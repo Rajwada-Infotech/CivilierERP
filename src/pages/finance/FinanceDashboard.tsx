@@ -42,7 +42,7 @@ import {
 } from "recharts";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatCompactINR } from "@/utils/formatCurrency";
-import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme, bwChartColor } from "@/contexts/ThemeContext";
 import {
   FinanceShell,
   FinanceGlassCard,
@@ -139,6 +139,7 @@ const DonutCard: React.FC<{
   glassStyle: React.CSSProperties;
   formatValue?: (n: number) => string;
 }> = ({ title, icon: Icon, accentColor, data, isDark, glassStyle, formatValue = fmt }) => {
+  const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
     <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
@@ -182,7 +183,7 @@ const DonutCard: React.FC<{
                   strokeWidth={0}
                 >
                   {data.map((d, i) => (
-                    <Cell key={i} fill={d.color} />
+                    <Cell key={i} fill={bwChartColor(theme, i, d.color)} />
                   ))}
                 </Pie>
                 <Tooltip
@@ -204,11 +205,11 @@ const DonutCard: React.FC<{
               </PieChart>
             </ResponsiveContainer>
             <div className="space-y-2 w-full sm:w-auto shrink-0">
-              {data.map((d) => (
+              {data.map((d, i) => (
                 <div key={d.name} className="flex items-center gap-2">
                   <div
                     className="w-2.5 h-2.5 rounded-full shrink-0"
-                    style={{ background: d.color }}
+                    style={{ background: bwChartColor(theme, i, d.color) }}
                   />
                   <span className="text-xs text-foreground whitespace-nowrap">
                     {d.name}
@@ -241,6 +242,7 @@ const TrendCard: React.FC<{
   isDark: boolean;
   glassStyle: React.CSSProperties;
 }> = ({ title, icon: Icon, accentColor, data, series, isDark, glassStyle }) => {
+  const { theme } = useTheme();
   const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
   return (
     <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
@@ -302,13 +304,13 @@ const TrendCard: React.FC<{
                 }}
               />
               <Legend wrapperStyle={{ fontSize: 11 }} iconType="circle" iconSize={8} />
-              {series.map((s) => (
+              {series.map((s, i) => (
                 <Line
                   key={s.key}
                   type="monotone"
                   dataKey={s.key}
                   name={s.name}
-                  stroke={s.color}
+                  stroke={bwChartColor(theme, i, s.color)}
                   strokeWidth={2}
                   dot={false}
                   activeDot={{ r: 4 }}
@@ -336,6 +338,13 @@ const INCOME_TREND_COLOR: Record<MonthlyIncomePoint["trend"], string> = {
   degrowth: "#f43f5e",
   neutral: "#6366f1",
 };
+// BW theme swaps the module-accent trend colours for the fixed maroon/green/orange
+// chart palette, keeping "growth" mapped to the palette's green for legibility.
+const BW_INCOME_TREND_COLOR: Record<MonthlyIncomePoint["trend"], string> = {
+  growth: "#008000",
+  degrowth: "#800000",
+  neutral: "#FFA500",
+};
 
 const MonthlyIncomeCard: React.FC<{
   data: MonthlyIncomePoint[];
@@ -343,6 +352,8 @@ const MonthlyIncomeCard: React.FC<{
   glassStyle: React.CSSProperties;
   isLoading: boolean;
 }> = ({ data, isDark, glassStyle, isLoading }) => {
+  const { theme } = useTheme();
+  const trendColor = theme === "bw" ? BW_INCOME_TREND_COLOR : INCOME_TREND_COLOR;
   const hasData = data.some((d) => Math.abs(d.income) > 0.005);
   return (
     <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
@@ -379,9 +390,9 @@ const MonthlyIncomeCard: React.FC<{
           <>
             <div className="flex items-center gap-4 mb-3 flex-wrap">
               {[
-                { label: "Growth", color: INCOME_TREND_COLOR.growth },
-                { label: "Degrowth", color: INCOME_TREND_COLOR.degrowth },
-                { label: "No change", color: INCOME_TREND_COLOR.neutral },
+                { label: "Growth", color: trendColor.growth },
+                { label: "Degrowth", color: trendColor.degrowth },
+                { label: "No change", color: trendColor.neutral },
               ].map((l) => (
                 <div key={l.label} className="flex items-center gap-1.5">
                   <div
@@ -433,7 +444,7 @@ const MonthlyIncomeCard: React.FC<{
                         <p className="text-xs text-muted-foreground">{fmt(d.income)}</p>
                         <p
                           className="text-[11px] font-medium mt-0.5"
-                          style={{ color: INCOME_TREND_COLOR[d.trend] }}
+                          style={{ color: trendColor[d.trend] }}
                         >
                           {trendLabel}
                         </p>
@@ -443,7 +454,7 @@ const MonthlyIncomeCard: React.FC<{
                 />
                 <Bar dataKey="income" radius={[3, 3, 0, 0]} maxBarSize={40}>
                   {data.map((d) => (
-                    <Cell key={d.key} fill={INCOME_TREND_COLOR[d.trend]} />
+                    <Cell key={d.key} fill={trendColor[d.trend]} />
                   ))}
                 </Bar>
               </BarChart>
@@ -519,7 +530,7 @@ const FinanceDashboard = () => {
   usePageRights("finance-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = isDarkDashboard(theme);
+  const isDark = !isLightTheme(theme);
 
   const {
     data: rawData,

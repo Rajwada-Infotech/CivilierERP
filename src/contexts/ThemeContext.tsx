@@ -20,15 +20,21 @@ const themes: Theme[] = ["dark", "light", "midnight", "root", "glass", "bw"];
 export const isLightTheme = (t: Theme): boolean => t === "light" || t === "bw";
 
 /**
- * Analytics/KPI dashboard pages (the glass chart-card + donut/bar-chart
- * layouts, e.g. CrmDashboard's "Bookings by Status" panels) use a dark
- * glass-card look everywhere except the plain Light theme -- including BW,
- * which is otherwise treated as a light surface by `isLightTheme` for
- * sidebars/shells. Use this instead of `!isLightTheme(theme)` for that one
- * "should this dashboard's cards render dark?" decision so BW dashboards
- * get the premium dark-card treatment the design calls for.
+ * Fixed 3-tone chart palette for the BW theme: maroon / green / orange.
+ * Dashboard charts (status pies, trend-line series) cycle through this
+ * instead of each chart's own module-accent hex when theme === "bw", so
+ * every chart across every module reads the same deliberate palette
+ * rather than a grab-bag of per-module accent colours.
  */
-export const isDarkDashboard = (t: Theme): boolean => t !== "light";
+export const BW_CHART_PALETTE = ["#800000", "#008000", "#FFA500"] as const;
+
+/** Pick the BW palette colour for a data point index, else fall back to `color`. */
+export const bwChartColor = (
+  theme: Theme,
+  index: number,
+  color: string,
+): string =>
+  theme === "bw" ? BW_CHART_PALETTE[index % BW_CHART_PALETTE.length] : color;
 
 // Dot colors that represent each theme visually
 export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
