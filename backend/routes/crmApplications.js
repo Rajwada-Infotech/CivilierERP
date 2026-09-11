@@ -19,6 +19,7 @@ const { recalculateRemainingMilestones, requireActiveBooking } = require("../ser
 const { releaseAllParkingForApplication, applyAddParking, rollupBookingTotals } = require("../routes/crmParking");
 const { ensureBrokerForChannelPartner } = require("../services/channelPartnerBrokerBridge");
 const { getApplicationFormPdfBuffer } = require("../services/applicationFormPdf");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -157,31 +158,134 @@ const APP_SELECT = `
 // rare) or the retry case (auto-create failed, e.g. a unit-hold conflict).
 // This is deliberately independent of the status/stage/includeConverted
 // params above so it can't be silently widened by combining with them.
+// Shared WHERE-fragment builder for both the paginated list below and
+// GET /stage-counts — kept in one place so the two queries can never drift
+// apart on what "matches the current filter set" means (the exact drift
+// risk that broke tab counts once pagination made "count what's on this
+// page" stop being a valid substitute for "count everything that matches").
+function buildApplicationFilters(req0, query) {
+  const { status, search, companyId, projectId, blockId } = query;
+  const conds = ["a.IsActive = 1"];
+  if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
+  if (companyId) { req0.input("companyId", sql.Int, parseInt(companyId, 10)); conds.push("a.CompanyId = @companyId"); }
+  if (projectId) { req0.input("projectId", sql.Int, parseInt(projectId, 10)); conds.push("a.ProjectId = @projectId"); }
+  if (blockId) { req0.input("blockId", sql.Int, parseInt(blockId, 10)); conds.push("um.BlockId = @blockId"); }
+  if (search) {
+    req0.input("srch", sql.NVarChar(200), `%${search}%`);
+    conds.push("(COALESCE(cust.CustomerName, a.ApplicantName) LIKE @srch OR COALESCE(cust.Mobile, a.Mobile) LIKE @srch OR a.ApplicationNo LIKE @srch)");
+  }
+  return "WHERE " + conds.join(" AND ");
+}
+
+// The DisplayStage the frontend's own getDisplayStage() computes — a
+// booking that exists but isn't yet Approved still reads as "InProcess",
+// not a premature "Converted". Only meaningful once Stage/BookingStatus are
+// real columns of a derived table (SQL Server won't let HAVING/an outer
+// WHERE reference a SELECT-list CASE alias directly — same fix already
+// applied to crmInvoices.js's grouped-view query this session).
+const DISPLAY_STAGE_EXPR = `CASE WHEN x.Stage = 'Converted' AND x.BookingStatus <> '${CrmStatus.APPROVED}' THEN 'InProcess' ELSE x.Stage END`;
+
 router.get("/", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, search, stage, includeConverted, forBooking, companyId } = req.query;
+    const { stage, includeConverted, forBooking, page } = req.query;
+
+    // No ?page= — every existing caller (New Booking dropdown, Unit/Parking
+    // Matrix, Communication Log, and this page's own pre-pagination
+    // behavior) keeps getting the exact same bare-array response it always
+    // has. Only opting into ?page= gets the new paginated envelope, so nothing
+    // else silently breaks from this rebuild.
+    if (!page) {
+      const req0 = pool.request();
+      const where = buildApplicationFilters(req0, req.query);
+      const result = await req0.query(`${APP_SELECT} ${where} ORDER BY a.CreatedAt DESC`);
+      let rows = result.recordset;
+      if (forBooking) {
+        rows = rows.filter((r) => ![CrmStatus.REJECTED, CrmStatus.CANCELLED, "Expired"].includes(r.Status) && r.Stage !== "Converted");
+      } else if (stage) {
+        rows = rows.filter((r) => r.Stage === stage);
+      } else if (!req.query.status && !includeConverted) {
+        rows = rows.filter((r) => r.Stage !== "Converted");
+      }
+      return res.json(rows);
+    }
+
+    // Paginated path — CrmApplication.tsx's own list. displayStage filters
+    // on the SAME derived value the frontend's tabs/badges use (see
+    // DISPLAY_STAGE_EXPR above), not the raw Stage column the legacy ?stage=
+    // param above still filters on, so a Converted-but-not-yet-Approved
+    // application lands in the right tab consistently everywhere.
+    const { page: pageNum, pageSize, offset } = applyPagination(req);
     const req0 = pool.request();
-    const conds = ["a.IsActive = 1"];
-    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, parseInt(companyId, 10)); conds.push("a.CompanyId = @companyId"); }
-    if (search) {
-      req0.input("srch", sql.NVarChar(200), `%${search}%`);
-      conds.push("(COALESCE(cust.CustomerName, a.ApplicantName) LIKE @srch OR COALESCE(cust.Mobile, a.Mobile) LIKE @srch OR a.ApplicationNo LIKE @srch)");
+    const where = buildApplicationFilters(req0, req.query);
+    req0.input("offset", sql.Int, offset).input("pageSize", sql.Int, pageSize);
+    let displayStageWhere = "";
+    if (req.query.displayStage) {
+      req0.input("dstage", sql.NVarChar(20), req.query.displayStage);
+      displayStageWhere = "WHERE DisplayStage = @dstage";
     }
-    const where = "WHERE " + conds.join(" AND ");
-    const result = await req0.query(`${APP_SELECT} ${where} ORDER BY a.CreatedAt DESC`);
-    let rows = result.recordset;
-    if (forBooking) {
-      rows = rows.filter((r) => ![CrmStatus.REJECTED, CrmStatus.CANCELLED, "Expired"].includes(r.Status) && r.Stage !== "Converted");
-    } else if (stage) {
-      rows = rows.filter((r) => r.Stage === stage);
-    } else if (!status && !includeConverted) {
-      rows = rows.filter((r) => r.Stage !== "Converted");
+    // Two levels of wrapping, not one: SQL Server won't let a WHERE at the
+    // same query level reference a SELECT-list alias (DisplayStage) — x
+    // computes it, y is where it becomes a real, filterable column. Same
+    // shape the count query below already used correctly.
+    const result = await req0.query(`
+      SELECT * FROM (
+        SELECT *, ${DISPLAY_STAGE_EXPR} AS DisplayStage
+        FROM (${APP_SELECT} ${where}) x
+      ) y
+      ${displayStageWhere}
+      ORDER BY CreatedAt DESC
+      OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
+    `);
+
+    const countReq = pool.request();
+    const countWhere = buildApplicationFilters(countReq, req.query);
+    let countDisplayStageWhere = "";
+    if (req.query.displayStage) {
+      countReq.input("dstage", sql.NVarChar(20), req.query.displayStage);
+      countDisplayStageWhere = "WHERE DisplayStage = @dstage";
     }
-    res.json(rows);
+    const countResult = await countReq.query(`
+      SELECT COUNT(*) AS Total FROM (
+        SELECT ${DISPLAY_STAGE_EXPR} AS DisplayStage
+        FROM (${APP_SELECT} ${countWhere}) x
+      ) y
+      ${countDisplayStageWhere}
+    `);
+
+    res.json({
+      rows: result.recordset,
+      total: countResult.recordset[0]?.Total || 0,
+      page: pageNum, pageSize,
+    });
   } catch (e) {
     console.error("[crm-applications] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /stage-counts — In Process / Converted / Not Converted totals under
+// the SAME filter set the paginated list above uses (minus stage itself),
+// so tab badges stay accurate no matter which page or stage is currently
+// selected — a page's own row count can no longer stand in for "how many
+// total" once the list is paginated.
+router.get("/stage-counts", requirePageRight("crm-applications", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const req0 = pool.request();
+    const where = buildApplicationFilters(req0, req.query);
+    const result = await req0.query(`
+      SELECT ${DISPLAY_STAGE_EXPR} AS DisplayStage, COUNT(*) AS Cnt
+      FROM (${APP_SELECT} ${where}) x
+      GROUP BY ${DISPLAY_STAGE_EXPR}
+    `);
+    const counts = { InProcess: 0, Converted: 0, NotConverted: 0 };
+    for (const row of result.recordset) {
+      if (row.DisplayStage in counts) counts[row.DisplayStage] = row.Cnt;
+    }
+    res.json(counts);
+  } catch (e) {
+    console.error("[crm-applications] GET /stage-counts error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });

@@ -1463,7 +1463,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
         .request()
         .input("PPaymentID", sql.Int, id)
         .query(
-          "SELECT PExpenseRef, PAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+          "SELECT PExpenseRef, PAmount, PDate, PMode, PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PChequeNo, BounceCharge, DocNo, OASkipAutoApply, PPartyId, PPaymentName, PCompany, PProject, SourceCrmBrokerageId, SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
         );
       const approvedRow = approvedPayRec.recordset[0];
       const approvedRef = approvedRow?.PExpenseRef;
@@ -1513,6 +1513,24 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
           await bumpCacheVersion("crm-brokerage");
         } catch (brokerErr) {
           console.warn("[new-payment] Brokerage tracking sync failed (non-fatal):", brokerErr.message);
+        }
+      }
+
+      // CRM Refund payout: this NewPayment IS the customer refund disbursement.
+      // Approving it means the cash has moved — mark the CrmRefund Paid, consume
+      // its held/on-account source, and post the forfeiture GL leg. Non-fatal.
+      if (approvedRow?.SourceCrmRefundId) {
+        try {
+          const { markCrmRefundPaid } = require("./crmRefunds");
+          await markCrmRefundPaid(
+            pool,
+            approvedRow.SourceCrmRefundId,
+            id,
+            req.user?.email || req.user?.name || null,
+          );
+          await bumpCacheVersion("crm-refunds");
+        } catch (refundErr) {
+          console.warn("[new-payment] CRM refund paid-sync failed (non-fatal):", refundErr.message);
         }
       }
 

@@ -47,10 +47,10 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
           SELECT 1 FROM dbo.CrmPrePossession pp
           WHERE pp.BookingId = b.Id AND pp.Status = 'Ready'
         )
-        AND EXISTS (
+        AND (b.ProjectId IS NULL OR EXISTS (
           SELECT 1 FROM dbo.CrmOccupancyCertificate oc
           WHERE oc.ProjectId = b.ProjectId AND oc.Status = 'Received'
-        )
+        ))
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmPossessionNotice pn
           WHERE pn.BookingId = b.Id AND pn.Status IN ('Draft', 'Sent')
@@ -67,7 +67,19 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
 router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`${PN_SELECT} ORDER BY n.CreatedAt DESC`);
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = [];
+    // Not paginated — status-tab counts are computed client-side from the
+    // full set (see CrmPossessionNotice.tsx), same reasoning as CrmDemands.
+    // Company/Project/Block narrows the set server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const result = await req0.query(`${PN_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where} ORDER BY n.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-possession-notice] GET error:", e.message);

@@ -8,6 +8,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { ensureCrmCustomerLedgerHead, syncCrmCustomerLedgerHead } = require("../services/crmLedger");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -76,14 +77,51 @@ router.get("/", requirePageRight("crm-customers", "view"), async (req, res) => {
   try {
     const pool = getPool();
     const { search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = ["c.IsActive = 1"];
     if (search) {
       req0.input("srch", sql.NVarChar(200), `%${search}%`);
       conds.push("(c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch OR c.PanNo LIKE @srch)");
     }
-    const result = await req0.query(`${CUSTOMER_SELECT} WHERE ${conds.join(" AND ")} ORDER BY c.CreatedAt DESC`);
-    res.json(result.recordset);
+    // A customer isn't itself scoped to one Company/Project/Block — it can
+    // have applications/bookings across several. Filtering here means "has
+    // at least one application matching this scope", via EXISTS against
+    // CrmApplication (which always carries CompanyId/ProjectId; BlockId only
+    // resolves once a unit is picked, via UnitMaster).
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId)"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId)"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId)"); }
+    const where = `WHERE ${conds.join(" AND ")}`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${CUSTOMER_SELECT} ${where} ORDER BY c.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${CUSTOMER_SELECT} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("srch2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmCustomer c
+          WHERE c.IsActive = 1
+            AND (@srch2 IS NULL OR (c.CustomerName LIKE @srch2 OR c.Mobile LIKE @srch2 OR c.CustomerNo LIKE @srch2 OR c.PanNo LIKE @srch2))
+            AND (@companyId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.CompanyId = @companyId2))
+            AND (@projectId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE a.CustomerId = c.Id AND a.ProjectId = @projectId2))
+            AND (@blockId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE a.CustomerId = c.Id AND um.BlockId = @blockId2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-customers] GET error:", e.message);
     res.status(500).json({ error: e.message });
@@ -454,6 +492,71 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
     }
     console.error("[crm-customers] PUT error:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+// DELETE /:id — soft-delete a customer (IsActive = 0). CrmCustomer records are
+// never hard-deleted (they anchor Applications/Bookings/ledger history); this
+// just removes them from every customer list/picker, all of which filter
+// IsActive = 1.
+//
+// Guard: only allowed when the customer has NO live booking. A booking counts
+// as live unless its Status is a terminal one (Cancelled / Rejected / Expired)
+// — so an Approved booking, or one still Pending/in approval, blocks the
+// delete. Staff must cancel the booking through the Cancellation flow first.
+// Applications with no booking do not block (they carry no money/allotment on
+// their own); they simply become inactive-customer history.
+router.delete("/:id", requirePageRight("crm-customers", "delete"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid customer id" });
+
+    const cust = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Id, CustomerNo, CustomerName, IsActive FROM dbo.CrmCustomer WHERE Id = @id");
+    if (!cust.recordset.length) return res.status(404).json({ error: "Customer not found" });
+    if (!cust.recordset[0].IsActive) {
+      return res.status(409).json({ error: "This customer has already been deleted" });
+    }
+
+    // Any booking that isn't in a terminal state blocks the delete.
+    const liveBookings = await pool.request().input("id", sql.Int, id).query(`
+      SELECT b.BookingNo, b.Status
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE a.CustomerId = @id
+        AND b.IsActive = 1
+        AND b.Status NOT IN ('Cancelled', 'Rejected', 'Expired')
+      ORDER BY b.BookingNo
+    `);
+    if (liveBookings.recordset.length) {
+      const list = liveBookings.recordset
+        .map((r) => `${r.BookingNo} (${r.Status})`)
+        .join(", ");
+      return res.status(400).json({
+        error: `Cannot delete ${cust.recordset[0].CustomerNo} — it has ${liveBookings.recordset.length} active or approved booking${liveBookings.recordset.length === 1 ? "" : "s"}: ${list}. Cancel the booking(s) through the Cancellation flow first.`,
+      });
+    }
+
+    // Soft-delete the customer and disable any portal login tied to it, in one
+    // transaction so a deleted customer can never still sign in to the portal.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req))
+        .query("UPDATE dbo.CrmCustomer SET IsActive = 0, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      await tx.request().input("id", sql.Int, id)
+        .query("UPDATE dbo.CrmCustomerPortalUser SET IsActive = 0 WHERE CustomerId = @id");
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw txErr;
+    }
+
+    res.json({ success: true, message: `Customer ${cust.recordset[0].CustomerNo} deleted` });
+  } catch (e) {
+    console.error("[crm-customers] DELETE error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
   }
 });
 

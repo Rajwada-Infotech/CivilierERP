@@ -9,6 +9,7 @@ const { actorId, isSaAdmin } = require("../services/saAccess");
 const { emitNotification } = require("../services/notify");
 const { getNextDocNumber } = require("../services/docNumber");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -41,21 +42,69 @@ const TICKET_SELECT = `
 router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, priority, category } = req.query;
+    const { status, priority, category, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [];
-    if (!isSaAdmin(req)) {
+    const isAdmin = isSaAdmin(req);
+    if (!isAdmin) {
       req0.input("actorId", sql.Int, actorId(req));
       conds.push("t.AssignedTo = @actorId");
     }
     if (status)   { req0.input("st", sql.NVarChar(30), status);   conds.push("t.Status = @st"); }
     if (priority) { req0.input("pr", sql.NVarChar(20), priority); conds.push("t.Priority = @pr"); }
     if (category) { req0.input("ct", sql.NVarChar(50), category); conds.push("t.Category = @ct"); }
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR t.TicketNo LIKE @search OR t.Subject LIKE @search)");
+    }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const result = await req0.query(`${TICKET_SELECT} ${where} ORDER BY
+    const SELECT_WITH_BLOCK = `${TICKET_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    const ORDER = `ORDER BY
       CASE t.Priority WHEN 'Urgent' THEN 1 WHEN 'High' THEN 2 WHEN 'Normal' THEN 3 ELSE 4 END,
-      t.CreatedAt DESC`);
-    res.json(result.recordset);
+      t.CreatedAt DESC`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER}`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const countReq = pool.request()
+      .input("companyId2", sql.Int, companyId)
+      .input("projectId2", sql.Int, projectId)
+      .input("blockId2", sql.Int, blockId)
+      .input("st2", sql.NVarChar(30), status || null)
+      .input("pr2", sql.NVarChar(20), priority || null)
+      .input("ct2", sql.NVarChar(50), category || null)
+      .input("search2", sql.NVarChar(200), search ? `%${search}%` : null);
+    if (!isAdmin) countReq.input("actorId2", sql.Int, actorId(req));
+    const [result, countResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      countReq.query(`
+        SELECT COUNT(*) AS total
+        FROM dbo.CrmServiceTicket t
+        JOIN dbo.CrmBooking b ON b.Id = t.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+        WHERE ${isAdmin ? "1=1" : "t.AssignedTo = @actorId2"}
+          AND (@st2 IS NULL OR t.Status = @st2)
+          AND (@pr2 IS NULL OR t.Priority = @pr2)
+          AND (@ct2 IS NULL OR t.Category = @ct2)
+          AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+          AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+          AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+          AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2 OR t.TicketNo LIKE @search2 OR t.Subject LIKE @search2))
+      `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-service-tickets] GET error:", e.message);
     res.status(500).json({ error: e.message });

@@ -43,7 +43,18 @@ async function requireAssignedOrApprover(req, res, pool, { bookingId, applicatio
 router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = ["b.IsActive = 1", `b.Status = '${CrmStatus.APPROVED}'`];
+    // Not paginated — Pending/Complete counts are computed client-side from
+    // the full set (see CrmCustomerBankDetails.tsx), same reasoning as
+    // CrmDemands. Company/Project/Block narrows the set server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,
         COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
@@ -57,8 +68,6 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
           NULLIF(LTRIM(RTRIM(ISNULL(d.AccountNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.IfscCode, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.AccountHolderName, ''))), '') IS NOT NULL AND
-          NULLIF(LTRIM(RTRIM(ISNULL(d.NomineeName, ''))), '') IS NOT NULL AND
-          NULLIF(LTRIM(RTRIM(ISNULL(d.NomineeRelation, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.PanNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.AadhaarNo, ''))), '') IS NOT NULL AND
           NULLIF(LTRIM(RTRIM(ISNULL(d.Occupation, ''))), '') IS NOT NULL AND
@@ -68,10 +77,11 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       LEFT JOIN dbo.CrmCustomerBankDetail d ON d.BookingId = b.Id
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
       OUTER APPLY (
         SELECT TOP 1 Outcome FROM dbo.CrmWelcomeCall WHERE BookingId = b.Id ORDER BY CallDate DESC, CreatedAt DESC
       ) wc
-      WHERE b.IsActive = 1 AND b.Status = '${CrmStatus.APPROVED}'
+      WHERE ${conds.join(" AND ")}
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -228,8 +238,11 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
 
     const fields = {
       bank: b.BankName || null, branch: b.BranchName || null, acc: b.AccountNo || null, ifsc: b.IfscCode || null,
-      holder: b.AccountHolderName || null, nname: b.NomineeName || null, nrel: b.NomineeRelation || null,
-      ndob: b.NomineeDob || null, ncon: b.NomineeContact || null, naddr: b.NomineeAddress || null,
+      holder: b.AccountHolderName || null,
+      // Nominee capture was removed from the CRM — these stay bound as NULL so
+      // the existing ISNULL(@nname, NomineeName) upserts simply never touch the
+      // Nominee* columns (the DB columns are kept, just no longer written).
+      nname: null, nrel: null, ndob: null, ncon: null, naddr: null,
       pan: b.PanNo || null, aadh: b.AadhaarNo || null,
       occ: b.Occupation || null, inc: b.AnnualIncome != null && b.AnnualIncome !== "" ? parseFloat(b.AnnualIncome) : null,
       cheque: b.ChequeNo || null, chqdate: b.ChequeDate || null, tref: b.TransactionRef || null,
@@ -244,8 +257,6 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     if (fields.ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(fields.ifsc))
       return res.status(400).json({ error: "IFSC code must be in the format ABCD0123456 (4 letters, 0, 6 alphanumeric)" });
     if (fields.ifsc) fields.ifsc = fields.ifsc.toUpperCase();
-    if (fields.ncon && !/^\d{10}$/.test(fields.ncon))
-      return res.status(400).json({ error: "Nominee contact must be exactly 10 digits" });
     if (fields.acc && fields.acc.length > 20 && !/^\d+$/.test(fields.acc))
       return res.status(400).json({ error: "Account number must be numeric" });
 
@@ -431,8 +442,11 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
 
     const fields = {
       bank: b.BankName || null, branch: b.BranchName || null, acc: b.AccountNo || null, ifsc: b.IfscCode || null,
-      holder: b.AccountHolderName || null, nname: b.NomineeName || null, nrel: b.NomineeRelation || null,
-      ndob: b.NomineeDob || null, ncon: b.NomineeContact || null, naddr: b.NomineeAddress || null,
+      holder: b.AccountHolderName || null,
+      // Nominee capture was removed from the CRM — these stay bound as NULL so
+      // the existing ISNULL(@nname, NomineeName) upserts simply never touch the
+      // Nominee* columns (the DB columns are kept, just no longer written).
+      nname: null, nrel: null, ndob: null, ncon: null, naddr: null,
       pan: b.PanNo || null, aadh: b.AadhaarNo || null,
       occ: b.Occupation || null, inc: b.AnnualIncome != null && b.AnnualIncome !== "" ? parseFloat(b.AnnualIncome) : null,
       cheque: b.ChequeNo || null, chqdate: b.ChequeDate || null, tref: b.TransactionRef || null,
@@ -447,8 +461,6 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     if (fields.ifsc && !/^[A-Z]{4}0[A-Z0-9]{6}$/i.test(fields.ifsc))
       return res.status(400).json({ error: "IFSC code must be in the format ABCD0123456 (4 letters, 0, 6 alphanumeric)" });
     if (fields.ifsc) fields.ifsc = fields.ifsc.toUpperCase();
-    if (fields.ncon && !/^\d{10}$/.test(fields.ncon))
-      return res.status(400).json({ error: "Nominee contact must be exactly 10 digits" });
 
     // VerifyBookingStage is only ever sent (true) by the Booking-tab "Save
     // Bank/KYC Details" button (CrmBookingDetail.tsx) — that's the one

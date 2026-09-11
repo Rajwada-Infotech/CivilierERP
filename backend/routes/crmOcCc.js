@@ -60,6 +60,21 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
       .query("SELECT name FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");
     if (!proj.recordset.length) return res.status(400).json({ error: "Selected project does not exist" });
 
+    // Duplicate guard: one (ProjectId, CertType) record per project is enough.
+    // A second Applied entry for the same type achieves nothing — if a reapplication
+    // is needed, edit the existing record. This is enforced at the DB level too
+    // (migration 412 unique constraint), but a friendly check here gives a clear message.
+    const dup = await pool.request()
+      .input("pid", sql.Int, parseInt(b.ProjectId))
+      .input("ct",  sql.NVarChar(20), b.CertType)
+      .query("SELECT TOP 1 Id, Status FROM dbo.CrmOccupancyCertificate WHERE ProjectId = @pid AND CertType = @ct");
+    if (dup.recordset.length) {
+      const existing = dup.recordset[0];
+      return res.status(409).json({
+        error: `An ${b.CertType} record for this project already exists (status: ${existing.Status}). Edit the existing record instead of creating a duplicate.`,
+      });
+    }
+
     const result = await pool.request()
       .input("pid",  sql.Int,           parseInt(b.ProjectId))
       .input("proj", sql.NVarChar(200), proj.recordset[0].name)
@@ -79,6 +94,11 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
       );
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
+    // DB-level unique constraint violation (migration 412) — belt-and-suspenders.
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique") ||
+        e.number === 2627 || e.number === 2601) {
+      return res.status(409).json({ error: "An OC/CC record for this project and certificate type already exists." });
+    }
     console.error("[crm-oc-cc] POST error:", e.message);
     res.status(500).json({ error: e.message });
   }

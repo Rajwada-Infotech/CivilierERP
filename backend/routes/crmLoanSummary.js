@@ -17,6 +17,21 @@ router.get("/", requirePageRight("crm-loan-details", "view"), async (req, res) =
     const pool = getPool();
     const cancelled = CrmStatus.CANCELLED;
     const rejected  = CrmStatus.REJECTED;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = [
+      "b.IsActive = 1",
+      `b.Status NOT IN ('${cancelled}', '${rejected}')`,
+    ];
+    // Not paginated — status-tab counts and disbursed totals are computed
+    // client-side from the full set (see CrmLoanTracking.tsx), same
+    // reasoning as CrmDemands. Company/Project/Block narrows the set
+    // server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
     const sql2 = [
       "SELECT",
       "  b.Id AS BookingId, b.BookingNo, b.Status AS BookingStatus,",
@@ -41,12 +56,12 @@ router.get("/", requirePageRight("crm-loan-details", "view"), async (req, res) =
       "JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId",
       "LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id",
       "LEFT JOIN dbo.CrmLoanDetail ld ON ld.BookingId = b.Id",
-      "WHERE b.IsActive = 1",
-      "  AND b.Status NOT IN ('" + cancelled + "', '" + rejected + "')",
+      "LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
+      "WHERE " + conds.join(" AND "),
       "ORDER BY b.BookingNo",
     ].join(" ");
 
-    const result = await pool.request().query(sql2);
+    const result = await req0.query(sql2);
     res.json(result.recordset);
   } catch (e) {
     console.error("[crm-loan-summary] GET error:", e.message);

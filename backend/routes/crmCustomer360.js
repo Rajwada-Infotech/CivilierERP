@@ -5,6 +5,7 @@ const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -19,13 +20,23 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
   try {
     const pool = getPool();
     const { search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
-    let where = "WHERE c.IsActive = 1";
+    const conds = ["c.IsActive = 1"];
     if (search) {
       req0.input("srch", sql.NVarChar(200), `%${search}%`);
-      where += " AND (c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch)";
+      conds.push("(c.CustomerName LIKE @srch OR c.Mobile LIKE @srch OR c.CustomerNo LIKE @srch)");
     }
-    const result = await req0.query(`
+    // A customer here is matched by mobile against CrmApplication (this
+    // table has no direct CompanyId/ProjectId of its own) — same EXISTS
+    // pattern as crmCustomers.js's own Company/Project/Block filter.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND a.CompanyId = @companyId)"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND a.ProjectId = @projectId)"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND um.BlockId = @blockId)"); }
+    const where = `WHERE ${conds.join(" AND ")}`;
+    const BASE_SELECT = `
       SELECT
         c.Id, c.CustomerNo, c.CustomerName, c.Mobile, c.City, c.State,
         (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AS ApplicationCount,
@@ -38,10 +49,34 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS TotalOutstanding
       FROM dbo.CrmCustomer c
-      ${where}
-      ORDER BY c.CreatedAt DESC
-    `);
-    res.json(result.recordset);
+    `;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${BASE_SELECT} ${where} ORDER BY c.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${BASE_SELECT} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("srch2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmCustomer c
+          WHERE c.IsActive = 1
+            AND (@srch2 IS NULL OR (c.CustomerName LIKE @srch2 OR c.Mobile LIKE @srch2 OR c.CustomerNo LIKE @srch2))
+            AND (@companyId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND a.CompanyId = @companyId2))
+            AND (@projectId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND a.ProjectId = @projectId2))
+            AND (@blockId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmApplication a JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND um.BlockId = @blockId2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-customer-360] GET / error:", e.message);
     res.status(500).json({ error: e.message });

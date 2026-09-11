@@ -65,8 +65,11 @@ function fmtMoney(v?: number | null) {
 }
 function fmtDate(v?: string | null) {
   if (!v) return "—";
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? String(v).slice(0, 10) : d.toLocaleDateString("en-IN");
+  // Bare date strings (YYYY-MM-DD) parsed as UTC shift by one day in IST.
+  // Force local midnight by appending T00:00:00 before parsing.
+  const iso = String(v).slice(0, 10);
+  const d = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("en-IN");
 }
 
 // Shared filter shape for the main list — both the grouped and flat views
@@ -77,7 +80,13 @@ interface ListFilters {
   invoicedStatus: string; dateFrom: string; dateTo: string;
 }
 
-async function fetchInvoiceList(view: "grouped" | "flat", filters: ListFilters, page: number): Promise<any> {
+async function fetchInvoiceList(
+  view: "grouped" | "flat",
+  filters: ListFilters,
+  page: number,
+  sortKey = "CreatedAt",
+  sortDir: "asc" | "desc" = "desc",
+): Promise<any> {
   const q = new URLSearchParams();
   q.set("view", view);
   q.set("page", String(page));
@@ -89,6 +98,7 @@ async function fetchInvoiceList(view: "grouped" | "flat", filters: ListFilters, 
   if (view === "grouped" && filters.invoicedStatus) q.set("invoicedStatus", filters.invoicedStatus);
   if (filters.dateFrom) q.set("dateFrom", filters.dateFrom);
   if (filters.dateTo) q.set("dateTo", filters.dateTo);
+  if (view === "flat") { q.set("sortKey", sortKey); q.set("sortDir", sortDir); }
   const res = await fetchWithAuth(`${API}?${q}`);
   if (!res.ok) throw new Error("Failed to load invoices");
   return res.json();
@@ -129,7 +139,7 @@ function invalidateInvoiceRelatedQueries(qc: ReturnType<typeof useQueryClient>, 
   }
 }
 
-type MilestoneTone = "ready" | "invoiced" | "partial" | "unpaid" | "demand" | "excluded";
+type MilestoneTone = "ready" | "invoiced" | "partial" | "unpaid" | "demand" | "booking";
 interface MilestoneInsight { tone: MilestoneTone; message: string; icon: typeof CheckCircle2; }
 
 // One place that decides "can this milestone be invoiced, and why/why not" —
@@ -143,9 +153,6 @@ interface MilestoneInsight { tone: MilestoneTone; message: string; icon: typeof 
 // invoice" on the same row used to look like a bug — it's two different
 // questions with two different, both-correct answers).
 function getMilestoneInsight(m: any, existingInvoices: any[]): MilestoneInsight {
-  if (Number(m.MilestoneNo) === 1) {
-    return { tone: "excluded", message: "Booking Amount — generated from the Booking page", icon: ExternalLink as any };
-  }
   // A Void invoice frees its milestone slot (see migration 325) — it must
   // not count as "already invoiced" here, or a corrected invoice could never
   // be raised for a milestone whose first attempt was voided.
@@ -153,6 +160,10 @@ function getMilestoneInsight(m: any, existingInvoices: any[]): MilestoneInsight 
   if (existingInv) {
     return { tone: "invoiced", message: `Already invoiced — ${existingInv.InvoiceNo}`, icon: FileText as any };
   }
+  // Booking Amount (Milestone #1) is invoiced from HERE, exactly like every
+  // other milestone — once its Demand is raised (from the Booking page's
+  // Payment Plan tab). No special case: it falls through to the same
+  // demand-gated "ready to invoice" logic below.
   // Invoice is generated from the demand (billing doc for AmountDue), BEFORE
   // On Account Adjustment settles the milestone. Only gate: demand must exist.
   if (m.DemandStatus === CrmStatus.PENDING) {
@@ -341,7 +352,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
   const milestones: any[] = bookingDetail?.milestones || [];
   const eligibleMilestones = milestones.filter((m) => getMilestoneInsight(m, existingInvoices).tone === "ready");
   const eligibleOnAccount = (onAccountData?.payments || []).filter(
-    (p: any) => !p.InvoiceId && !existingInvoices.some((inv: any) => inv.OnAccountPaymentId === p.Id && inv.Status !== "Void")
+    (p: any) => !p.InvoiceId && p.Status !== "Applied" && p.Status !== "PartiallyApplied" && !existingInvoices.some((inv: any) => inv.OnAccountPaymentId === p.Id && inv.Status !== "Void")
   );
   // Real money still owed on this booking's payment plan — a Maintenance/
   // Other invoice never touches this, so raising one while this is non-empty
@@ -416,8 +427,26 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
         InvoicePrefix: form.NumberMode === "prefix" ? form.InvoicePrefix.trim() : undefined,
         CustomInvoiceNo: form.NumberMode === "custom" ? form.CustomInvoiceNo.trim() : undefined,
       };
-      if (form.InvoiceType === "Milestone") body.MilestoneId = parseInt(form.MilestoneId);
-      else if (form.InvoiceType === "OnAccount") body.OnAccountPaymentId = parseInt(form.OnAccountPaymentId);
+      // Milestone invoices (incl. the Booking Amount / Milestone #1) go
+      // through the shared bulk-generate path — the one sanctioned route for
+      // demand-gated milestone invoicing. POST /:id/invoices only handles
+      // the free-form types (Maintenance / Other / OnAccount) now.
+      if (form.InvoiceType === "Milestone") {
+        const res = await fetchWithAuth(`${BKG_API}/invoices/bulk-generate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items: [{ bookingId, milestoneId: parseInt(form.MilestoneId) }] }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Failed to generate invoice");
+        const ok = data.succeeded?.[0];
+        const skip = data.skipped?.[0];
+        if (!ok) throw new Error(skip?.reason || "Failed to generate invoice");
+        toast.success(`Invoice ${ok.InvoiceNo} generated`);
+        onGenerated(bookingId as number);
+        return;
+      }
+      if (form.InvoiceType === "OnAccount") body.OnAccountPaymentId = parseInt(form.OnAccountPaymentId);
       else { body.Amount = parseFloat(form.Amount); body.InvoiceDate = form.InvoiceDate; }
       const res = await fetchWithAuth(`${BKG_API}/${bookingId}/invoices`, {
         method: "POST",
@@ -594,6 +623,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                 ) : milestones.map((m: any) => {
                   const insight = getMilestoneInsight(m, existingInvoices);
                   const eligible = insight.tone === "ready";
+                  const isBookingAmountPointer = insight.tone === "booking";
                   const selected = form.InvoiceType === "Milestone" && form.MilestoneId === String(m.Id);
                   const bulkChecked = bulkSelected.has(m.Id);
                   const pct = Math.min(100, Math.round((Number(m.AmountPaid || 0) / Math.max(Number(m.AmountDue || 0), 1)) * 100));
@@ -603,6 +633,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                     : insight.tone === "invoiced" ? "text-primary"
                     : insight.tone === "partial" ? "text-amber-700 dark:text-amber-400"
                     : insight.tone === "demand" ? "text-sky-700 dark:text-sky-400"
+                    : insight.tone === "booking" ? "text-violet-600 dark:text-violet-400"
                     : "text-muted-foreground";
                   return (
                     <div key={m.Id}
@@ -625,7 +656,9 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                           {milestoneStatusPill(m)}
                           {selected && <span className="text-primary font-medium">✓ Selected</span>}
                         </div>
-                        <div className={`mt-0.5 ${toneText}`}>Billing: {insight.message}</div>
+                        <div className={`mt-0.5 ${toneText}`}>
+                          {isBookingAmountPointer ? insight.message : `Billing: ${insight.message}`}
+                        </div>
                         {(insight.tone === "partial" || insight.tone === "unpaid") && (
                           <div className="h-1 rounded-full bg-muted overflow-hidden mt-1.5 max-w-[160px]">
                             <div className="h-full rounded-full bg-amber-500" style={{ width: `${pct}%` }} />
@@ -635,6 +668,13 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                       <div className="text-right shrink-0">
                         <div className="font-semibold">{fmtMoney(m.AmountDue)}</div>
                         <div className="text-[10px] text-muted-foreground">Paid {fmtMoney(m.AmountPaid)}</div>
+                        {isBookingAmountPointer && (
+                          <a href={`/crm/bookings?view=${bookingId}`}
+                            className="text-[10px] text-violet-600 dark:text-violet-400 hover:underline mt-0.5 block"
+                            onClick={(e) => e.stopPropagation()}>
+                            Open Booking ↗
+                          </a>
+                        )}
                       </div>
                     </div>
                   );
@@ -866,7 +906,7 @@ const CrmInvoices: React.FC = () => {
   const [page, setPage] = useState(1);
 
   const [preview, setPreview] = useState<InvoiceRow | null>(null);
-  const [invoiceDeepLinkOpened, setInvoiceDeepLinkOpened] = useState(false);
+  const [lastDeepLinkedInvoiceId, setLastDeepLinkedInvoiceId] = useState<string | null>(null);
   const [voidTarget, setVoidTarget] = useState<InvoiceRow | null>(null);
   const [genBookingId, setGenBookingId] = useState<number | null | undefined>(undefined); // undefined = closed
   const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
@@ -899,11 +939,8 @@ const CrmInvoices: React.FC = () => {
     return Array.from(seen.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [bookingsForFilters, projectId]);
 
-  // Dedicated-usage-area wiring: the Booking page's own Payment & Invoice
-  // tab links here with ?bookingId=X for anything beyond the Booking Amount
-  // invoice (which stays exclusive to that page) — arriving with that param
-  // jumps straight to step two, already scoped to that booking, instead of
-  // making staff search for the booking they just came from.
+  // The Booking page's own Payment & Invoice tab links here with ?bookingId=X
+  // to pre-select that booking in the Generate dialog.
   useEffect(() => {
     const bid = searchParams.get("bookingId");
     if (bid && rights.canCreate) {
@@ -915,12 +952,10 @@ const CrmInvoices: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Preview only ever set local state — the URL stayed put, so a refresh
-  // lost the open preview and there was nothing to copy/bookmark/share to
-  // jump straight back to this invoice. Unlike ?bookingId= above (a
-  // one-shot create-flow prefill), ?invoiceId= persists while the preview
-  // is open — same convention as the fixes to other CRM list pages this
-  // session (CrmBooking.tsx's ?view=, CrmWelcomeCall.tsx's ?bookingId=).
+  // ?invoiceId= persists in the URL while a preview is open so it can be
+  // bookmarked/shared. Track the last ID we opened — not a boolean — so
+  // navigating to a *different* ?invoiceId= (e.g. a copied link) always
+  // opens the new one instead of being blocked by the stale flag.
   const openInvoice = (inv: InvoiceRow) => {
     setPreview(inv);
     setSearchParams((sp) => { sp.set("invoiceId", String(inv.Id)); return sp; }, { replace: true });
@@ -931,9 +966,11 @@ const CrmInvoices: React.FC = () => {
   };
 
   const filters: ListFilters = { type, search, projectId, blockId, invoicedStatus, dateFrom, dateTo };
+  // flatSort is part of the query key so changing sort column/direction
+  // triggers a fresh server fetch (server-side ORDER BY across all pages).
   const { data, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-invoices", view, filters, page],
-    queryFn: () => fetchInvoiceList(view, filters, page),
+    queryKey: ["crm-invoices", view, filters, page, flatSort],
+    queryFn: () => fetchInvoiceList(view, filters, page, flatSort.key, flatSort.dir),
     placeholderData: (prev) => prev,
   });
   const groups: BookingGroup[] = data?.view === "grouped" ? data.groups : [];
@@ -947,33 +984,26 @@ const CrmInvoices: React.FC = () => {
     return (v: T) => { setter(v); setPage(1); };
   }
 
-  const sortedFlatRows = useMemo(() => {
-    const rows = [...flatRows];
-    rows.sort((a: any, b: any) => {
-      const av = a[flatSort.key], bv = b[flatSort.key];
-      let cmp = 0;
-      if (flatSort.key === "Amount") cmp = Number(av || 0) - Number(bv || 0);
-      else cmp = String(av ?? "").localeCompare(String(bv ?? ""));
-      return flatSort.dir === "asc" ? cmp : -cmp;
-    });
-    return rows;
-  }, [flatRows, flatSort]);
-
+  // Sort column toggle — resets to page 1 so you always see the globally
+  // highest/lowest rows, not just the sorted current page.
   function toggleFlatSort(key: string) {
     setFlatSort((s) => s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" });
+    setPage(1);
   }
 
+  // Deep-link: open the preview for ?invoiceId= on load or when the URL
+  // param changes to a different value (e.g. copied link opened in same tab).
   useEffect(() => {
     const invId = searchParams.get("invoiceId");
-    if (!invId || invoiceDeepLinkOpened) return;
+    if (!invId || invId === lastDeepLinkedInvoiceId) return;
     const pool = view === "grouped" ? groups.flatMap((g) => g.Invoices) : flatRows;
     if (!pool.length) return;
     const match = pool.find((r) => String(r.Id) === invId);
     if (match) {
-      setInvoiceDeepLinkOpened(true);
+      setLastDeepLinkedInvoiceId(invId);
       setPreview(match);
     }
-  }, [searchParams, invoiceDeepLinkOpened, groups, flatRows, view]);
+  }, [searchParams, lastDeepLinkedInvoiceId, groups, flatRows, view]);
 
   function toggleCollapsed(bookingId: number) {
     setCollapsed((c) => {
@@ -999,7 +1029,7 @@ const CrmInvoices: React.FC = () => {
       <Breadcrumbs items={["Dashboard", "CRM", "Invoices"]} />
       <CrmShell
         title="CRM — Invoices"
-      subtitle="Booking-wise invoice history and generation — Milestone (beyond the Booking Amount), Maintenance, Other, and On-Account. The Booking Amount invoice itself is generated from the Booking's own Payment & Invoice tab."
+      subtitle="Booking-wise invoice history and generation — Milestone (including Booking Amount), Maintenance, Other, and On-Account."
       action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
     >
       <div className="flex gap-3 flex-wrap items-center">
@@ -1197,7 +1227,7 @@ const CrmInvoices: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedFlatRows.map((inv) => {
+                  {flatRows.map((inv) => {
                     const isVoid = inv.Status === "Void";
                     return (
                       <tr key={inv.Id} className={`border-b border-border last:border-0 hover:bg-muted/20 ${isVoid ? "opacity-60" : ""}`}>

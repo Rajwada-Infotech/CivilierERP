@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
@@ -64,8 +65,24 @@ async function fetchMilestones(bookingId: string): Promise<any> {
     return r.ok ? r.json() : null;
   } catch { return null; }
 }
-async function fetchBookings(): Promise<any[]> {
-  try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
+// The booking picker below is a native <select> — fetching every booking in
+// the system into it is fine for a small deployment but degrades badly as
+// the portfolio grows (huge payload, thousands of unscrollable <option>s).
+// Company/Project/Block + an optional booking-no search scope the fetch
+// server-side (all four params already supported by /api/crm/bookings — see
+// crmBookings.js) so the dropdown only ever renders a workable subset.
+interface BookingPickerScope { companyId: string; projectId: string; blockId: string; search: string }
+async function fetchBookings(scope?: BookingPickerScope): Promise<any[]> {
+  try {
+    const params = new URLSearchParams();
+    if (scope?.companyId) params.set("companyId", scope.companyId);
+    if (scope?.projectId) params.set("projectId", scope.projectId);
+    if (scope?.blockId) params.set("blockId", scope.blockId);
+    if (scope?.search) params.set("search", scope.search);
+    const qs = params.toString();
+    const r = await fetchWithAuth(`${BKG_API}${qs ? `?${qs}` : ""}`);
+    return r.ok ? r.json() : [];
+  } catch { return []; }
 }
 // Same call CrmBookingDetail.tsx's Payments tab already uses to drive its
 // token-payment transparency states — pulled in here too so a booking's
@@ -126,7 +143,19 @@ const CrmPaymentMilestones: React.FC = () => {
   const [waiveDialog, setWaiveDialog] = useState<{ milestone: any; reason: string } | null>(null);
   const [remarksDialog, setRemarksDialog] = useState<{ milestone: any } | null>(null);
 
-  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings-dropdown"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
+  // Scope for the booking picker (see fetchBookings above).
+  const [pickerCpb, setPickerCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [pickerSearchInput, setPickerSearchInput] = useState("");
+  const [pickerSearch, setPickerSearch] = useState("");
+  const pickerScope: BookingPickerScope = useMemo(
+    () => ({ companyId: pickerCpb.companyId, projectId: pickerCpb.projectId, blockId: pickerCpb.blockId, search: pickerSearch }),
+    [pickerCpb, pickerSearch],
+  );
+  const { data: bookings = [] } = useQuery({
+    queryKey: ["crm-bookings-dropdown", pickerScope],
+    queryFn: () => fetchBookings(pickerScope),
+    staleTime: 5 * 60_000,
+  });
   const { data: milestoneData, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-milestones", selectedBookingId],
     queryFn: () => fetchMilestones(selectedBookingId),
@@ -550,10 +579,28 @@ const CrmPaymentMilestones: React.FC = () => {
         subtitle="Milestone-wise payment tracking for bookings"
         action={<RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />}
       >
-        {/* Booking selector */}
+        {/* Booking selector — scoped so the dropdown stays workable as the
+            portfolio grows (see fetchBookings). */}
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <CrmCompanyProjectBlockFilter
+              value={pickerCpb}
+              onChange={(v) => { setPickerCpb(v); setSp({}, { replace: true }); }}
+            />
+            <input
+              value={pickerSearchInput}
+              onChange={(e) => setPickerSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { setPickerSearch(pickerSearchInput.trim()); setSp({}, { replace: true }); } }}
+              placeholder="Booking no / customer… (Enter)"
+              className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background w-56"
+            />
+          </div>
+        </div>
         <div className="flex gap-3 items-end flex-wrap">
           <div className="flex-1 min-w-64">
-            <label className="text-xs text-muted-foreground block mb-1">Select Booking</label>
+            <label className="text-xs text-muted-foreground block mb-1">
+              Select Booking <span className="text-muted-foreground/60">({(bookings as any[]).length} in scope)</span>
+            </label>
             <select value={selectedBookingId} onChange={(e) => setSp(e.target.value ? { bookingId: e.target.value } : {}, { replace: true })}
               className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
               <option value="">— Choose a booking —</option>

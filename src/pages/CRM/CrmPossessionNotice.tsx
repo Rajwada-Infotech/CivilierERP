@@ -19,6 +19,7 @@ import { promptNextStep } from "@/lib/workflowNav";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { cn } from "@/lib/utils";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/possession-notice";
 const DELIVERY_MODES = ["Email", "Post", "Courier", "InPerson"];
@@ -53,8 +54,17 @@ const STATUS_CONFIG: Record<string, {
 };
 
 // ── Fetchers ──────────────────────────────────────────────────────────────────
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
+interface PossessionNoticeCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — status-tab counts are computed
+// client-side from the whole set (see `counts` below), same as CrmDemands.
+// Company/Project/Block narrows the set server-side instead.
+async function fetchAll(cpb?: PossessionNoticeCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
   if (!r.ok) { const d = await r.json().catch(() => null); throw new Error(d?.error || `HTTP ${r.status}`); }
   return r.json();
 }
@@ -412,9 +422,10 @@ const CrmPossessionNotice: React.FC = () => {
   const [proxyAckTarget,       setProxyAckTarget]       = useState<number | null>(null);
   const [proxyDisputeTarget,   setProxyDisputeTarget]   = useState<number | null>(null);
   const [proxySaving,          setProxySaving]          = useState(false);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
   const { data: notices = [], isLoading, dataUpdatedAt, isFetching, refetch } =
-    useQuery({ queryKey: ["crm-possession-notice"], queryFn: fetchAll, staleTime: 30_000 });
+    useQuery({ queryKey: ["crm-possession-notice", cpb], queryFn: () => fetchAll(cpb), staleTime: 30_000 });
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ["crm-possession-notice"] });
@@ -650,6 +661,7 @@ const CrmPossessionNotice: React.FC = () => {
                   </button>
                 )}
               </div>
+              <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
             </div>
 
             {/* Notice cards */}

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import { useAuth } from "@/contexts/AuthContext";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/registry";
 
@@ -70,6 +72,25 @@ async function fetchAll(): Promise<any[]> {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load Registry trackers");
   return r.json();
 }
+
+const PAGE_SIZE = 20;
+interface RegistryListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchRegistryList(filters: RegistryListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  const r = await fetchWithAuth(`${API}?${params}`);
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load Registry trackers");
+  const data = await r.json();
+  return { rows: data.rows || [], total: data.total || 0 };
+}
 async function fetchEligible(): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/eligible-bookings`);
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load eligible bookings");
@@ -88,7 +109,13 @@ const CrmRegistry: React.FC = () => {
   const deepLinkBookingId = sp.get("bookingId");
   const registryIdFilter = sp.get("registryId");
 
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
   const [dialogOpen, setDialogOpen] = useState(false);
   const [bookingId, setBookingId] = useState("");
   const [saving, setSaving] = useState(false);
@@ -121,7 +148,17 @@ const CrmRegistry: React.FC = () => {
   const [previewDoc, setPreviewDoc] = useState<{ url: string; mime: string; name: string } | null>(null);
   const [previewLoading, setPreviewLoading] = useState<number | null>(null);
 
-  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-registry"], queryFn: fetchAll, staleTime: 30_000 });
+  const listFilters: RegistryListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-registry", listFilters, page],
+    queryFn: () => fetchRegistryList(listFilters, page),
+    staleTime: 30_000,
+  });
+  const rows = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: startableBookings = [] } = useQuery({ queryKey: ["crm-registry-eligible"], queryFn: fetchEligible, staleTime: 60_000 });
 
   const { data: detailData, refetch: refetchDetail } = useQuery({
@@ -337,13 +374,7 @@ const CrmRegistry: React.FC = () => {
     } catch (e: any) { toast.error(translateError(e.message)); }
   };
 
-  const filtered = (rows as any[]).filter((r) =>
-    !search ||
-    r.ApplicantName?.toLowerCase().includes(search.toLowerCase()) ||
-    r.RegNo?.toLowerCase().includes(search.toLowerCase()) ||
-    r.BookingNo?.toLowerCase().includes(search.toLowerCase()) ||
-    r.UnitNo?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = rows as any[];
 
   const required = documents.filter((d) => d.IsMandatory);
   const supporting = documents.filter((d) => !d.IsMandatory);
@@ -422,10 +453,12 @@ const CrmRegistry: React.FC = () => {
           <div className="w-80 shrink-0 flex flex-col gap-2">
             <div className="relative">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search registrations..."
+              <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+                placeholder="Search registrations... (Enter to search)"
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
+            <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
             <div className="flex-1 overflow-y-auto thin-scroll space-y-1.5">
               {isLoading ? (
                 <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
@@ -453,6 +486,7 @@ const CrmRegistry: React.FC = () => {
                 );
               })}
             </div>
+            <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
           </div>
 
           {/* Detail (Right Pane) */}

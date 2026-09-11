@@ -462,9 +462,21 @@ router.get("/", requirePageRight("crm-parking-booking", "view"), async (req, res
   try {
     const pool = getPool();
     const { status } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = ["pa.IsActive = 1"];
     if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("pa.PaymentStatus = @st"); }
+    // Not paginated — Pending/Paid totals are computed client-side from the
+    // full set (see CrmParkingBooking.tsx), same reasoning as CrmDemands.
+    // Company resolved via either linkage a row can carry (its Application
+    // directly, or via its Booking); Project/Block use the already-COALESCEd
+    // ParkingMaster/ParkingSlot values (re-expressed here since a WHERE
+    // clause can't reference a SELECT-list alias at the same query level).
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("(a.CompanyId = @companyId OR b.CompanyId = @companyId)"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("COALESCE(p.ProjectId, s.ProjectId) = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("COALESCE(p.BlockId, s.BlockId) = @blockId"); }
     const result = await req0.query(`${ALLOTMENT_SELECT} WHERE ${conds.join(" AND ")} ORDER BY pa.CreatedAt DESC`);
     res.json(result.recordset);
   } catch (e) {

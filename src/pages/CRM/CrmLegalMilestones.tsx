@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -10,6 +10,8 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Plus, CheckCircle2, Circle, ExternalLink, Lock, FileCheck, ChevronRight } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/legal-milestones";
 
@@ -32,10 +34,35 @@ async function fetchAll(): Promise<any[]> {
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Failed to load legal workflows (HTTP ${r.status})`);
   return r.json();
 }
+
+const PAGE_SIZE = 20;
+interface LegalMilestoneListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchLegalMilestonesList(filters: LegalMilestoneListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  const r = await fetchWithAuth(`${API}?${params}`);
+  if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Failed to load legal workflows (HTTP ${r.status})`);
+  const data = await r.json();
+  return { rows: data.rows || [], total: data.total || 0 };
+}
 async function fetchEligibleBookings(): Promise<any[]> {
   const r = await fetchWithAuth(`${API}/eligible-bookings`);
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || `Failed to load bookings (HTTP ${r.status})`);
   return r.json();
+}
+async function fetchTrackerByBooking(bookingId: string): Promise<any | null> {
+  try {
+    const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
+    return r.ok ? r.json() : null;
+  } catch { return null; }
 }
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -152,7 +179,7 @@ function buildWorkflowModel(t: any): WorkflowModel {
           key: "afsQP",
           label: "Agreement Registration Fees",
           sublabel: "Stamp duty & registration fee due before Visit 1",
-          path: "/crm/afs-query-payment",
+          path: "/crm/agreements?tab=afs-payment",
           no: t.AfsQPNo || null,
           status: t.AfsQPStatus || null,
           isDone: t.AfsQPStatus === "Confirmed" || afsRegistered,
@@ -163,7 +190,7 @@ function buildWorkflowModel(t: any): WorkflowModel {
           key: "afsReg",
           label: "Agreement Registration Visit",
           sublabel: "Buyer & seller appear at Sub-Registrar Office (Visit 1) — Agreement becomes Registered",
-          path: "/crm/afs-registry",
+          path: "/crm/agreements?tab=afs-registry",
           no: t.AfsRegNo || null,
           status: t.AfsRegistryStatus || null,
           isDone: afsRegistered,
@@ -575,15 +602,29 @@ const CrmLegalMilestones: React.FC = () => {
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedTracker, setSelectedTracker] = useState<any | null>(null);
   const [newDialog, setNewDialog] = useState(false);
   const [bookingId, setBookingId] = useState("");
   const [saving, setSaving] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
 
-  const { data: trackers = [], isLoading, isFetching, dataUpdatedAt, refetch, isError, error } = useQuery({
-    queryKey: ["crm-legal-milestones"],
-    queryFn: fetchAll,
+  const listFilters: LegalMilestoneListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  const { data: listResult, isLoading, isFetching, dataUpdatedAt, refetch, isError, error } = useQuery({
+    queryKey: ["crm-legal-milestones", listFilters, page],
+    queryFn: () => fetchLegalMilestonesList(listFilters, page),
     staleTime: 30_000,
   });
+  const trackers = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: bookings = [] } = useQuery({
     queryKey: ["crm-legal-milestones-eligible-bookings"],
     queryFn: fetchEligibleBookings,
@@ -591,16 +632,27 @@ const CrmLegalMilestones: React.FC = () => {
     enabled: newDialog,
   });
 
-  // Auto-select from ?bookingId= URL param (deep-link from stage buttons on this page)
+  // Auto-select from ?bookingId= URL param (deep-link from stage buttons on
+  // this page). Resolved via the dedicated /booking/:bookingId lookup
+  // rather than scanning `trackers` — that list is now paginated, so the
+  // deep-linked tracker could easily not be on the current page (same class
+  // of bug fixed on CrmHandover.tsx earlier this rollout).
+  const [deepLinkResolved, setDeepLinkResolved] = useState(false);
   useEffect(() => {
     const urlBookingId = sp.get("bookingId");
-    if (!urlBookingId || !(trackers as any[]).length) return;
-    const match = (trackers as any[]).find((t: any) => String(t.BookingId) === urlBookingId);
-    if (match) setSelectedId(match.Id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sp, trackers]);
+    if (!urlBookingId || deepLinkResolved) return;
+    setDeepLinkResolved(true);
+    fetchTrackerByBooking(urlBookingId).then((t) => { if (t) { setSelectedId(t.Id); setSelectedTracker(t); } });
+  }, [sp, deepLinkResolved]);
 
-  const selected = (trackers as any[]).find((t: any) => t.Id === selectedId);
+  // A regular row click sets both the id and the full row object directly
+  // (selectRow below) so selection never depends on the object still being
+  // present in the current page/filter — only the deep-link path above
+  // needs the dedicated lookup.
+  const selected = selectedTracker && selectedTracker.Id === selectedId
+    ? selectedTracker
+    : (trackers as any[]).find((t: any) => t.Id === selectedId);
+  const selectRow = (t: any) => { setSelectedId(t.Id); setSelectedTracker(t); setSp({ bookingId: String(t.BookingId) }, { replace: true }); };
   // /eligible-bookings already applies the real POST gate (Approved, active,
   // not frozen, has an Agreement, no tracker yet) — no client-side filtering needed.
   const startableBookings = bookings as any[];
@@ -667,7 +719,15 @@ const CrmLegalMilestones: React.FC = () => {
       >
         <div className="flex gap-4 h-[calc(100vh-220px)]">
           {/* ── Left panel: booking list ── */}
-          <div className="w-80 shrink-0 overflow-y-auto thin-scroll space-y-1.5">
+          <div className="w-80 shrink-0 flex flex-col gap-2">
+          <div className="relative">
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+              placeholder="Search customer, booking... (Enter to search)"
+              className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+          </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+          <div className="flex-1 overflow-y-auto thin-scroll space-y-1.5">
             {isLoading ? (
               <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
             ) : isError ? (
@@ -680,7 +740,7 @@ const CrmLegalMilestones: React.FC = () => {
               return (
                 <button
                   key={t.Id}
-                  onClick={() => { setSelectedId(t.Id); setSp({ bookingId: String(t.BookingId) }, { replace: true }); }}
+                  onClick={() => selectRow(t)}
                   className={`w-full text-left rounded-lg border overflow-hidden transition-colors ${
                     selectedId === t.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20"
                   }`}
@@ -704,6 +764,8 @@ const CrmLegalMilestones: React.FC = () => {
                 </button>
               );
             })}
+          </div>
+          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
           </div>
 
           {/* ── Right panel: journey detail ── */}

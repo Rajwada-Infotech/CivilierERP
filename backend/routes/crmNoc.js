@@ -12,6 +12,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 // editor being able to self-approve a NOC on this page.
 const { transition: approvalTransition } = require("../services/approvalService");
 const { requireActiveBooking, resolveNocType } = require("../services/crmWorkflowGuards");
+const { applyPagination } = require("../services/crmListPagination");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -32,14 +33,56 @@ const NOC_SELECT = `
 router.get("/", requirePageRight("crm-noc", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { type, status } = req.query;
+    const { type, status, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [];
     if (type)   { req0.input("t",  sql.NVarChar(30), type);   conds.push("n.NocType = @t"); }
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("n.Status = @st"); }
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
+    }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const result = await req0.query(`${NOC_SELECT} ${where} ORDER BY n.CreatedAt DESC`);
-    res.json(result.recordset);
+    const SELECT_WITH_BLOCK = `${NOC_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("t2", sql.NVarChar(30), type || null)
+        .input("st2", sql.NVarChar(30), status || null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmNoc n
+          JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE (@t2 IS NULL OR n.NocType = @t2)
+            AND (@st2 IS NULL OR n.Status = @st2)
+            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-noc] GET error:", e.message);
     res.status(500).json({ error: e.message });

@@ -113,9 +113,51 @@ router.get("/", requirePageRight("crm-payment-plans", "view"), async (req, res) 
   try {
     const pool = getPool();
     const showAll = req.query.showAll === "true";
-    const where = showAll ? "" : "WHERE p.IsActive = 1";
-    const result = await pool.request().query(`${PLAN_SELECT} ${where} ORDER BY p.CreatedAt DESC`);
-    res.json(result.recordset);
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const req0 = pool.request();
+    const conds = [];
+    if (!showAll) conds.push("p.IsActive = 1");
+    // A plan tags to at most one Project (dbo.CrmPaymentPlanProject, 1:1) —
+    // there is no Block dimension on a plan. Project filter is a direct
+    // EXISTS; Company filter walks up to the tagged project's parent
+    // (enterprise.company_id). Done via EXISTS rather than the PLAN_SELECT
+    // OUTER APPLY alias so the clause sits at the same query level cleanly
+    // (SQL Server won't let a WHERE reference a SELECT-list alias).
+    if (projectId) {
+      req0.input("projectId", sql.Int, projectId);
+      conds.push("EXISTS (SELECT 1 FROM dbo.CrmPaymentPlanProject cpp WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1 AND cpp.ProjectId = @projectId)");
+    }
+    if (companyId) {
+      req0.input("companyId", sql.Int, companyId);
+      conds.push("EXISTS (SELECT 1 FROM dbo.CrmPaymentPlanProject cpp JOIN dbo.enterprise e ON e.id = cpp.ProjectId AND e.business_type = 'P' WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1 AND e.company_id = @companyId)");
+    }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+
+    if (!req.query.page) {
+      const result = await req0.query(`${PLAN_SELECT} ${where} ORDER BY p.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
+    const offset = (page - 1) * pageSize;
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${PLAN_SELECT} ${where} ORDER BY p.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmPaymentPlanTemplate p
+          WHERE ${showAll ? "1=1" : "p.IsActive = 1"}
+            AND (@projectId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmPaymentPlanProject cpp WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1 AND cpp.ProjectId = @projectId2))
+            AND (@companyId2 IS NULL OR EXISTS (SELECT 1 FROM dbo.CrmPaymentPlanProject cpp JOIN dbo.enterprise e ON e.id = cpp.ProjectId AND e.business_type = 'P' WHERE cpp.PlanId = p.Id AND cpp.IsActive = 1 AND e.company_id = @companyId2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-payment-plans] GET error:", e.message);
     res.status(500).json({ error: e.message });
