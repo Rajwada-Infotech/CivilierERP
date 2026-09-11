@@ -2659,7 +2659,7 @@ const Payment: React.FC = () => {
                               if (!groups.has(key)) groups.set(key, []);
                               groups.get(key)!.push(s);
                             });
-                            const order = ["Suppliers", "Contractors", "Brokers", "Customers", "Other"];
+                            const order = ["Suppliers", "Contractors", "Brokers", "Customers", "Partners", "Other"];
                             const sortedKeys = [...groups.keys()].sort(
                               (a, b) => order.indexOf(a) - order.indexOf(b),
                             );
@@ -4799,11 +4799,15 @@ const Payment: React.FC = () => {
                               </p>
                             )}
                           </td>
-                          {/* Expense Ref + GRN stacked */}
+                          {/* Expense Ref + JV + GRN stacked */}
                           <td className="px-4 py-4">
                             {rec.expenseRef ? (
                               <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
                                 {rec.expenseRef}
+                              </span>
+                            ) : rec.jvNo ? (
+                              <span className="font-mono text-[11px] bg-teal-500/10 text-teal-600 border border-teal-500/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
+                                {rec.jvNo}
                               </span>
                             ) : (
                               <span className="text-muted-foreground text-xs">
@@ -5485,7 +5489,10 @@ const Payment: React.FC = () => {
                     label: "Project Site",
                     value: viewingRec.projectSite || "—",
                   },
-                  { label: "Expense Ref", value: viewingRec.expenseRef || "—" },
+                  {
+                    label: "Expense Ref",
+                    value: viewingRec.expenseRef || viewingRec.jvNo || "—",
+                  },
                   ...(viewingRec.notes
                     ? [{ label: "Remarks", value: viewingRec.notes }]
                     : []),

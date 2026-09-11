@@ -262,6 +262,14 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         eb.EDocNo                                          AS RefDoc,
         -- Expense Booking primary key — used by "Pay Remaining" to pre-fill the form
         eb.Eid                                             AS PExpenseId,
+        -- Journal Voucher this payment settles (JVLineId, migration 417) —
+        -- so the list's Expense Ref column can show a JV chip the same way
+        -- it shows an invoice/GRN chip, instead of a bare "—".
+        (
+          SELECT jv.JVNo FROM dbo.JournalVoucherLines jvl
+          JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
+          WHERE jvl.LineID = np.JVLineId
+        )                                                  AS JVNo,
         -- EB DocDate for reference
         eb.EDocDate                                        AS EBDocDate,
         -- Card display info (last 4 digits + network) when PCardId is set

@@ -159,10 +159,11 @@ router.post("/", requirePageRight("partner-master", "create"), async (req, res) 
     const groups = await getPartnerGroups(pool);
 
     await tx.begin();
-    const insertHead = async (code, groupId) => {
+    const insertHead = async (code, groupId, displayName) => {
       const request = new sql.Request(tx);
       const result = await request
         .input("LHeadName", sql.NVarChar(200), name)
+        .input("DisplayName", sql.NVarChar(200), displayName)
         .input("LHeadType", sql.VarChar(50), "P")
         .input("LHeadCode", sql.NVarChar(20), code)
         .input("LHeadAddress", sql.NVarChar(300), "N/A")
@@ -174,13 +175,13 @@ router.post("/", requirePageRight("partner-master", "create"), async (req, res) 
         .input("CreatedBy", sql.NVarChar(100), userEmail)
         .input("CreatedAt", sql.DateTime2, new Date()).query(`
           INSERT INTO dbo.AccountHeadMaster (
-            LHeadName, LHeadType, LHeadCode, LHeadAddress, LHeadContactPerson,
+            LHeadName, DisplayName, LHeadType, LHeadCode, LHeadAddress, LHeadContactPerson,
             LHeadStatus, LHeadPaymentTerms, LHeadCreditLimit, LBelongsTo,
             CreatedBy, CreatedAt
           )
           OUTPUT INSERTED.LHeadId AS id
           VALUES (
-            @LHeadName, @LHeadType, @LHeadCode, @LHeadAddress, @LHeadContactPerson,
+            @LHeadName, @DisplayName, @LHeadType, @LHeadCode, @LHeadAddress, @LHeadContactPerson,
             @LHeadStatus, @LHeadPaymentTerms, @LHeadCreditLimit, @LBelongsTo,
             @CreatedBy, @CreatedAt
           )
@@ -188,8 +189,14 @@ router.post("/", requirePageRight("partner-master", "create"), async (req, res) 
       return result.recordset[0].id;
     };
 
-    const capitalHeadId = await insertHead(`${baseCode}${CAP_SUFFIX}`, groups.capital.id);
-    const currentHeadId = await insertHead(`${baseCode}${CUR_SUFFIX}`, groups.current.id);
+    // Every other picker across the app that lists AccountHeadMaster rows
+    // (Payment page's Payee/Party, Invoice's Payable To, Trial Balance,
+    // etc.) shows ISNULL(DisplayName, LHeadName) — and both of this
+    // Partner's heads share the same LHeadName, which would otherwise show
+    // up twice with no way to tell them apart. DisplayName disambiguates
+    // everywhere at once instead of patching every consumer's own query.
+    const capitalHeadId = await insertHead(`${baseCode}${CAP_SUFFIX}`, groups.capital.id, `${name} (Capital Account)`);
+    const currentHeadId = await insertHead(`${baseCode}${CUR_SUFFIX}`, groups.current.id, `${name} (Current Account)`);
     await tx.commit();
 
     await bumpCacheVersion("partner-master");
@@ -227,11 +234,14 @@ router.put("/:code", requirePageRight("partner-master", "edit"), async (req, res
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
+    const newName = cleanStr(PartnerName, 200);
     const result = await pool
       .request()
       .input("CapCode", sql.NVarChar(20), `${baseCode}${CAP_SUFFIX}`)
       .input("CurCode", sql.NVarChar(20), `${baseCode}${CUR_SUFFIX}`)
-      .input("LHeadName", sql.NVarChar(200), cleanStr(PartnerName, 200))
+      .input("LHeadName", sql.NVarChar(200), newName)
+      .input("CapDisplayName", sql.NVarChar(200), newName ? `${newName} (Capital Account)` : null)
+      .input("CurDisplayName", sql.NVarChar(200), newName ? `${newName} (Current Account)` : null)
       .input(
         "LHeadStatus",
         sql.Bit,
@@ -240,6 +250,11 @@ router.put("/:code", requirePageRight("partner-master", "edit"), async (req, res
       .input("UpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.AccountHeadMaster SET
           LHeadName   = COALESCE(@LHeadName, LHeadName),
+          DisplayName = COALESCE(
+            CASE WHEN LHeadCode = @CapCode THEN @CapDisplayName
+                 WHEN LHeadCode = @CurCode THEN @CurDisplayName END,
+            DisplayName
+          ),
           LHeadStatus = COALESCE(@LHeadStatus, LHeadStatus),
           isEdited    = 1,
           UpdatedBy   = @UpdatedBy,
