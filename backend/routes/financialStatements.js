@@ -205,6 +205,15 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL((
             SELECT SUM(gle.DebitAmount) FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId AND gle.IsReversed = 0
+              -- 'OnAccountAdjustment' is the real GL leg posted when a
+              -- pooled on-account advance is applied to an invoice — it
+              -- always pairs with a dbo.OnAccountLedger DEBIT row for the
+              -- same amount, and both are already excluded from this
+              -- head's on-account contribution below (onAccountCreditByHead
+              -- only sums CREDIT rows), so counting this GL leg too would
+              -- double it. Same fix as vendorLedger.js's fetchOnAccountRows
+              -- and trialBalance.js's per-account drill-down.
+              AND gle.SourceType <> 'OnAccountAdjustment'
               AND gle.VoucherDate <= @asOf
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -215,13 +224,23 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL((
             SELECT SUM(gle.CreditAmount) FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId AND gle.IsReversed = 0
+              AND gle.SourceType <> 'OnAccountAdjustment'
               AND gle.VoucherDate <= @asOf
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
               AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
-          ), 0)
-          + CASE WHEN ahm.LHeadType IN ('S', 'C') THEN ISNULL(ahm.OnAccountBalance, 0) ELSE 0 END
-            AS credit
+          ), 0) AS credit
+          -- Supplier/Contractor on-account advance is folded in separately
+          -- below (onAccountCreditByHead, a live SUM over dbo.OnAccountLedger
+          -- CREDIT rows) instead of the AccountHeadMaster.OnAccountBalance
+          -- cached column that used to be added here — that column double-
+          -- counted every advance (once via this flat total, again via the
+          -- GL leg an applied/adjusted portion of it already posts), the
+          -- exact bug vendorLedger.js's own OPENING_ADJ_SQL comment
+          -- documents and fixed for the Vendor Ledger report. Balance Sheet
+          -- had the same bug unfixed, which is why a Supplier/Contractor's
+          -- Balance Sheet figure could diverge sharply from that same
+          -- head's own Vendor Ledger closing balance.
         FROM dbo.AccountHeadMaster ahm
         -- No LHeadStatus filter — same universe of heads and the same
         -- opening/txn balance computation trialBalance.js's own main query
@@ -235,6 +254,27 @@ router.get("/balance-sheet", async (req, res) => {
         -- correct.
         WHERE ahm.LBelongsTo IS NOT NULL
       `);
+
+    // Live per-head on-account advance, asOf-scoped — CREDIT rows only (a
+    // standalone advance/excess payment pooled against "Company On Account
+    // A/c", not yet applied to any invoice). A DEBIT row ("applied to
+    // invoice") is deliberately excluded, same reasoning as
+    // vendorLedger.js's fetchOnAccountRows: it always pairs with the
+    // OnAccountAdjustment GL leg already excluded above, and counting
+    // both/neither keeps the net contribution correct either way.
+    const onAccountRes = await pool
+      .request()
+      .input("asOf", sql.Date, asOf)
+      .query(`
+        SELECT PartyId, SUM(Amount) AS credit
+        FROM dbo.OnAccountLedger
+        WHERE PartyType IN ('Supplier', 'Contractor') AND TxnType = 'CREDIT'
+          AND TxnDate <= @asOf
+        GROUP BY PartyId
+      `);
+    const onAccountCreditByHead = new Map(
+      onAccountRes.recordset.map((r) => [Number(r.PartyId), Number(r.credit) || 0]),
+    );
 
     // Net P&L (income - expenses, life-to-date through asOf) rolls into
     // Partners' Capital as Net Profit — same as any statutory Balance
@@ -356,7 +396,8 @@ router.get("/balance-sheet", async (req, res) => {
 
     for (const h of headsRes.recordset) {
       const debit = Number(h.debit) || 0;
-      const credit = Number(h.credit) || 0;
+      const onAccountCredit = onAccountCreditByHead.get(Number(h.id)) || 0;
+      const credit = (Number(h.credit) || 0) + onAccountCredit;
       const net = Math.round((debit - credit) * 100) / 100;
       if (Math.abs(net) < 0.005) continue; // zero-balance heads add no signal
 

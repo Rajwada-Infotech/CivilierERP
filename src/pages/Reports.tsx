@@ -2674,7 +2674,16 @@ const ReportTable: React.FC<{
       // supports `page` — one request is all there is, so stop after it
       // regardless of how many rows came back.
       const noPaginationMetadata = Array.isArray(json);
-      if (batch.length === 0 || batch.length < pageSize || doneByPageCount || doneByTotal || noPaginationMetadata) break;
+      // "Short page" only means "last page" when there's no total/totalPages
+      // to trust instead — a route that hard-caps `limit` server-side below
+      // what was asked for (e.g. expense-booking clamping 500 down to 100)
+      // returns a batch shorter than pageSize on page 1 even though
+      // totalPages says there are 3 more pages still to fetch. Relying on
+      // batch.length < pageSize unconditionally stopped the loop right
+      // there, silently truncating the on-screen table to that server cap.
+      const hasPaginationMetadata = totalPages != null || total != null;
+      const doneByShortPage = !hasPaginationMetadata && batch.length < pageSize;
+      if (batch.length === 0 || doneByShortPage || doneByPageCount || doneByTotal || noPaginationMetadata) break;
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
