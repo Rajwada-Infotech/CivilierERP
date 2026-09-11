@@ -10,10 +10,12 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Plus, Search, ChevronRight, IdCard, IndianRupee, Lock, Pencil, BookUser,
-  User, MapPin, Briefcase, FileText, UserPlus, AlertTriangle,
+  User, MapPin, Briefcase, FileText, UserPlus, AlertTriangle, Trash2,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/customers";
 const SA_LEADS_API = "/api/sa/leads";
@@ -28,13 +30,25 @@ const EMPTY_FORM = {
   Notes: "",
 };
 
-async function fetchCustomers(search: string): Promise<any[]> {
+const PAGE_SIZE = 20;
+interface CustomerListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchCustomersList(filters: CustomerListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
   try {
-    const url = search ? `${API}?search=${encodeURIComponent(search)}` : API;
-    const res = await fetchWithAuth(url);
-    if (!res.ok) return [];
-    return res.json();
-  } catch { return []; }
+    const res = await fetchWithAuth(`${API}?${params}`);
+    if (!res.ok) return { rows: [], total: 0 };
+    const data = await res.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
 }
 // Only converted leads are offered here — this dropdown IS the real "only a
 // converted lead may enter the CRM module" gate now (Leads -> Customer ->
@@ -122,7 +136,7 @@ function AddressFields({
   );
 }
 
-function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onClose: () => void; onSaved: () => void }) {
+function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onDeleted }: { customer: any; canDelete?: boolean; onClose: () => void; onSaved: () => void; onDeleted?: () => void }) {
   const [form, setForm] = useState({
     CustomerName: customer.CustomerName || "", Mobile: customer.Mobile || "",
     AltMobile: customer.AltMobile || "", Email: customer.Email || "",
@@ -146,6 +160,33 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
   // this central (every Application/Booking reads its KYC off this row).
   const [locked, setLocked] = useState(true);
   const inputCls = `w-full text-sm border border-border rounded px-2 py-1.5 bg-background ${locked ? "opacity-70 cursor-not-allowed bg-muted/30" : ""}`;
+
+  const [deleting, setDeleting] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  // Client-side mirror of the server guard: a customer can be deleted only when
+  // none of their bookings are still live (Approved / Pending / in-approval).
+  // Backend re-checks and is the real authority — this just gates the button.
+  const blockingBookings = (customer.applications || []).filter(
+    (a: any) => a.BookingStatus && !["Cancelled", "Rejected", "Expired"].includes(a.BookingStatus),
+  );
+  const deleteBlocked = blockingBookings.length > 0;
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    try {
+      const res = await fetchWithAuth(`${API}/${customer.Id}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Failed to delete customer");
+      toast.success(`${customer.CustomerNo} deleted`);
+      onDeleted?.();
+      onClose();
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const handleSave = async () => {
     if (form.Mobile?.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
@@ -298,7 +339,32 @@ function EditCustomerDialog({ customer, onClose, onSaved }: { customer: any; onC
           </div>
         ) : null}
 
-        <div className="flex justify-end gap-2 pt-2.5 border-t border-border">
+        <div className="flex justify-between items-center gap-2 pt-2.5 border-t border-border">
+          <div>
+            {locked && canDelete && (
+              confirmDelete ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Delete this customer?</span>
+                  <button onClick={() => setConfirmDelete(false)} disabled={deleting}
+                    className="px-2.5 py-1 text-xs border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                  <button onClick={handleDelete} disabled={deleting}
+                    className="px-2.5 py-1 text-xs rounded-lg font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40">
+                    {deleting ? "Deleting…" : "Confirm Delete"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  disabled={deleteBlocked}
+                  title={deleteBlocked
+                    ? `Cannot delete — active/approved booking(s): ${blockingBookings.map((a: any) => `${a.BookingNo} (${a.BookingStatus})`).join(", ")}. Cancel them first.`
+                    : "Delete this customer"}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-red-300 text-red-600 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30 disabled:opacity-40 disabled:cursor-not-allowed transition-all">
+                  <Trash2 size={12} /> Delete Customer
+                </button>
+              )
+            )}
+          </div>
           {locked ? (
             <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
           ) : (
@@ -321,7 +387,10 @@ const CrmCustomers: React.FC = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
@@ -426,11 +495,20 @@ const CrmCustomers: React.FC = () => {
     }
   };
 
-  const { data: customers = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-customers", search],
-    queryFn: () => fetchCustomers(search),
+  const listFilters: CustomerListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-customers", listFilters, page],
+    queryFn: () => fetchCustomersList(listFilters, page),
     staleTime: 30_000,
   });
+  const customers = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
 
   // Deep-link from CrmLeads.tsx's "Create Customer" action
@@ -560,7 +638,7 @@ const CrmCustomers: React.FC = () => {
       ) },
   ];
 
-  usePageRights("crm-customers");
+  const { canDelete } = usePageRights("crm-customers");
 
   return (
     <>
@@ -583,11 +661,15 @@ const CrmCustomers: React.FC = () => {
         </div>
       }
     >
-      <div className="relative max-w-md">
-        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-        <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name, mobile, PAN, customer no..."
-          className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+      <div className="flex gap-3 flex-wrap items-center">
+        <div className="relative flex-1 min-w-48 max-w-md">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+            placeholder="Search name, mobile, PAN, customer no... (Enter to search)"
+            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+        </div>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
       </div>
 
       <DataTable
@@ -598,6 +680,7 @@ const CrmCustomers: React.FC = () => {
         emptyMessage="No customers found"
         className="rounded-xl border border-border overflow-hidden bg-card"
       />
+      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       {/* New Customer Dialog — wide two-column layout, compact enough to
           fit the whole field set on one screen without an inner scroller. */}
@@ -747,8 +830,10 @@ const CrmCustomers: React.FC = () => {
       {editingId && editingCustomer && (
         <EditCustomerDialog
           customer={editingCustomer}
+          canDelete={canDelete}
           onClose={closeCustomer}
           onSaved={() => qc.invalidateQueries({ queryKey: ["crm-customers"] })}
+          onDeleted={() => { qc.invalidateQueries({ queryKey: ["crm-customers"] }); closeCustomer(); }}
         />
       )}
     </CrmShell>

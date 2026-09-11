@@ -16,6 +16,8 @@ import {
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import {
   Pencil,
   Trash2,
@@ -255,6 +257,43 @@ const GeneralLedgerMaster: React.FC = () => {
   useEffect(() => {
     setPage(1);
   }, [search, filterGroup]);
+
+  const ledgerExportColumns: ExportColumn[] = useMemo(
+    () => [
+      { header: "Code", accessor: "LHeadCode" },
+      { header: "Account Name", accessor: "LHeadName" },
+      { header: "Account Group", accessor: "GroupName" },
+      {
+        header: "Status",
+        accessor: (row: any) => (row.LHeadStatus ? "Active" : "Inactive"),
+      },
+    ],
+    [],
+  );
+
+  const fetchAllLedgersForExport = async () => {
+    // Backend caps `limit` at 100 per request — page through until every
+    // matching row (across all filters) has been pulled, not just the
+    // currently-visible page.
+    const EXPORT_PAGE_SIZE = 100;
+    const first = await getLedgers({
+      page: 1,
+      limit: EXPORT_PAGE_SIZE,
+      search,
+      groupId: filterGroup,
+    });
+    let all = [...first.data];
+    for (let p = 2; p <= first.totalPages; p++) {
+      const next = await getLedgers({
+        page: p,
+        limit: EXPORT_PAGE_SIZE,
+        search,
+        groupId: filterGroup,
+      });
+      all = all.concat(next.data);
+    }
+    return all as unknown as Record<string, unknown>[];
+  };
 
   // ── Remote data ────────────────────────────────────────────────────────────
   const { data: groupsData, isLoading: groupsLoading } = useQuery({
@@ -725,6 +764,15 @@ const GeneralLedgerMaster: React.FC = () => {
                 <X size={11} /> Clear
               </button>
             )}
+
+            <ExportMenu
+              data={filtered as unknown as Record<string, unknown>[]}
+              fetchData={fetchAllLedgersForExport}
+              columns={ledgerExportColumns}
+              title="General Ledger Master"
+              filename="general-ledger-master"
+              disabled={!rights.canExport || (ledgersData?.total ?? 0) === 0}
+            />
           </div>
 
           {/* Table */}

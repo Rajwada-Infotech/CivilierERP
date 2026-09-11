@@ -15,6 +15,10 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { promptNextStep } from "@/lib/workflowNav";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { ProxyActionDialog, PROXY_METHODS, type ProxyMethod, PROXY_METHOD_LABELS } from "@/components/crm/ProxyActionDialog";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import CrmAfsQueryPayment from "@/pages/CRM/CrmAfsQueryPayment";
+import CrmAfsRegistry from "@/pages/CRM/CrmAfsRegistry";
 
 const API = "/api/crm/agreements";
 // NOTE: mount path assumed as "/api/users" to match users.js's PRIVILEGED_ROLES
@@ -84,8 +88,21 @@ function followupProgress(documents: any[] | undefined): { required: number; upl
 // Module-level so both agreementStepStates() and the component's own
 // useState can share the exact same type — the stepper's steps and the tab
 // bar below it must always agree on what tabs actually exist.
-const AGR_TABS = ["Overview", "Legal & Approval", "Documents"] as const;
+const AGR_TABS = ["Timeline", "Overview", "Legal & Approval", "Documents", "AFS Payment", "AFS Registry"] as const;
 type AgrTab = typeof AGR_TABS[number];
+
+// URL ?tab= slug <-> AgrTab. Lets other pages deep-link straight to a stage
+// (e.g. /crm/agreements?bookingId=123&tab=afs-payment).
+const TAB_SLUGS: Record<string, AgrTab> = {
+  timeline: "Timeline", overview: "Overview", legal: "Legal & Approval",
+  "legal-approval": "Legal & Approval", documents: "Documents", papers: "Documents",
+  "afs-payment": "AFS Payment", "afs-query-payment": "AFS Payment",
+  "afs-registry": "AFS Registry",
+};
+const SLUG_FOR_TAB: Record<AgrTab, string> = {
+  Timeline: "timeline", Overview: "overview", "Legal & Approval": "legal",
+  Documents: "documents", "AFS Payment": "afs-payment", "AFS Registry": "afs-registry",
+};
 
 // A single, honest read of where this agreement actually is in its real
 // lifecycle — mirrors the exact same gates the buttons below already
@@ -158,6 +175,125 @@ const docStatusColor: Record<string, string> = {
   Verified:  "text-green-600 bg-green-50 border-green-200",
   Rejected:  "text-red-600 bg-red-50 border-red-200",
 };
+
+// ── Workflow Timeline (the "Timeline" tab) ────────────────────────────────────
+// One honest, top-to-bottom read of where the booking is across the whole
+// pre-sale + AFS journey: Agreement → Agreement Papers →
+// AFS Query Payment → AFS Registry. Purely presentational; each stage is
+// clickable and jumps to its own tab. AFS statuses are fetched per-booking
+// from the same endpoints the AFS tabs use.
+type TlState = "done" | "current" | "upcoming" | "blocked";
+function TlRow({ n, title, detailText, state, badge, onJump, last }: {
+  n: number; title: string; detailText?: string; state: TlState; badge?: string;
+  onJump: () => void; last?: boolean;
+}) {
+  const ring =
+    state === "done" ? "bg-green-500 text-white" :
+    state === "current" ? "bg-primary text-primary-foreground" :
+    state === "blocked" ? "bg-muted text-muted-foreground" :
+    "bg-muted text-muted-foreground";
+  return (
+    <button onClick={onJump} className="w-full text-left flex gap-3 group">
+      <div className="flex flex-col items-center">
+        <span className={`w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0 ${ring}`}>
+          {state === "done" ? <Check size={13} /> : n}
+        </span>
+        {!last && <span className={`w-px flex-1 my-1 ${state === "done" ? "bg-green-400" : "bg-border"}`} />}
+      </div>
+      <div className={`flex-1 min-w-0 pb-4 ${last ? "pb-0" : ""}`}>
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`text-sm font-semibold ${
+            state === "done" ? "text-green-700 dark:text-green-400"
+            : state === "current" ? "text-foreground"
+            : "text-muted-foreground"}`}>{title}</span>
+          {badge && (
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full border border-border bg-muted/50 text-muted-foreground">{badge}</span>
+          )}
+          <ArrowRight size={12} className="text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+        </div>
+        {detailText && <p className="text-[11px] text-muted-foreground mt-0.5">{detailText}</p>}
+      </div>
+    </button>
+  );
+}
+function AgreementTimeline({ agreement, bookingId, onJump, canViewAfsPay = true, canViewAfsReg = true }: { agreement: any; bookingId: number; onJump: (t: AgrTab) => void; canViewAfsPay?: boolean; canViewAfsReg?: boolean }) {
+  const { data: afsQp } = useQuery({
+    queryKey: ["crm-afs-query-payment-booking", bookingId],
+    queryFn: async () => { const r = await fetchWithAuth(`/api/crm/afs-query-payment/booking/${bookingId}`); return r.ok ? r.json() : null; },
+    staleTime: 15_000,
+    enabled: canViewAfsPay,
+  });
+  const { data: afsReg } = useQuery({
+    queryKey: ["crm-afs-registry-booking", bookingId],
+    queryFn: async () => { const r = await fetchWithAuth(`/api/crm/afs-registry/booking/${bookingId}`); return r.ok ? r.json() : null; },
+    staleTime: 15_000,
+    enabled: canViewAfsReg,
+  });
+
+  const executed = agreement?.Status === CrmStatus.EXECUTED || agreement?.Status === CrmStatus.REGISTERED;
+  const registered = agreement?.Status === CrmStatus.REGISTERED;
+  const qpConfirmed = afsQp?.Status === "Confirmed";
+  const regDone = afsReg?.Status === "Completed";
+
+  const agrStageText = registered ? "Registered at Sub-Registrar"
+    : executed ? "Executed — awaiting AFS registration"
+    : agreement?.SentToCustomerAt ? "Sent to customer for approval"
+    : agreement?.SeniorApprovalStatus === CrmStatus.APPROVED ? "Senior-approved — ready to send"
+    : agreement?.LegalExecutiveId ? "Drafting / legal review"
+    : "Not started — assign a Legal Executive";
+
+  const allRows: { n: number; title: string; detailText: string; state: TlState; badge?: string; tab: AgrTab }[] = [
+    {
+      n: 1, title: "Agreement for Sale",
+      detailText: agrStageText, state: registered ? "done" : executed ? "done" : "current",
+      badge: agreement?.Status, tab: "Overview",
+    },
+    {
+      n: 2, title: "Agreement Papers",
+      detailText: "Supporting documents — request, upload and verify",
+      state: executed ? "done" : agreement?.LegalExecutiveId ? "current" : "upcoming",
+      tab: "Documents",
+    },
+    {
+      n: 3, title: "AFS Query Payment",
+      detailText: !executed ? "Unlocks once the Agreement is Executed"
+        : qpConfirmed ? "Government fees confirmed paid"
+        : afsQp ? `In progress — ${afsQp.Status === "InfoSent" ? "info sent, awaiting payment" : "started"}`
+        : "Not started",
+      state: !executed ? "blocked" : qpConfirmed ? "done" : afsQp ? "current" : "current",
+      badge: afsQp?.Status, tab: "AFS Payment",
+    },
+    {
+      n: 4, title: "AFS Registry (Sub-Registrar Visit 1)",
+      detailText: !qpConfirmed ? "Unlocks once AFS Query Payment is Confirmed"
+        : regDone ? (afsReg?.AfsRegistrationNo ? "Completed & registration no. recorded" : "Visit complete — record the AFS Reg No on the Agreement tab")
+        : afsReg ? `In progress — ${afsReg.Status}`
+        : "Not started",
+      state: !qpConfirmed ? "blocked" : regDone ? "done" : afsReg ? "current" : "current",
+      badge: afsReg?.Status, tab: "AFS Registry",
+    },
+  ];
+  const rows = allRows
+    .filter((r) =>
+      r.tab === "AFS Payment" ? canViewAfsPay :
+      r.tab === "AFS Registry" ? canViewAfsReg : true,
+    )
+    .map((r, i) => ({ ...r, n: i + 1 }));
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-5">
+      <h3 className="text-sm font-semibold mb-4 flex items-center gap-1.5">
+        <BarChart3 size={15} className="text-primary" /> Workflow Timeline
+      </h3>
+      <div>
+        {rows.map((r, i) => (
+          <TlRow key={r.n} n={r.n} title={r.title} detailText={r.detailText}
+            state={r.state} badge={r.badge} onJump={() => onJump(r.tab)} last={i === rows.length - 1} />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const EMPTY_AGR_FORM = {
   BookingId: "", LegalName: "", LegalAddress: "",
@@ -490,10 +626,42 @@ const DocumentReviewDialog: React.FC<{ agreementId: number; doc: any; onClose: (
 async function fetchAgreements(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
 }
+
+const PAGE_SIZE = 20;
+interface AgreementListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchAgreementsList(filters: AgreementListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
+}
 async function fetchAgreementDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
   if (!r.ok) throw new Error("Failed to load agreement");
   return r.json();
+}
+// Resolve a booking's agreement id directly via the per-booking endpoint —
+// never by scanning the paginated list (the target agreement may not be on
+// the current page). Returns null when the booking has no agreement yet.
+async function fetchAgreementIdByBooking(bookingId: string): Promise<number | null> {
+  try {
+    const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data?.agreement?.Id ?? null;
+  } catch { return null; }
 }
 async function fetchDateHistory(id: number): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/${id}/date-history`); return r.ok ? r.json() : []; } catch { return []; }
@@ -521,7 +689,10 @@ const CrmAgreement: React.FC = () => {
   const [sp, setSp] = useSearchParams();
   const bkgFilter = sp.get("bookingId") || "";
   const idFilter = sp.get("id") ? parseInt(sp.get("id")!, 10) : null;
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<number | null>(idFilter);
   // Selecting a row only ever set local state — the URL stayed at whatever
   // it loaded with, so a refresh or shared link lost track of which
@@ -562,10 +733,35 @@ const CrmAgreement: React.FC = () => {
   // section-specific. AGR_TABS/AgrTab are declared at module scope (shared
   // with agreementStepStates) so the stepper's steps can each carry a real
   // tab and stay clickable, same as Booking's own checklist row.
-  const [agrTab, setAgrTab] = useState<AgrTab>("Overview");
-  useEffect(() => { setAgrTab("Overview"); setEditingLegalExec(false); }, [selectedId]);
+  // The merged workspace now covers Allotment → Agreement → Papers → AFS
+  // Query Payment → AFS Registry as tabs. Default to Timeline (the at-a-glance
+  // read of where the booking is); a ?tab= slug deep-links straight to a stage.
+  const urlTab = TAB_SLUGS[(sp.get("tab") || "").toLowerCase()];
+  const [agrTab, setAgrTabRaw] = useState<AgrTab>(urlTab || "Timeline");
+  const setAgrTab = (t: AgrTab) => {
+    setAgrTabRaw(t);
+    setSp((p) => { p.set("tab", SLUG_FOR_TAB[t]); return p; }, { replace: true });
+  };
+  useEffect(() => {
+    setAgrTabRaw(TAB_SLUGS[(sp.get("tab") || "").toLowerCase()] || "Timeline");
+    setEditingLegalExec(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
-  const { data: agreements = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-agreements"], queryFn: fetchAgreements, staleTime: 30_000 });
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
+  const listFilters: AgreementListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-agreements", listFilters, page],
+    queryFn: () => fetchAgreementsList(listFilters, page),
+    staleTime: 30_000,
+  });
+  const agreements = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: detail } = useQuery({
     queryKey: ["crm-agreement-detail", selectedId],
     queryFn: () => fetchAgreementDetail(selectedId!),
@@ -597,11 +793,7 @@ const CrmAgreement: React.FC = () => {
     return hit ? String(hit.PreferredAgreementDate).slice(0, 10) : "";
   })();
 
-  const filtered = useMemo(() =>
-    (agreements as any[]).filter((a: any) =>
-      !search || a.ApplicantName?.toLowerCase().includes(search.toLowerCase())
-        || a.AgreementNo?.includes(search) || a.BookingNo?.includes(search)
-    ), [agreements, search]);
+  const filtered = agreements;
 
   // Arriving here via CrmBooking.tsx's "Agreement" next-step link
   // (`/crm/agreements?bookingId=X`) means the booking already cleared
@@ -618,17 +810,22 @@ const CrmAgreement: React.FC = () => {
   // priority and skip this entirely.
   const handledBkgFilterRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!bkgFilter || idFilter || isLoading) return;
+    if (!bkgFilter || idFilter) return;
     if (handledBkgFilterRef.current === bkgFilter) return;
     handledBkgFilterRef.current = bkgFilter;
-    const existing = (agreements as any[]).find((a) => String(a.BookingId) === String(bkgFilter));
-    if (existing) {
-      setSelectedId(existing.Id);
-    } else {
-      setAgrForm((f) => ({ ...f, BookingId: bkgFilter }));
-      setAgrDialog(true);
-    }
-  }, [bkgFilter, idFilter, agreements, isLoading]);
+    let cancelled = false;
+    (async () => {
+      const agId = await fetchAgreementIdByBooking(bkgFilter);
+      if (cancelled) return;
+      if (agId) {
+        setSelectedId(agId);
+      } else {
+        setAgrForm((f) => ({ ...f, BookingId: bkgFilter }));
+        setAgrDialog(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [bkgFilter, idFilter]);
 
   // Auto-fill Legal Name, PAN, Aadhaar, Legal Address from the selected booking's
   // customer record whenever the user picks a booking in the New Agreement dialog.
@@ -1043,15 +1240,6 @@ const CrmAgreement: React.FC = () => {
     if (!selectedId) return;
     if (editForm.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(editForm.PanNo.trim())) { toast.error("Invalid PAN format (e.g. ABCDE1234F)"); return; }
     if (editForm.AadhaarNo && !/^\d{12}$/.test(editForm.AadhaarNo.trim())) { toast.error("Aadhaar must be exactly 12 digits"); return; }
-    const alIssued = detail?.agreement?.AllotmentLetterStatus === "Issued";
-    const touchesLegal = editForm.LegalName !== (detail?.agreement?.LegalName || "")
-      || editForm.LegalAddress !== (detail?.agreement?.LegalAddress || "")
-      || editForm.PanNo !== (detail?.agreement?.PanNo || "")
-      || editForm.AadhaarNo !== (detail?.agreement?.AadhaarNo || "");
-    if (alIssued && touchesLegal && !editForm.RevisionReason.trim()) {
-      toast.error("Amendment reason is required — the Allotment Letter has been issued for this booking. State why this change is needed.");
-      return;
-    }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}`, {
@@ -1075,6 +1263,11 @@ const CrmAgreement: React.FC = () => {
   };
 
   const rights = usePageRights("crm-agreements");
+  const afsPayRights = usePageRights("crm-afs-query-payment");
+  const afsRegRights = usePageRights("crm-afs-registry");
+  const tabAllowed = (t: AgrTab): boolean =>
+    t === "AFS Payment" ? afsPayRights.canView :
+    t === "AFS Registry" ? afsRegRights.canView : true;
 
   return (
     <>
@@ -1097,10 +1290,12 @@ const CrmAgreement: React.FC = () => {
         <div className="w-80 shrink-0 flex flex-col gap-2">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search agreements..."
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+              placeholder="Search agreements... (Enter to search)"
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
           </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
           <div className="flex-1 overflow-y-auto thin-scroll space-y-1.5">
             {isLoading ? (
               <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
@@ -1138,6 +1333,7 @@ const CrmAgreement: React.FC = () => {
               );
             })}
           </div>
+          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
         </div>
 
         {/* Detail */}
@@ -1297,11 +1493,6 @@ const CrmAgreement: React.FC = () => {
                         <span title="Booking is cancelled — cannot edit" className="text-xs px-2 py-0.5 border border-dashed border-border rounded-full text-muted-foreground/40 cursor-not-allowed">
                           Edit Details
                         </span>
-                      ) : detail.agreement?.AllotmentLetterStatus === "Issued" ? (
-                        <button onClick={openEdit} title="Allotment Letter issued — any change to legal details requires an amendment reason"
-                          className="flex items-center gap-1 text-xs px-2 py-0.5 border border-amber-300 rounded-full text-amber-700 bg-amber-50 hover:bg-amber-100">
-                          <Lock size={10} /> Amend Details
-                        </button>
                       ) : (
                         <button onClick={openEdit}
                           className="text-xs px-2 py-0.5 border border-border rounded-full text-muted-foreground hover:bg-muted">
@@ -1416,8 +1607,8 @@ const CrmAgreement: React.FC = () => {
                   tabs (underline style), so the two most-used CRM detail
                   pages feel like one consistent system instead of each
                   inventing their own step UI. */}
-              <div className="flex items-center gap-x-1 border-b border-border px-1 -mt-1">
-                {AGR_TABS.map((t, i) => (
+              <div className="flex items-center gap-x-1 border-b border-border px-1 -mt-1 overflow-x-auto thin-scroll">
+                {AGR_TABS.filter(tabAllowed).map((t, i) => (
                   <button key={t} onClick={() => setAgrTab(t)}
                     className={`px-3.5 py-2 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap flex items-center gap-1.5 ${
                       agrTab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
@@ -1431,13 +1622,6 @@ const CrmAgreement: React.FC = () => {
 
               {agrTab === "Overview" && (
               <div className="rounded-xl border border-border overflow-hidden space-y-0">
-                {detail.agreement?.AllotmentLetterStatus === "Issued" && (
-                  <div className="flex items-center gap-1.5 text-xs text-amber-700 bg-amber-50 border-b border-amber-200 dark:bg-amber-950/40 dark:border-amber-900/40 px-4 py-2.5">
-                    <Lock size={11} className="shrink-0" />
-                    Allotment Letter issued{detail.agreement?.AllotmentLetterIssuedOn ? ` on ${String(detail.agreement.AllotmentLetterIssuedOn).slice(0, 10)}` : ""} — legal details are locked. Use <strong className="mx-0.5">Amend Details</strong> to make a recorded change.
-                  </div>
-                )}
-
                 {/* Key summary row */}
                 <div className="grid grid-cols-3 divide-x divide-border border-b border-border">
                   <div className="px-4 py-3">
@@ -1448,9 +1632,6 @@ const CrmAgreement: React.FC = () => {
                   <div className="px-4 py-3">
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Project</p>
                     <p className="text-sm font-semibold truncate">{detail.agreement?.ProjectName || "—"}</p>
-                    <p className={`text-[11px] font-medium ${detail.agreement?.AllotmentLetterStatus === "Issued" ? "text-green-600" : "text-muted-foreground"}`}>
-                      AL: {detail.agreement?.AllotmentLetterStatus || "—"}
-                    </p>
                   </div>
                   <div className={`px-4 py-3 ${detail.agreement?.AgreementDate ? "bg-green-500/[0.04]" : ""}`}>
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Agreement Date</p>
@@ -2057,6 +2238,52 @@ const CrmAgreement: React.FC = () => {
               </div>
                 );
               })()}
+
+              {agrTab === "Timeline" && (
+                <AgreementTimeline
+                  agreement={detail.agreement}
+                  bookingId={detail.agreement.BookingId}
+                  onJump={(t) => setAgrTab(t)}
+                  canViewAfsPay={afsPayRights.canView}
+                  canViewAfsReg={afsRegRights.canView}
+                />
+              )}
+
+              {agrTab === "AFS Payment" && (
+                afsPayRights.canView ? (
+                  <CrmAfsQueryPayment
+                    embeddedBookingId={detail.agreement.BookingId}
+                    agreementStatus={detail.agreement.Status}
+                    onChanged={() => {
+                      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+                      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+                      qc.invalidateQueries({ queryKey: ["crm-afs-query-payment-booking", detail.agreement.BookingId] });
+                      qc.invalidateQueries({ queryKey: ["crm-afs-registry-booking", detail.agreement.BookingId] });
+                    }}
+                  />
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                    You don't have access to the AFS Query Payment stage.
+                  </div>
+                )
+              )}
+
+              {agrTab === "AFS Registry" && (
+                afsRegRights.canView ? (
+                  <CrmAfsRegistry
+                    embeddedBookingId={detail.agreement.BookingId}
+                    onChanged={() => {
+                      qc.invalidateQueries({ queryKey: ["crm-agreement-detail", selectedId] });
+                      qc.invalidateQueries({ queryKey: ["crm-agreements"] });
+                      qc.invalidateQueries({ queryKey: ["crm-afs-registry-booking", detail.agreement.BookingId] });
+                    }}
+                  />
+                ) : (
+                  <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                    You don't have access to the AFS Registry stage.
+                  </div>
+                )
+              )}
             </>
           )}
         </div>
@@ -2083,7 +2310,7 @@ const CrmAgreement: React.FC = () => {
               {bookings.length === 0 && (
                 <p className="text-xs text-muted-foreground mt-1">
                   No bookings are eligible yet — a booking needs to be Approved, have its welcome call marked
-                  Welcomed, and have customer bank/nominee/PAN/Aadhaar details on file before an agreement can be created.
+                  Welcomed, and have customer bank/PAN/Aadhaar details on file before an agreement can be created.
                 </p>
               )}
               {bkgFilter && !(bookings as any[]).some((b) => String(b.Id) === String(bkgFilter)) && (
@@ -2444,13 +2671,12 @@ const CrmAgreement: React.FC = () => {
 
       {/* Edit Details — every save snapshots the prior values into Version
           History (see backend PUT /:id) rather than silently overwriting them.
-          When Allotment Letter is Issued, legal fields are formally committed
-          and any change is treated as an amendment: reason becomes mandatory. */}
+          The revision reason is optional context, saved into version history. */}
       <Dialog open={editDialog} onOpenChange={(o) => { if (!o) { setEditDialog(false); setEditLocked(true); } }}>
         <DialogContent accent="crm" className="max-w-lg">
           {(() => {
-            const alIssued = detail?.agreement?.AllotmentLetterStatus === "Issued";
-            const alIssuedOn = detail?.agreement?.AllotmentLetterIssuedOn;
+            const alIssued = false;
+            const alIssuedOn = null;
             return (
               <>
                 <DialogHeader>

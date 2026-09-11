@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -12,6 +12,8 @@ import { translateError } from "@/lib/translateError";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Plus, Key, AlertTriangle, CheckCircle2, User } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API        = "/api/crm/handover";
 const SA_LEADS_API = "/api/sa/leads";
@@ -48,6 +50,35 @@ const statusLabel: Record<string, string> = {
 async function fetchHandovers(): Promise<any[]> {
   try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
 }
+async function fetchHandoverByBooking(bookingId: string): Promise<any | null> {
+  try {
+    const r = await fetchWithAuth(`${API}?bookingId=${bookingId}`);
+    if (!r.ok) return null;
+    const rows = await r.json();
+    return Array.isArray(rows) && rows.length ? rows[0] : null;
+  } catch { return null; }
+}
+
+const PAGE_SIZE = 20;
+interface HandoverListFilters {
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchHandoversList(filters: HandoverListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
+}
 async function fetchDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
   if (!r.ok) throw new Error("Failed to load handover");
@@ -73,6 +104,13 @@ const CrmHandover: React.FC = () => {
   const deepLinkBookingId = sp.get("bookingId");
 
   const [selectedId, setSelectedId]     = useState<number | null>(null);
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
   const [newDialog, setNewDialog]       = useState(false);
   const [snagDialog, setSnagDialog]     = useState(false);
   const [completeDialog, setCompleteDialog] = useState(false);
@@ -90,9 +128,17 @@ const CrmHandover: React.FC = () => {
     CustomerAcknowledged: false,
   });
 
-  const { data: handovers = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-handovers"], queryFn: fetchHandovers, staleTime: 30_000,
+  const listFilters: HandoverListFilters = useMemo(
+    () => ({ search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [search, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-handovers", listFilters, page],
+    queryFn: () => fetchHandoversList(listFilters, page),
+    staleTime: 30_000,
   });
+  const handovers = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
   const { data: detail } = useQuery({
     queryKey: ["crm-handover-detail", selectedId],
     queryFn: () => fetchDetail(selectedId!),
@@ -110,21 +156,24 @@ const CrmHandover: React.FC = () => {
     queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000,
   });
 
-  // Deep-link: ?bookingId=X — pre-select existing handover or open schedule dialog
+  // Deep-link: ?bookingId=X — pre-select existing handover or open schedule
+  // dialog. Looks the booking up directly via ?bookingId= (a small,
+  // unpaginated scoped query — see crmHandover.js) rather than scanning the
+  // now-paginated main `handovers` list, which could easily not include the
+  // one booking being deep-linked to if it's not on the current page.
   useEffect(() => {
-    if (!deepLinkBookingId || !(handovers as any[]).length) return;
+    if (!deepLinkBookingId) return;
     setSp({}, { replace: true });
-    const existing = (handovers as any[]).find(
-      (h: any) => String(h.BookingId) === deepLinkBookingId,
-    );
-    if (existing) {
-      setSelectedId(existing.Id);
-    } else {
-      setNewForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
-      setNewDialog(true);
-    }
+    fetchHandoverByBooking(deepLinkBookingId).then((existing) => {
+      if (existing) {
+        setSelectedId(existing.Id);
+      } else {
+        setNewForm((f) => ({ ...f, BookingId: deepLinkBookingId }));
+        setNewDialog(true);
+      }
+    });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkBookingId, handovers]);
+  }, [deepLinkBookingId]);
 
   // ── Schedule handover ──────────────────────────────────────────────────────
   const handleSchedule = async () => {
@@ -298,7 +347,15 @@ const CrmHandover: React.FC = () => {
     >
       <div className="flex gap-4 h-[calc(100vh-220px)]">
         {/* ── List panel ─────────────────────────────────────────────────── */}
-        <div className="w-80 shrink-0 overflow-y-auto space-y-1.5">
+        <div className="w-80 shrink-0 flex flex-col gap-2">
+        <div className="relative">
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+            placeholder="Search customer, booking... (Enter to search)"
+            className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+        </div>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+        <div className="flex-1 overflow-y-auto space-y-1.5">
           {isLoading ? (
             <div className="p-4 text-center text-muted-foreground text-sm">Loading...</div>
           ) : (handovers as any[]).length === 0 ? (
@@ -330,6 +387,8 @@ const CrmHandover: React.FC = () => {
               )}
             </button>
           ))}
+        </div>
+        <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
         </div>
 
         {/* ── Detail panel ───────────────────────────────────────────────── */}

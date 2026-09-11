@@ -23,6 +23,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/afs-registry";
 const BKG_API = "/api/crm/bookings";
@@ -93,8 +94,17 @@ function Timeline({ row }: { row: any }) {
   );
 }
 
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
+interface AfsRegistryCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — status counts (awaitingRegNo, etc.)
+// are computed client-side from the whole set, same as CrmDemands.
+// Company/Project/Block narrows the set server-side instead.
+async function fetchAll(cpb?: AfsRegistryCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load AFS Registry trackers");
   return r.json();
 }
@@ -120,11 +130,16 @@ function StatCard({ label, value, sub, icon: Icon, tint }: { label: string; valu
   );
 }
 
-const CrmAfsRegistry: React.FC = () => {
+// When `embeddedBookingId` is set this renders ONLY the per-booking detail
+// panel (no CrmShell / list / KPI strip) — used as the "AFS Registry" tab of
+// the merged Agreement workspace. `onChanged` fires after any mutation so the
+// workspace's Timeline + sibling tabs can refresh.
+const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => void }> = ({ embeddedBookingId, onChanged } = {}) => {
+  const embedded = embeddedBookingId != null;
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp] = useSearchParams();
-  const deepLinkBookingId = sp.get("bookingId");
+  const deepLinkBookingId = embedded ? null : sp.get("bookingId");
   const { canCreate } = usePageRights("crm-afs-registry");
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
@@ -138,15 +153,51 @@ const CrmAfsRegistry: React.FC = () => {
   const [completedDate, setCompletedDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [detailRow, setDetailRow] = useState<any | null>(null);
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [filterStatus, setFilterStatus] = useState<"all" | "Pending" | "Scheduled" | "Completed">("all");
 
-  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({ queryKey: ["crm-afs-registry"], queryFn: fetchAll, staleTime: 30_000 });
+  const { data: rows = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-afs-registry", cpb], queryFn: () => fetchAll(cpb),
+    staleTime: 30_000, enabled: !embedded,
+  });
   const { data: eligibleBookings = [], isFetching: eligFetching } = useQuery({
     queryKey: ["crm-afs-registry-eligible"],
     queryFn: fetchEligibleBookings,
-    enabled: dialogOpen,
+    enabled: dialogOpen && !embedded,
     staleTime: 0,
   });
+
+  // Embedded mode: the single record for this one booking (or null when the
+  // AFS Registry hasn't been started yet).
+  const { data: embeddedRow, isLoading: embeddedLoading, refetch: refetchEmbedded } = useQuery({
+    queryKey: ["crm-afs-registry-booking", embeddedBookingId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/booking/${embeddedBookingId}`);
+      return r.ok ? r.json() : null;
+    },
+    enabled: embedded,
+    staleTime: 15_000,
+  });
+  const afterChange = () => { refetchEmbedded(); onChanged?.(); };
+  const [startingEmbedded, setStartingEmbedded] = useState(false);
+  const startEmbedded = async () => {
+    if (!embeddedBookingId) return;
+    setStartingEmbedded(true);
+    try {
+      const res = await fetchWithAuth(API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ BookingId: embeddedBookingId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(`${data.AfsRegNo} started`);
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
+      afterChange();
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally { setStartingEmbedded(false); }
+  };
 
   const startableBookings = eligibleBookings as any[];
 
@@ -229,6 +280,7 @@ const CrmAfsRegistry: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-afs-registry"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
+      if (embedded) afterChange();
     } catch (e: any) {
       toast.error(translateError(e.message));
     }
@@ -251,12 +303,17 @@ const CrmAfsRegistry: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
       qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-gateway"] });
-      promptNextStep(
-        navigate,
-        "AFS Registry visit completed. Next: open the Agreement and click Mark as Registered (enter the AFS Registration No + Date).",
-        completingBookingId ? `/crm/agreements?bookingId=${completingBookingId}` : "/crm/agreements",
-        "Go to Agreement → Mark Registered",
-      );
+      if (embedded) {
+        toast.success("AFS Registry completed — now open the Agreement tab and Mark as Registered.");
+        afterChange();
+      } else {
+        promptNextStep(
+          navigate,
+          "AFS Registry visit completed. Next: open the Agreement and click Mark as Registered (enter the AFS Registration No + Date).",
+          completingBookingId ? `/crm/agreements?bookingId=${completingBookingId}` : "/crm/agreements",
+          "Go to Agreement → Mark Registered",
+        );
+      }
     } catch (e: any) {
       toast.error(translateError(e.message));
     }
@@ -374,6 +431,135 @@ const CrmAfsRegistry: React.FC = () => {
   };
   const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
 
+  // ── Embedded (Agreement workspace "AFS Registry" tab) ──────────────────────
+  if (embedded) {
+    const r = embeddedRow;
+    return (
+      <div className="space-y-4">
+        {embeddedLoading ? (
+          <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>
+        ) : !r ? (
+          <div className="rounded-xl border border-dashed border-border p-8 text-center space-y-3">
+            <CalendarClock size={24} className="mx-auto text-muted-foreground" />
+            <p className="text-sm font-medium text-foreground">AFS Registry not started</p>
+            <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+              Both parties visit the Sub-Registrar's Office to register the Agreement for Sale. Requires this booking's AFS Query Payment to be <strong>Confirmed</strong> first.
+            </p>
+            {canCreate && (
+              <button onClick={startEmbedded} disabled={startingEmbedded}
+                className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
+                <Plus size={13} /> {startingEmbedded ? "Starting…" : "Start AFS Registry"}
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="px-5 pt-5 pb-4 border-b border-border">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-sm font-semibold font-mono text-foreground">{r.AfsRegNo}</span>
+                <StatusBadge status={r.Status} />
+                <button onClick={() => copyToClipboard(r.AfsRegNo, "AREG No.")} className="text-muted-foreground hover:text-foreground" title="Copy AREG No.">
+                  <Copy size={11} />
+                </button>
+              </div>
+              <div className="mt-3"><Timeline row={r} /></div>
+            </div>
+            <div className="px-5 py-4 space-y-3">
+              <div className="grid grid-cols-2 gap-3 text-xs">
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <p className="text-[10px] text-muted-foreground">Agreement No</p>
+                  <p className="font-mono font-medium mt-0.5">{r.AgreementNo || "—"}</p>
+                </div>
+                <div className="rounded-lg border border-border px-3 py-2">
+                  <p className="text-[10px] text-muted-foreground">AFS Registration No</p>
+                  <p className="font-mono font-medium mt-0.5">{r.AfsRegistrationNo || "—"}</p>
+                </div>
+              </div>
+              {r.Status === "Pending" && (
+                <button onClick={() => { setScheduleId(r.Id); setScheduledDate(""); }}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-md hover:shadow-amber-500/20 transition-all">
+                  <CalendarClock size={12} /> Schedule Appointment
+                </button>
+              )}
+              {r.Status === "Scheduled" && (
+                <button onClick={() => { setCompleteId(r.Id); setCompletedDate(new Date().toISOString().slice(0, 10)); }}
+                  className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors">
+                  <CheckCircle2 size={12} /> Mark Completed
+                </button>
+              )}
+              {r.Status === "Completed" && (
+                r.AfsRegistrationNo ? (
+                  <div className="flex items-center gap-2 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 dark:bg-emerald-900/20 dark:border-emerald-800/60 dark:text-emerald-400">
+                    <ShieldCheck size={16} className="shrink-0" /> AFS registered — details recorded on the Agreement.
+                  </div>
+                ) : (
+                  <div className="flex items-start gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 dark:bg-amber-900/20 dark:border-amber-800/60 dark:text-amber-400">
+                    <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                    <span>Registry visit complete. Now switch to the <strong>Agreement</strong> tab and click <strong>Mark as Registered</strong> — enter the AFS Registration No and date from the Sub-Registrar receipt.</span>
+                  </div>
+                )
+              )}
+              {r.Remarks && <p className="text-[11px] text-muted-foreground italic">&ldquo;{r.Remarks}&rdquo;</p>}
+            </div>
+          </div>
+        )}
+
+        {/* Schedule dialog */}
+        <Dialog open={!!scheduleId} onOpenChange={(o) => !o && setScheduleId(null)}>
+          <DialogContent className="max-w-xs p-0 gap-0 overflow-hidden">
+            <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 shrink-0 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
+                  <CalendarClock size={16} className="text-blue-600 dark:text-blue-400" />
+                </div>
+                <DialogTitle className="font-heading text-base">Schedule AFS Registration</DialogTitle>
+              </div>
+            </DialogHeader>
+            <div className="px-5 py-4">
+              <label className="text-xs text-muted-foreground block mb-1">Appointment Date *</label>
+              <input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/10">
+              <button onClick={() => setScheduleId(null)}
+                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted font-medium">Cancel</button>
+              <button onClick={handleSchedule}
+                className="px-4 py-1.5 text-sm text-white rounded-lg font-semibold bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">Save</button>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        {/* Complete dialog */}
+        <Dialog open={!!completeId} onOpenChange={(o) => !o && setCompleteId(null)}>
+          <DialogContent className="max-w-xs p-0 gap-0 overflow-hidden">
+            <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 shrink-0 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                  <CheckCircle2 size={16} className="text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <DialogTitle className="font-heading text-base">Mark AFS Registry Completed</DialogTitle>
+              </div>
+            </DialogHeader>
+            <div className="px-5 py-4">
+              <label className="text-xs text-muted-foreground block mb-1">Completed Date</label>
+              <input type="date" value={completedDate} onChange={(e) => setCompletedDate(e.target.value)}
+                className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+              <p className="text-[11px] text-muted-foreground mt-2">
+                After confirming, switch to the Agreement tab and Mark as Registered.
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/10">
+              <button onClick={() => setCompleteId(null)}
+                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted font-medium">Cancel</button>
+              <button onClick={handleComplete}
+                className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700 transition-colors">Confirm Completed</button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+    );
+  }
+
   return (
     <>
       <Breadcrumbs items={[{ label: "Dashboard" }, { label: "CRM" }, { label: "Legal" }, { label: "Agreement Registration Visit" }]} />
@@ -410,6 +596,7 @@ const CrmAfsRegistry: React.FC = () => {
                 placeholder="Search name, AREG no, booking, unit..."
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
             </div>
+            <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
             <div className="flex items-center gap-2 flex-wrap">
               {(["all", "Pending", "Scheduled", "Completed"] as const).map((s) => {
                 const label = s === "all" ? "All" : s;

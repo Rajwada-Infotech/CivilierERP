@@ -16,6 +16,7 @@ const { transition: approvalTransition, recordGLPosting } = require("../services
 const { emitNotification } = require("../services/notify");
 const { postCrmSalesDeedStatutoryToGL } = require("../services/crmLedger");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
+const { applyPagination } = require("../services/crmListPagination");
 const multer = require('multer');
 
 router.use(authMiddleware);
@@ -166,10 +167,14 @@ router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), asy
       OUTER APPLY (
         SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = b.Id ORDER BY CreatedAt DESC
       ) hov
-      WHERE b.Status <> 'Cancelled'
+      WHERE b.IsActive = 1
+        AND b.Status NOT IN ('Cancelled', 'Rejected')
         AND NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeed WHERE BookingId = b.Id)
         AND ag.Status = 'Registered'
-        AND (proj.entity_type <> 'UnderConstruction' OR proj.status = 'Completed' OR hov.Status = 'Completed')
+        AND (b.ProjectId IS NULL OR proj.entity_type IS NULL
+             OR proj.entity_type <> 'UnderConstruction'
+             OR proj.status = 'Completed'
+             OR hov.Status = 'Completed')
       ORDER BY b.CreatedAt DESC
     `);
     res.json(result.recordset);
@@ -183,9 +188,27 @@ router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), asy
 router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status } = req.query;
-    const result = await pool.request().query(`${DEED_SELECT} ORDER BY d.CreatedAt DESC`);
-    const rows = result.recordset.map((r) => ({
+    const { status, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = [];
+    // Company/Project/Block narrow the SQL scan itself. Status, however, is
+    // derived in JS below (deriveDeedStatus depends on today's date and
+    // several columns together, not one stored column) — it stays a
+    // post-fetch filter, same as before, just now applied to an
+    // already-scoped set rather than the entire table.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR d.DeedNo LIKE @search OR b.BookingNo LIKE @search)");
+    }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const result = await req0.query(`${DEED_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where} ORDER BY d.CreatedAt DESC`);
+    let rows = result.recordset.map((r) => ({
       ...r,
       Status: deriveDeedStatus({
         bookingStatus: r.BookingStatus, registrationNo: r.RegistrationNo,
@@ -193,7 +216,19 @@ router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => 
         registrationDeadline: r.RegistrationDeadline,
       }),
     }));
-    res.json(status ? rows.filter((r) => r.Status === status) : rows);
+    if (status) rows = rows.filter((r) => r.Status === status);
+
+    if (!req.query.page) return res.json(rows);
+
+    // Status is JS-derived, so true SQL-side OFFSET/FETCH isn't possible
+    // here without replicating deriveDeedStatus in T-SQL — paginate the
+    // already company/project/block-scoped, already status-filtered array
+    // in memory instead. Still a real scalability win: the SQL scan itself
+    // is bounded to one company/project/block, not the whole portfolio.
+    const { page, pageSize } = applyPagination(req);
+    const total = rows.length;
+    const start = (page - 1) * pageSize;
+    res.json({ rows: rows.slice(start, start + pageSize), total, page, pageSize });
   } catch (e) {
     console.error("[crm-sales-deed] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });

@@ -475,6 +475,24 @@ router.put("/:id/approve", authenticateToken, requirePageRight("fund-transfer", 
       }
     }
 
+    // CRM re-booking credit transfer: if this Inter-company transfer was
+    // raised to move a cancelled booking's held credit to a new booking in
+    // another company, now that it's Approved (real bank + LOAN-C squared),
+    // drop the fresh on-account credit on the target booking. Non-fatal.
+    if (transitionResult.newStatus === "Approved" || alreadyApproved) {
+      try {
+        const linked = await pool.request().input("ft", sql.Int, id)
+          .query("SELECT Id FROM dbo.CrmRebookingTransfer WHERE FundTransferId = @ft AND Status = 'PendingTransfer'");
+        if (linked.recordset.length) {
+          const { applyRebookingTransferToBooking } = require("./crmRefunds");
+          await applyRebookingTransferToBooking(pool, linked.recordset[0].Id, req.user?.email || req.user?.name || null);
+          await bumpCacheVersion("crm-refunds");
+        }
+      } catch (rebookErr) {
+        console.warn("[fund-transfer] CRM re-booking apply failed (non-fatal):", rebookErr.message);
+      }
+    }
+
     await bumpCacheVersion("fund-transfer");
     await bumpCacheVersion("general-ledger");
     res.json({ message: "Fund Transfer approved and posted to GL", ...transitionResult });

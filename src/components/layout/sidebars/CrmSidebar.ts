@@ -1,4 +1,4 @@
-import { ClipboardList, FileText, IndianRupee, Wrench, Scale, HardHat, LayoutDashboard, Grid3x3, Users, Key, Building2 } from "lucide-react";
+import { ClipboardList, FileText, IndianRupee, Wrench, HardHat, LayoutDashboard, Grid3x3, Users, Key, Building2 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Sidebar groups follow the real legal workflow sequence per Transfer of
@@ -32,8 +32,7 @@ export const crmNavItems: NavItem[] = [
       { label: "Applications & Bookings", path: "/crm/bookings",              pageKey: "crm-bookings"            },
       { label: "Welcome Calls",           path: "/crm/welcome-calls",         pageKey: "crm-welcome-calls"       },
       { label: "Booking Amendments",       path: "/crm/booking-amendments",    pageKey: "crm-bookings"            },
-      { label: "Communication Log",       path: "/crm/communication",         pageKey: "crm-communication"       },
-      { label: "Customer Bank & Nominee", path: "/crm/customer-bank-details", pageKey: "crm-customer-bank-details" },
+      { label: "Customer Bank Details", path: "/crm/customer-bank-details", pageKey: "crm-customer-bank-details" },
     ],
   },
 
@@ -47,27 +46,15 @@ export const crmNavItems: NavItem[] = [
     ],
   },
 
-  // ── Pre-Sale Documents ───────────────────────────────────────────────────────
-  // Allotment Letter → Agreement (internal legal steps) → Executed
+  // ── Pre-Sale ─────────────────────────────────────────────────────────────────
+  // Agreement workspace (draft → approve → send → execute → AFS Query Payment →
+  // AFS Registry, all tabs on one page) → Legal Milestones.
   {
     label: "Pre-Sale",
     icon: FileText,
     children: [
-      { label: "Allotment Letter",  path: "/crm/allotment-letter",  pageKey: "crm-allotment-letter" },
-      { label: "Agreements",        path: "/crm/agreements",        pageKey: "crm-agreements"       },
-      { label: "Agreement Papers",  path: "/crm/agreement-papers",  pageKey: "crm-documents"        },
+      { label: "Agreement",         path: "/crm/agreements",        pageKey: "crm-agreements"       },
       { label: "Legal Milestones",  path: "/crm/legal-milestones",  pageKey: "crm-legal-milestones" },
-    ],
-  },
-
-  // ── Sub-Registrar Visit 1 — AFS Registration ─────────────────────────────────
-  // Gate: Agreement Executed. Outcome: Agreement status → Registered
-  {
-    label: "AFS Registration",
-    icon: Scale,
-    children: [
-      { label: "AFS Query Payment", path: "/crm/afs-query-payment", pageKey: "crm-afs-query-payment" },
-      { label: "AFS Registry",      path: "/crm/afs-registry",      pageKey: "crm-afs-registry"      },
     ],
   },
 
@@ -121,6 +108,7 @@ export const crmNavItems: NavItem[] = [
       { label: "Demands",            path: "/crm/demands",         pageKey: "crm-payments"        },
       { label: "Money Receipts",     path: "/crm/money-receipts",  pageKey: "crm-money-receipts"  },
       { label: "On Account",         path: "/crm/on-account",      pageKey: "crm-payments"        },
+      { label: "Refunds",            path: "/crm/refunds",         pageKey: "crm-refunds"         },
       { label: "Invoices",           path: "/crm/invoices",        pageKey: "crm-invoices"        },
       { label: "Parking Booking",    path: "/crm/parking-booking", pageKey: "crm-parking-booking" },
       { label: "Brokerage",          path: "/crm/brokerage",       pageKey: "crm-brokerage"       },

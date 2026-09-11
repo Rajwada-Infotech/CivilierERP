@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { formatINR } from "@/utils/formatCurrency";
 import {
   Plus, AlertTriangle, CheckCircle2, Landmark, Pencil, Lock,
-  ShieldCheck, Building2, ArrowRight,
+  ShieldCheck, Building2, ArrowRight, Search,
 } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle, DialogDescription,
@@ -21,6 +21,8 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/noc";
 
@@ -72,6 +74,31 @@ async function fetchAll(type?: string, status?: string): Promise<any[]> {
     const r = await fetchWithAuth(`${API}?${params}`);
     return r.ok ? r.json() : [];
   } catch { return []; }
+}
+
+const PAGE_SIZE = 20;
+interface NocListFilters {
+  type: string;
+  status: string;
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchNocList(filters: NocListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.type !== "All") params.set("type", filters.type);
+  if (filters.status !== "All") params.set("status", filters.status);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  try {
+    const r = await fetchWithAuth(`${API}?${params}`);
+    if (!r.ok) return { rows: [], total: 0 };
+    const data = await r.json();
+    return { rows: data.rows || [], total: data.total || 0 };
+  } catch { return { rows: [], total: 0 }; }
 }
 
 // No type param here — NOC type is resolved per booking (see NocType on
@@ -210,6 +237,13 @@ const CrmNoc: React.FC = () => {
   // Filter tabs
   const [typeFilter, setTypeFilter]     = useState("All");
   const [statusFilter, setStatusFilter] = useState("All");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
 
   // Create dialog
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -223,11 +257,17 @@ const CrmNoc: React.FC = () => {
   const [editNoc, setEditNoc] = useState<any>(null);
 
   // Data
-  const { data: nocs = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-noc", typeFilter, statusFilter],
-    queryFn: () => fetchAll(typeFilter, statusFilter),
+  const listFilters: NocListFilters = useMemo(
+    () => ({ type: typeFilter, status: statusFilter, search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    [typeFilter, statusFilter, search, cpb]
+  );
+  const { data: listResult, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+    queryKey: ["crm-noc", listFilters, page],
+    queryFn: () => fetchNocList(listFilters, page),
     staleTime: 30_000,
   });
+  const nocs = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
 
   const { data: eligibleBookings = [], isFetching: bkgFetching } = useQuery({
     queryKey: ["crm-noc-eligible"],
@@ -427,7 +467,7 @@ const CrmNoc: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 mb-4">
           <div className="flex rounded-lg border border-border overflow-hidden text-sm">
             {(["All", "Organisation", "Bank"] as const).map((t) => (
-              <button key={t} onClick={() => setTypeFilter(t)}
+              <button key={t} onClick={() => updateFilter(setTypeFilter)(t)}
                 className={cn("px-3 py-1.5 transition-colors", typeFilter === t ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground")}>
                 {t}
               </button>
@@ -435,12 +475,20 @@ const CrmNoc: React.FC = () => {
           </div>
           <div className="flex rounded-lg border border-border overflow-hidden text-sm">
             {(["All", "Pending", "Approved", "Issued", "Rejected"] as const).map((s) => (
-              <button key={s} onClick={() => setStatusFilter(s)}
+              <button key={s} onClick={() => updateFilter(setStatusFilter)(s)}
                 className={cn("px-3 py-1.5 transition-colors", statusFilter === s ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground")}>
                 {s}
               </button>
             ))}
           </div>
+          <div className="relative flex-1 min-w-48">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+              placeholder="Search customer, booking... (Enter to search)"
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+          </div>
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
         </div>
 
         <DataTable
@@ -451,6 +499,7 @@ const CrmNoc: React.FC = () => {
           className="rounded-xl border border-border overflow-hidden bg-card"
           onRowClick={(row) => setDetailId(row.original.Id)}
         />
+        <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
         {/* ── Request dialog ────────────────────────────────────────────── */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>

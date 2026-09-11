@@ -10,12 +10,12 @@ const { crmCancellationCreateSchema } = require("../validation/crmCancellationSc
 const { actorId, requireUserEmail } = require("../services/saAccess");
 
 const { getNextDocNumber } = require("../services/docNumber");
+const { applyPagination } = require("../services/crmListPagination");
 // Approve/reject is gated to admin/super_admin/marketing_head via this shared
 // engine — same mechanism BOQ/Purchase Orders/etc. use — instead of any
 // editor being able to self-approve a cancellation/refund on this page.
-const { transition: approvalTransition, recordGLPosting } = require("../services/approvalService");
+const { transition: approvalTransition } = require("../services/approvalService");
 const { requireActiveBooking } = require("../services/crmWorkflowGuards");
-const { postCrmCancellationRefundToGL } = require("../services/crmLedger");
 const { releaseAllParkingForBooking } = require("./crmParking");
 const { emitNotification } = require("../services/notify");
 const { getIo } = require("../socket");
@@ -40,6 +40,22 @@ const DEPOSIT_BANKS_FOR_BOOKING = `
    SELECT DepositBankId FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id AND DepositBankId IS NOT NULL) x
 `;
 
+// The single hard fallback deduction % when no CrmCancellationPolicy slab
+// matches. It was read from an AppSetting row, but dbo.AppSetting does not
+// exist in every deployment — the raw query threw, 500-ing /policy and
+// POST / for any project without a configured slab (and the intended 10%
+// default was never reached). Now: try the setting, fall back to 10 on any
+// failure (missing table included).
+async function resolveDefaultDeductionPct(pool) {
+  try {
+    const r = await pool.request()
+      .query("SELECT TOP 1 Value FROM dbo.AppSetting WHERE [Key] = 'CancellationDefaultPct'");
+    return r.recordset.length ? (parseFloat(r.recordset[0].Value) || 10) : 10;
+  } catch {
+    return 10;
+  }
+}
+
 const CANCEL_SELECT = `
   SELECT
     c.Id, c.CancellationNo, c.BookingId, c.RequestedDate, c.Reason, c.AmountPaidTillDate,
@@ -52,16 +68,26 @@ const CANCEL_SELECT = `
     b.ProjectId, b.TotalValue, b.AssignedTo,
     a.ApplicantName, a.Mobile,
     rb.name AS RequestedByName, ab.name AS ApprovedByName,
-    c.SettlementStatus, c.RefundDueDate, c.SettledAt, c.SettledBy, c.SettlementNotes,
-    sb.name AS SettledByName,
+    -- Settlement/refund is no longer tracked on CrmCancellation — the money
+    -- side moved to the general-purpose Refund page (dbo.CrmRefund). These
+    -- are DERIVED for the Cancellations list: the held credit parked at
+    -- approval (hc), and the latest linked refund request (lr).
+    hc.Id AS HeldOnAccountId, hc.Amount AS HeldAmount, hc.AppliedAmount AS HeldApplied,
+    lr.Id AS RefundId, lr.RefundNo, lr.Status AS RefundStatus,
+    lr.NetAmount AS RefundNetAmount, lr.RefundDueDate,
     CASE
-      WHEN c.RefundDueDate IS NOT NULL AND c.SettlementStatus = 'RefundPending'
-           AND CAST(SYSDATETIME() AS DATE) > c.RefundDueDate
+      WHEN hc.Id IS NULL THEN NULL
+      WHEN hc.Status = 'Applied' OR hc.AppliedAmount >= hc.Amount THEN 'Settled'
+      ELSE 'RefundPending'
+    END AS SettlementStatus,
+    CASE
+      WHEN lr.RefundDueDate IS NOT NULL AND ISNULL(lr.Status,'') <> 'Paid'
+           AND CAST(SYSDATETIME() AS DATE) > lr.RefundDueDate
       THEN 1 ELSE 0
     END AS IsRefundOverdue,
     CASE
-      WHEN c.RefundDueDate IS NOT NULL AND c.SettlementStatus = 'RefundPending'
-      THEN DATEDIFF(day, CAST(SYSDATETIME() AS DATE), c.RefundDueDate)
+      WHEN lr.RefundDueDate IS NOT NULL AND ISNULL(lr.Status,'') <> 'Paid'
+      THEN DATEDIFF(day, CAST(SYSDATETIME() AS DATE), lr.RefundDueDate)
       ELSE NULL
     END AS RefundDaysRemaining,
     (SELECT COUNT(DISTINCT x.DepositBankId) FROM ${DEPOSIT_BANKS_FOR_BOOKING}) AS DistinctDepositBankCount,
@@ -72,7 +98,18 @@ const CANCEL_SELECT = `
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.Users rb ON rb.id = c.RequestedBy
   LEFT JOIN dbo.Users ab ON ab.id = c.ApprovedBy
-  LEFT JOIN dbo.Users sb ON sb.id = c.SettledBy
+  OUTER APPLY (
+    SELECT TOP 1 oa.Id, oa.Amount, oa.AppliedAmount, oa.Status
+    FROM dbo.CrmOnAccountPayment oa
+    WHERE oa.HeldSourceType = 'Cancellation' AND oa.HeldSourceRefId = c.Id
+    ORDER BY oa.Id DESC
+  ) hc
+  OUTER APPLY (
+    SELECT TOP 1 r.Id, r.RefundNo, r.Status, r.NetAmount, r.RefundDueDate
+    FROM dbo.CrmRefund r
+    WHERE r.SourceCancellationId = c.Id
+    ORDER BY r.Id DESC
+  ) lr
 `;
 
 // GET /policy — returns the applicable cancellation penalty slab for a given
@@ -93,8 +130,8 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
     if (!bookingId) return res.status(400).json({ error: "bookingId is required" });
 
     const bkgRow = await pool.request().input("bid", sql.Int, parseInt(bookingId))
-      .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
-    if (!bkgRow.recordset.length) return res.status(404).json({ error: "Booking not found" });
+      .query("SELECT ProjectId, BookingDate FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
+    if (!bkgRow.recordset.length) return res.status(404).json({ error: "Booking not found or not eligible for cancellation" });
 
     const { ProjectId, BookingDate } = bkgRow.recordset[0];
     const daysSince = BookingDate
@@ -124,12 +161,8 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
       return res.json({ ...slabRes.recordset[0], daysSinceBooking: daysSince, source: "policy" });
     }
 
-    // No slab configured — fall back to AppSetting
-    const settingRes = await pool.request()
-      .query("SELECT TOP 1 Value FROM dbo.AppSetting WHERE [Key] = 'CancellationDefaultPct'");
-    const fallbackPct = settingRes.recordset.length
-      ? parseFloat(settingRes.recordset[0].Value) || 10
-      : 10;
+    // No slab configured — fall back to the app default (10% if unset).
+    const fallbackPct = await resolveDefaultDeductionPct(pool);
     return res.json({ DeductionPercent: fallbackPct, daysSinceBooking: daysSince, source: "default" });
   } catch (e) {
     console.error("[crm-cancellations] GET /policy error:", e.message);
@@ -141,14 +174,53 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
 router.get("/", requirePageRight("crm-cancellations", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, companyId } = req.query;
+    const { status, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
     const req0 = pool.request();
     const conds = [];
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("c.Status = @st"); }
-    if (companyId) { req0.input("companyId", sql.Int, parseInt(companyId, 10)); conds.push("b.CompanyId = @companyId"); }
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR c.CancellationNo LIKE @search)");
+    }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const result = await req0.query(`${CANCEL_SELECT} ${where} ORDER BY c.CreatedAt DESC`);
-    res.json(result.recordset);
+    const SELECT_WITH_BLOCK = `${CANCEL_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY c.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY c.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("st2", sql.NVarChar(30), status || null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmCancellation c
+          JOIN dbo.CrmBooking b ON b.Id = c.BookingId
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE (@st2 IS NULL OR c.Status = @st2)
+            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2 OR c.CancellationNo LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
   } catch (e) {
     console.error("[crm-cancellations] GET error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
@@ -227,15 +299,15 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
       if (policyRes.recordset.length) {
         deductionPct = Number(policyRes.recordset[0].DeductionPercent);
       } else {
-        const settingRes = await pool.request()
-          .query("SELECT TOP 1 Value FROM dbo.AppSetting WHERE [Key] = 'CancellationDefaultPct'");
-        deductionPct = settingRes.recordset.length
-          ? parseFloat(settingRes.recordset[0].Value) || 10
-          : 10;
+        deductionPct = await resolveDefaultDeductionPct(pool);
       }
     }
-    const deductionAmt = Math.round(totalPaid * deductionPct / 100 * 100) / 100;
-    const refundAmt = Math.max(0, totalPaid - deductionAmt);
+    // The resolved deduction % is REMEMBERED on the request but NOT taken now.
+    // The full paid amount is what gets parked as 'Held' credit on approval;
+    // the deduction is only applied later, and only if the customer chooses a
+    // refund (not a re-booking) — that logic lives on the Refund page
+    // (dbo.CrmRefund). So AmountPaidTillDate = RefundAmount = gross, and
+    // DeductionAmount stays 0 on the cancellation record.
     const cancellationNo = await getNextDocNumber(pool, "CXL", "CXL");
 
     const result = await pool.request()
@@ -244,8 +316,8 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
       .input("reason",sql.NVarChar(sql.MAX), b.Reason || null)
       .input("paid",  sql.Decimal(18,2), totalPaid)
       .input("dpct",  sql.Decimal(5,2),  deductionPct)
-      .input("damt",  sql.Decimal(18,2), deductionAmt)
-      .input("ramt",  sql.Decimal(18,2), refundAmt)
+      .input("damt",  sql.Decimal(18,2), 0)
+      .input("ramt",  sql.Decimal(18,2), totalPaid)
       .input("rb",    sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmCancellation
@@ -256,7 +328,7 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
 
     res.status(201).json({
       success: true, id: result.recordset[0].Id, CancellationNo: cancellationNo,
-      totalPaid, deductionAmt, refundAmt,
+      totalPaid, deductionAmt: 0, refundAmt: totalPaid,
     });
   } catch (e) {
     if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
@@ -267,9 +339,10 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
 });
 
 // PUT /:id — edit notes only. Status is never settable here — Approved/
-// Rejected go through the endpoints below, Refunded through /:id/mark-refunded.
-// Blocked once Refunded — that's the final, GL-posted state; the notes on a
-// completed refund shouldn't be quietly rewritable afterward.
+// Rejected go through the endpoints below. The money side (refund/settlement)
+// now lives on dbo.CrmRefund (the Refunds page), not on this record.
+// Blocked once the cancellation is Approved — its held credit and linked
+// refund are already in flight; notes shouldn't be quietly rewritable then.
 router.put("/:id", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -278,8 +351,8 @@ router.put("/:id", requirePageRight("crm-cancellations", "edit"), async (req, re
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmCancellation WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
-    if (cur.recordset[0].Status === CrmStatus.REFUNDED) {
-      return res.status(400).json({ error: "This cancellation has already been refunded — notes can no longer be edited" });
+    if ([CrmStatus.APPROVED, "Cancelled"].includes(cur.recordset[0].Status)) {
+      return res.status(400).json({ error: "This cancellation is already approved — its held credit and refund are in flight; notes can no longer be edited here" });
     }
 
     await pool.request()
@@ -339,23 +412,46 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     // atomic with the writes — the UPDLOCK inside approvalTransition's own
     // internal transaction is what prevents concurrent double-approvals.
     const before = await pool.request().input("id", sql.Int, id)
-      .query("SELECT BookingId, AmountPaidTillDate, DeductionPercent, Notes FROM dbo.CrmCancellation WHERE Id = @id");
+      .query("SELECT BookingId, CancellationNo, AmountPaidTillDate, DeductionPercent, Notes FROM dbo.CrmCancellation WHERE Id = @id");
     if (!before.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
-    const { BookingId: bookingId, AmountPaidTillDate: staleAmountPaid, DeductionPercent: deductionPct, Notes: existingNotes } = before.recordset[0];
+    const { BookingId: bookingId, CancellationNo: cancellationNo, AmountPaidTillDate: staleAmountPaid, DeductionPercent: deductionPct, Notes: existingNotes } = before.recordset[0];
 
     const freshPaidRes = await pool.request().input("bid", sql.Int, bookingId)
       .query(`
-        SELECT 
+        SELECT
           (SELECT ISNULL(SUM(AmountPaid), 0) FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid) +
-          (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid) AS TotalPaid
+          (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid AND ISNULL(Status,'') <> 'Held') AS TotalPaid
       `);
     const freshTotalPaid = freshPaidRes.recordset[0].TotalPaid || 0;
+
+    // Context for the held-credit row + the auto-created draft CrmRefund.
+    const ctxRes = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT b.CompanyId, b.ProjectId, a.CustomerId,
+             (SELECT TOP 1 BankName    FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid ORDER BY Id DESC) AS BankName,
+             (SELECT TOP 1 AccountNo   FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid ORDER BY Id DESC) AS AccountNo,
+             (SELECT TOP 1 IfscCode    FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid ORDER BY Id DESC) AS IfscCode
+      FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE b.Id = @bid
+    `);
+    const ctx = ctxRes.recordset[0] || {};
+    const refundNo = ctx.CustomerId ? await getNextDocNumber(pool, "CRFD", "CRFD") : null;
 
     // approvalTransition has its own internal transaction and locking — it must
     // run on pool (not on a tx object) BEFORE we open our own transaction.
     // It enforces role-based access and status-machine guards; if it rejects,
     // we bail before touching any other table.
     const result = await approvalTransition("crm-cancellations", id, CrmStatus.APPROVED, userEmail, req.user?.role);
+
+    // Multi-level approval workflows: approvalTransition returns newStatus
+    // 'Pending' (not 'Approved') until the FINAL level signs off. The whole
+    // booking-cancellation cascade below — cancel booking, reject receipts,
+    // release parking, void brokerage, stamp the RERA refund date — must run
+    // ONLY on that final approval. A first-level approve on a multi-step
+    // workflow previously fell straight through and cancelled the booking
+    // while the request itself was still mid-chain.
+    if (result.newStatus !== CrmStatus.APPROVED) {
+      return res.json({ success: true, status: result.newStatus });
+    }
 
     // ── BEGIN ATOMIC SECTION ─────────────────────────────────────────────────
     // Every downstream state mutation runs inside a single transaction so that
@@ -373,20 +469,20 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
     // no DB write, so they must not run inside the transaction).
     const pendingNotifications = [];
     try {
-      // Recompute refund figures if a payment landed while the request sat Pending.
+      // Re-snapshot the gross paid amount if a payment landed while the request
+      // sat Pending. The deduction is NOT taken here anymore — the full paid
+      // amount is what gets parked as held credit; deduction only applies later
+      // on a refund (see dbo.CrmRefund). So AmountPaidTillDate = RefundAmount =
+      // gross, DeductionAmount stays 0 on the cancellation record.
       if (Math.abs(freshTotalPaid - Number(staleAmountPaid || 0)) >= 1) {
-        const deductionAmt = Math.round(freshTotalPaid * deductionPct / 100 * 100) / 100;
-        const refundAmt = Math.max(0, freshTotalPaid - deductionAmt);
-        const note = `[Auto-recomputed at approval] Paid amount changed from ₹${Number(staleAmountPaid || 0).toLocaleString("en-IN")} to ₹${freshTotalPaid.toLocaleString("en-IN")} since the request was filed — refund figures updated accordingly.`;
+        const note = `[Re-snapshotted at approval] Paid amount changed from ₹${Number(staleAmountPaid || 0).toLocaleString("en-IN")} to ₹${freshTotalPaid.toLocaleString("en-IN")} since the request was filed.`;
         await tx.request()
           .input("id", sql.Int, id)
           .input("paid", sql.Decimal(18, 2), freshTotalPaid)
-          .input("damt", sql.Decimal(18, 2), deductionAmt)
-          .input("ramt", sql.Decimal(18, 2), refundAmt)
           .input("notes", sql.NVarChar(sql.MAX), existingNotes ? `${existingNotes}\n${note}` : note)
           .query(`
             UPDATE dbo.CrmCancellation SET
-              AmountPaidTillDate = @paid, DeductionAmount = @damt, RefundAmount = @ramt,
+              AmountPaidTillDate = @paid, RefundAmount = @paid, DeductionAmount = 0,
               Notes = @notes, UpdatedAt = SYSDATETIME()
             WHERE Id = @id
           `);
@@ -401,20 +497,12 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       await tx.request().input("id", sql.Int, id).input("ab", sql.Int, actorId(req))
         .query("UPDATE dbo.CrmCancellation SET ApprovedBy = @ab, ApprovedAt = SYSDATETIME() WHERE Id = @id");
 
-      // ── Maker-Checker Finance Gate ────────────────────────────────────────
-      // Sales/marketing approval confirms the cancellation is commercially
-      // valid. Finance approval (below, /:id/finance-approve) is the second,
-      // independent gate that clears the actual cash disbursement. We flip the
-      // status to FinancePending immediately after the approvalTransition commit
-      // so the refund cannot be recorded until a finance-authorised user
-      // explicitly approves it — preventing any editor from triggering a cash
-      // outflow unilaterally. Operational side-effects (booking cancellation,
-      // parking release, brokerage clawback) happen here at sales-approval time
-      // since they are commercial decisions, not financial ones.
-      if (result.newStatus === CrmStatus.APPROVED) {
-        await tx.request().input("id", sql.Int, id)
-          .query("UPDATE dbo.CrmCancellation SET Status = 'FinancePending', UpdatedAt = SYSDATETIME() WHERE Id = @id");
-      }
+      // The cancellation workflow ends at 'Approved'. The MONEY side (finance
+      // approval, disbursement, RERA timer) no longer lives here — it moved to
+      // the general-purpose Refund page (dbo.CrmRefund). This handler parks the
+      // full paid amount as a 'Held' on-account credit and auto-creates a
+      // linked draft CrmRefund below; staff then either refund it or apply it
+      // to a re-booking from /crm/refunds.
 
       await tx.request().input("bid", sql.Int, bookingId)
         .query("UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
@@ -439,9 +527,19 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       // this a Finance approver can process and post a payment against a
       // cancelled booking (updates milestone AmountPaid, triggers GL, Sales
       // Deed, brokerage auto-create — all against a dead record).
-      await tx.request().input("bid", sql.Int, bookingId).query(`
+      // NOTE: dbo.ReceivedPayment uses the RP-prefixed column convention
+      // (RPUpdatedAt/RPUpdatedBy/RPRejectedAt) — a bare `UpdatedAt` here once
+      // threw "Invalid column name 'UpdatedAt'", which rolled back this entire
+      // cascade and left the cancellation stuck at Status='Approved' with a
+      // still-live booking. Keep the column names exact.
+      await tx.request()
+        .input("bid", sql.Int, bookingId)
+        .input("rb", sql.Int, actorId(req))
+        .query(`
         UPDATE dbo.ReceivedPayment
-        SET RPStatus = 'Rejected', UpdatedAt = SYSDATETIME()
+        SET RPStatus = 'Rejected', RPRejectedBy = @rb, RPRejectedAt = SYSDATETIME(),
+            RPRejectionNote = 'Auto-rejected — booking cancelled',
+            RPUpdatedBy = @rb, RPUpdatedAt = SYSDATETIME()
         WHERE CrmBookingId = @bid AND RPStatus = 'Pending'
       `);
 
@@ -503,29 +601,98 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
         }
       }
 
-      // RERA Section 18: promoter must refund within 45 days. Stamp the due date
-      // now so finance dashboards and overdue escalation queries can check it.
-      // If RefundAmount = 0 (full forfeiture), there is nothing to refund —
-      // mark as ForfeitureDocumented immediately so the pool shows it as settled.
-      const finalAmts = await tx.request().input("id", sql.Int, id)
-        .query("SELECT RefundAmount FROM dbo.CrmCancellation WHERE Id = @id");
-      const refundAmt = Number(finalAmts.recordset[0]?.RefundAmount || 0);
-      const newSettlementStatus = refundAmt === 0 ? "ForfeitureDocumented" : "RefundPending";
-      await tx.request()
-        .input("id",  sql.Int, id)
-        .input("ss",  sql.NVarChar(30), newSettlementStatus)
-        .input("rdd", sql.Date, refundAmt > 0 ? new Date(Date.now() + 45 * 86400000) : null)
-        .query(`
-          UPDATE dbo.CrmCancellation SET
-            SettlementStatus = @ss,
-            RefundDueDate    = @rdd,
-            UpdatedAt        = SYSDATETIME()
-          WHERE Id = @id
-        `);
+      // ── Park the money as HELD on-account credit ─────────────────────────
+      // The full paid amount (milestone receipts + any existing unapplied
+      // on-account) is consolidated into ONE CrmOnAccountPayment row with
+      // Status='Held', keyed back to this cancellation. NO GL is posted — the
+      // customer ledger head already carries this liability from the original
+      // receipts; the hold is a pure CRM tracking record. The ledgers move
+      // only when the held credit is later refunded or applied to a re-booking.
+      const heldTotal = Number(freshTotalPaid) || 0;
+      let heldRowId = null;
+      if (heldTotal > 0) {
+        // Fold the booking's still-open on-account rows into the hold so they
+        // aren't double-counted (their money is now represented by the Held row).
+        await tx.request().input("bid", sql.Int, bookingId)
+          .query(`
+            UPDATE dbo.CrmOnAccountPayment
+            SET AppliedAmount = Amount, Status = 'Applied',
+                Notes = ISNULL(Notes,'') + char(10) + 'Rolled into held credit on booking cancellation.'
+            WHERE BookingId = @bid AND ISNULL(Status,'') IN ('Unapplied','PartiallyApplied')
+          `);
+        const heldIns = await tx.request()
+          .input("no", sql.NVarChar(30), cancellationNo ? `${cancellationNo}-HOLD` : null)
+          .input("bid", sql.Int, bookingId)
+          .input("amt", sql.Decimal(18, 2), heldTotal)
+          .input("cid", sql.Int, id)
+          .input("cb", sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmOnAccountPayment
+              (ReceiptNo, BookingId, Amount, AppliedAmount, Status, ReceivedDate, PaymentMode,
+               Notes, HeldFromBookingId, HeldSourceType, HeldSourceRefId, HeldAt, CreatedBy, CreatedAt)
+            OUTPUT INSERTED.Id
+            VALUES
+              (@no, @bid, @amt, 0, 'Held', CAST(SYSDATETIME() AS DATE), 'HeldCredit',
+               'Held credit from cancelled booking — refund or apply to a re-booking from the Refunds page.',
+               @bid, 'Cancellation', @cid, SYSDATETIME(), @cb, SYSDATETIME())
+          `);
+        heldRowId = heldIns.recordset[0].Id;
+      }
+
+      // ── Auto-create the linked draft CrmRefund ───────────────────────────
+      // RERA Section 18: 45 days from cancellation approval. The deduction %
+      // resolved at request time is carried onto the refund; it only bites if
+      // the customer takes a refund (a re-booking waives it entirely).
+      if (heldRowId && ctx.CustomerId && refundNo) {
+        const pct = Number(deductionPct) || 0;
+        const damt = Math.round(heldTotal * pct / 100 * 100) / 100;
+        const net = Math.max(0, heldTotal - damt);
+        await tx.request()
+          .input("rno", sql.NVarChar(30), refundNo)
+          .input("cust", sql.Int, ctx.CustomerId)
+          .input("comp", sql.Int, ctx.CompanyId ?? null)
+          .input("proj", sql.Int, ctx.ProjectId ?? null)
+          .input("bid", sql.Int, bookingId)
+          .input("held", sql.Int, heldRowId)
+          .input("cid", sql.Int, id)
+          .input("gross", sql.Decimal(18, 2), heldTotal)
+          .input("pct", sql.Decimal(5, 2), pct)
+          .input("damt", sql.Decimal(18, 2), damt)
+          .input("net", sql.Decimal(18, 2), net)
+          .input("cbank", sql.NVarChar(200), ctx.BankName || null)
+          .input("cacc", sql.NVarChar(50), ctx.AccountNo || null)
+          .input("cifsc", sql.NVarChar(20), ctx.IfscCode || null)
+          .input("due", sql.Date, new Date(Date.now() + 45 * 86400000))
+          .input("rb", sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmRefund
+              (RefundNo, CustomerId, CompanyId, ProjectId, BookingId, SourceType,
+               SourceOnAccountId, SourceCancellationId, GrossAmount, DeductionPercent,
+               DeductionAmount, NetAmount, CustomerBankName, CustomerAccountNo, CustomerIfscCode,
+               Status, RefundDueDate, RequestedBy, RequestedAt, CreatedBy, CreatedAt)
+            VALUES
+              (@rno, @cust, @comp, @proj, @bid, 'CancellationHeldCredit',
+               @held, @cid, @gross, @pct,
+               @damt, @net, @cbank, @cacc, @cifsc,
+               'Draft', @due, @rb, SYSDATETIME(), @rb, SYSDATETIME())
+          `);
+      }
 
       await tx.commit();
     } catch (txErr) {
       try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      // approvalTransition already committed Status='Approved' on its own
+      // transaction before this block opened. The downstream cascade just
+      // rolled back, so the booking was NOT actually cancelled and NO held
+      // credit / draft refund was created — walk the request back to 'Pending'
+      // so it can be retried cleanly from a consistent state.
+      try {
+        await pool.request().input("id", sql.Int, id).query(
+          "UPDATE dbo.CrmCancellation SET Status = 'Pending', UpdatedAt = SYSDATETIME() WHERE Id = @id AND Status = 'Approved'",
+        );
+      } catch (compErr) {
+        console.error("[crm-cancellations] approve compensation failed:", compErr.message);
+      }
       throw txErr;
     }
     // ── END ATOMIC SECTION ───────────────────────────────────────────────────
@@ -544,7 +711,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       }
     }
 
-    res.json({ success: true, status: result.newStatus === CrmStatus.APPROVED ? "FinancePending" : result.newStatus });
+    res.json({ success: true, status: result.newStatus });
   } catch (e) {
     console.error("[crm-cancellations] approve error:", e.message);
     res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
@@ -566,215 +733,5 @@ router.put("/:id/reject", requirePageRight("crm-cancellations", "edit"), async (
   }
 });
 
-// PUT /:id/finance-approve — second gate in the maker-checker refund chain.
-// Gated to accounts_head / finance_head / admin / super_admin — i.e. the
-// finance authorisation tier that is separate from the CRM/sales approver.
-// Moves Status: FinancePending → Approved, which is the gate mark-refunded
-// already checks for — so no other route needs to change.
-// Records FinanceClearedBy/FinanceClearedAt (if those columns exist) for a
-// full audit trail of who cleared the cash disbursement.
-const FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
-router.put("/:id/finance-approve", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  try {
-    const pool = getPool();
-    const actor = actorId(req);
-    const role = (req.user?.role || "").toLowerCase();
-    if (!FINANCE_APPROVER_ROLES.includes(role)) {
-      return res.status(403).json({ error: "Only accounts/finance heads or admins can clear refunds for disbursement" });
-    }
-
-    const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, RequestedBy, RefundAmount, BookingId FROM dbo.CrmCancellation WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
-    if (cur.recordset[0].Status !== CrmStatus.FINANCE_PENDING) {
-      return res.status(400).json({ error: `Cannot finance-approve — status must be FinancePending (currently '${cur.recordset[0].Status}')` });
-    }
-
-    // Move to Approved — this is the status mark-refunded already requires.
-    // Try to write FinanceClearedBy/FinanceClearedAt if those columns exist;
-    // degrade gracefully if the migration hasn't been run yet (IGNORE ERRORS).
-    try {
-      await pool.request().input("id", sql.Int, id).input("ab", sql.Int, actor)
-        .query(`
-          UPDATE dbo.CrmCancellation SET
-            Status = '${CrmStatus.APPROVED}',
-            FinanceClearedBy = @ab,
-            FinanceClearedAt = SYSDATETIME(),
-            UpdatedAt = SYSDATETIME()
-          WHERE Id = @id
-        `);
-    } catch {
-      // Column may not exist yet — run the migration SQL to add it
-      await pool.request().input("id", sql.Int, id)
-        .query("UPDATE dbo.CrmCancellation SET Status = 'Approved', UpdatedAt = SYSDATETIME() WHERE Id = @id");
-    }
-
-    // Notify the requestor that their refund has been finance-cleared
-    const { RequestedBy, RefundAmount } = cur.recordset[0];
-    if (RequestedBy) {
-      const fmtCurrency = (n) => `₹${Number(n || 0).toLocaleString("en-IN")}`;
-      await emitNotification(pool, RequestedBy, "crm_cancellation_finance_approved",
-        "Refund Cleared for Disbursement",
-        `Your cancellation refund of ${fmtCurrency(RefundAmount)} has been finance-approved and is now cleared for disbursement.`,
-        id, "crm_cancellation");
-    }
-
-    res.json({ success: true, status: CrmStatus.APPROVED });
-  } catch (e) {
-    console.error("[crm-cancellations] finance-approve error:", e.message);
-    res.status(500).json({ error: "An internal error occurred. Please try again later." });
-  }
-});
-
-// PUT /:id/finance-reject — finance head sends the request back to the CRM
-// team with a note (e.g. "refund amount mismatch — recalculate"). Moves
-// FinancePending back to Pending so sales can revise and re-submit.
-router.put("/:id/finance-reject", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  try {
-    const pool = getPool();
-    const role = (req.user?.role || "").toLowerCase();
-    if (!FINANCE_APPROVER_ROLES.includes(role)) {
-      return res.status(403).json({ error: "Only accounts/finance heads or admins can finance-reject a cancellation" });
-    }
-    const note = req.body?.note || "Finance rejected — please revise and resubmit";
-    const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, RequestedBy, Notes FROM dbo.CrmCancellation WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
-    if (cur.recordset[0].Status !== CrmStatus.FINANCE_PENDING) {
-      return res.status(400).json({ error: `Cannot finance-reject — status must be FinancePending (currently '${cur.recordset[0].Status}')` });
-    }
-    const appendedNotes = cur.recordset[0].Notes
-      ? `${cur.recordset[0].Notes}\n[Finance Rejection] ${note}`
-      : `[Finance Rejection] ${note}`;
-    await pool.request().input("id", sql.Int, id).input("notes", sql.NVarChar(sql.MAX), appendedNotes)
-      .query("UPDATE dbo.CrmCancellation SET Status = 'Pending', Notes = @notes, UpdatedAt = SYSDATETIME() WHERE Id = @id");
-
-    // Notify the requestor
-    if (cur.recordset[0].RequestedBy) {
-      await emitNotification(pool, cur.recordset[0].RequestedBy, "crm_cancellation_finance_rejected",
-        "Refund Finance-Rejected",
-        `Your cancellation refund request was sent back by finance: ${note}`,
-        id, "crm_cancellation");
-    }
-    res.json({ success: true, status: CrmStatus.PENDING });
-  } catch (e) {
-    console.error("[crm-cancellations] finance-reject error:", e.message);
-    res.status(500).json({ error: "An internal error occurred. Please try again later." });
-  }
-});
-
-// PUT /:id/mark-refunded — a business action (recording that money actually
-// moved), not an approval decision — any editor can do this once Approved.
-router.put("/:id/mark-refunded", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
-  try {
-    const pool = getPool();
-    const id = parseInt(req.params.id);
-    const b = req.body;
-
-    const cur = await pool.request().input("id", sql.Int, id)
-      .query(`
-        SELECT c.Status, b.ProjectId
-        FROM dbo.CrmCancellation c
-        JOIN dbo.CrmBooking b ON b.Id = c.BookingId
-        WHERE c.Id = @id
-      `);
-    if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
-    if (cur.recordset[0].Status !== CrmStatus.APPROVED) {
-      return res.status(400).json({ error: `Cannot mark refunded — cancellation must be Approved (currently '${cur.recordset[0].Status}')` });
-    }
-
-    // Same mandatory-bank rule as every deposit — mirrored for the money
-    // going back out. "Same account, same" is only ever a frontend default;
-    // the requirement itself doesn't relax just because this is a refund.
-    const tagged = await pool.request().input("pid", sql.Int, cur.recordset[0].ProjectId)
-      .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmProjectBank WHERE ProjectId = @pid AND IsActive = 1");
-    if (tagged.recordset[0].Cnt > 0 && !b.RefundBankId) {
-      return res.status(400).json({ error: "Refund bank is required for this project" });
-    }
-
-    await pool.request()
-      .input("id",    sql.Int,           id)
-      .input("rdate", sql.Date,          b.RefundDate || null)
-      .input("rmode", sql.NVarChar(50),  b.RefundMode || null)
-      .input("rref",  sql.NVarChar(200), b.RefundRef  || null)
-      .input("rbank", sql.Int,           b.RefundBankId ? parseInt(b.RefundBankId) : null)
-      .input("actor", sql.Int,           actorId(req))
-      .query(`
-        UPDATE dbo.CrmCancellation SET
-          Status = '${CrmStatus.REFUNDED}',
-          RefundDate = ISNULL(@rdate, CAST(SYSDATETIME() AS DATE)),
-          RefundMode = @rmode, RefundRef = @rref, RefundBankId = @rbank,
-          SettlementStatus = 'Settled', SettledAt = SYSDATETIME(), SettledBy = @actor,
-          UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-
-    // Post to the core Finance GL — cash actually paid back to the customer.
-    // Never allowed to fail the refund record itself.
-    const actorEmail = req.user?.email || req.user?.name || null;
-    try {
-      const outcome = await postCrmCancellationRefundToGL(pool, id, actorEmail);
-      await recordGLPosting("crm-cancellation-refund", id, outcome, actorEmail);
-    } catch (glErr) {
-      await recordGLPosting("crm-cancellation-refund", id, { failed: true, reason: glErr.message }, actorEmail);
-    }
-
-    res.json({ success: true });
-  } catch (e) {
-    console.error("[crm-cancellations] mark-refunded error:", e.message);
-    res.status(500).json({ error: "An internal error occurred. Please try again later." });
-  }
-});
-
-// PUT /:id/settle — finance/admin only. Explicitly marks a cancellation as
-// settled when there is no cash refund to disburse (full forfeiture, or the
-// buyer has acknowledged and agreed). This closes the RERA 45-day loop for
-// zero-refund cancellations and moves the record out of the overdue queue.
-const SETTLE_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
-router.put("/:id/settle", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  try {
-    const pool = getPool();
-    const role = (req.user?.role || "").toLowerCase();
-    if (!SETTLE_ROLES.includes(role)) {
-      return res.status(403).json({ error: "Only accounts/finance heads or admins can mark a cancellation as settled" });
-    }
-    const { notes } = req.body || {};
-    const cur = await pool.request().input("id", sql.Int, id)
-      .query("SELECT Status, SettlementStatus, RefundAmount FROM dbo.CrmCancellation WHERE Id = @id");
-    if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation not found" });
-    const { Status, SettlementStatus, RefundAmount } = cur.recordset[0];
-    if (!["Approved", "FinancePending", "Refunded"].includes(Status)) {
-      return res.status(400).json({ error: `Cannot settle — cancellation must be Approved or FinancePending (currently '${Status}')` });
-    }
-    if (SettlementStatus === "Settled") {
-      return res.status(409).json({ error: "Cancellation is already settled" });
-    }
-    if (Number(RefundAmount || 0) > 0 && Status !== "Refunded") {
-      return res.status(400).json({
-        error: "A refund is owed on this cancellation — use mark-refunded to settle it, not manual settle",
-      });
-    }
-    await pool.request()
-      .input("id",    sql.Int,          id)
-      .input("actor", sql.Int,          actorId(req))
-      .input("notes", sql.NVarChar(500), notes ? String(notes).trim() : null)
-      .query(`
-        UPDATE dbo.CrmCancellation SET
-          SettlementStatus = 'Settled',
-          SettledAt        = SYSDATETIME(),
-          SettledBy        = @actor,
-          SettlementNotes  = @notes,
-          UpdatedAt        = SYSDATETIME()
-        WHERE Id = @id
-      `);
-    res.json({ success: true, message: "Cancellation marked as settled" });
-  } catch (e) {
-    console.error("[crm-cancellations] settle error:", e.message);
-    res.status(500).json({ error: "An internal error occurred. Please try again later." });
-  }
-});
 
 module.exports = router;

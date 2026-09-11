@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dialog";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/parking";
 const APP_API = "/api/crm/applications";
@@ -59,8 +60,18 @@ interface Allotment {
   CreatedAt: string | null;
 }
 
-async function fetchAllotments(): Promise<Allotment[]> {
-  try { const r = await fetchWithAuth(API); return r.ok ? r.json() : []; } catch { return []; }
+interface ParkingCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — standalone Pending/Paid totals are
+// computed client-side from the whole set (see `standalonePending`/
+// `standalonePaid` below), same as CrmDemands. Company/Project/Block
+// narrows the set server-side instead.
+async function fetchAllotments(cpb?: ParkingCpb): Promise<Allotment[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  try { const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchApplications(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${APP_API}?includeConverted=1`); return r.ok ? r.json() : []; } catch { return []; }
@@ -352,9 +363,10 @@ const CrmParkingBooking: React.FC = () => {
   const [releaseReason, setReleaseReason] = useState("");
   const [releaseConfirmText, setReleaseConfirmText] = useState("");
   const [releaseSaving, setReleaseSaving] = useState(false);
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
 
   const { data: allotments = [], isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
-    queryKey: ["crm-parking-all"], queryFn: fetchAllotments, staleTime: 30_000,
+    queryKey: ["crm-parking-all", cpb], queryFn: () => fetchAllotments(cpb), staleTime: 30_000,
   });
 
   // Row clicks only ever set local state — the URL stayed plain
@@ -679,6 +691,7 @@ const CrmParkingBooking: React.FC = () => {
             </button>
           ))}
         </div>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
         {(statusFilter || linkFilter || search) && (
           <button onClick={() => { setStatusFilter(""); setLinkFilter(""); setSearch(""); }}
             className="text-xs text-muted-foreground hover:text-foreground underline px-1">

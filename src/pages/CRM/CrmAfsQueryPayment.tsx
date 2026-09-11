@@ -27,6 +27,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/afs-query-payment";
 const BKG_API = "/api/crm/bookings";
@@ -148,8 +149,17 @@ function fileToStaged(file: File): Promise<StagedFile> {
 const MAX_FILE_BYTES = 4 * 1024 * 1024;
 const MAX_COMBINED_BYTES = 6 * 1024 * 1024;
 
-async function fetchAll(): Promise<any[]> {
-  const r = await fetchWithAuth(API);
+interface AfsQpCpb { companyId: string; projectId: string; blockId: string }
+// NOTE on scale: still fetched in full — statusCounts are computed
+// client-side from the whole set (see below), same as CrmDemands.
+// Company/Project/Block narrows the set server-side instead.
+async function fetchAll(cpb?: AfsQpCpb): Promise<any[]> {
+  const params = new URLSearchParams();
+  if (cpb?.companyId) params.set("companyId", cpb.companyId);
+  if (cpb?.projectId) params.set("projectId", cpb.projectId);
+  if (cpb?.blockId) params.set("blockId", cpb.blockId);
+  const qs = params.toString();
+  const r = await fetchWithAuth(`${API}${qs ? `?${qs}` : ""}`);
   if (!r.ok) throw new Error((await r.json().catch(() => null))?.error || "Failed to load AFS Query Payments");
   return r.json();
 }
@@ -341,11 +351,21 @@ function StatCard({ label, value, sub, icon: Icon, tint }: { label: string; valu
   );
 }
 
-const CrmAfsQueryPayment: React.FC = () => {
+// When `embeddedBookingId` is set this renders ONLY the per-booking workflow
+// panel (no CrmShell / list / KPI strip) — used as the "AFS Payment" tab of
+// the merged Agreement workspace. `agreementStatus` lets it decide whether to
+// show the start form (Executed) or a "registered elsewhere" note; `onChanged`
+// fires after any mutation so the workspace can refresh.
+const CrmAfsQueryPayment: React.FC<{
+  embeddedBookingId?: number;
+  agreementStatus?: string;
+  onChanged?: () => void;
+}> = ({ embeddedBookingId, agreementStatus, onChanged } = {}) => {
+  const embedded = embeddedBookingId != null;
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [sp] = useSearchParams();
-  const deepLinkBookingId = sp.get("bookingId");
+  const deepLinkBookingId = embedded ? String(embeddedBookingId) : sp.get("bookingId");
   const { canCreate, canEdit } = usePageRights("crm-afs-query-payment");
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
@@ -365,17 +385,57 @@ const CrmAfsQueryPayment: React.FC = () => {
   const [confirming, setConfirming] = useState(false);
   const [filterStatus, setFilterStatus] = useState<"all" | "Pending" | "InfoSent" | "Confirmed">("all");
   const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const infoInputRef = useRef<HTMLInputElement>(null);
   const proofInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: rows = [], isLoading, dataUpdatedAt: listUpdatedAt, isFetching: listFetching, refetch: refetchList } = useQuery({ queryKey: ["crm-afs-query-payment"], queryFn: fetchAll, staleTime: 30_000 });
-  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
-  const { data: eligibleBookings = [] } = useQuery({ queryKey: ["crm-afs-query-payment-eligible"], queryFn: fetchEligibleBookings, staleTime: 60_000 });
+  const { data: rows = [], isLoading, dataUpdatedAt: listUpdatedAt, isFetching: listFetching, refetch: refetchList } = useQuery({ queryKey: ["crm-afs-query-payment", cpb], queryFn: () => fetchAll(cpb), staleTime: 30_000, enabled: !embedded });
+  const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000, enabled: !embedded });
+  const { data: eligibleBookings = [] } = useQuery({ queryKey: ["crm-afs-query-payment-eligible"], queryFn: fetchEligibleBookings, staleTime: 60_000, enabled: !embedded });
   const { data: detail, refetch: refetchDetail } = useQuery({
     queryKey: ["crm-afs-query-payment-detail", selectedId],
     queryFn: () => fetchDetail(selectedId),
     enabled: !!selectedId,
   });
+
+  // Embedded mode: resolve this one booking's AFS QP record id (or null).
+  const { data: embeddedRecord, isLoading: embeddedLoading, refetch: refetchEmbedded } = useQuery({
+    queryKey: ["crm-afs-query-payment-booking", embeddedBookingId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`${API}/booking/${embeddedBookingId}`);
+      return r.ok ? r.json() : null;
+    },
+    enabled: embedded,
+    staleTime: 15_000,
+  });
+  useEffect(() => {
+    if (embedded && embeddedRecord?.Id && embeddedRecord.Id !== selectedId) setSelectedId(embeddedRecord.Id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, embeddedRecord?.Id]);
+  const afterChange = () => { refetchEmbedded(); refetchDetail(); onChanged?.(); };
+  const [embeddedStarting, setEmbeddedStarting] = useState(false);
+  const embeddedStart = async (stampDuty: string, registrationFee: string) => {
+    if (!embeddedBookingId) return;
+    setEmbeddedStarting(true);
+    try {
+      const res = await fetchWithAuth(API, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          BookingId: embeddedBookingId,
+          StampDuty: stampDuty || undefined,
+          RegistrationFee: registrationFee || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error);
+      toast.success(`${data.AfsQPNo} started`);
+      qc.invalidateQueries({ queryKey: ["crm-afs-query-payment"] });
+      qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      afterChange();
+    } catch (e: any) {
+      toast.error(translateError(e.message));
+    } finally { setEmbeddedStarting(false); }
+  };
 
   // /eligible-bookings already applies the real gate (Approved + active
   // booking, Agreement Executed/Registered, no tracker yet) — no client-side
@@ -460,6 +520,7 @@ const CrmAfsQueryPayment: React.FC = () => {
       setNewForm({ BookingId: "", StampDuty: "", RegistrationFee: "" });
       qc.invalidateQueries({ queryKey: ["crm-afs-query-payment"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      if (embedded) afterChange();
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -530,6 +591,7 @@ const CrmAfsQueryPayment: React.FC = () => {
       refetchDetail();
       qc.invalidateQueries({ queryKey: ["crm-afs-query-payment"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
+      if (embedded) afterChange();
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -559,14 +621,19 @@ const CrmAfsQueryPayment: React.FC = () => {
       qc.invalidateQueries({ queryKey: ["crm-afs-query-payment"] });
       qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
       qc.invalidateQueries({ queryKey: ["crm-pre-possession-gateway"] });
-      // Find the bookingId for the confirmed record so we can deep-link
-      const confirmedRow = (rows as any[]).find((r: any) => r.Id === selectedId);
-      promptNextStep(
-        navigate,
-        "AFS Query Payment confirmed. Next step: start the AFS Registry visit (both parties at Sub-Registrar Office).",
-        confirmedRow?.BookingId ? `/crm/afs-registry?bookingId=${confirmedRow.BookingId}` : "/crm/afs-registry",
-        "Go to AFS Registry",
-      );
+      if (embedded) {
+        toast.success("AFS Query Payment confirmed — now start the AFS Registry visit from that tab.");
+        afterChange();
+      } else {
+        // Find the bookingId for the confirmed record so we can deep-link
+        const confirmedRow = (rows as any[]).find((r: any) => r.Id === selectedId);
+        promptNextStep(
+          navigate,
+          "AFS Query Payment confirmed. Next step: start the AFS Registry visit (both parties at Sub-Registrar Office).",
+          confirmedRow?.BookingId ? `/crm/afs-registry?bookingId=${confirmedRow.BookingId}` : "/crm/afs-registry",
+          "Go to AFS Registry",
+        );
+      }
     } catch (e: any) {
       toast.error(translateError(e.message));
     } finally {
@@ -849,6 +916,70 @@ const CrmAfsQueryPayment: React.FC = () => {
   };
   const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
 
+  // ── Embedded (Agreement workspace "AFS Payment" tab) ───────────────────────
+  if (embedded) {
+    const registered = agreementStatus === "Registered";
+    const executed = agreementStatus === "Executed" || registered;
+    return (
+      <div className="space-y-4">
+        {embeddedLoading ? (
+          <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>
+        ) : selectedId && detail ? (
+          <InlineDetail />
+        ) : registered ? (
+          <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-500/[0.05] px-5 py-5 flex items-start gap-4">
+            <div className="w-10 h-10 shrink-0 rounded-full bg-emerald-100 dark:bg-emerald-900/40 border-2 border-emerald-400 dark:border-emerald-600 flex items-center justify-center">
+              <CheckCircle2 size={18} className="text-emerald-600 dark:text-emerald-400" />
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Agreement for Sale is Registered</p>
+              <p className="text-xs text-emerald-600/80 dark:text-emerald-400/70 mt-1 max-w-lg">
+                Registered at the Sub-Registrar's Office — stamp duty and registration fees were settled directly, no in-system fee tracker was created. Registration details are on the Agreement tab.
+              </p>
+            </div>
+          </div>
+        ) : !executed ? (
+          <div className="rounded-xl border border-dashed border-border p-8 text-center space-y-2">
+            <ReceiptIndianRupee size={24} className="mx-auto text-muted-foreground" />
+            <p className="text-sm font-medium text-foreground">Not available yet</p>
+            <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+              AFS registration fees can be started once the Agreement for Sale is <strong>Executed</strong>. Complete the Agreement tab first.
+            </p>
+          </div>
+        ) : canCreate ? (
+          <div className="rounded-xl border border-amber-300/60 dark:border-amber-800/60 bg-amber-500/[0.03] overflow-hidden">
+            <div className="px-5 py-4 border-b border-amber-300/40 dark:border-amber-800/40 bg-amber-500/[0.04]">
+              <p className="text-sm font-semibold">Start Registration Fee Process</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Enter the stamp duty and registration fee amounts (both optional now — can be filled before sending to the customer).</p>
+            </div>
+            <div className="px-5 py-4 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-foreground block mb-1.5">Stamp Duty (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
+                  <Input type="number" className="h-9 font-mono text-sm focus-visible:ring-amber-500/40" placeholder="e.g. 50000"
+                    value={newForm.StampDuty} onChange={(e) => setNewForm((f) => ({ ...f, StampDuty: e.target.value }))} />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground block mb-1.5">Registration Fee (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
+                  <Input type="number" className="h-9 font-mono text-sm focus-visible:ring-amber-500/40" placeholder="e.g. 30000"
+                    value={newForm.RegistrationFee} onChange={(e) => setNewForm((f) => ({ ...f, RegistrationFee: e.target.value }))} />
+                </div>
+              </div>
+              <button
+                onClick={() => embeddedStart(newForm.StampDuty, newForm.RegistrationFee)}
+                disabled={embeddedStarting}
+                className="flex items-center gap-2 px-5 py-2.5 text-sm font-semibold text-white rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
+                <CheckCircle2 size={14} /> {embeddedStarting ? "Starting…" : "Start — Create Registration Fee Tracker"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="p-8 text-center text-sm text-muted-foreground">No AFS Query Payment tracker for this booking.</div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <>
       <Breadcrumbs items={[{ label: "Dashboard" }, { label: "CRM" }, { label: "Legal" }, { label: "Agreement Registration Fees" }]} />
@@ -960,6 +1091,7 @@ const CrmAfsQueryPayment: React.FC = () => {
                     placeholder="Search name, AQP no, booking, unit..."
                     className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
                 </div>
+                <CrmCompanyProjectBlockFilter value={cpb} onChange={setCpb} />
                 <div className="flex items-center gap-2 flex-wrap">
                   {(["all", "Pending", "InfoSent", "Confirmed"] as const).map((s) => {
                     const label = s === "all" ? "All" : s === "InfoSent" ? "Info Sent" : s;

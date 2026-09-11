@@ -10,8 +10,6 @@ const REQUIRED_CUSTOMER_DETAIL_FIELDS = [
   ["AccountNo", "Account number"],
   ["IfscCode", "IFSC code"],
   ["AccountHolderName", "account holder name"],
-  ["NomineeName", "nominee name"],
-  ["NomineeRelation", "nominee relation"],
   ["PanNo", "PAN number"],
   ["AadhaarNo", "Aadhaar number"],
   ["Occupation", "occupation"],
@@ -188,7 +186,7 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   `);
   const customerDetails = detail.recordset[0];
   if (!customerDetails) {
-    errors.push("Customer bank, nominee, PAN, and Aadhaar details are required");
+    errors.push("Customer bank, PAN, and Aadhaar details are required");
   } else {
     const missing = REQUIRED_CUSTOMER_DETAIL_FIELDS
       .filter(([field]) => !hasValue(customerDetails[field]))
@@ -221,7 +219,7 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
 
 /**
  * Auto-advance step: the moment the last agreement-prep prerequisite lands
- * (welcome call completed AND customer bank/nominee/PAN/Aadhaar details
+ * (welcome call completed AND customer bank/PAN/Aadhaar details
  * saved, in either order), automatically create the Draft agreement shell
  * and provision the customer portal login — instead of waiting for a staff
  * member to remember to click "New Agreement". Never fabricates a step: it

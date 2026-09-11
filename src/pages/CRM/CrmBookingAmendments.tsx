@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   CheckCircle2,
@@ -24,6 +24,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/contexts/AuthContext";
 import { CrmShell } from "@/components/crm/CrmShell";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const AMENDMENT_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
 
@@ -129,11 +131,25 @@ function ProposedChangeDiffCard({ json }: { json: string }) {
   );
 }
 
-async function fetchAmendments(status?: string): Promise<AmendmentRow[]> {
-  const url = status ? `${BASE}?status=${status}` : BASE;
-  const r = await fetch(url, { credentials: "include" });
+const PAGE_SIZE = 20;
+interface AmendmentListFilters {
+  status?: string;
+  search: string;
+  companyId: string;
+  projectId: string;
+  blockId: string;
+}
+async function fetchAmendmentsList(filters: AmendmentListFilters, page: number): Promise<{ rows: AmendmentRow[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+  if (filters.status) params.set("status", filters.status);
+  if (filters.search) params.set("search", filters.search);
+  if (filters.companyId) params.set("companyId", filters.companyId);
+  if (filters.projectId) params.set("projectId", filters.projectId);
+  if (filters.blockId) params.set("blockId", filters.blockId);
+  const r = await fetch(`${BASE}?${params}`, { credentials: "include" });
   if (!r.ok) throw new Error(await r.text());
-  return r.json();
+  const data = await r.json();
+  return { rows: data.rows || [], total: data.total || 0 };
 }
 
 async function reviewAmendment(
@@ -170,18 +186,30 @@ export default function CrmBookingAmendments() {
     action: "approve" | "reject";
   } | null>(null);
   const [notes, setNotes] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const [search, setSearch] = useState("");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
 
   const isApprover =
     AMENDMENT_APPROVER_ROLES.includes(
       String(currentUser?.role || "").toLowerCase()
     ) || canDoAction("approval-inbox" as any, "edit");
 
-  const { data: rows = [], isLoading } = useQuery({
-    queryKey: ["crm-booking-amendments", statusFilter],
-    queryFn: () =>
-      fetchAmendments(statusFilter === "All" ? undefined : statusFilter),
+  const listFilters: AmendmentListFilters = useMemo(() => ({
+    status: statusFilter === "All" ? undefined : statusFilter,
+    search, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId,
+  }), [statusFilter, search, cpb]);
+  const { data: listResult, isLoading } = useQuery({
+    queryKey: ["crm-booking-amendments", listFilters, page],
+    queryFn: () => fetchAmendmentsList(listFilters, page),
     staleTime: 30_000,
   });
+  const rows = listResult?.rows ?? [];
+  const total = listResult?.total ?? 0;
 
   const mutation = useMutation({
     mutationFn: ({
@@ -361,7 +389,7 @@ export default function CrmBookingAmendments() {
             <button
               key={s}
               type="button"
-              onClick={() => setStatusFilter(s)}
+              onClick={() => updateFilter(setStatusFilter)(s)}
               className="relative flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-medium transition-all"
               style={
                 active
@@ -388,8 +416,8 @@ export default function CrmBookingAmendments() {
                 <XCircle className="w-3 h-3" style={{ color: active ? accent : undefined }} />
               )}
               {s}
-              {/* Live count badge */}
-              {!isLoading && statusFilter === s && rows.length > 0 && (
+              {/* Live count badge — total matching this status, not just the current page */}
+              {!isLoading && statusFilter === s && total > 0 && (
                 <span
                   className="text-[10px] font-bold px-1 py-0.5 rounded-full leading-none min-w-[18px] text-center"
                   style={{
@@ -397,7 +425,7 @@ export default function CrmBookingAmendments() {
                     color: accent,
                   }}
                 >
-                  {rows.length}
+                  {total}
                 </span>
               )}
             </button>
@@ -405,15 +433,25 @@ export default function CrmBookingAmendments() {
         })}
       </div>
 
+      <div className="flex gap-3 flex-wrap items-center">
+        <div className="relative flex-1 min-w-48">
+          <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
+            placeholder="Search by booking, customer... (Enter to search)"
+            className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
+        </div>
+        <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+      </div>
+
       {/* ── Main data table ───────────────────────────────────────────────── */}
       <DataTable
         columns={columns}
         data={rows}
         loading={isLoading}
-        searchable
-        searchPlaceholder="Search by booking, customer, or project…"
+        searchable={false}
         emptyMessage="No amendment requests found."
       />
+      <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       {/* ── Review dialog ─────────────────────────────────────────────────── */}
       {reviewDialog && (

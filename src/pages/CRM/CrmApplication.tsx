@@ -21,6 +21,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useGstRates, computeUnitParkingGst, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
+import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
 
 const API = "/api/crm/applications";
 const CUSTOMER_API = "/api/crm/customers";
@@ -89,7 +92,6 @@ const EMPTY_FORM = {
 
 const EMPTY_BANK = {
   BankName: "", BranchName: "", AccountNo: "", IfscCode: "", AccountHolderName: "",
-  NomineeName: "", NomineeRelation: "", NomineeDob: "", NomineeContact: "", NomineeAddress: "",
   PanNo: "", AadhaarNo: "", Occupation: "", AnnualIncome: "",
 };
 
@@ -105,16 +107,53 @@ async function fetchAllBanks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 
-// The management page needs every stage (Converted/In Process/Not
-// Converted) for its own tabs — every other page's application-selector
-// dropdown deliberately gets the narrower default (Converted excluded, see
-// crmApplications.js GET /), so only this page opts back in.
-async function fetchApps(): Promise<any[]> {
+const PAGE_SIZE = 20;
+
+interface ApplicationListFilters {
+  search: string; status: string; displayStage: string;
+  companyId: string; projectId: string; blockId: string;
+}
+
+// The management page's own paginated list — server-side filtered on
+// exactly the same terms the page's UI exposes (search/status/stage/
+// Company/Project/Block), unlike every other page's application-selector
+// dropdown (New Booking, Unit/Parking Matrix, Communication Log), which
+// still calls GET / with no ?page= at all and keeps getting the original
+// bare-array/Converted-excluded-by-default behavior untouched.
+async function fetchApplicationsList(filters: ApplicationListFilters, page: number): Promise<{ rows: any[]; total: number }> {
+  const q = new URLSearchParams();
+  q.set("page", String(page));
+  q.set("pageSize", String(PAGE_SIZE));
+  if (filters.search) q.set("search", filters.search);
+  if (filters.status && filters.status !== "All") q.set("status", filters.status);
+  if (filters.displayStage) q.set("displayStage", filters.displayStage);
+  if (filters.companyId) q.set("companyId", filters.companyId);
+  if (filters.projectId) q.set("projectId", filters.projectId);
+  if (filters.blockId) q.set("blockId", filters.blockId);
   try {
-    const res = await fetchWithAuth(`${API}?includeConverted=1`);
-    if (!res.ok) return [];
+    const res = await fetchWithAuth(`${API}?${q}`);
+    if (!res.ok) return { rows: [], total: 0 };
     return res.json();
-  } catch { return []; }
+  } catch { return { rows: [], total: 0 }; }
+}
+
+// Same filter set as the list above, minus stage itself — for the tab
+// badges, which must reflect the true total under the current
+// search/status/Company/Project/Block filters regardless of which page or
+// stage is currently selected (a page's own row count stopped being usable
+// as "the total" the moment the list became paginated).
+async function fetchStageCounts(filters: Omit<ApplicationListFilters, "displayStage">): Promise<Record<Stage, number>> {
+  const q = new URLSearchParams();
+  if (filters.search) q.set("search", filters.search);
+  if (filters.status && filters.status !== "All") q.set("status", filters.status);
+  if (filters.companyId) q.set("companyId", filters.companyId);
+  if (filters.projectId) q.set("projectId", filters.projectId);
+  if (filters.blockId) q.set("blockId", filters.blockId);
+  try {
+    const res = await fetchWithAuth(`${API}/stage-counts?${q}`);
+    if (!res.ok) return { InProcess: 0, Converted: 0, NotConverted: 0 };
+    return res.json();
+  } catch { return { InProcess: 0, Converted: 0, NotConverted: 0 }; }
 }
 async function fetchAppDetail(id: number): Promise<any> {
   const r = await fetchWithAuth(`${API}/${id}`);
@@ -653,9 +692,12 @@ const CrmApplication: React.FC = () => {
   const canRequestBookingCancellation = canDoAction("crm-cancellations", "create");
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
+  const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
   const [activeStage, setActiveStage] = useState<Stage>("InProcess");
+  const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
+  const [page, setPage] = useState(1);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [step, setStep] = useState(1);
   // Furthest step this application has actually reached — persisted
@@ -715,7 +757,27 @@ const CrmApplication: React.FC = () => {
     setSearchParams((sp) => { sp.delete("id"); return sp; }, { replace: true });
   };
 
-  const { data: apps = [], isLoading } = useQuery({ queryKey: ["crm-apps"], queryFn: fetchApps, staleTime: 60_000 });
+  const listFilters: ApplicationListFilters = { search, status: statusFilter, displayStage: activeStage, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId };
+  const { data: listData, isLoading } = useQuery({
+    queryKey: ["crm-apps", listFilters, page],
+    queryFn: () => fetchApplicationsList(listFilters, page),
+    placeholderData: (prev) => prev,
+  });
+  const apps = listData?.rows || [];
+  const total = listData?.total || 0;
+  // Stage tab counts — same filters minus stage itself, so a badge's number
+  // always matches "how many total match everything except which tab is
+  // active", independent of pagination.
+  const { data: stageCounts = { InProcess: 0, Converted: 0, NotConverted: 0 } } = useQuery({
+    queryKey: ["crm-apps-stage-counts", search, statusFilter, cpb],
+    queryFn: () => fetchStageCounts({ search, status: statusFilter, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }),
+    placeholderData: (prev) => prev,
+  });
+  // Any filter change resets back to page 1 — otherwise a narrower result
+  // set can strand the user on a page number that no longer exists.
+  function updateFilter<T>(setter: (v: T) => void) {
+    return (v: T) => { setter(v); setPage(1); };
+  }
   const { data: viewingAppDetail } = useQuery({
     queryKey: ["crm-app-detail", viewingAppId],
     queryFn: () => fetchAppDetail(viewingAppId as number),
@@ -753,6 +815,19 @@ const CrmApplication: React.FC = () => {
       return r.ok ? r.json() : [];
     },
     enabled: !!viewingAppId,
+  });
+  // Invoices for the application's linked booking — same source and shape
+  // the Booking Detail page uses, rendered through the shared CrmInvoiceList
+  // so they read identically everywhere. Read-only here; invoices are
+  // generated only on the CRM Invoices page.
+  const viewingAppBookingId = (viewingAppDetail?.bookings || [])[0]?.Id ?? null;
+  const { data: viewingAppInvoices = [] } = useQuery({
+    queryKey: ["crm-app-invoices", viewingAppBookingId],
+    queryFn: async () => {
+      const r = await fetchWithAuth(`/api/crm/bookings/${viewingAppBookingId}/invoices`);
+      return r.ok ? r.json() : [];
+    },
+    enabled: !!viewingAppBookingId,
   });
   const { data: customers = [] } = useQuery({ queryKey: ["crm-customers-dropdown"], queryFn: fetchCustomers, staleTime: 60_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
@@ -985,37 +1060,17 @@ const CrmApplication: React.FC = () => {
     [brokers, form.BrokerId]
   );
 
-  // Display stage: a Converted application whose booking is not yet Approved
-  // (still Pending/Review) shows in "In Process" — it's still moving through
-  // the approval chain. Only a fully Approved booking is a real conversion.
-  const getDisplayStage = (a: any): Stage => {
-    if (a.Stage === "Converted" && a.BookingStatus !== CrmStatus.APPROVED) return "InProcess";
-    return a.Stage as Stage;
-  };
-
-  const stageCounts = useMemo(() => {
-    const counts: Record<Stage, number> = { InProcess: 0, Converted: 0, NotConverted: 0 };
-    for (const a of apps as any[]) {
-      const ds = getDisplayStage(a);
-      if (ds in counts) counts[ds]++;
-    }
-    return counts;
-  }, [apps]);
-
+  // Display stage (a Converted application whose booking isn't yet Approved
+  // still reads as "In Process" — it's still moving through the approval
+  // chain) is now computed server-side (DISPLAY_STAGE_EXPR in
+  // crmApplications.js) for both the paginated list (?displayStage=) and
+  // the counts endpoint, so this page no longer filters/counts client-side
+  // — `apps` from the query above is already the current page's correctly
+  // filtered rows, and `stageCounts` above is already the server's totals.
   const conversionRate = useMemo(() => {
-    const total = stageCounts.Converted + stageCounts.NotConverted;
-    return total > 0 ? Math.round((stageCounts.Converted / total) * 100) : 0;
+    const convTotal = stageCounts.Converted + stageCounts.NotConverted;
+    return convTotal > 0 ? Math.round((stageCounts.Converted / convTotal) * 100) : 0;
   }, [stageCounts]);
-
-  const filtered = useMemo(() => {
-    return (apps as any[]).filter((a: any) => {
-      const s = !search || a.ApplicantName?.toLowerCase().includes(search.toLowerCase())
-        || a.Mobile?.includes(search) || a.ApplicationNo?.includes(search);
-      const st = statusFilter === "All" || a.Status === statusFilter;
-      const stg = getDisplayStage(a) === activeStage;
-      return s && st && stg;
-    });
-  }, [apps, search, statusFilter, activeStage]);
 
   // Source field is no longer editable in the wizard (see CrmApplication
   // task history), but Source is still submitted and still shown in the
@@ -1907,7 +1962,7 @@ const CrmApplication: React.FC = () => {
             const Icon = stageIcon[stg];
             const active = activeStage === stg;
             return (
-              <button key={stg} onClick={() => setActiveStage(stg)}
+              <button key={stg} onClick={() => updateFilter(setActiveStage)(stg)}
                 className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-medium border-b-2 -mb-px transition-colors shrink-0 ${
                   active ? "border-amber-500 text-amber-600 dark:text-amber-400" : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}>
@@ -1923,12 +1978,13 @@ const CrmApplication: React.FC = () => {
         <div className="flex gap-3 flex-wrap items-center px-3.5 py-3 border-b" style={{ borderColor }}>
           <div className="relative flex-1 min-w-48">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)}
+            <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && updateFilter(setSearch)(searchInput.trim())}
               placeholder="Search name, mobile, app no..."
               className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
           </div>
           {activeStage !== "Converted" && (
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={statusFilter} onValueChange={updateFilter(setStatusFilter)}>
               <SelectTrigger className="w-auto min-w-[140px] text-sm border-border focus:ring-amber-500/40">
                 <SelectValue placeholder="All Statuses" />
               </SelectTrigger>
@@ -1938,19 +1994,37 @@ const CrmApplication: React.FC = () => {
               </SelectContent>
             </Select>
           )}
+          {/* Company -> Project -> Block cascading filter, shared across
+              every CRM list page being migrated to this same pattern — not
+              derived from this page's own (now paginated) applications
+              list, but from lightweight master-data endpoints, so filter
+              options stay correct and cheap regardless of how many
+              applications exist. */}
+          <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
+          <button onClick={() => updateFilter(setSearch)(searchInput.trim())}
+            className="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted">Search</button>
+          {(search || statusFilter !== "All" || cpb.companyId || cpb.projectId || cpb.blockId) && (
+            <button onClick={() => { updateFilter(setSearchInput)(""); setSearch(""); setStatusFilter("All"); setCpb({ companyId: "", projectId: "", blockId: "" }); setPage(1); }}
+              className="px-3 py-2 text-sm text-muted-foreground hover:text-foreground">Clear filters</button>
+          )}
         </div>
 
         {/* Table — sortable via DataTable; filtering stays the purpose-built
-            search box + status/stage controls above, so DataTable's own
-            global search is disabled to avoid a second, redundant search box. */}
+            search box + status/stage/Company-Project-Block controls above,
+            so DataTable's own global search is disabled to avoid a second,
+            redundant search box. `apps` is now the current page's already
+            server-filtered rows, not a client-side-filtered full list. */}
         <DataTable
-          data={filtered}
+          data={apps}
           columns={activeStage === "Converted" ? convertedColumns : inProcessColumns}
           searchable={false}
           loading={isLoading}
-          emptyMessage={activeStage === "Converted" ? "No converted applications yet" : activeStage === "NotConverted" ? "No rejected/cancelled applications" : "No applications in process"}
+          emptyMessage={activeStage === "Converted" ? "No converted applications match these filters" : activeStage === "NotConverted" ? "No rejected/cancelled applications match these filters" : "No applications in process match these filters"}
           className="border-0"
         />
+        <div className="px-3.5">
+          <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
+        </div>
       </div>
 
       {/* New Application Dialog — 5-step wizard: what the customer is
@@ -2653,7 +2727,7 @@ const CrmApplication: React.FC = () => {
       {/* ── Application detail — opened by clicking any row, in every stage
           tab (In Process/Converted/Not Converted). Read-only summary; the
           actions that actually change something (Resume, Approve/Reject,
-          View Booking, Generate Invoice) stay on the row itself, not here. ── */}
+          View Booking) stay on the row itself, not here. ── */}
       <Dialog open={!!viewingAppId} onOpenChange={(o) => { if (!o) closeApplication(); }}>
         <DialogContent accent="crm" className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
@@ -2902,6 +2976,23 @@ const CrmApplication: React.FC = () => {
                   </section>
                 )}
 
+                {/* ── 6b. Invoices (linked booking) ── */}
+                {booking && (
+                  <section className="rounded-xl border border-border overflow-hidden">
+                    <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
+                      <FileText size={13} className="text-primary shrink-0" />
+                      <span className="text-xs font-semibold uppercase tracking-wide">Invoices</span>
+                      <a href={`/crm/invoices?bookingId=${booking.Id}`}
+                        className="ml-auto text-[11px] text-primary hover:underline flex items-center gap-0.5">
+                        Invoices page <ChevronRight size={11} />
+                      </a>
+                    </div>
+                    <div className="px-4 py-3">
+                      <CrmInvoiceList invoices={viewingAppInvoices as any[]} emptyText="No invoices yet for this booking." />
+                    </div>
+                  </section>
+                )}
+
                 {/* ── 7. Notes ── */}
                 {a.Notes && (
                   <section className="rounded-xl border border-border overflow-hidden">
@@ -3052,7 +3143,7 @@ const CrmApplication: React.FC = () => {
   );
 };
 
-// ── Step 3: Bank / KYC / Nominee — identity & bank details only ───────────────
+// ── Step 3: Bank / KYC — identity & bank details only ────────────────────────
 // Identity fields the Customer master already captures at intake — when the
 // KYC form loads with no bank-detail row saved yet, the backend pre-fills
 // these from dbo.CrmCustomer and flags the response _prefilledFrom:
@@ -3074,8 +3165,7 @@ const KYC_PREFILL_KEYS = ["PanNo", "AccountHolderName", "AadhaarNo", "Occupation
 // BankName silently left null).
 const BANK_STEP_REQUIRED_FIELDS: [keyof typeof EMPTY_BANK, string][] = [
   ["BankName", "Bank Name"], ["AccountNo", "Account No"], ["IfscCode", "IFSC Code"],
-  ["AccountHolderName", "Account Holder Name"], ["NomineeName", "Nominee Name"],
-  ["NomineeRelation", "Nominee Relation"], ["PanNo", "PAN No"], ["AadhaarNo", "Aadhaar No"],
+  ["AccountHolderName", "Account Holder Name"], ["PanNo", "PAN No"], ["AadhaarNo", "Aadhaar No"],
   ["Occupation", "Occupation"],
 ];
 
@@ -3091,19 +3181,12 @@ const BankDetailsStep: React.FC<{
   // Which of KYC_PREFILL_KEYS are currently locked (auto-fetched from the
   // customer record, not yet reviewed/confirmed by staff this time around).
   const [kycLocked, setKycLocked] = useState<Set<string>>(new Set());
-  // "Same as applicant's address" for the Nominee — a convenience toggle,
-  // not a customer-data prefill lock like kycLocked above. Checking it
-  // copies the applicant's current address in; unchecking hands the field
-  // back for free editing. Defaults on if a saved NomineeAddress already
-  // matches the applicant's address (e.g. re-opening a previously saved form).
-  const [nomineeSameAsApplicant, setNomineeSameAsApplicant] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     setBankLoaded(false);
     setBank({ ...EMPTY_BANK });
     setKycLocked(new Set());
-    setNomineeSameAsApplicant(false);
     fetchWithAuth(`${BANK_DETAIL_API}/application/${applicationId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((d) => {
@@ -3111,9 +3194,6 @@ const BankDetailsStep: React.FC<{
         setBank({
           BankName: d.BankName || "", BranchName: d.BranchName || "", AccountNo: d.AccountNo || "",
           IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
-          NomineeName: d.NomineeName || "", NomineeRelation: d.NomineeRelation || "",
-          NomineeDob: d.NomineeDob ? String(d.NomineeDob).slice(0, 10) : "",
-          NomineeContact: d.NomineeContact || "", NomineeAddress: d.NomineeAddress || "",
           PanNo: d.PanNo || "", AadhaarNo: d.AadhaarNo || "",
           Occupation: d.Occupation || "", AnnualIncome: d.AnnualIncome != null ? String(d.AnnualIncome) : "",
         });
@@ -3122,22 +3202,10 @@ const BankDetailsStep: React.FC<{
           KYC_PREFILL_KEYS.forEach((k) => { if (d[k] !== null && d[k] !== undefined && String(d[k]).trim() !== "") locked.add(k); });
           setKycLocked(locked);
         }
-        if (applicantAddress && d.NomineeAddress && d.NomineeAddress.trim() === applicantAddress.trim()) {
-          setNomineeSameAsApplicant(true);
-        }
       })
       .finally(() => { if (!cancelled) setBankLoaded(true); });
     return () => { cancelled = true; };
   }, [applicationId]);
-
-  // While the "same as applicant" checkbox is on, keep NomineeAddress in
-  // step if the applicant's address itself changes (e.g. a different
-  // customer gets selected before this application is first saved).
-  useEffect(() => {
-    if (nomineeSameAsApplicant) {
-      setBank((b) => (b.NomineeAddress === (applicantAddress || "") ? b : { ...b, NomineeAddress: applicantAddress || "" }));
-    }
-  }, [nomineeSameAsApplicant, applicantAddress]);
 
   const saveBank = useCallback(async (silent = false) => {
     // Block here, not just downstream at agreement prep — this is the one
@@ -3160,9 +3228,6 @@ const BankDetailsStep: React.FC<{
     }
     if ((bank as any).AadhaarNo && !/^\d{12}$/.test((bank as any).AadhaarNo)) {
       const msg = "Aadhaar must be exactly 12 digits"; toast.error(msg); throw new Error(msg);
-    }
-    if ((bank as any).NomineeContact && !/^\d{10}$/.test((bank as any).NomineeContact)) {
-      const msg = "Nominee contact must be a 10-digit mobile number"; toast.error(msg); throw new Error(msg);
     }
     setBankSaving(true);
     try {
@@ -3222,53 +3287,6 @@ const BankDetailsStep: React.FC<{
               )}
             </div>
           ))}
-        </div>
-        <div className="pt-2 border-t border-border/60">
-          <p className="text-xs font-medium text-foreground mb-2">Nominee</p>
-          <div className="grid grid-cols-2 gap-2">
-            {[
-              ["NomineeName", "Name"], ["NomineeContact", "Contact"],
-            ].map(([key, label]) => (
-              <div key={key}>
-                <label className={labelCls}>{label}{BANK_STEP_REQUIRED_FIELDS.some(([rk]) => rk === key) && " *"}</label>
-                <input value={(bank as any)[key]} onChange={(e) => setBank((b) => ({ ...b, [key]: e.target.value }))} className={inputCls} />
-              </div>
-            ))}
-            <div>
-              <label className={labelCls}>Relation *</label>
-              <select value={bank.NomineeRelation} onChange={(e) => setBank((b) => ({ ...b, NomineeRelation: e.target.value }))} className={inputCls}>
-                <option value="">Select</option>
-                <option value="Spouse">Spouse</option>
-                <option value="Son">Son</option>
-                <option value="Daughter">Daughter</option>
-                <option value="Father">Father</option>
-                <option value="Mother">Mother</option>
-                <option value="Brother">Brother</option>
-                <option value="Sister">Sister</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className={labelCls + " mb-0"}>Address</label>
-                {applicantAddress && (
-                  <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer">
-                    <input type="checkbox" checked={nomineeSameAsApplicant}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        setNomineeSameAsApplicant(checked);
-                        if (checked) setBank((b) => ({ ...b, NomineeAddress: applicantAddress }));
-                      }}
-                      className="rounded border-border" />
-                    Same as {applicantName || "applicant"}'s address
-                  </label>
-                )}
-              </div>
-              <input value={bank.NomineeAddress} readOnly={nomineeSameAsApplicant}
-                onChange={(e) => setBank((b) => ({ ...b, NomineeAddress: e.target.value }))}
-                className={inputCls + (nomineeSameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
-            </div>
-          </div>
         </div>
       </div>
     </div>

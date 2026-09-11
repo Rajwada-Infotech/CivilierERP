@@ -87,8 +87,7 @@ async function fetchApplicationFormData(pool, applicationId) {
       FROM dbo.CrmCoApplicant WHERE ApplicationId = @id AND IsActive = 1 ORDER BY Id
     `),
     pool.request().input("id", sql.Int, applicationId).query(`
-      SELECT TOP 1 BankName, BranchName, AccountNo, IfscCode, AccountHolderName,
-             NomineeName, NomineeRelation, NomineeContact
+      SELECT TOP 1 BankName, BranchName, AccountNo, IfscCode, AccountHolderName
       FROM dbo.CrmCustomerBankDetail WHERE ApplicationId = @id ORDER BY Id DESC
     `),
     d.BookingId
@@ -709,12 +708,12 @@ function renderApplicationFormPdfBuffer(d) {
       doc.addPage();
       pageHeader(doc, d, W, L, `Page 3 of ${TOTAL}`);
 
-      // 7. BANK & NOMINEE
-      sectionHead(doc, "7.  Bank Details & Nominee Information", L, W);
+      // 7. BANK DETAILS
+      sectionHead(doc, "7.  Bank Details", L, W);
       if (!d.bankDetail) {
         const naY = doc.y + 6;
         doc.font("Helvetica-Oblique").fontSize(8.5).fillColor(MUTED)
-          .text("Bank and nominee details have not been captured yet.", L + 12, naY, { lineBreak: false });
+          .text("Bank details have not been captured yet.", L + 12, naY, { lineBreak: false });
         doc.fillColor(INK);
         doc.y = naY + 22;
       } else {
@@ -728,13 +727,6 @@ function renderApplicationFormPdfBuffer(d) {
           ["Account Number", d.bankDetail.AccountNo || "—"],
           ["Account Holder Name", d.bankDetail.AccountHolderName || "—"],
         ], L, W / 2);
-        if (d.bankDetail.NomineeName) {
-          fieldRow(doc, [
-            ["Nominee Name", d.bankDetail.NomineeName],
-            ["Nominee Relation", d.bankDetail.NomineeRelation || "—"],
-            ["Nominee Contact", d.bankDetail.NomineeContact || "—"],
-          ], L, W / 3);
-        }
         doc.y += 4;
       }
 
