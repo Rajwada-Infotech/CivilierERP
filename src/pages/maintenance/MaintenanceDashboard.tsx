@@ -10,7 +10,7 @@ import { GlassCard, GlassSection } from "@/components/dashboard/GlassShell";
 import { MaintenanceShell, MAINTENANCE_ACCENT as ACCENT } from "@/components/maintenance/MaintenanceShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { getMaintenanceDirectory } from "@/api/maintenanceApi";
 import { getActiveChargeHeads } from "@/api/chargeHeadApi";
 import { formatCompactINR } from "@/utils/formatCurrency";
@@ -148,7 +148,7 @@ export default function MaintenanceDashboard() {
   usePageRights("maintenance-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = isDarkDashboard(theme);
+  const isDark = !isLightTheme(theme);
 
   const { data: directory, isLoading: directoryLoading } = useQuery({
     queryKey: ["maintenance-directory", ""],

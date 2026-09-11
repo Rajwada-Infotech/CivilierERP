@@ -42,7 +42,7 @@ import {
 } from "recharts";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatCompactINR } from "@/utils/formatCurrency";
-import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
   FinanceShell,
   FinanceGlassCard,
@@ -519,7 +519,7 @@ const FinanceDashboard = () => {
   usePageRights("finance-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = isDarkDashboard(theme);
+  const isDark = !isLightTheme(theme);
 
   const {
     data: rawData,

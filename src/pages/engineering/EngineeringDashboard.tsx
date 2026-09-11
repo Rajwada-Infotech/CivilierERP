@@ -6,7 +6,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatCompactINR } from "@/utils/formatCurrency";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
   GlassShell,
   GlassCard,
@@ -446,7 +446,7 @@ export default function EngineeringDashboard() {
   const rights = usePageRights("engineering-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = isDarkDashboard(theme);
+  const isDark = !isLightTheme(theme);
 
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["engineering-dashboard"],

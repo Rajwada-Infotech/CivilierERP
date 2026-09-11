@@ -4,7 +4,7 @@ import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
   GlassShell,
   GlassCard,
@@ -288,7 +288,7 @@ export default function CivilWorkDprDashboard() {
   usePageRights("civilworkdpr-dashboard");
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = isDarkDashboard(theme);
+  const isDark = !isLightTheme(theme);
 
   const {
     data: rawData,

@@ -29,7 +29,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { getCompanyOptions, type CompanyOption } from "@/api/bankMasterApi";
 import { CompanyFilterCombo } from "@/components/CompanyFilterCombo";
-import { useTheme, isDarkDashboard } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 const ACCENT = "#22c55e";
 
@@ -256,7 +256,7 @@ export default function LoanDashboard() {
     .slice(0, 5);
 
   const { theme } = useTheme();
-  const isDark = isDarkDashboard(theme);
+  const isDark = !isLightTheme(theme);
 
   const loanTypeDonutData: DonutPoint[] = (Object.keys(LOAN_TYPE_COLORS) as LoanType[])
     .map((t) => ({
