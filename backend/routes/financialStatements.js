@@ -224,7 +224,23 @@ router.get("/balance-sheet", async (req, res) => {
               -- only sums CREDIT rows), so counting this GL leg too would
               -- double it. Same fix as vendorLedger.js's fetchOnAccountRows
               -- and trialBalance.js's per-account drill-down.
-              AND gle.SourceType <> 'OnAccountAdjustment'
+              -- Only exclude this leg when the head actually has a matching
+              -- OnAccountLedger addback (a real Supplier/Contractor party
+              -- ledger — onAccountAdvanceByHead re-adds the equivalent
+              -- amount below, so excluding it here avoids double-counting).
+              -- A head with no such addback (e.g. "Company On Account A/c",
+              -- the pooled clearing account itself, not a party ledger)
+              -- needs this leg counted normally — it's the only entry that
+              -- ever reduces that head's balance as advances get applied,
+              -- and excluding it unconditionally left the pool permanently
+              -- overstated by every advance ever applied to an invoice.
+              AND (
+                gle.SourceType <> 'OnAccountAdjustment'
+                OR NOT EXISTS (
+                  SELECT 1 FROM dbo.OnAccountLedger oal
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
+                )
+              )
               AND gle.VoucherDate <= @asOf
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -235,7 +251,23 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL((
             SELECT SUM(gle.CreditAmount) FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId AND gle.IsReversed = 0
-              AND gle.SourceType <> 'OnAccountAdjustment'
+              -- Only exclude this leg when the head actually has a matching
+              -- OnAccountLedger addback (a real Supplier/Contractor party
+              -- ledger — onAccountAdvanceByHead re-adds the equivalent
+              -- amount below, so excluding it here avoids double-counting).
+              -- A head with no such addback (e.g. "Company On Account A/c",
+              -- the pooled clearing account itself, not a party ledger)
+              -- needs this leg counted normally — it's the only entry that
+              -- ever reduces that head's balance as advances get applied,
+              -- and excluding it unconditionally left the pool permanently
+              -- overstated by every advance ever applied to an invoice.
+              AND (
+                gle.SourceType <> 'OnAccountAdjustment'
+                OR NOT EXISTS (
+                  SELECT 1 FROM dbo.OnAccountLedger oal
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
+                )
+              )
               AND gle.VoucherDate <= @asOf
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -286,7 +318,7 @@ router.get("/balance-sheet", async (req, res) => {
       .query(`
         SELECT PartyId, SUM(Amount) AS advance
         FROM dbo.OnAccountLedger
-        WHERE PartyType IN ('Supplier', 'Contractor') AND TxnType = 'CREDIT'
+        WHERE PartyType IN ('Supplier', 'Vendor', 'Contractor') AND TxnType = 'CREDIT'
           AND TxnDate <= @asOf
           AND (@companyId IS NULL OR CompanyId = @companyId)
           AND (@projectId IS NULL OR ProjectId = @projectId)

@@ -117,7 +117,19 @@ router.get("/", async (req, res) => {
               -- in here before, this main report could double-count that
               -- wash pair for any Supplier/Contractor with an applied
               -- advance.
-              AND gle.SourceType <> 'OnAccountAdjustment'
+              -- Only exclude when the head has a matching OnAccountLedger
+              -- addback (a real Supplier/Contractor party ledger) — see
+              -- financialStatements.js's headsRes for the full rationale
+              -- ("Company On Account A/c", the pooled clearing account
+              -- itself, has no addback and was permanently overstated by
+              -- this exclusion being applied unconditionally).
+              AND (
+                gle.SourceType <> 'OnAccountAdjustment'
+                OR NOT EXISTS (
+                  SELECT 1 FROM dbo.OnAccountLedger oal
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
+                )
+              )
               AND gle.VoucherDate < @from
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
@@ -133,7 +145,19 @@ router.get("/", async (req, res) => {
             FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId
               AND gle.IsReversed = 0
-              AND gle.SourceType <> 'OnAccountAdjustment'
+              -- Only exclude when the head has a matching OnAccountLedger
+              -- addback (a real Supplier/Contractor party ledger) — see
+              -- financialStatements.js's headsRes for the full rationale
+              -- ("Company On Account A/c", the pooled clearing account
+              -- itself, has no addback and was permanently overstated by
+              -- this exclusion being applied unconditionally).
+              AND (
+                gle.SourceType <> 'OnAccountAdjustment'
+                OR NOT EXISTS (
+                  SELECT 1 FROM dbo.OnAccountLedger oal
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
+                )
+              )
               AND gle.VoucherDate < @from
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
@@ -146,7 +170,13 @@ router.get("/", async (req, res) => {
             FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId
               AND gle.IsReversed = 0
-              AND gle.SourceType <> 'OnAccountAdjustment'
+              AND (
+                gle.SourceType <> 'OnAccountAdjustment'
+                OR NOT EXISTS (
+                  SELECT 1 FROM dbo.OnAccountLedger oal
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
+                )
+              )
               AND gle.VoucherDate BETWEEN @from AND @to
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
@@ -159,7 +189,13 @@ router.get("/", async (req, res) => {
             FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId
               AND gle.IsReversed = 0
-              AND gle.SourceType <> 'OnAccountAdjustment'
+              AND (
+                gle.SourceType <> 'OnAccountAdjustment'
+                OR NOT EXISTS (
+                  SELECT 1 FROM dbo.OnAccountLedger oal
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
+                )
+              )
               AND gle.VoucherDate BETWEEN @from AND @to
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
@@ -202,7 +238,7 @@ router.get("/", async (req, res) => {
           SUM(CASE WHEN TxnDate < @from THEN Amount ELSE 0 END) AS openingAdvance,
           SUM(CASE WHEN TxnDate >= @from AND TxnDate <= @to THEN Amount ELSE 0 END) AS txnAdvance
         FROM dbo.OnAccountLedger
-        WHERE PartyType IN ('Supplier', 'Contractor') AND TxnType = 'CREDIT'
+        WHERE PartyType IN ('Supplier', 'Vendor', 'Contractor') AND TxnType = 'CREDIT'
           AND TxnDate <= @to
           AND (@companyId IS NULL OR CompanyId = @companyId)
           AND (@enterpriseId IS NULL OR CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
@@ -534,8 +570,19 @@ router.get("/:lheadId/transactions", async (req, res) => {
           -- below, now CREDIT-only for the same reason). Showing both is a
           -- wash that inflates this list's Total Debit/Credit without
           -- changing any balance — see vendorLedger.js's fetchOnAccountRows
-          -- for the report where this was first reported and fixed.
-          AND gle.SourceType <> 'OnAccountAdjustment'
+          -- for the report where this was first reported and fixed. Only
+          -- applies when this head has a matching OnAccountLedger addback
+          -- (a real Supplier/Contractor party ledger) — see
+          -- financialStatements.js's headsRes for why an unconditional
+          -- exclusion is wrong for a head like "Company On Account A/c"
+          -- (the pooled clearing account itself, not a party ledger).
+          AND (
+            gle.SourceType <> 'OnAccountAdjustment'
+            OR NOT EXISTS (
+              SELECT 1 FROM dbo.OnAccountLedger oal
+              WHERE oal.PartyId = @LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
+            )
+          )
           AND gle.VoucherDate >= @from AND gle.VoucherDate <= @to
           AND (@companyId IS NULL OR gle.CompanyId = @companyId)
           AND (@enterpriseId IS NULL OR gle.CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))

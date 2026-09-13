@@ -1551,7 +1551,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
       if (approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
         try {
           const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
-          const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
+          const partyTypeLabel = { S: "Supplier", V: "Vendor", C: "Contractor", A: "Customer" };
           const party = await resolvePartyFromRef(pool, approvedRef);
           if (party?.partyId) {
             // Read invoice AFTER syncBillStatus so ERemainingAmount is current
@@ -1655,7 +1655,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
               .input("PartyId", sql.Int, approvedRow.PPartyId)
               .query(`SELECT LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @PartyId`);
             if (partyRes.recordset.length) {
-              const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
+              const partyTypeLabel = { S: "Supplier", V: "Vendor", C: "Contractor", A: "Customer" };
               const partyType = partyRes.recordset[0].LHeadType;
               const payAmt = parseFloat(approvedRow.PAmount) || 0;
               const bounceAmt = parseFloat(approvedRow.BounceCharge ?? 0);

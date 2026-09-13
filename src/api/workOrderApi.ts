@@ -152,7 +152,7 @@ export const fetchSuppliers = async (): Promise<
   { id: number; name: string }[]
 > => {
   try {
-    const res = await fetchWithAuth("/api/account-head/options?type=S");
+    const res = await fetchWithAuth("/api/account-head/options?type=S,V&excludeCategory=Landlord");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = safeArray<{ id: number; label: string }>(await res.json());
     return data.map((r) => ({ id: r.id, name: r.label ?? "" }));

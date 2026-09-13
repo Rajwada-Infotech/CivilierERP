@@ -2659,7 +2659,7 @@ const Payment: React.FC = () => {
                               if (!groups.has(key)) groups.set(key, []);
                               groups.get(key)!.push(s);
                             });
-                            const order = ["Suppliers", "Contractors", "Brokers", "Customers", "Partners", "Other"];
+                            const order = ["Vendors", "Suppliers", "Contractors", "Brokers", "Customers", "Partners", "Other"];
                             const sortedKeys = [...groups.keys()].sort(
                               (a, b) => order.indexOf(a) - order.indexOf(b),
                             );

@@ -36,7 +36,7 @@ const HEAD_SELECT = `
 // place in this file that used to hard-filter to just 'S' left Contractors
 // invisible here even though they're posted against the exact same
 // GeneralLedgerEntry table via the exact same postVoucher() path.
-const VENDOR_HEAD_TYPES = ["S", "C"];
+const VENDOR_HEAD_TYPES = ["S", "V", "C"];
 const VENDOR_HEAD_TYPES_SQL = `'${VENDOR_HEAD_TYPES.join("','")}'`;
 
 // ── GET /search?q= — find a party/GL head by name ───────────────────────────
@@ -193,7 +193,7 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
 // straight against the customer's own head, so those already show up via
 // GeneralLedgerEntry and don't need this merge. Scoped to Supplier/
 // Contractor only for that reason.
-const ON_ACCOUNT_PARTY_TYPES = ["Supplier", "Contractor"];
+const ON_ACCOUNT_PARTY_TYPES = ["Supplier", "Vendor", "Contractor"];
 
 // Only CREDIT rows (the advance/excess payment itself) are ever surfaced on
 // this report. A DEBIT row ("applied to invoice") and its paired real

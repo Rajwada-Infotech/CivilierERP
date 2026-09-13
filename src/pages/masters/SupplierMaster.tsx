@@ -57,6 +57,11 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUPPLIER_TYPE = "S";
+const VENDOR_TYPE = "V";
+// The Vendor Master list/queries fetch both LHeadTypes together — Landlord
+// entries are still stored as LHeadType='S' (only Vendor gets its own 'V'),
+// see lheadTypeForVendorType below.
+const LIST_TYPES = `${SUPPLIER_TYPE},${VENDOR_TYPE}`;
 
 const SUPPLIER_CATEGORIES = ["Goods", "Services", "Both"] as const;
 
@@ -73,13 +78,23 @@ type VendorType = (typeof VENDOR_TYPES)[number] | "";
 
 function vendorTypeFromCategory(category: string): VendorType {
   if ((SUPPLIER_CATEGORIES as readonly string[]).includes(category)) return "Supplier";
-  if (category === "Vendor" || category === "Landlord") return category;
+  // "Supplier" itself is stored as a placeholder when Type=Supplier has been
+  // picked but no Goods/Services/Both sub-category has been chosen yet —
+  // without this, the derived Type would snap back to "" on every render
+  // and the Type dropdown would appear to do nothing.
+  if (category === "Supplier" || category === "Vendor" || category === "Landlord") return category;
   return "";
 }
 // Every value the shared category/type column can actually hold — used for
 // CSV import validation, which doesn't otherwise know about the Type/
 // Category split.
 const ALL_CATEGORY_VALUES = [...SUPPLIER_CATEGORIES, "Vendor", "Landlord"] as const;
+
+// LHeadType to persist on save: Vendor gets its own 'V'; Supplier and
+// Landlord both remain 'S' (Landlord is only distinguished via LHeadCategory).
+function lheadTypeForVendorType(type: VendorType): string {
+  return type === "Vendor" ? VENDOR_TYPE : SUPPLIER_TYPE;
+}
 const GST_TYPES = ["Registered", "Unregistered"] as const;
 const GST_STATES = [
   "Andaman and Nicobar Islands",
@@ -476,12 +491,13 @@ const SupplierMaster: React.FC = () => {
       supplierCategory:
         next === "Supplier"
           ? // Switching TO Supplier keeps an already-valid Goods/Services/
-            // Both pick; otherwise clears it so Category starts blank
-            // rather than silently inheriting "Vendor"/"Landlord" as if it
-            // were a real category.
+            // Both pick; otherwise stores the "Supplier" placeholder so
+            // vendorTypeFromCategory still resolves back to "Supplier" on
+            // the next render (an empty string would resolve to "" and the
+            // Type dropdown would appear to revert/do nothing).
             ((SUPPLIER_CATEGORIES as readonly string[]).includes(p.supplierCategory)
               ? p.supplierCategory
-              : "")
+              : "Supplier")
           : next, // "Vendor" / "Landlord" — the Type IS the stored value
       isTdsApplicable: next === "Supplier" ? p.isTdsApplicable : false,
     }));
@@ -501,8 +517,8 @@ const SupplierMaster: React.FC = () => {
     isLoading,
     isError,
   } = useQuery({
-    queryKey: ["account-head", SUPPLIER_TYPE],
-    queryFn: () => getList(SUPPLIER_TYPE),
+    queryKey: ["account-head", LIST_TYPES],
+    queryFn: () => getList(LIST_TYPES),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -549,11 +565,11 @@ const SupplierMaster: React.FC = () => {
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const invalidate = () =>
-    qc.invalidateQueries({ queryKey: ["account-head", SUPPLIER_TYPE] });
+    qc.invalidateQueries({ queryKey: ["account-head", LIST_TYPES] });
 
   const buildPayload = (f: SupplierForm) => ({
     LHeadName: f.LHeadName,
-    LHeadType: SUPPLIER_TYPE,
+    LHeadType: lheadTypeForVendorType(vendorTypeFromCategory(f.supplierCategory)),
     LHeadContactPerson: f.LHeadContactPerson || null,
     LHeadPhone: f.LHeadPhone || null,
     LHeadEmail: f.LHeadEmail || null,
@@ -577,7 +593,11 @@ const SupplierMaster: React.FC = () => {
   });
 
   const createMut = useMutation({
-    mutationFn: (f: SupplierForm) => addRecord(buildPayload(f), SUPPLIER_TYPE),
+    mutationFn: (f: SupplierForm) =>
+      addRecord(
+        buildPayload(f),
+        lheadTypeForVendorType(vendorTypeFromCategory(f.supplierCategory)),
+      ),
     onSuccess: (res: {
       SupplierLoginEmail?: string;
       SupplierPasswordDefaulted?: boolean;
@@ -599,7 +619,11 @@ const SupplierMaster: React.FC = () => {
 
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: number; data: SupplierForm }) =>
-      updateRecord(id, buildPayload(data), SUPPLIER_TYPE),
+      updateRecord(
+        id,
+        buildPayload(data),
+        lheadTypeForVendorType(vendorTypeFromCategory(data.supplierCategory)),
+      ),
     onSuccess: () => {
       toast.success("Vendor updated");
       invalidate();
@@ -771,7 +795,10 @@ const SupplierMaster: React.FC = () => {
             SupplierPassword: password,
           };
 
-          await addRecord(buildPayload(rowForm), SUPPLIER_TYPE);
+          await addRecord(
+            buildPayload(rowForm),
+            lheadTypeForVendorType(vendorTypeFromCategory(rowForm.supplierCategory)),
+          );
           results.push({ row: rowNum, name, status: "success" });
         } catch (err: any) {
           results.push({
@@ -876,6 +903,12 @@ const SupplierMaster: React.FC = () => {
   const handleSave = () => {
     const e: Partial<Record<keyof SupplierForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
+    if (!vendorType) e.supplierCategory = true;
+    if (
+      vendorType === "Supplier" &&
+      !(SUPPLIER_CATEGORIES as readonly string[]).includes(form.supplierCategory)
+    )
+      e.supplierCategory = true;
     if (!form.LHeadPan.trim() && form.LHeadPan !== "PANNOTAVBL") e.LHeadPan = true;
     if (!form.LGSTType) e.LGSTType = true;
     if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
@@ -1152,20 +1185,24 @@ const SupplierMaster: React.FC = () => {
                   <TreeDropdown
                     variant="flat"
                     value={vendorType}
-                    onChange={(v) => handleTypeChange(v as VendorType)}
+                    onChange={(v) => {
+                      handleTypeChange(v as VendorType);
+                      setErrors((p) => ({ ...p, supplierCategory: false }));
+                    }}
                     options={VENDOR_TYPES.map((t) => ({ value: t, label: t }))}
                     placeholder="Select type…"
+                    error={errors.supplierCategory}
                   />
                 </div>
 
-                {/* Vendor Category — active only when Type = "Supplier" */}
+                {/* Supplier Category — active only when Type = "Supplier" */}
                 <div className="space-y-1.5">
                   <label
                     className={`text-xs font-heading font-medium uppercase tracking-wider block ${
                       vendorType === "Supplier" ? "text-muted-foreground" : "text-muted-foreground/40"
                     }`}
                   >
-                    Vendor Category
+                    Supplier Category
                   </label>
                   <div className={vendorType !== "Supplier" ? "opacity-40 pointer-events-none" : ""}>
                     <TreeDropdown
@@ -1175,7 +1212,7 @@ const SupplierMaster: React.FC = () => {
                           ? form.supplierCategory
                           : ""
                       }
-                      onChange={(v) =>
+                      onChange={(v) => {
                         setForm((p) => ({
                           ...p,
                           supplierCategory: v,
@@ -1186,13 +1223,15 @@ const SupplierMaster: React.FC = () => {
                           // not auto-enabled). Still a normal toggle below, so
                           // it can be corrected by hand for any exception.
                           isTdsApplicable: v === "Services",
-                        }))
-                      }
+                        }));
+                        setErrors((p) => ({ ...p, supplierCategory: false }));
+                      }}
                       options={SUPPLIER_CATEGORIES.map((c) => ({
                         value: c,
                         label: c,
                       }))}
                       placeholder={vendorType === "Supplier" ? "Select category…" : "Select Supplier type first"}
+                      error={vendorType === "Supplier" && errors.supplierCategory}
                     />
                   </div>
                 </div>
@@ -1829,7 +1868,7 @@ const SupplierMaster: React.FC = () => {
                 { label: "GST Type", value: viewRecord.LGSTType || "—" },
                 { label: "GST State", value: viewRecord.LGSTState || "—" },
                 {
-                  label: "Vendor Category",
+                  label: "Supplier Category",
                   value: viewRecord.supplierCategory || "—",
                 },
                 {

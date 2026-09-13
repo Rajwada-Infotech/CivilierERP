@@ -136,7 +136,9 @@ export const getProjects = async (): Promise<ProjectOption[]> => {
 };
 
 export const getSuppliers = async (): Promise<NameOption[]> => {
-  const raw = await fetchWithAuth("/api/account-head/options?type=S").then((r) => r.json().catch(() => []));
+  // Debit Notes are goods-return/procurement adjustments — Vendors and
+  // Suppliers, not Landlords (same scope as PO/GRN).
+  const raw = await fetchWithAuth("/api/account-head/options?type=S,V&excludeCategory=Landlord").then((r) => r.json().catch(() => []));
   return normalizeArray<any>(raw).map((s) => ({ id: String(s.id), name: s.label ?? "" }));
 };
 
