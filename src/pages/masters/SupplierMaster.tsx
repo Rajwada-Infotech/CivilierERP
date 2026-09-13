@@ -58,7 +58,28 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUPPLIER_TYPE = "S";
 
-const SUPPLIER_CATEGORIES = ["Goods", "Services", "Both", "Landlord"] as const;
+const SUPPLIER_CATEGORIES = ["Goods", "Services", "Both"] as const;
+
+// Vendor Type — a layer above Category: Category (Goods/Services/Both) is
+// only ever meaningful for a Supplier, so a Landlord or a generic Vendor
+// picks a Type here instead and never sees the Category field at all.
+// There's no dedicated DB column for this — it's derived from/written
+// straight into the existing supplierCategory (LHeadCategory) value:
+// Goods/Services/Both implies Type="Supplier" (with that as the
+// sub-category); the literal values "Vendor"/"Landlord" ARE the Type,
+// stored the same column, with no sub-category underneath them.
+const VENDOR_TYPES = ["Vendor", "Supplier", "Landlord"] as const;
+type VendorType = (typeof VENDOR_TYPES)[number] | "";
+
+function vendorTypeFromCategory(category: string): VendorType {
+  if ((SUPPLIER_CATEGORIES as readonly string[]).includes(category)) return "Supplier";
+  if (category === "Vendor" || category === "Landlord") return category;
+  return "";
+}
+// Every value the shared category/type column can actually hold — used for
+// CSV import validation, which doesn't otherwise know about the Type/
+// Category split.
+const ALL_CATEGORY_VALUES = [...SUPPLIER_CATEGORIES, "Vendor", "Landlord"] as const;
 const GST_TYPES = ["Registered", "Unregistered"] as const;
 const GST_STATES = [
   "Andaman and Nicobar Islands",
@@ -212,7 +233,7 @@ const CSV_HEADERS = {
   email: "Email",
   gst: "GST Number",
   pan: "PAN Number",
-  category: "Category (Goods/Services/Both/Landlord)",
+  category: "Category/Type (Goods/Services/Both/Vendor/Landlord)",
   gstType: "GST Type (Registered/Unregistered)",
   gstState: "GST State",
   group: "Group Name",
@@ -445,6 +466,27 @@ const SupplierMaster: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [viewRecord, setViewRecord] = useState<Supplier | null>(null);
 
+  // Vendor Type — derived from (and written back into) supplierCategory;
+  // see vendorTypeFromCategory's comment. Drives the form's dynamic
+  // heading and whether the Category sub-field is active.
+  const vendorType = vendorTypeFromCategory(form.supplierCategory);
+  const handleTypeChange = (next: VendorType) => {
+    setForm((p) => ({
+      ...p,
+      supplierCategory:
+        next === "Supplier"
+          ? // Switching TO Supplier keeps an already-valid Goods/Services/
+            // Both pick; otherwise clears it so Category starts blank
+            // rather than silently inheriting "Vendor"/"Landlord" as if it
+            // were a real category.
+            ((SUPPLIER_CATEGORIES as readonly string[]).includes(p.supplierCategory)
+              ? p.supplierCategory
+              : "")
+          : next, // "Vendor" / "Landlord" — the Type IS the stored value
+      isTdsApplicable: next === "Supplier" ? p.isTdsApplicable : false,
+    }));
+  };
+
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
@@ -654,13 +696,13 @@ const SupplierMaster: React.FC = () => {
 
           // Category is optional — validate against the known list when given.
           const category = categoryRaw
-            ? SUPPLIER_CATEGORIES.find(
+            ? ALL_CATEGORY_VALUES.find(
                 (c) => c.toLowerCase() === categoryRaw.toLowerCase(),
               )
             : "";
           if (categoryRaw && !category)
             throw new Error(
-              `Category must be one of ${SUPPLIER_CATEGORIES.join(", ")} (got "${categoryRaw}")`,
+              `Category must be one of ${ALL_CATEGORY_VALUES.join(", ")} (got "${categoryRaw}")`,
             );
 
           // GST Type is optional — when given must be Registered/Unregistered.
@@ -1034,7 +1076,7 @@ const SupplierMaster: React.FC = () => {
           >
             <div>
               <h2 className="text-sm font-heading font-semibold text-foreground">
-                {editingId ? "Edit Vendor" : "Add Vendor"}
+                {editingId ? `Edit ${vendorType || "Vendor"}` : `Add ${vendorType || "Vendor"}`}
               </h2>
               <p className="text-[11px] text-muted-foreground mt-0.5">
                 Fields marked <span className="text-destructive">*</span> are
@@ -1100,33 +1142,59 @@ const SupplierMaster: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Vendor Category */}
+                {/* Type — Vendor / Supplier / Landlord. Only picking
+                    "Supplier" activates the Category field below;
+                    "Vendor"/"Landlord" have no sub-category. */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Vendor Category
+                    Type
                   </label>
                   <TreeDropdown
                     variant="flat"
-                    value={form.supplierCategory}
-                    onChange={(v) =>
-                      setForm((p) => ({
-                        ...p,
-                        supplierCategory: v,
-                        // TDS mainly attaches to service payments (194C/194J),
-                        // not straight goods purchases — auto-set the toggle
-                        // whenever the category changes to/from "Services".
-                        // "Both" is deliberately excluded (goods+services is
-                        // not auto-enabled). Still a normal toggle below, so
-                        // it can be corrected by hand for any exception.
-                        isTdsApplicable: v === "Services",
-                      }))
-                    }
-                    options={SUPPLIER_CATEGORIES.map((c) => ({
-                      value: c,
-                      label: c,
-                    }))}
-                    placeholder="Select category…"
+                    value={vendorType}
+                    onChange={(v) => handleTypeChange(v as VendorType)}
+                    options={VENDOR_TYPES.map((t) => ({ value: t, label: t }))}
+                    placeholder="Select type…"
                   />
+                </div>
+
+                {/* Vendor Category — active only when Type = "Supplier" */}
+                <div className="space-y-1.5">
+                  <label
+                    className={`text-xs font-heading font-medium uppercase tracking-wider block ${
+                      vendorType === "Supplier" ? "text-muted-foreground" : "text-muted-foreground/40"
+                    }`}
+                  >
+                    Vendor Category
+                  </label>
+                  <div className={vendorType !== "Supplier" ? "opacity-40 pointer-events-none" : ""}>
+                    <TreeDropdown
+                      variant="flat"
+                      value={
+                        (SUPPLIER_CATEGORIES as readonly string[]).includes(form.supplierCategory)
+                          ? form.supplierCategory
+                          : ""
+                      }
+                      onChange={(v) =>
+                        setForm((p) => ({
+                          ...p,
+                          supplierCategory: v,
+                          // TDS mainly attaches to service payments (194C/194J),
+                          // not straight goods purchases — auto-set the toggle
+                          // whenever the category changes to/from "Services".
+                          // "Both" is deliberately excluded (goods+services is
+                          // not auto-enabled). Still a normal toggle below, so
+                          // it can be corrected by hand for any exception.
+                          isTdsApplicable: v === "Services",
+                        }))
+                      }
+                      options={SUPPLIER_CATEGORIES.map((c) => ({
+                        value: c,
+                        label: c,
+                      }))}
+                      placeholder={vendorType === "Supplier" ? "Select category…" : "Select Supplier type first"}
+                    />
+                  </div>
                 </div>
 
                 {/* Account Group — always Sundry Creditors for suppliers, never
@@ -1553,8 +1621,8 @@ const SupplierMaster: React.FC = () => {
                 {saving
                   ? "Saving…"
                   : editingId
-                    ? "Update Vendor"
-                    : "Save Vendor"}
+                    ? `Update ${vendorType || "Vendor"}`
+                    : `Save ${vendorType || "Vendor"}`}
               </button>
             </div>
           </div>
@@ -1581,7 +1649,7 @@ const SupplierMaster: React.FC = () => {
               variant="flat"
               value={filterCategory}
               onChange={(v) => setFilterCategory(v)}
-              options={SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: c }))}
+              options={ALL_CATEGORY_VALUES.map((c) => ({ value: c, label: c }))}
               placeholder="All Categories"
             />
 
