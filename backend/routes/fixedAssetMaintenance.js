@@ -104,7 +104,7 @@ router.get("/assets", requirePageRight(PAGE, "view"), async (req, res) => {
 // excluded: they are the P&L / balance-sheet control accounts (Accumulated
 // Depreciation A/c, Purchase A/c, GST ledgers, share capital, …), never a
 // payee. resolveVendorHead() enforces the same restriction server-side.
-const VENDOR_HEAD_TYPES = ["S", "C", "CN", "B"];
+const VENDOR_HEAD_TYPES = ["S", "V", "C", "CN", "B"];
 router.get("/vendors", requirePageRight(PAGE, "view"), async (_req, res) => {
   try {
     const pool = getPool();

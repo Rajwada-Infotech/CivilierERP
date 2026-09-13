@@ -25,7 +25,7 @@ import { Chart2 } from "iconsax-react";
 import { FollowupShell } from "@/components/followup/FollowupShell";
 import { DataTable, type ColumnDef, type ExportColumn } from "@/components/ui/DataTable";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 
@@ -168,7 +168,7 @@ function formatDate(dateStr: string | null): string {
 
 function useGlass() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const glassCard = isDark
     ? {
         background: "rgba(6, 20, 19, 0.45)",

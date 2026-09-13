@@ -10,7 +10,7 @@ import { translateError } from "@/lib/translateError";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { promptNextStep } from "@/lib/workflowNav";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import {
   Plus, CalendarClock, CheckCircle2, Search, MoreHorizontal, Eye, Copy,
@@ -142,7 +142,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
   const deepLinkBookingId = embedded ? null : sp.get("bookingId");
   const { canCreate } = usePageRights("crm-afs-registry");
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [bookingId, setBookingId] = useState("");
@@ -637,7 +637,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
 
         {/* Start dialog */}
         <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setBookingId(""); } }}>
-          <DialogContent className="max-w-sm p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-sm p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 shrink-0 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
@@ -685,7 +685,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
 
         {/* Schedule dialog */}
         <Dialog open={!!scheduleId} onOpenChange={(o) => !o && setScheduleId(null)}>
-          <DialogContent className="max-w-xs p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-xs p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 shrink-0 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center">
@@ -710,7 +710,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
 
         {/* Complete dialog */}
         <Dialog open={!!completeId} onOpenChange={(o) => !o && setCompleteId(null)}>
-          <DialogContent className="max-w-xs p-0 gap-0 overflow-hidden">
+          <DialogContent accent="crm" className="max-w-xs p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 shrink-0 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
@@ -740,7 +740,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
             list endpoint already returns (there is no GET /:id route on
             this router), so opening it costs no extra request. */}
         <Dialog open={!!detailRow} onOpenChange={(o) => !o && setDetailRow(null)}>
-          <DialogContent className="max-w-md p-0 gap-0 overflow-hidden rounded-xl">
+          <DialogContent accent="crm" className="max-w-md p-0 gap-0 overflow-hidden rounded-xl">
             <DialogTitle className="sr-only">{detailRow ? `${detailRow.AfsRegNo} — AFS Registry` : "AFS Registry"}</DialogTitle>
             <DialogDescription className="sr-only">{detailRow ? `${detailRow.ApplicantName} · ${detailRow.BookingNo}` : "Record detail"}</DialogDescription>
             {detailRow && (

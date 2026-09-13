@@ -96,7 +96,7 @@ router.get("/contact-persons", authenticateToken, async (req, res) => {
         LGST                             AS gst,
         LHeadPan                         AS pan
       FROM dbo.AccountHeadMaster
-      WHERE LHeadType IN ('S', 'C', 'A')
+      WHERE LHeadType IN ('S', 'V', 'C', 'A')
         AND LHeadContactPerson IS NOT NULL
         AND LTRIM(RTRIM(LHeadContactPerson)) <> ''
       ORDER BY LHeadType, LHeadContactPerson
@@ -112,7 +112,7 @@ router.get("/meta/suppliers", authenticateToken, async (req, res) => {
   try {
     const result = await getPool().request().query(`
       SELECT LHeadId AS id, LHeadName AS name, LHeadCode AS code
-      FROM dbo.AccountHeadMaster WHERE LHeadType = 'S' AND Status IN ('Active', 'Approved')
+      FROM dbo.AccountHeadMaster WHERE LHeadType IN ('S', 'V') AND Status IN ('Active', 'Approved')
       ORDER BY LHeadName
     `);
     res.json(result.recordset);

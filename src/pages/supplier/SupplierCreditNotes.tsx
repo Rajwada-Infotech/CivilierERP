@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import * as spApi from "@/api/supplierPortalApi";
 import { Input } from "@/components/ui/input";
 import { RefreshCw, Search, ReceiptText, AlertTriangle } from "lucide-react";
@@ -18,7 +18,7 @@ const fmtPercent1 = (n: number | null | undefined) => {
 
 export default function SupplierCreditNotes() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [search, setSearch] = useState("");
 
   const { data: notes = [], isLoading, isFetching, refetch } = useQuery({

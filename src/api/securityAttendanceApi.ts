@@ -27,7 +27,7 @@ export interface SecurityPersonnelRow {
   // Broker/Customer head, same set Vendor Ledger Report searches.
   VendorId: number | null;
   VendorName: string | null;
-  VendorType: "S" | "C" | "BR" | "A" | null;
+  VendorType: "S" | "V" | "C" | "BR" | "A" | null;
   ProjectId: number | null;
   ProjectName: string | null;
   CreatedAt: string | null;
@@ -36,7 +36,7 @@ export interface SecurityPersonnelRow {
 export interface VendorOption {
   id: number;
   name: string;
-  type: "S" | "C" | "BR" | "A";
+  type: "S" | "V" | "C" | "BR" | "A";
   typeLabel: string;
 }
 

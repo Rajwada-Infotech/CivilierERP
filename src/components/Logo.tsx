@@ -81,7 +81,7 @@ export function LogoIcon({ size = 32 }: { size?: number }) {
       alt="CivilierERP"
       width={size}
       height={size}
-      className="object-contain"
+      className="object-contain bw-color-keep"
       loading="eager"
       decoding="sync"
       initial={{ rotate: -180, scale: 0, opacity: 0 }}
@@ -116,7 +116,7 @@ export function LogoFull({ className }: { className?: string }) {
       : "Loading version…";
 
   return (
-    <div className={`flex items-center gap-2 ${className || ""}`}>
+    <div className={`flex items-center gap-2 bw-color-keep ${className || ""}`}>
       <LogoIcon size={32} />
       <div className="flex flex-col leading-none">
         <span className="font-heading font-bold text-lg gradient-text">

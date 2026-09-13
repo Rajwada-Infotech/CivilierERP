@@ -9,7 +9,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
   Plus, Search, ChevronRight, CheckCircle2, Clock, XCircle, Building2, IdCard,
   ExternalLink, ChevronLeft, Upload, Trash2, FileText, ParkingSquare, User, Phone, FileBadge,
@@ -231,7 +231,7 @@ function parseMilestones(json: string | null | undefined): MilestoneRow[] {
   } catch { return []; }
 }
 
-const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40";
+const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40 focus:border-amber-500/50";
 const labelCls = "text-xs text-muted-foreground block mb-1.5";
 
 // Live "cost + GST" preview shown at every point Unit/Parking/Extra Charges
@@ -660,7 +660,7 @@ const ApplicationFormPdfDialog: React.FC<{ applicationId: number; applicationNo:
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-3xl">
+      <DialogContent accent="crm" className="max-w-3xl">
         <DialogHeader>
           <div className="flex items-center justify-between gap-3 pr-6">
             <DialogTitle className="flex items-center gap-2"><FileText size={16} className="text-primary" /> Application Form — {applicationNo}</DialogTitle>
@@ -691,7 +691,7 @@ const CrmApplication: React.FC = () => {
   const canCreateApplications = canDoAction("crm-applications", "create");
   const canRequestBookingCancellation = canDoAction("crm-cancellations", "create");
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -2031,10 +2031,16 @@ const CrmApplication: React.FC = () => {
           applying for (unit/parking/KYC/docs). No money changes hands or
           gets recorded here — that's entirely the Booking page's job. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetWizard(); } }}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6 gap-4">
+        <DialogContent accent="crm" className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-6 gap-4">
           <DialogHeader className="space-y-0.5">
-            <DialogTitle className="font-heading text-base font-bold">
-              New CRM Application {applicationNo ? `— ${applicationNo}` : ""}
+            <DialogTitle className="font-heading text-base font-bold flex items-center gap-2">
+              <span className="w-6 h-6 rounded-lg bg-amber-500/15 border border-amber-500/30 flex items-center justify-center">
+                <Building2 size={13} className="text-amber-500" />
+              </span>
+              <span className="bg-gradient-to-r from-amber-400 to-orange-500 bg-clip-text text-transparent">
+                New CRM Application
+              </span>
+              {applicationNo ? <span className="text-muted-foreground font-medium">— {applicationNo}</span> : null}
             </DialogTitle>
           </DialogHeader>
 
@@ -2050,7 +2056,7 @@ const CrmApplication: React.FC = () => {
               const reachable = stepNum === 1 || (!!applicationId && stepNum <= maxStepReached);
               return (
                 <React.Fragment key={label}>
-                  {i > 0 && <div className="flex-1 h-px bg-border" />}
+                  {i > 0 && <div className="flex-1 h-px bg-amber-500/20" />}
                   <button
                     type="button"
                     onClick={() => reachable && setStep(stepNum)}
@@ -2115,7 +2121,7 @@ const CrmApplication: React.FC = () => {
                     permanently disabled — a real Booking either exists or
                     is expected the moment it's Approved, so the unit pick
                     can't move anymore. */}
-                <div className="rounded-xl border border-border p-4 space-y-3">
+                <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-heading font-semibold text-foreground block">Project / Unit (tree)</label>
                     {!!applicationId && (
@@ -2245,6 +2251,23 @@ const CrmApplication: React.FC = () => {
                 {/* Right: everything the unit pick unlocks — GST preview,
                     Payment Plan, and Broker. */}
                 <div className="space-y-4">
+                  {/* Placeholder while the unit tree on the left is still
+                      empty — keeps the widened dialog's right column from
+                      reading as dead space and tells staff what will
+                      appear here. */}
+                  {!form.PreferredUnitId && (
+                    <div className="rounded-xl border border-dashed border-amber-500/30 bg-amber-500/5 p-5 text-center space-y-1.5">
+                      <div className="mx-auto w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center">
+                        <Building2 size={16} className="text-amber-500" />
+                      </div>
+                      <p className="text-xs font-heading font-semibold text-foreground">Pick a unit to continue</p>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Choose the company, project and unit on the left. GST breakdown,
+                        payment plan and broker options will show up here.
+                      </p>
+                    </div>
+                  )}
+
                   {/* GST preview — live from the moment a Rate is entered,
                       including any Parking already picked on Step 2 in this
                       same application, so staff see the real combined
@@ -2259,7 +2282,7 @@ const CrmApplication: React.FC = () => {
                       is offered instead. Not re-selectable on the Booking
                       page — this is the one place it's chosen. */}
                   {form.PreferredUnitId && (
-                    <div className="rounded-xl border border-border p-4 space-y-2">
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-2">
                       <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
                       <select value={form.PaymentPlanId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
@@ -2322,7 +2345,7 @@ const CrmApplication: React.FC = () => {
                       (maybeAutoCreateBrokerage), at which point it's split
                       into one tranche per payment milestone, each unlocking
                       as that milestone is paid — not a manual toggle here. */}
-                  <div className="rounded-xl border border-border p-4 space-y-3">
+                  <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3">
                     <label className="flex items-center gap-2 text-xs font-heading font-semibold text-foreground">
                       <input type="checkbox" checked={form.ViaBroker}
                         onChange={(e) => setForm((f) => ({ ...f, ViaBroker: e.target.checked, ...(e.target.checked ? {} : { BrokerId: "", BrokerageRatePercent: "" }) }))} />
@@ -2706,7 +2729,7 @@ const CrmApplication: React.FC = () => {
           actions that actually change something (Resume, Approve/Reject,
           View Booking) stay on the row itself, not here. ── */}
       <Dialog open={!!viewingAppId} onOpenChange={(o) => { if (!o) closeApplication(); }}>
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogContent accent="crm" className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2">
               {viewingAppDetail ? (

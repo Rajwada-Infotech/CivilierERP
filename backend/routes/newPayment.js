@@ -262,6 +262,14 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         eb.EDocNo                                          AS RefDoc,
         -- Expense Booking primary key — used by "Pay Remaining" to pre-fill the form
         eb.Eid                                             AS PExpenseId,
+        -- Journal Voucher this payment settles (JVLineId, migration 417) —
+        -- so the list's Expense Ref column can show a JV chip the same way
+        -- it shows an invoice/GRN chip, instead of a bare "—".
+        (
+          SELECT jv.JVNo FROM dbo.JournalVoucherLines jvl
+          JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
+          WHERE jvl.LineID = np.JVLineId
+        )                                                  AS JVNo,
         -- EB DocDate for reference
         eb.EDocDate                                        AS EBDocDate,
         -- Card display info (last 4 digits + network) when PCardId is set
@@ -680,6 +688,10 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // Party ID (AccountHeadMaster LHeadId) for direct-invoice payments.
     // Migration 180 adds PPartyId column; resolvePartyFromRef reads it as fallback.
     partyId,
+    // Journal Voucher credit line this payment settles (migration 417) —
+    // set alongside partyId (the JV line's own LHeadId) when the payment
+    // is made from the Payment page's "Journal Vouchers" tab.
+    JVLineId,
     // "Keep the balance on his on account" checkbox — see migration 188.
     oaSkipAutoApply,
     // Direct Expense Payment (migration 303) — pay one or more Expense
@@ -896,6 +908,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       .input("BounceCharge", sql.Decimal(18, 2), BounceCharge ? parseFloat(BounceCharge) : null)
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
       .input("PPartyId", sql.Int, partyId ? parseInt(partyId, 10) : null)
+      .input("JVLineId", sql.Int, JVLineId ? parseInt(JVLineId, 10) : null)
       .input("OASkipAutoApply", sql.Bit, oaSkipAutoApply ? 1 : 0)
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
@@ -913,7 +926,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference, PCardReference, PCardId,
           DocNo, DocTypeId, DocYear, DocSerial, PFinYearId, ParentDocNo, RootExBDocNo,
-          ReplacesPaymentId, BounceCharge, ContractId, PPartyId, OASkipAutoApply,
+          ReplacesPaymentId, BounceCharge, ContractId, PPartyId, JVLineId, OASkipAutoApply,
           PCreatedAt, PCreatedBy, PApprovedBy, Status,
           TDSId, TDSNature, TDSName, TDSPercentage, TDSAmount
         )
@@ -925,7 +938,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference, @PCardReference, @PCardId,
           @DocNo, @DocTypeId, @DocYear, @DocSerial, @PFinYearId, @ParentDocNo, @RootExBDocNo,
-          @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId, @OASkipAutoApply,
+          @ReplacesPaymentId, @BounceCharge, @ContractId, @PPartyId, @JVLineId, @OASkipAutoApply,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status,
           @TDSId, @TDSNature, @TDSName, @TDSPercentage, @TDSAmount
         )
@@ -1538,7 +1551,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
       if (approvedRef && !/-EMI-\d+$/.test(approvedRef) && approvedRow) {
         try {
           const { resolvePartyFromRef } = require("../utils/resolvePartyFromRef");
-          const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
+          const partyTypeLabel = { S: "Supplier", V: "Vendor", C: "Contractor", A: "Customer" };
           const party = await resolvePartyFromRef(pool, approvedRef);
           if (party?.partyId) {
             // Read invoice AFTER syncBillStatus so ERemainingAmount is current
@@ -1642,7 +1655,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
               .input("PartyId", sql.Int, approvedRow.PPartyId)
               .query(`SELECT LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @PartyId`);
             if (partyRes.recordset.length) {
-              const partyTypeLabel = { S: "Supplier", C: "Contractor", A: "Customer" };
+              const partyTypeLabel = { S: "Supplier", V: "Vendor", C: "Contractor", A: "Customer" };
               const partyType = partyRes.recordset[0].LHeadType;
               const payAmt = parseFloat(approvedRow.PAmount) || 0;
               const bounceAmt = parseFloat(approvedRow.BounceCharge ?? 0);
@@ -2324,8 +2337,23 @@ router.get("/:id/posting", async (req, res) => {
     // system-generated placeholder (there isn't one; every vendor has
     // their own ledger). The row label stays generic; only the LHeadId
     // determines which specific account the posting actually lands in.
-    const { resolvePaymentSupplierHeadId, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
+    const { resolvePaymentSupplierHeadId, getCashInHandBankId } = require("../services/generalLedger");
     const resolvedSupplierId = await resolvePaymentSupplierHeadId(pool, pmt);
+    // For any payment not resolved via an invoice/ExpenseBooking above —
+    // a direct/on-account payment (PPartyId), or one settling a Journal
+    // Voucher's credit line (JVLineId, migration 417) — supplierName is
+    // still null at this point even though resolvedSupplierId already
+    // points at a real, named party. Falling back to "Supplier / Creditor
+    // A/c" then showed a generic label on the Payment Chain view instead
+    // of the actual party name the money actually posted against (e.g. a
+    // salary/wages JV settled by payment, debited straight to the named
+    // employee/contractor head, not a generic creditor bucket).
+    if (!supplierName && resolvedSupplierId) {
+      const headRes = await pool.request().input("Id", sql.Int, resolvedSupplierId).query(`
+        SELECT ISNULL(DisplayName, LHeadName) AS name FROM dbo.AccountHeadMaster WHERE LHeadId = @Id
+      `);
+      supplierName = headRes.recordset[0]?.name ?? null;
+    }
     // Mirrors postPaymentApproval in services/generalLedger.js: for an
     // invoice-linked payment, pmt.TDSAmount is only an inherited display
     // snapshot (see resolveInvoiceLinkedTds in services/tds.js) — TDS was
@@ -2334,19 +2362,26 @@ router.get("/:id/posting", async (req, res) => {
     const tdsAmount = pmt.PExpenseRef ? 0 : Number(pmt.TDSAmount) || 0;
 
     // Cash-mode payments never carry a PBankID (Payment.tsx disables the
-    // Bank field for Cash) — Cash-in-Hand (migration 339) stands in for the
-    // bank/credit leg instead of leaving it unresolved.
+    // Bank field for Cash) — the seeded Cash in Hand bank (migration 418)
+    // stands in for the bank/credit leg instead of leaving it unresolved.
     let bankAccount = pmt.PBankID
       ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null }
       : null;
     if (!bankAccount && pmt.PMode === "Cash") {
-      const cashHeadId = await getGLHeadId(pool, GL_ACCOUNTS.CASH_IN_HAND).catch(() => null);
-      if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash-in-Hand A/c", code: null };
+      const cashHeadId = await getCashInHandBankId(pool).catch(() => null);
+      if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash in Hand", code: "CASH-IN-HAND" };
     }
 
     const accounts = {
+      // Plain party name when one resolved — matches how a Journal
+      // Voucher's own posting display names its ledgers (e.g. "Pinaki
+      // Chandra", not "Supplier/Creditor Payable — Pinaki Chandra"), and
+      // is no longer assuming every resolved party is literally a
+      // Supplier/Creditor (a JV-settling payment can debit any head, e.g.
+      // an employee paid for salary & wages). Only falls back to the
+      // generic label when no name could be resolved at all.
       supplier: resolvedSupplierId
-        ? { id: resolvedSupplierId, label: supplierName ? `Supplier/Creditor Payable — ${supplierName}` : "Supplier / Creditor A/c", code: null }
+        ? { id: resolvedSupplierId, label: supplierName || "Supplier / Creditor A/c", code: null }
         : null,
       bank: bankAccount,
       // TDS (migration 304) — only present when this payment actually
@@ -2419,7 +2454,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
   try {
     const pool = getPool();
     const userEmail = req.user?.email || req.user?.upn || "system";
-    const { postVoucher, resolvePaymentSupplierHeadId, getGLHeadId, GL_ACCOUNTS } = require("../services/generalLedger");
+    const { postVoucher, resolvePaymentSupplierHeadId, getGLHeadId, getCashInHandBankId } = require("../services/generalLedger");
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
@@ -2465,10 +2500,10 @@ router.post("/:id/post-to-gl", async (req, res) => {
     const isCash = pmt.PMode === "Cash";
     let bankId = pmt.PBankID ? parseInt(pmt.PBankID, 10) : null;
     // Cash-mode payments never carry a PBankID (Payment.tsx disables the
-    // Bank field for Cash) — Cash-in-Hand (migration 339) stands in for the
-    // bank leg instead of hard-failing for lack of one.
+    // Bank field for Cash) — the seeded Cash in Hand bank (migration 418)
+    // stands in for the bank leg instead of hard-failing for lack of one.
     if (!bankId && isCash) {
-      bankId = await getGLHeadId(pool, GL_ACCOUNTS.CASH_IN_HAND).catch(() => null);
+      bankId = await getCashInHandBankId(pool).catch(() => null);
     }
 
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });

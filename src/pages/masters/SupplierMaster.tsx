@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useCallback } from "react";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -57,8 +57,44 @@ import {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUPPLIER_TYPE = "S";
+const VENDOR_TYPE = "V";
+// The Vendor Master list/queries fetch both LHeadTypes together — Landlord
+// entries are still stored as LHeadType='S' (only Vendor gets its own 'V'),
+// see lheadTypeForVendorType below.
+const LIST_TYPES = `${SUPPLIER_TYPE},${VENDOR_TYPE}`;
 
 const SUPPLIER_CATEGORIES = ["Goods", "Services", "Both"] as const;
+
+// Vendor Type — a layer above Category: Category (Goods/Services/Both) is
+// only ever meaningful for a Supplier, so a Landlord or a generic Vendor
+// picks a Type here instead and never sees the Category field at all.
+// There's no dedicated DB column for this — it's derived from/written
+// straight into the existing supplierCategory (LHeadCategory) value:
+// Goods/Services/Both implies Type="Supplier" (with that as the
+// sub-category); the literal values "Vendor"/"Landlord" ARE the Type,
+// stored the same column, with no sub-category underneath them.
+const VENDOR_TYPES = ["Vendor", "Supplier", "Landlord"] as const;
+type VendorType = (typeof VENDOR_TYPES)[number] | "";
+
+function vendorTypeFromCategory(category: string): VendorType {
+  if ((SUPPLIER_CATEGORIES as readonly string[]).includes(category)) return "Supplier";
+  // "Supplier" itself is stored as a placeholder when Type=Supplier has been
+  // picked but no Goods/Services/Both sub-category has been chosen yet —
+  // without this, the derived Type would snap back to "" on every render
+  // and the Type dropdown would appear to do nothing.
+  if (category === "Supplier" || category === "Vendor" || category === "Landlord") return category;
+  return "";
+}
+// Every value the shared category/type column can actually hold — used for
+// CSV import validation, which doesn't otherwise know about the Type/
+// Category split.
+const ALL_CATEGORY_VALUES = [...SUPPLIER_CATEGORIES, "Vendor", "Landlord"] as const;
+
+// LHeadType to persist on save: Vendor gets its own 'V'; Supplier and
+// Landlord both remain 'S' (Landlord is only distinguished via LHeadCategory).
+function lheadTypeForVendorType(type: VendorType): string {
+  return type === "Vendor" ? VENDOR_TYPE : SUPPLIER_TYPE;
+}
 const GST_TYPES = ["Registered", "Unregistered"] as const;
 const GST_STATES = [
   "Andaman and Nicobar Islands",
@@ -171,7 +207,7 @@ const EMPTY_FORM: SupplierForm = {
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
 const EXPORT_COLUMNS: ExportColumn[] = [
-  { header: "Supplier Name", accessor: "LHeadName" },
+  { header: "Vendor Name", accessor: "LHeadName" },
   { header: "Contact Person", accessor: "LHeadContactPerson" },
   { header: "Phone", accessor: "LHeadPhone" },
   { header: "Email", accessor: "LHeadEmail" },
@@ -206,13 +242,13 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 // Single source of truth for both the downloadable template and the importer,
 // so the headers a user downloads are exactly the headers the importer reads.
 const CSV_HEADERS = {
-  name: "Supplier Name",
+  name: "Vendor Name",
   contactPerson: "Contact Person",
   phone: "Phone",
   email: "Email",
   gst: "GST Number",
   pan: "PAN Number",
-  category: "Category (Goods/Services/Both)",
+  category: "Category/Type (Goods/Services/Both/Vendor/Landlord)",
   gstType: "GST Type (Registered/Unregistered)",
   gstState: "GST State",
   group: "Group Name",
@@ -267,7 +303,7 @@ function buildSupplierColumns(
   return [
     {
       accessorKey: "LHeadName",
-      header: "Supplier Name",
+      header: "Vendor Name",
       cell: ({ getValue }) => (
         <span className="font-medium text-foreground">
           {getValue() as string}
@@ -432,7 +468,7 @@ function buildSupplierColumns(
 const SupplierMaster: React.FC = () => {
   const qc = useQueryClient();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const rights = usePageRights("supplier-master");
 
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -444,6 +480,28 @@ const SupplierMaster: React.FC = () => {
   >({});
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [viewRecord, setViewRecord] = useState<Supplier | null>(null);
+
+  // Vendor Type — derived from (and written back into) supplierCategory;
+  // see vendorTypeFromCategory's comment. Drives the form's dynamic
+  // heading and whether the Category sub-field is active.
+  const vendorType = vendorTypeFromCategory(form.supplierCategory);
+  const handleTypeChange = (next: VendorType) => {
+    setForm((p) => ({
+      ...p,
+      supplierCategory:
+        next === "Supplier"
+          ? // Switching TO Supplier keeps an already-valid Goods/Services/
+            // Both pick; otherwise stores the "Supplier" placeholder so
+            // vendorTypeFromCategory still resolves back to "Supplier" on
+            // the next render (an empty string would resolve to "" and the
+            // Type dropdown would appear to revert/do nothing).
+            ((SUPPLIER_CATEGORIES as readonly string[]).includes(p.supplierCategory)
+              ? p.supplierCategory
+              : "Supplier")
+          : next, // "Vendor" / "Landlord" — the Type IS the stored value
+      isTdsApplicable: next === "Supplier" ? p.isTdsApplicable : false,
+    }));
+  };
 
   const [search, setSearch] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
@@ -459,8 +517,8 @@ const SupplierMaster: React.FC = () => {
     isLoading,
     isError,
   } = useQuery({
-    queryKey: ["account-head", SUPPLIER_TYPE],
-    queryFn: () => getList(SUPPLIER_TYPE),
+    queryKey: ["account-head", LIST_TYPES],
+    queryFn: () => getList(LIST_TYPES),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -507,11 +565,11 @@ const SupplierMaster: React.FC = () => {
 
   // ── Mutations ──────────────────────────────────────────────────────────────
   const invalidate = () =>
-    qc.invalidateQueries({ queryKey: ["account-head", SUPPLIER_TYPE] });
+    qc.invalidateQueries({ queryKey: ["account-head", LIST_TYPES] });
 
   const buildPayload = (f: SupplierForm) => ({
     LHeadName: f.LHeadName,
-    LHeadType: SUPPLIER_TYPE,
+    LHeadType: lheadTypeForVendorType(vendorTypeFromCategory(f.supplierCategory)),
     LHeadContactPerson: f.LHeadContactPerson || null,
     LHeadPhone: f.LHeadPhone || null,
     LHeadEmail: f.LHeadEmail || null,
@@ -535,7 +593,11 @@ const SupplierMaster: React.FC = () => {
   });
 
   const createMut = useMutation({
-    mutationFn: (f: SupplierForm) => addRecord(buildPayload(f), SUPPLIER_TYPE),
+    mutationFn: (f: SupplierForm) =>
+      addRecord(
+        buildPayload(f),
+        lheadTypeForVendorType(vendorTypeFromCategory(f.supplierCategory)),
+      ),
     onSuccess: (res: {
       SupplierLoginEmail?: string;
       SupplierPasswordDefaulted?: boolean;
@@ -546,8 +608,8 @@ const SupplierMaster: React.FC = () => {
         : "";
       toast.success(
         res?.SupplierLoginEmail
-          ? `Supplier created — login email: ${res.SupplierLoginEmail}${passwordNote}`
-          : "Supplier created",
+          ? `Vendor created — login email: ${res.SupplierLoginEmail}${passwordNote}`
+          : "Vendor created",
       );
       invalidate();
       resetForm();
@@ -557,9 +619,13 @@ const SupplierMaster: React.FC = () => {
 
   const updateMut = useMutation({
     mutationFn: ({ id, data }: { id: number; data: SupplierForm }) =>
-      updateRecord(id, buildPayload(data), SUPPLIER_TYPE),
+      updateRecord(
+        id,
+        buildPayload(data),
+        lheadTypeForVendorType(vendorTypeFromCategory(data.supplierCategory)),
+      ),
     onSuccess: () => {
-      toast.success("Supplier updated");
+      toast.success("Vendor updated");
       invalidate();
       resetForm();
     },
@@ -569,7 +635,7 @@ const SupplierMaster: React.FC = () => {
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteRecord(id),
     onSuccess: () => {
-      toast.success("Supplier deleted");
+      toast.success("Vendor deleted");
       invalidate();
       setDeleteConfirm(null);
     },
@@ -586,7 +652,7 @@ const SupplierMaster: React.FC = () => {
   );
 
   const handleDownloadTemplate = () => {
-    exportToCsv([], SUPPLIER_CSV_TEMPLATE_COLUMNS, "supplier-master-template");
+    exportToCsv([], SUPPLIER_CSV_TEMPLATE_COLUMNS, "vendor-master-template");
     toast.success("Template downloaded — fill it in and use Import.");
   };
 
@@ -645,7 +711,7 @@ const SupplierMaster: React.FC = () => {
             .trim()
             .toLowerCase();
 
-          if (!name) throw new Error("Supplier Name is required");
+          if (!name) throw new Error("Vendor Name is required");
           if (!pan) throw new Error("PAN Number is required");
           // Password is optional on import — left blank, the backend defaults
           // the login to "123456" (changeable later from the Edit form).
@@ -654,13 +720,13 @@ const SupplierMaster: React.FC = () => {
 
           // Category is optional — validate against the known list when given.
           const category = categoryRaw
-            ? SUPPLIER_CATEGORIES.find(
+            ? ALL_CATEGORY_VALUES.find(
                 (c) => c.toLowerCase() === categoryRaw.toLowerCase(),
               )
             : "";
           if (categoryRaw && !category)
             throw new Error(
-              `Category must be one of Goods, Services, Both (got "${categoryRaw}")`,
+              `Category must be one of ${ALL_CATEGORY_VALUES.join(", ")} (got "${categoryRaw}")`,
             );
 
           // GST Type is optional — when given must be Registered/Unregistered.
@@ -729,7 +795,10 @@ const SupplierMaster: React.FC = () => {
             SupplierPassword: password,
           };
 
-          await addRecord(buildPayload(rowForm), SUPPLIER_TYPE);
+          await addRecord(
+            buildPayload(rowForm),
+            lheadTypeForVendorType(vendorTypeFromCategory(rowForm.supplierCategory)),
+          );
           results.push({ row: rowNum, name, status: "success" });
         } catch (err: any) {
           results.push({
@@ -750,7 +819,7 @@ const SupplierMaster: React.FC = () => {
       }
       if (errorCount === 0) {
         toast.success(
-          `Imported ${successCount} supplier${successCount === 1 ? "" : "s"} ✓`,
+          `Imported ${successCount} vendor${successCount === 1 ? "" : "s"} ✓`,
         );
       } else if (successCount === 0) {
         toast.error(
@@ -834,6 +903,12 @@ const SupplierMaster: React.FC = () => {
   const handleSave = () => {
     const e: Partial<Record<keyof SupplierForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
+    if (!vendorType) e.supplierCategory = true;
+    if (
+      vendorType === "Supplier" &&
+      !(SUPPLIER_CATEGORIES as readonly string[]).includes(form.supplierCategory)
+    )
+      e.supplierCategory = true;
     if (!form.LHeadPan.trim() && form.LHeadPan !== "PANNOTAVBL") e.LHeadPan = true;
     if (!form.LGSTType) e.LGSTType = true;
     if (form.LGSTType === "Registered" && !form.LGST.trim()) e.LGST = true;
@@ -856,12 +931,12 @@ const SupplierMaster: React.FC = () => {
     const win = window.open("", "_blank", "width=700,height=600");
     if (!win) return;
     win.document.write(safeHtml`
-      <html><head><title>Supplier — ${s.LHeadName}</title>
+      <html><head><title>Vendor — ${s.LHeadName}</title>
       <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
       </head><body>
-      <h2>Supplier Card</h2>
+      <h2>Vendor Card</h2>
       <table>
-        <tr><td>Supplier Name</td><td>${s.LHeadName || "—"}</td></tr>
+        <tr><td>Vendor Name</td><td>${s.LHeadName || "—"}</td></tr>
         <tr><td>Contact Person</td><td>${s.LHeadContactPerson || "—"}</td></tr>
         <tr><td>Phone</td><td>${s.LHeadPhone || "—"}</td></tr>
         <tr><td>Email</td><td>${s.LHeadEmail || "—"}</td></tr>
@@ -952,11 +1027,11 @@ const SupplierMaster: React.FC = () => {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
-      <Breadcrumbs items={["Masters", "Supplier Master"]} />
+      <Breadcrumbs items={["Masters", "Vendor Master"]} />
 
       <FinanceShell
-        title="Supplier Master"
-        subtitle="Manage supplier accounts with contact, GST and category details"
+        title="Vendor Master"
+        subtitle="Manage vendor accounts with contact, GST and category details"
         action={
           <div className="flex items-center gap-2">
             <span
@@ -967,7 +1042,7 @@ const SupplierMaster: React.FC = () => {
                 color: "#818cf8",
               }}
             >
-              {suppliers.length} Suppliers
+              {suppliers.length} Vendors
             </span>
             <input
               ref={importFileInputRef}
@@ -978,7 +1053,7 @@ const SupplierMaster: React.FC = () => {
             />
             <button
               onClick={handleDownloadTemplate}
-              title="Download a blank CSV with all supplier fields"
+              title="Download a blank CSV with all vendor fields"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
             >
               <Download size={13} />
@@ -987,7 +1062,7 @@ const SupplierMaster: React.FC = () => {
             <button
               onClick={handleImportClick}
               disabled={importing}
-              title="Import suppliers from a filled-in CSV"
+              title="Import vendors from a filled-in CSV"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {importing ? (
@@ -1034,7 +1109,7 @@ const SupplierMaster: React.FC = () => {
           >
             <div>
               <h2 className="text-sm font-heading font-semibold text-foreground">
-                {editingId ? "Edit Supplier" : "Add Supplier"}
+                {editingId ? `Edit ${vendorType || "Vendor"}` : `Add ${vendorType || "Vendor"}`}
               </h2>
               <p className="text-[11px] text-muted-foreground mt-0.5">
                 Fields marked <span className="text-destructive">*</span> are
@@ -1055,10 +1130,10 @@ const SupplierMaster: React.FC = () => {
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-                {/* Supplier Name */}
+                {/* Vendor Name */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Supplier Name <span className="text-destructive">*</span>
+                    Vendor Name <span className="text-destructive">*</span>
                   </label>
                   <input
                     value={form.LHeadName}
@@ -1100,33 +1175,65 @@ const SupplierMaster: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Supplier Category */}
+                {/* Type — Vendor / Supplier / Landlord. Only picking
+                    "Supplier" activates the Category field below;
+                    "Vendor"/"Landlord" have no sub-category. */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Supplier Category
+                    Type
                   </label>
                   <TreeDropdown
                     variant="flat"
-                    value={form.supplierCategory}
-                    onChange={(v) =>
-                      setForm((p) => ({
-                        ...p,
-                        supplierCategory: v,
-                        // TDS mainly attaches to service payments (194C/194J),
-                        // not straight goods purchases — auto-set the toggle
-                        // whenever the category changes to/from "Services".
-                        // "Both" is deliberately excluded (goods+services is
-                        // not auto-enabled). Still a normal toggle below, so
-                        // it can be corrected by hand for any exception.
-                        isTdsApplicable: v === "Services",
-                      }))
-                    }
-                    options={SUPPLIER_CATEGORIES.map((c) => ({
-                      value: c,
-                      label: c,
-                    }))}
-                    placeholder="Select category…"
+                    value={vendorType}
+                    onChange={(v) => {
+                      handleTypeChange(v as VendorType);
+                      setErrors((p) => ({ ...p, supplierCategory: false }));
+                    }}
+                    options={VENDOR_TYPES.map((t) => ({ value: t, label: t }))}
+                    placeholder="Select type…"
+                    error={errors.supplierCategory}
                   />
+                </div>
+
+                {/* Supplier Category — active only when Type = "Supplier" */}
+                <div className="space-y-1.5">
+                  <label
+                    className={`text-xs font-heading font-medium uppercase tracking-wider block ${
+                      vendorType === "Supplier" ? "text-muted-foreground" : "text-muted-foreground/40"
+                    }`}
+                  >
+                    Supplier Category
+                  </label>
+                  <div className={vendorType !== "Supplier" ? "opacity-40 pointer-events-none" : ""}>
+                    <TreeDropdown
+                      variant="flat"
+                      value={
+                        (SUPPLIER_CATEGORIES as readonly string[]).includes(form.supplierCategory)
+                          ? form.supplierCategory
+                          : ""
+                      }
+                      onChange={(v) => {
+                        setForm((p) => ({
+                          ...p,
+                          supplierCategory: v,
+                          // TDS mainly attaches to service payments (194C/194J),
+                          // not straight goods purchases — auto-set the toggle
+                          // whenever the category changes to/from "Services".
+                          // "Both" is deliberately excluded (goods+services is
+                          // not auto-enabled). Still a normal toggle below, so
+                          // it can be corrected by hand for any exception.
+                          isTdsApplicable: v === "Services",
+                        }));
+                        setErrors((p) => ({ ...p, supplierCategory: false }));
+                      }}
+                      options={SUPPLIER_CATEGORIES.map((c) => ({
+                        value: c,
+                        label: c,
+                      }))}
+                      placeholder={vendorType === "Supplier" ? "Select category…" : "Select Supplier type first"}
+                      error={vendorType === "Supplier" && errors.supplierCategory}
+                    />
+                  </div>
                 </div>
 
                 {/* Account Group — always Sundry Creditors for suppliers, never
@@ -1553,8 +1660,8 @@ const SupplierMaster: React.FC = () => {
                 {saving
                   ? "Saving…"
                   : editingId
-                    ? "Update Supplier"
-                    : "Save Supplier"}
+                    ? `Update ${vendorType || "Vendor"}`
+                    : `Save ${vendorType || "Vendor"}`}
               </button>
             </div>
           </div>
@@ -1581,7 +1688,7 @@ const SupplierMaster: React.FC = () => {
               variant="flat"
               value={filterCategory}
               onChange={(v) => setFilterCategory(v)}
-              options={SUPPLIER_CATEGORIES.map((c) => ({ value: c, label: c }))}
+              options={ALL_CATEGORY_VALUES.map((c) => ({ value: c, label: c }))}
               placeholder="All Categories"
             />
 
@@ -1621,14 +1728,14 @@ const SupplierMaster: React.FC = () => {
               getRowId={(row) => String(row.LHeadId)}
               emptyMessage={
                 isError
-                  ? "Failed to load suppliers."
+                  ? "Failed to load vendors."
                   : suppliers.length === 0
-                    ? "No suppliers yet."
+                    ? "No vendors yet."
                     : "No results match your search."
               }
               exportConfig={{
-                title: "Supplier Master",
-                filename: "supplier-master",
+                title: "Vendor Master",
+                filename: "vendor-master",
                 columns: EXPORT_COLUMNS,
               }}
               rowClassName={(row) =>
@@ -1725,7 +1832,7 @@ const SupplierMaster: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Building2 size={15} className="text-primary" />
                 <h3 className="font-heading font-semibold text-sm text-foreground">
-                  Supplier Details
+                  Vendor Details
                 </h3>
               </div>
               <button
@@ -1737,7 +1844,7 @@ const SupplierMaster: React.FC = () => {
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               {[
-                { label: "Supplier Name", value: viewRecord.LHeadName },
+                { label: "Vendor Name", value: viewRecord.LHeadName },
                 {
                   label: "Contact Person",
                   value: viewRecord.LHeadContactPerson || "—",
@@ -1817,7 +1924,7 @@ const SupplierMaster: React.FC = () => {
                 }}
                 className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white shadow-sm flex items-center gap-1.5"
               >
-                <Pencil size={13} /> Edit Supplier
+                <Pencil size={13} /> Edit Vendor
               </button>
             </div>
           </div>

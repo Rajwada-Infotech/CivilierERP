@@ -118,7 +118,7 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
 
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent accent="crm" className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-heading text-base flex items-center gap-2">
             <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center">
@@ -747,7 +747,7 @@ const CrmPossessionNotice: React.FC = () => {
 
         {/* ── Mark-Sent dialog ── */}
         <Dialog open={!!sentTarget} onOpenChange={(o) => { if (!o) { setSentTarget(null); setSentMode(""); } }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2 text-base">
                 <Send size={16} className="text-blue-600" /> Mark Notice Sent
@@ -786,7 +786,7 @@ const CrmPossessionNotice: React.FC = () => {
 
         {/* ── Edit dialog ── */}
         <Dialog open={!!editTarget} onOpenChange={(o) => { if (!o) setEditTarget(null); }}>
-          <DialogContent className="max-w-md">
+          <DialogContent accent="crm" className="max-w-md">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2 text-base">
                 <Pencil size={15} /> Edit Draft — {editTarget?.NoticeNo}
@@ -841,7 +841,7 @@ const CrmPossessionNotice: React.FC = () => {
 
         {/* ── Delete confirmation ── */}
         <Dialog open={!!deleteTarget} onOpenChange={(o) => { if (!o) setDeleteTarget(null); }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2 text-base text-red-600">
                 <Trash2 size={16} /> Delete Notice
@@ -866,7 +866,7 @@ const CrmPossessionNotice: React.FC = () => {
 
         {/* ── Dispute dialog ── */}
         <Dialog open={!!disputeDialog} onOpenChange={(o) => { if (!o) { setDisputeDialog(null); setDisputeReason(""); } }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2 text-base">
                 <AlertTriangle size={16} className="text-red-500" /> Mark Disputed
@@ -892,7 +892,7 @@ const CrmPossessionNotice: React.FC = () => {
 
         {/* ── Retract dispute ── */}
         <Dialog open={!!retractDialog} onOpenChange={(o) => { if (!o) { setRetractDialog(null); setRetractReason(""); } }}>
-          <DialogContent className="max-w-sm">
+          <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2 text-base">
                 <RotateCcw size={16} className="text-amber-600" /> Retract Dispute

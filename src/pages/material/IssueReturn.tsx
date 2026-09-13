@@ -9,7 +9,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Textarea } from "@/components/ui/textarea";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
   CalendarDays, FileText, Save, Search, Trash2, Plus, RefreshCw,
   X, Edit3, Building2, FolderOpen, RotateCcw, ArrowLeft, Package,
@@ -88,7 +88,7 @@ export default function IssueReturn() {
   const qc = useQueryClient();
   const rights = usePageRights("material-issue-return");
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);

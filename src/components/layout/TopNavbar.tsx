@@ -5,7 +5,7 @@ import { LogoFull } from "../Logo";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./layoutContexts";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
 import { SaNotificationBell } from "@/components/navbar/SaNotificationBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
@@ -50,6 +50,7 @@ import {
   GitBranch,
   ClipboardCheck,
   XCircle,
+  Handshake,
 } from "lucide-react";
 import {
   Crown,
@@ -185,7 +186,7 @@ const financeSetupItems = [
   },
   {
     icon: Truck,
-    label: "Suppliers",
+    label: "Vendors",
     path: "/masters/suppliers",
     color: "text-blue-400",
     pageKey: "supplier-master",
@@ -203,6 +204,13 @@ const financeSetupItems = [
     path: "/masters/banks",
     color: "text-emerald-500",
     pageKey: "bank-master",
+  },
+  {
+    icon: Handshake,
+    label: "Partners",
+    path: "/masters/partners",
+    color: "text-orange-500",
+    pageKey: "partner-master",
   },
   {
     icon: Calendar,
@@ -986,7 +994,7 @@ export const TopNavbar = () => {
 
   // "light" is the only light-background theme; everything else is dark
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   // Track first-mount so remounts skip the entrance animation.
   const isFirstMount = useRef(_pillNavFirstMount);

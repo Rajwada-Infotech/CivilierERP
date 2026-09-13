@@ -15,7 +15,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { GlassCard, GlassCardSkeleton } from "@/components/dashboard/GlassShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Calendar,
@@ -1211,7 +1211,7 @@ export default function DailyProgressReport() {
   const [date, setDate] = useState(todayStr());
   const printRef = useRef<HTMLDivElement>(null);
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const sectionGlass = {
     background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",

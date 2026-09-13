@@ -7,7 +7,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Search, UserPlus, ExternalLink, Users, CheckCircle2 } from "lucide-react";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 const LEADS_API = "/api/sa/leads";
 const CUSTOMER_API = "/api/crm/customers";
@@ -37,7 +37,7 @@ async function fetchCustomers(): Promise<any[]> {
 const CrmLeads: React.FC = () => {
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"Available" | "Used">("Available");
 

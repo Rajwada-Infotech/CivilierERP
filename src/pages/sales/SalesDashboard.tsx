@@ -22,7 +22,7 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   SalesShell,
@@ -128,7 +128,7 @@ const SalesDashboard = () => {
   const { theme } = useTheme();
   usePageRights("sales-dashboard");
 
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const {
     data: rawData,

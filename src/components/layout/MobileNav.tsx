@@ -46,6 +46,7 @@ import {
   XCircle,
   Percent,
   Wrench,
+  Handshake,
 } from "lucide-react";
 import {
   Bank,
@@ -270,7 +271,7 @@ const financeSetupItems: SetupItem[] = [
   },
   {
     icon: Truck,
-    label: "Suppliers",
+    label: "Vendors",
     path: "/masters/suppliers",
     color: "text-blue-400",
     pageKey: "supplier-master",
@@ -288,6 +289,13 @@ const financeSetupItems: SetupItem[] = [
     path: "/masters/banks",
     color: "text-emerald-500",
     pageKey: "bank-master",
+  },
+  {
+    icon: Handshake,
+    label: "Partners",
+    path: "/masters/partners",
+    color: "text-orange-500",
+    pageKey: "partner-master",
   },
   {
     icon: Calendar,
@@ -853,6 +861,7 @@ export const MobileNav: React.FC = () => {
     midnight: "#2dd4bf",
     root: "#f59e0b",
     glass: "#fb7185",
+    bw: "#111111",
   };
 
   const tabs: Array<{ id: "nav" | "setup" | "theme"; label: string }> = [

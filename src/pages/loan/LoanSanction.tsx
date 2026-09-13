@@ -49,7 +49,7 @@ import {
   ListChecks,
   CreditCard,
 } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { MoneyRecive } from "iconsax-react";
 import { getCompanyOptions, getBanks, type CompanyOption, type BankRecord } from "@/api/bankMasterApi";
 import { CompanyFilterCombo } from "@/components/CompanyFilterCombo";
@@ -405,7 +405,7 @@ export default function LoanSanctionPage() {
   const qc = useQueryClient();
   usePageRights("loan-sanction");
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const [showForm, setShowForm] = useState(false);
   const [viewingLoan, setViewingLoan] = useState<LoanSanction | null>(null);
   const [tab, setTab] = useState<"overview" | "exposure" | "schedule" | "chain" | "posting">("overview");

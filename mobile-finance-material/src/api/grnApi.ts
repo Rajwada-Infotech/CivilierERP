@@ -157,7 +157,7 @@ export const previewNextGRNNumber = async (parentDocNo?: string | null): Promise
 export interface NameOption { id: string; name: string }
 
 export const getSuppliers = async (): Promise<NameOption[]> => {
-  const raw = await fetchWithAuth("/api/account-head?type=S").then((r) => r.json().catch(() => []));
+  const raw = await fetchWithAuth("/api/account-head?type=S,V&excludeCategory=Landlord").then((r) => r.json().catch(() => []));
   return normalizeArray<any>(raw).map((s) => ({ id: String(s.LHeadId), name: s.LHeadName ?? "" }));
 };
 

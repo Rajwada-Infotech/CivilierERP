@@ -152,6 +152,73 @@ router.get("/ledger-options", authenticateToken, async (req, res) => {
   }
 });
 
+// ── GET /payable-lines — JV credit legs still owed, for the Payment page ────
+// A Journal Voucher can record a liability (e.g. DR Expense / CR Party)
+// with no cash movement — once Approved it already posts straight to
+// dbo.GeneralLedgerEntry (postJournalVoucherApproval). Settling that
+// liability is a separate later payment (DR the same head, CR bank), picked
+// from this list on the Payment page's "Journal Vouchers" tab. Only a JV's
+// CREDIT lines are ever "payable" (a debit line is where the JV recorded an
+// increase, not something you owe); only lines still carrying an unpaid
+// balance (CreditAmount minus whatever's already linked via
+// NewPayment.JVLineId) are returned. Registered before "/:id" for the same
+// reason as /ledger-options above.
+router.get("/payable-lines", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const { companyId, projectId } = req.query;
+    const request = pool.request();
+    const conditions = [];
+    if (companyId) {
+      conditions.push("jv.CompanyId = @companyId");
+      request.input("companyId", sql.Int, parseInt(companyId, 10));
+    }
+    if (projectId) {
+      conditions.push("jv.ProjectId = @projectId");
+      request.input("projectId", sql.Int, parseInt(projectId, 10));
+    }
+
+    let query = `
+      SELECT jvl.LineID, jvl.JVID, jv.JVNo, jv.JVDate, jv.Narration,
+             jv.CompanyId, jv.ProjectId, co.name AS CompanyName, pr.name AS ProjectName,
+             jvl.LHeadId, ISNULL(ahm.DisplayName, ahm.LHeadName) AS LHeadName, ahm.LHeadType,
+             jvl.CreditAmount,
+             -- Only Approved payments count as "paid" — same convention
+             -- ExpenseBooking's own ETotalPaid/ERemainingAmount uses (a
+             -- Pending payment can still be Rejected and never reduces the
+             -- real liability until it's actually approved).
+             ISNULL((
+               SELECT SUM(np.PAmount) FROM dbo.NewPayment np
+               WHERE np.JVLineId = jvl.LineID AND np.Status = 'Approved'
+             ), 0) AS PaidAmount
+      FROM dbo.JournalVoucherLines jvl
+      JOIN dbo.JournalVoucher jv ON jv.JVID = jvl.JVID
+      JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = jvl.LHeadId
+      LEFT JOIN dbo.enterprise co ON co.id = jv.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = jv.ProjectId
+      WHERE jv.Status = 'Approved'
+        AND jvl.CreditAmount > 0
+        AND EXISTS (
+          SELECT 1 FROM dbo.GeneralLedgerEntry gle
+          WHERE gle.SourceType = 'JournalVoucher' AND gle.SourceId = jv.JVID AND gle.IsReversed = 0
+        )
+    `;
+    if (conditions.length) query += " AND " + conditions.join(" AND ");
+    query += " ORDER BY jv.JVDate DESC, jv.JVID DESC";
+
+    const result = await request.query(query);
+    const lines = result.recordset
+      .map((r) => ({
+        ...r,
+        RemainingAmount: Math.round((Number(r.CreditAmount) - Number(r.PaidAmount)) * 100) / 100,
+      }))
+      .filter((r) => r.RemainingAmount > 0.01);
+    res.json(lines);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /:id — header + lines ───────────────────────────────────────────────
 router.get("/:id", authenticateToken, async (req, res) => {
   try {
