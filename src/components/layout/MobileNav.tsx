@@ -271,7 +271,7 @@ const financeSetupItems: SetupItem[] = [
   },
   {
     icon: Truck,
-    label: "Suppliers",
+    label: "Vendors",
     path: "/masters/suppliers",
     color: "text-blue-400",
     pageKey: "supplier-master",
