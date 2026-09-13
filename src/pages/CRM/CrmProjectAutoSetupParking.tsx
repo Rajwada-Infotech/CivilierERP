@@ -292,6 +292,24 @@ const CrmProjectAutoSetupParking: React.FC = () => {
         </div>
       )}
 
+      {/* Surfaces the parking equivalent of the floor-less unit gap:
+          slots whose BlockId IS NULL are visible in the parking matrix
+          but invisible to the wizard's per-block totals. parkingSlotMaster.js
+          POST allows BlockId to be optional, so these can accumulate silently.
+          Shown regardless of step1Done — the orphan slots exist at project
+          level and need fixing even if the block tree isn't set up yet. */}
+      {projectId && status && (status.orphanParkingSlotCount ?? 0) > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-600">
+          {status.orphanParkingSlotCount} parking slot{status.orphanParkingSlotCount === 1 ? "" : "s"} on this project{" "}
+          {status.orphanParkingSlotCount === 1 ? "has" : "have"} no Block assigned and won't appear in the
+          per-block totals below — assign a Block in{" "}
+          <a href="/crm/setup/parking-slot-master" className="underline">
+            Parking Slot Master
+          </a>{" "}
+          before relying on this page as the full picture.
+        </div>
+      )}
+
       {projectId && status && step1Done && (
         <div className={cardCls}>
           <h3 className="text-sm font-semibold flex items-center gap-1.5">

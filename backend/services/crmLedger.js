@@ -45,6 +45,40 @@ async function getGstRateForBooking(pool, bookingId) {
   return cgstSgst || Number(row.HIGST) || 0;
 }
 
+/**
+ * THE single, canonical GST split for a CRM payment amount against a
+ * booking — every GL posting (postCrmReceiptToGL, postCrmOnAccountToGL
+ * below) and every CrmPaymentReceipt row's own stored BaseAmount/GSTAmount
+ * (crmPayments.js, previously its own separate local copy of this exact
+ * function) must go through this one implementation, not re-derive GST
+ * independently. Two independently-maintained calculations of "the same"
+ * split is exactly the kind of drift bug this consolidation closes — a
+ * receipt's stored GSTAmount disagreeing with what actually got posted to
+ * the GST Output Liability account in GL would be a real reconciliation
+ * problem, not just a cosmetic one.
+ *
+ * Deliberately NOT the live-HSN-rate back-calculation getGstRateForBooking
+ * above uses — this instead takes the *ratio* of the booking's own already-
+ * computed TotalGstAmount to its GrandTotal (both set once, at booking
+ * time, from the live HSN rate that applied then) and applies that ratio to
+ * the payment amount. Rationale: a booking's locked-in GST amount must
+ * never silently drift just because the HSN master's rate changed later —
+ * only a fresh booking (or an explicit re-price) should ever pick up a new
+ * rate. No hardcoded percentage anywhere: both TotalGstAmount and
+ * GrandTotal are themselves live, HSN-derived figures computed once at
+ * booking/re-price time (see crmLedger.js's own booking-level GST columns).
+ * Returns a zero split (no GST) if the booking has no GST recorded at all —
+ * same conservative "don't invent a split" behavior as getGstRateForBooking.
+ */
+async function getGstSplit(pool, bookingId, amount) {
+  const r = await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT ISNULL(TotalGstAmount,0) AS TotalGstAmount, ISNULL(GrandTotal,0) AS GrandTotal FROM dbo.CrmBooking WHERE Id = @bid");
+  const row = r.recordset[0] || {};
+  const ratio = Number(row.GrandTotal) > 0 ? Number(row.TotalGstAmount) / Number(row.GrandTotal) : 0;
+  const gstAmount = Math.round(amount * ratio * 100) / 100;
+  return { gstAmount, baseAmount: Math.round((amount - gstAmount) * 100) / 100 };
+}
+
 let _sundryDebtorsGroupId;
 /** ASSETS > CURRENT ASSETS > TRADE RECEIVABLES > SUNDRY DEBTORS (migration
  * 191) — without this, a new customer head has LBelongsTo = NULL and is
@@ -73,7 +107,7 @@ async function ensureCrmCustomerLedgerHead(pool, crmCustomerId, createdBy) {
   if (existing.recordset.length) return existing.recordset[0].LHeadId;
 
   const cust = await pool.request().input("id", sql.Int, crmCustomerId)
-    .query("SELECT CustomerName, Mobile, Email, Address, PanNo FROM dbo.CrmCustomer WHERE Id = @id");
+    .query("SELECT CustomerName, Mobile, Email, Address, PanNo, InvoiceMode FROM dbo.CrmCustomer WHERE Id = @id");
   const c = cust.recordset[0];
   if (!c) throw new Error(`CrmCustomer ${crmCustomerId} not found — cannot create ledger head`);
 
@@ -93,16 +127,17 @@ async function ensureCrmCustomerLedgerHead(pool, crmCustomerId, createdBy) {
     .input("LHeadStatus", sql.Bit, 1)
     .input("Status", sql.NVarChar(20), "Approved")
     .input("LBelongsTo", sql.Int, groupId)
+    .input("InvoiceMode", sql.NVarChar(20), c.InvoiceMode || "NonInvoice")
     .input("CreatedBy", sql.NVarChar(100), createdBy || "system")
     .query(`
       INSERT INTO dbo.AccountHeadMaster
         (LHeadName, LHeadCode, LHeadPhone, LHeadEmail, LHeadAddress, LHeadContactPerson,
-         LHeadPaymentTerms, LHeadPan, LCountry, LHeadType, LHeadStatus, Status, LBelongsTo,
+         LHeadPaymentTerms, LHeadPan, LCountry, LHeadType, LHeadStatus, Status, LBelongsTo, InvoiceMode,
          ApprovedBy, ApprovedAt, CreatedBy, CreatedAt)
       OUTPUT INSERTED.LHeadId
       VALUES
         (@LHeadName, @LHeadCode, @LHeadPhone, @LHeadEmail, @LHeadAddress, @LHeadContactPerson,
-         @LHeadPaymentTerms, @LHeadPan, @LCountry, @LHeadType, @LHeadStatus, @Status, @LBelongsTo,
+         @LHeadPaymentTerms, @LHeadPan, @LCountry, @LHeadType, @LHeadStatus, @Status, @LBelongsTo, @InvoiceMode,
          @CreatedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME())
     `);
   return result.recordset[0].LHeadId;
@@ -127,6 +162,14 @@ async function syncCrmCustomerLedgerHead(pool, crmCustomerId, fields) {
     .input("email",  sql.NVarChar(100), fields.Email ?? null)
     .input("addr",   sql.VarChar(300), fields.Address || null)
     .input("pan",    sql.NVarChar(50), fields.PanNo || null)
+    // InvoiceMode has no ISNULL fallback like the fields above — CrmCustomer
+    // is the canonical source for this flag (it's NOT NULL there with a real
+    // default), so every sync call always carries a real value and this
+    // ledger head must always end up matching it exactly, never keeping a
+    // stale value from before. This is what makes "no invoice for this
+    // customer" hold from BOTH the CRM booking-invoice pipeline and the
+    // standalone Accounts Sale Invoice module, which reads this same row.
+    .input("invmode", sql.NVarChar(20), fields.InvoiceMode || "NonInvoice")
     .query(`
       UPDATE dbo.AccountHeadMaster SET
         LHeadName          = ISNULL(@name, LHeadName),
@@ -134,7 +177,8 @@ async function syncCrmCustomerLedgerHead(pool, crmCustomerId, fields) {
         LHeadPhone         = ISNULL(@phone, LHeadPhone),
         LHeadEmail         = @email,
         LHeadAddress       = ISNULL(@addr, LHeadAddress),
-        LHeadPan           = ISNULL(@pan, LHeadPan)
+        LHeadPan           = ISNULL(@pan, LHeadPan),
+        InvoiceMode        = @invmode
       WHERE LHeadCode = @code
     `);
 }
@@ -175,20 +219,20 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
   const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
 
-  // Pricing is GST-inclusive — back-calculate the GST portion from the live
-  // HSN rate rather than storing/hardcoding one. A booking with no HsnCode
-  // (or an unresolvable one) posts exactly as before this feature existed:
-  // the full amount credited to the customer, no GST leg.
-  const gstRate = await getGstRateForBooking(pool, row.BookingId);
+  // Pricing is GST-inclusive — split via the same canonical getGstSplit()
+  // every other CRM money event (including this receipt's own stored
+  // BaseAmount/GSTAmount columns) uses, so the GL posting can never disagree
+  // with what the receipt itself records. A booking with no GST recorded
+  // posts exactly as before this feature existed: the full amount credited
+  // to the customer, no GST leg.
+  const { gstAmount, baseAmount } = await getGstSplit(pool, row.BookingId, amount);
   const legs = [
     { lHeadId: collectionsHeadId, debit: amount, narration: `${row.ReceiptNo} — CRM payment received (${row.PaymentMode || "—"})` },
   ];
-  if (gstRate > 0) {
-    const gstAmount = Math.round((amount - amount / (1 + gstRate / 100)) * 100) / 100;
-    const baseAmount = Math.round((amount - gstAmount) * 100) / 100;
+  if (gstAmount > 0) {
     const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
     legs.push({ lHeadId: customerHeadId, credit: baseAmount, narration: `${row.ReceiptNo} — CRM payment received (base, excl. GST)` });
-    legs.push({ lHeadId: gstHeadId, credit: gstAmount, narration: `${row.ReceiptNo} — GST output liability @ ${gstRate}%` });
+    legs.push({ lHeadId: gstHeadId, credit: gstAmount, narration: `${row.ReceiptNo} — GST output liability` });
   } else {
     legs.push({ lHeadId: customerHeadId, credit: amount, narration: `${row.ReceiptNo} — CRM payment received` });
   }
@@ -222,7 +266,7 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
 
   const r = await pool.request().input("id", sql.Int, onAccountId).query(`
     SELECT oa.Id, oa.ReceiptNo, oa.Amount, oa.ReceivedDate, oa.PaymentMode,
-           b.CompanyId, b.ProjectId, a.CustomerId
+           b.Id AS BookingId, b.CompanyId, b.ProjectId, a.CustomerId
     FROM dbo.CrmOnAccountPayment oa
     JOIN dbo.CrmBooking b ON b.Id = oa.BookingId
     JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -239,6 +283,26 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
   const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
 
+  // Same canonical getGstSplit() as postCrmReceiptToGL above — an on-account
+  // deposit is real cash against the same GST-inclusive booking price, just
+  // not yet allocated to a specific milestone. It must carry the identical
+  // GST split so GST liability is recognised the moment cash actually
+  // arrives, not deferred until the deposit happens to get applied to a
+  // milestone later — postCrmOnAccountApplied below is a pure reallocation
+  // of already-posted cash, not new income, so it correctly does NOT
+  // re-split GST a second time.
+  const { gstAmount, baseAmount } = await getGstSplit(pool, row.BookingId, amount);
+  const legs = [
+    { lHeadId: collectionsHeadId, debit: amount, narration: `${row.ReceiptNo} — CRM on-account deposit received` },
+  ];
+  if (gstAmount > 0) {
+    const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
+    legs.push({ lHeadId: customerHeadId, credit: baseAmount, narration: `${row.ReceiptNo} — CRM on-account deposit received (base, excl. GST)` });
+    legs.push({ lHeadId: gstHeadId, credit: gstAmount, narration: `${row.ReceiptNo} — GST output liability` });
+  } else {
+    legs.push({ lHeadId: customerHeadId, credit: amount, narration: `${row.ReceiptNo} — CRM on-account deposit received` });
+  }
+
   await postVoucher(pool, {
     voucherNo: row.ReceiptNo,
     voucherDate: row.ReceivedDate,
@@ -247,10 +311,7 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
     companyId: row.CompanyId ?? null,
     projectId: row.ProjectId ?? null,
     createdBy: userEmail,
-    legs: [
-      { lHeadId: collectionsHeadId, debit: amount, narration: `${row.ReceiptNo} — CRM on-account deposit received` },
-      { lHeadId: customerHeadId, credit: amount, narration: `${row.ReceiptNo} — CRM on-account deposit received` },
-    ],
+    legs,
   });
 
   await pool.request()
@@ -665,6 +726,7 @@ module.exports = {
   ensureCrmCustomerLedgerHead,
   syncCrmCustomerLedgerHead,
   getGstRateForBooking,
+  getGstSplit,
   postCrmReceiptToGL,
   postCrmOnAccountToGL,
   postCrmOnAccountApplied,

@@ -33,8 +33,6 @@ const LM_SELECT = `
   SELECT m.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
     -- Agreement status (Executed / Registered / etc.)
     ag.Status AS AgreementStatus, ag.AgreementNo,
-    -- Allotment Letter (issued right after booking, before agreement signing)
-    al.Id AS AllotmentLetterId, al.AlNo, al.Status AS AllotmentLetterStatus,
     -- Sub-Registrar Visit 1: Agreement for Sale registration
     aqp.Id AS AfsQPId, aqp.AfsQPNo, aqp.Status AS AfsQPStatus,
     areg.Id AS AfsRegistryId, areg.AfsRegNo, areg.Status AS AfsRegistryStatus,
@@ -99,10 +97,6 @@ const LM_SELECT = `
     SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) ag
-  OUTER APPLY (
-    SELECT TOP 1 Id, AlNo, Status FROM dbo.CrmAllotmentLetter
-    WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
-  ) al
   OUTER APPLY (
     SELECT TOP 1 Id, AfsQPNo, Status FROM dbo.CrmAfsQueryPayment
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC

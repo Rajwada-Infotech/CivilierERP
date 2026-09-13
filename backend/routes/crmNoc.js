@@ -271,14 +271,31 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
     res.status(201).json({ success: true, id: result.recordset[0].Id, NocNo: nocNo });
 
   } catch (e) {
+    // A genuine concurrent double-submit (two staff clicking "Request NOC"
+    // within milliseconds of each other) can both pass the pre-check SELECT
+    // above before either INSERT commits — the second one lands here instead,
+    // rejected by UQ_CrmNoc_ActiveNocPerType. Translate that into the same
+    // friendly 409 the synchronous pre-check gives, instead of surfacing the
+    // raw SQL Server constraint-violation message as an ugly 500.
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique") || e.number === 2601 || e.number === 2627) {
+      return res.status(409).json({ error: "An active NOC already exists for this booking — refresh to see it." });
+    }
     console.error("[crm-noc] POST error:", e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-// PUT /:id — update bank loan tracking fields/notes only. Status is never
-// settable here — Approved/Rejected go through the endpoints below, Issued
-// through /:id/mark-issued.
+// PUT /:id — update Notes only. Status is never settable here —
+// Approved/Rejected go through the endpoints below, Issued through
+// /:id/mark-issued. The legacy LoanSanctionStatus/LoanSanctionDate/
+// LoanDisbursementStatus/LoanDisbursementDate columns (from migration 152,
+// pre-dating CrmLoanDetail) used to be writable here too — removed: nothing
+// downstream (resolveNocType, checkLoanProcessingCleared, the lifecycle bar,
+// the Sales Deed page) ever read them, so they were a second, disconnected
+// "loan status" a staff member could edit and trust by mistake while the
+// real gating value lived only on the Loan Tracking page. The columns
+// themselves are left in the schema (old data, no migration needed) but are
+// no longer written from here — CrmLoanDetail is the single source of truth.
 router.put("/:id", requirePageRight("crm-noc", "edit"), async (req, res) => {
   try {
     const pool = getPool();
@@ -292,16 +309,10 @@ router.put("/:id", requirePageRight("crm-noc", "edit"), async (req, res) => {
 
     await pool.request()
       .input("id",    sql.Int,  id)
-      .input("lss",   sql.NVarChar(50),  b.LoanSanctionStatus || null)
-      .input("lsd",   sql.Date, b.LoanSanctionDate || null)
-      .input("lds",   sql.NVarChar(50),  b.LoanDisbursementStatus || null)
-      .input("ldd",   sql.Date, b.LoanDisbursementDate || null)
       .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub",    sql.Int,  actorId(req))
       .query(`
         UPDATE dbo.CrmNoc SET
-          LoanSanctionStatus = ISNULL(@lss, LoanSanctionStatus), LoanSanctionDate = ISNULL(@lsd, LoanSanctionDate),
-          LoanDisbursementStatus = ISNULL(@lds, LoanDisbursementStatus), LoanDisbursementDate = ISNULL(@ldd, LoanDisbursementDate),
           Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);

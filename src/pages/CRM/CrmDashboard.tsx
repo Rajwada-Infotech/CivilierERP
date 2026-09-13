@@ -223,7 +223,7 @@ const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
                 </button>
               )}
               {day.Registries > 0 && (
-                <button onClick={() => navigate("/crm/registry")}
+                <button onClick={() => navigate("/crm/sales-deed?tab=Registry")}
                   className="w-full flex items-center gap-1 text-[10px] text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 rounded px-1 py-0.5 hover:opacity-80">
                   <FileText size={9} /> {day.Registries}
                 </button>

@@ -122,11 +122,15 @@ async function fetchBookingContext(bookingId: string): Promise<any> {
 
 // ─── Edit dialog for loan tracking / notes ─────────────────────────────────
 
+// Loan Sanction/Disbursement Status+Date used to be editable here too, but
+// they were a second, disconnected copy of what the Loan Tracking page
+// (CrmLoanDetail) already tracks — nothing in the workflow (resolveNocType,
+// checkLoanProcessingCleared, the lifecycle bar, the Sales Deed page) ever
+// read this copy, so a staff member filling it in here was writing to a
+// field the system quietly ignored while trusting the wrong number if it
+// ever drifted from the real one. Removed; see the Loan Tracking page for
+// actual loan status. Only Notes is editable here now.
 function EditNocDialog({ noc, onClose, onSaved }: { noc: any; onClose: () => void; onSaved: () => void }) {
-  const [lss, setLss]   = useState(noc.LoanSanctionStatus || "");
-  const [lsd, setLsd]   = useState(noc.LoanSanctionDate?.slice(0, 10) || "");
-  const [lds, setLds]   = useState(noc.LoanDisbursementStatus || "");
-  const [ldd, setLdd]   = useState(noc.LoanDisbursementDate?.slice(0, 10) || "");
   const [notes, setNotes] = useState(noc.Notes || "");
   const [saving, setSaving] = useState(false);
 
@@ -136,13 +140,7 @@ function EditNocDialog({ noc, onClose, onSaved }: { noc: any; onClose: () => voi
       const res = await fetchWithAuth(`${API}/${noc.Id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          LoanSanctionStatus: lss || null,
-          LoanSanctionDate: lsd || null,
-          LoanDisbursementStatus: lds || null,
-          LoanDisbursementDate: ldd || null,
-          Notes: notes || null,
-        }),
+        body: JSON.stringify({ Notes: notes || null }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
       toast.success("NOC details updated");
@@ -162,44 +160,6 @@ function EditNocDialog({ noc, onClose, onSaved }: { noc: any; onClose: () => voi
           <DialogTitle className="font-heading">Edit NOC Details</DialogTitle>
         </DialogHeader>
         <div className="space-y-3">
-          {noc.NocType === "Bank" && (
-            <>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Sanction Status</label>
-                  <select value={lss} onChange={(e) => setLss(e.target.value)}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                    <option value="">—</option>
-                    <option>Sanctioned</option>
-                    <option>Pending</option>
-                    <option>Rejected</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Sanction Date</label>
-                  <input type="date" value={lsd} onChange={(e) => setLsd(e.target.value)}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Disbursement Status</label>
-                  <select value={lds} onChange={(e) => setLds(e.target.value)}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                    <option value="">—</option>
-                    <option>Disbursed</option>
-                    <option>Partial</option>
-                    <option>Pending</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Disbursement Date</label>
-                  <input type="date" value={ldd} onChange={(e) => setLdd(e.target.value)}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                </div>
-              </div>
-            </>
-          )}
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Notes</label>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3}
@@ -658,16 +618,6 @@ const CrmNoc: React.FC = () => {
                         <DetailRow label="Bank Name"     value={detail.BankName || "—"} />
                         <DetailRow label="Loan A/C No."  value={detail.LoanAccountNo || "—"} mono />
                         <DetailRow label="Loan Amount"   value={detail.LoanAmount ? formatINR(detail.LoanAmount) : "—"} mono />
-                        <DetailRow label="Sanction"      value={
-                          detail.LoanSanctionStatus
-                            ? `${detail.LoanSanctionStatus}${detail.LoanSanctionDate ? " · " + fmtDate(detail.LoanSanctionDate) : ""}`
-                            : "—"
-                        } />
-                        <DetailRow label="Disbursement"  value={
-                          detail.LoanDisbursementStatus
-                            ? `${detail.LoanDisbursementStatus}${detail.LoanDisbursementDate ? " · " + fmtDate(detail.LoanDisbursementDate) : ""}`
-                            : "—"
-                        } />
                       </>
                     )}
                     {detail.ApprovalDate && <DetailRow label="Approved"    value={fmtDate(detail.ApprovalDate)} />}

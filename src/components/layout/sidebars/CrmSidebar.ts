@@ -60,16 +60,14 @@ export const crmNavItems: NavItem[] = [
 
   // ── Sub-Registrar Visit 2 — Sale Deed ────────────────────────────────────────
   // Legal ownership vests on execution of the Sale Deed (s.54 TPA 1882).
-  // Gate: AFS Registered. Sale Deed → Query Payment (stamp duty) → Registry →
-  // Mutation (revenue records updated to new owner name).
+  // Gate: AFS Registered. Sale Deed now also carries Query Payment (stamp
+  // duty) and Registry as steps within its own "Registration" tab.
   {
     label: "Sale Deed",
     icon: Key,
     children: [
-      { label: "Sale Deed",     path: "/crm/sales-deed",    pageKey: "crm-sales-deed"    },
-      { label: "Query Payment", path: "/crm/query-payment", pageKey: "crm-query-payment" },
-      { label: "Registry",      path: "/crm/registry",      pageKey: "crm-registry"      },
-      { label: "Mutation",      path: "/crm/mutation",      pageKey: "crm-mutation"      },
+      { label: "Sale Deed", path: "/crm/sales-deed", pageKey: "crm-sales-deed" },
+      { label: "Mutation",  path: "/crm/mutation",   pageKey: "crm-mutation"   },
     ],
   },
 

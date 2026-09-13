@@ -35,10 +35,10 @@ router.get("/", requirePageRight("crm-project-banks", "view"), async (req, res) 
 //   1. Any bank(s) tagged to this Project -> return exactly those, nothing
 //      else (a tagged bank is exclusive to its tagged Project(s) and must
 //      never appear for a different one).
-//   2. Nothing tagged to this Project -> return every bank that has NO tag
-//      to ANY project at all. A bank tagged elsewhere must stay invisible
-//      here even though this Project itself has no tags of its own —
-//      "untagged" is the fallback pool, not "everything".
+//   2. Nothing tagged to this Project -> return every active bank account,
+//      full stop. An untagged project is meant to behave as if it were
+//      tagged to everything — a bank being tagged to some OTHER project
+//      doesn't remove it from this one's fallback list.
 router.get("/for-project/:projectId", async (req, res) => {
   try {
     const pool = getPool();
@@ -64,7 +64,16 @@ router.get("/for-project/:projectId", async (req, res) => {
       // tagged bank happens to be currently inactive. An empty array here
       // (all tagged banks temporarily deactivated) is the correct result,
       // not a signal to fall through to the untagged pool below.
-      return res.json(rows.recordset.filter((r) => r.BStatus === 1).map(({ BId, BName }) => ({ BId, BName })));
+      //
+      // BUG FIX: LHeadStatus is a `bit` column — mssql deserializes it as a
+      // JS boolean (true/false), not the number 1/0. The old `=== 1` strict
+      // check could never match a boolean, so this branch silently returned
+      // an empty list for every project that actually had tagged banks —
+      // exactly the "tagging is broken" symptom reported live (tag a bank
+      // to a project, its dropdown still shows nothing). Use a truthy check
+      // instead so it works regardless of whether the driver hands back a
+      // boolean or a 1/0.
+      return res.json(rows.recordset.filter((r) => !!r.BStatus).map(({ BId, BName }) => ({ BId, BName })));
     }
 
     // No banks are tagged to this project — show ALL active company banks

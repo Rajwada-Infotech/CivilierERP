@@ -1514,7 +1514,7 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
     const pool = getPool();
     const b = req.body;
     const agreementId = parseInt(req.params.id);
-    const DOC_TYPES = ["SaleAgreement","AllotmentLetter","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
+    const DOC_TYPES = ["SaleAgreement","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
     if (!DOC_TYPES.includes(b.DocumentType))
       return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
 
@@ -1577,7 +1577,7 @@ router.post("/:id/documents/request", requirePageRight("crm-documents", "create"
     const pool = getPool();
     const b = req.body;
     const agreementId = parseInt(req.params.id);
-    const DOC_TYPES = ["SaleAgreement","AllotmentLetter","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
+    const DOC_TYPES = ["SaleAgreement","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
     if (!DOC_TYPES.includes(b.DocumentType))
       return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
 
@@ -1649,7 +1649,7 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
       const pool = getPool();
       const agreementId = parseInt(req.params.id);
       const docType = req.body?.DocumentType;
-      const DOC_TYPES = ["SaleAgreement","AllotmentLetter","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
+      const DOC_TYPES = ["SaleAgreement","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
       if (!DOC_TYPES.includes(docType)) return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
       for (const file of req.files) {

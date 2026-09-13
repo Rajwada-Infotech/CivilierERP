@@ -360,6 +360,27 @@ async function createSaleInvoiceInternal(pool, payload, userEmail, issuedByEmail
     };
   }
 
+  // ── Guard: the billed party is set to Non-Invoice ────────────────────────
+  // Migration 420 — AccountHeadMaster.InvoiceMode (default 'NonInvoice').
+  // A CrmCustomer-linked ledger head (LHeadCode 'CRMCUST-<id>') has this kept
+  // in sync from the CRM Customer record itself (see crmLedger.js's
+  // syncCrmCustomerLedgerHead); a manually-entered Accounts customer sets it
+  // directly on this same row via CustomerMaster.tsx. Either way, this is
+  // the single check that makes "no invoice for this customer" hold from
+  // both invoicing systems in this codebase.
+  if (so.CustomerID) {
+    const modeRes = await pool.request().input("id", sql.Int, so.CustomerID)
+      .query("SELECT LHeadName, InvoiceMode FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
+    const modeRow = modeRes.recordset[0];
+    if (modeRow?.InvoiceMode === "NonInvoice") {
+      const err = new Error(
+        `${modeRow.LHeadName || "This customer"} is set to Non-Invoice — no invoice can be generated for them. Change it on the Customer Master record if this is incorrect.`,
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
+
   // ── Guard: no existing active invoice for this SO ────────────────────────
   const dupCheck = await pool
     .request()

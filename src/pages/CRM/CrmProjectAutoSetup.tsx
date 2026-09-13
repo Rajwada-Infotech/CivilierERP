@@ -24,7 +24,7 @@ async function fetchUnitTypes(): Promise<{ label: string }[]> {
 
 type TemplateRow = { UnitType: string; Count: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 type PaymentPlan = { Id: number; PlanName: string; IsActive: boolean };
-type UnitEdit = { UnitName: string; UnitType: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
+type UnitEdit = { UnitName: string; FloorNo: string; UnitType: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
 
 async function fetchApplicablePlans(projectId: string): Promise<PaymentPlan[]> {
   try {
@@ -488,6 +488,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     setEditingUnitId(unit.Id);
     setEditingUnit({
       UnitName: unit.UnitName || "",
+      FloorNo: unit.FloorNo != null ? String(unit.FloorNo) : "",
       UnitType: unit.UnitType || unitTypesMaster[0]?.label || "",
       AreaSqFt: unit.AreaSqFt != null ? String(unit.AreaSqFt) : "",
       CarpetAreaSqFt: unit.CarpetAreaSqFt != null ? String(unit.CarpetAreaSqFt) : "",
@@ -503,6 +504,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     if (!editingUnit) return;
     const unitName = editingUnit.UnitName.trim();
     if (!unitName) { toast.error("Unit name is required"); return; }
+    const floorNo = editingUnit.FloorNo !== "" ? parseInt(editingUnit.FloorNo, 10) : null;
     setSavingUnitId(unit.Id);
     try {
       const res = await fetchWithAuth(`/api/unit-master/${unit.Id}`, {
@@ -512,7 +514,7 @@ const CrmProjectAutoSetup: React.FC = () => {
           ProjectId: unit.ProjectId,
           BlockId: unit.BlockId,
           UnitName: unitName,
-          FloorNo: unit.FloorNo,
+          FloorNo: floorNo,
           UnitType: editingUnit.UnitType || null,
           AreaSqFt: editingUnit.AreaSqFt || null,
           CarpetAreaSqFt: editingUnit.CarpetAreaSqFt || null,
@@ -704,13 +706,19 @@ const CrmProjectAutoSetup: React.FC = () => {
           </div>
         )}
 
-        {/* Flags the exact class of gap that caused a real mix-up once
-            before: active Units under this project with no Floor at all
-            can't show up in the tree below, so this surfaces them instead
-            of silently doing nothing about them. */}
+        {/* Floor-less units are now shown in the Unassigned row in the tree
+            below (Option B synthetic bucket). This note stays as a lightweight
+            signpost so staff know what the amber row means without having to
+            guess — it disappears automatically once all units are fixed. */}
         {projectId && status && status.legacyUnitCount > 0 && (
-          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 text-sm text-amber-600">
-            {status.legacyUnitCount} unit{status.legacyUnitCount === 1 ? "" : "s"} on this project {status.legacyUnitCount === 1 ? "has" : "have"} no Floor assigned and won't appear in the tree below — resolve them in <a href="/crm/setup/unit-master" className="underline">Unit Master</a> (assign a floor, or deactivate if they're stale/duplicate data) before relying on this page as the full picture.
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-2.5 text-sm text-amber-600 flex items-center gap-2">
+            <span>
+              {status.legacyUnitCount} unit{status.legacyUnitCount === 1 ? "" : "s"} with no floor assigned — visible as the{" "}
+              <span className="font-semibold">Unassigned</span> row in the tree below. Edit each unit to assign a floor, or go to{" "}
+              <a href="/crm/setup/unit-master" className="underline" onClick={(e) => e.stopPropagation()}>
+                Unit Master
+              </a>.
+            </span>
           </div>
         )}
 
@@ -1008,16 +1016,22 @@ const CrmProjectAutoSetup: React.FC = () => {
                               </span>
                               <div className="flex flex-wrap items-center gap-1">
                                 {blockFloors.map((f) => (
-                                  <span key={f.Id} className={`flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded text-muted-foreground ${floorsEditMode ? "bg-muted/70" : "bg-muted/40"}`}>
+                                  <span key={f.Id} className={`flex items-center gap-0.5 text-[11px] px-1.5 py-0.5 rounded text-muted-foreground ${
+                                    f.FloorNo === -1
+                                      ? "bg-amber-500/10 text-amber-600"
+                                      : floorsEditMode ? "bg-muted/70" : "bg-muted/40"
+                                  }`}>
                                     {/* Generated floors are clickable in view
                                         mode — same drill-into-Units tree as
-                                        the overview card/Blocks section. */}
-                                    {!floorsEditMode && f.IsGenerated ? (
+                                        the overview card/Blocks section.
+                                        Unassigned bucket (FloorNo -1) is not
+                                        clickable here — use the overview tree. */}
+                                    {!floorsEditMode && f.IsGenerated && f.FloorNo !== -1 ? (
                                       <button onClick={() => handleToggleFloorPlanFloor(f)} className="hover:text-primary">{f.FloorLabel}</button>
                                     ) : (
                                       <span>{f.FloorLabel}</span>
                                     )}
-                                    {floorsEditMode && (
+                                    {floorsEditMode && f.FloorNo !== -1 && (
                                       <button onClick={() => handleDeleteFloor(f)} className="hover:text-red-600">
                                         <X size={9} />
                                       </button>
@@ -1473,7 +1487,20 @@ const BlockFloorTree: React.FC<{
     ) : (
       blockFloors.map((f) => (
         <div key={f.Id}>
-          {f.IsGenerated ? (
+          {f.FloorNo === -1 ? (
+            // Synthetic "Unassigned" bucket — units with no FloorNo at all.
+            // Still clickable to expand and edit inline (assign a real floor),
+            // but amber-styled so it reads as "something to fix" not "done".
+            <button onClick={() => onToggleFloor(f)}
+              className="w-full flex items-center gap-1.5 py-0.5 text-left hover:text-amber-700 text-amber-600">
+              {expandedFloorId === f.Id ? <ChevronDown size={10} className="shrink-0" /> : <ChevronRight size={10} className="shrink-0" />}
+              <Layers size={10} className="shrink-0" />
+              <span className="shrink-0 font-medium">Unassigned</span>
+              <span className="text-amber-500/80">
+                {f.GeneratedUnitCount ?? f.UnitCount} unit{(f.GeneratedUnitCount ?? f.UnitCount) === 1 ? "" : "s"} — no floor set, edit to assign one
+              </span>
+            </button>
+          ) : f.IsGenerated ? (
             <button onClick={() => onToggleFloor(f)}
               className="w-full flex items-center gap-1.5 py-0.5 text-left hover:text-primary">
               {expandedFloorId === f.Id ? <ChevronDown size={10} className="shrink-0" /> : <ChevronRight size={10} className="shrink-0" />}
@@ -1573,6 +1600,22 @@ const FloorUnitList: React.FC<{
                       {unitTypesMaster.map((t) => <option key={t.label} value={t.label}>{t.label}</option>)}
                     </select>
                   </div>
+                  {/* Floor No. input — only shown for Unassigned units (FloorNo IS NULL)
+                      so staff can assign a real floor right here without going to Unit Master.
+                      Hidden for units already on a real floor — their floor is set correctly
+                      by the wizard and shouldn't be changed from the inline form. */}
+                  {u.FloorNo == null && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-amber-600 uppercase tracking-wide font-medium shrink-0">Floor No. (required)</span>
+                      <input
+                        value={editingUnit.FloorNo}
+                        type="number"
+                        placeholder="e.g. 1"
+                        onChange={(e) => onEditChange({ FloorNo: e.target.value })}
+                        className="h-7 w-24 rounded border border-amber-500/50 bg-background px-2 text-[11px] outline-none focus:border-amber-600"
+                      />
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 sm:grid-cols-6 gap-1.5">
                     <div className="flex flex-col gap-0.5">
                       <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Saleable (sqft)</span>

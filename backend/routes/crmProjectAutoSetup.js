@@ -119,6 +119,66 @@ async function syncExistingStructure(pool, projectId) {
       `);
   }
 
+  // ── "Unassigned" synthetic bucket (Option B) ──────────────────────────────
+  // For each block that has active UnitMaster rows with FloorNo IS NULL (i.e.
+  // units that predate this wizard and were created without a floor), create or
+  // maintain a synthetic CrmProjectAutoSetupFloor row keyed at FloorNo = -1,
+  // FloorLabel = 'Unassigned'. This makes those units visible in the wizard's
+  // floor tree so staff can expand the bucket, click Edit on each unit, and
+  // assign a real floor — instead of just seeing a count in an amber banner
+  // with no actionable path inside this page.
+  //
+  // IsGenerated = 1: the generate-units handler filters IsGenerated = 0, so
+  //   this row is permanently excluded from generation — the units already exist.
+  // Auto-cleanup: when the real count reaches 0 (all units fixed), the row is
+  //   deleted so it disappears from the tree without staff having to do anything.
+  // Option A (FloorNo required in unitMaster.js) prevents this bucket from
+  //   ever growing from new data; this section handles the legacy backlog only.
+  const blocksWithOrphanUnits = await pool.request().input("pid", sql.Int, projectId).query(`
+    SELECT b.Id AS BlockId, COUNT(*) AS OrphanCount
+    FROM dbo.UnitMaster u
+    JOIN dbo.BlockMaster b ON b.Id = u.BlockId
+    WHERE b.ProjectId = @pid AND b.IsActive = 1 AND u.IsActive = 1 AND u.FloorNo IS NULL
+    GROUP BY b.Id
+  `);
+  // Also collect blocks that HAD the bucket but now have no orphans (for cleanup).
+  const blocksWithBucket = await pool.request().input("pid", sql.Int, projectId).query(`
+    SELECT BlockId FROM dbo.CrmProjectAutoSetupFloor
+    WHERE ProjectId = @pid AND FloorNo = -1 AND IsActive = 1
+  `);
+  const orphanMap = new Map(blocksWithOrphanUnits.recordset.map((r) => [r.BlockId, r.OrphanCount]));
+  const bucketBlockIds = new Set(blocksWithBucket.recordset.map((r) => r.BlockId));
+
+  for (const { BlockId, OrphanCount } of blocksWithOrphanUnits.recordset) {
+    if (bucketBlockIds.has(BlockId)) {
+      // Update existing bucket's count if it changed.
+      await pool.request()
+        .input("bid", sql.Int, BlockId).input("uc", sql.Int, OrphanCount)
+        .query(`
+          UPDATE dbo.CrmProjectAutoSetupFloor SET UnitCount = @uc, UpdatedAt = SYSDATETIME()
+          WHERE BlockId = @bid AND FloorNo = -1 AND IsActive = 1
+            AND UnitCount <> @uc
+        `);
+    } else {
+      // Create the synthetic bucket for the first time.
+      await pool.request()
+        .input("pid", sql.Int, projectId).input("bid", sql.Int, BlockId)
+        .input("uc", sql.Int, OrphanCount)
+        .query(`
+          INSERT INTO dbo.CrmProjectAutoSetupFloor
+            (ProjectId, BlockId, FloorNo, FloorLabel, UnitCount, HasUnits, IsGenerated, IsActive, CreatedAt)
+          VALUES (@pid, @bid, -1, 'Unassigned', @uc, 1, 1, 1, SYSDATETIME())
+        `);
+    }
+  }
+  // Remove stale buckets for blocks that no longer have any floor-less units.
+  for (const BlockId of bucketBlockIds) {
+    if (!orphanMap.has(BlockId)) {
+      await pool.request().input("bid", sql.Int, BlockId)
+        .query("DELETE FROM dbo.CrmProjectAutoSetupFloor WHERE BlockId = @bid AND FloorNo = -1");
+    }
+  }
+
   // ── Template backward fill ────────────────────────────────────────────────
   // For each block that has live units but NO active unit-template rows:
   // derive the template from the actual UnitType distribution in UnitMaster
@@ -350,7 +410,14 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
     const floors = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT
         f.Id, f.BlockId, f.FloorNo, f.FloorLabel, f.UnitCount, f.HasUnits, f.IsGenerated,
-        (SELECT COUNT(*) FROM dbo.UnitMaster u WHERE u.BlockId = f.BlockId AND u.FloorNo = f.FloorNo AND u.IsActive = 1) AS GeneratedUnitCount
+        (SELECT COUNT(*) FROM dbo.UnitMaster u
+         WHERE u.BlockId = f.BlockId AND u.IsActive = 1
+           AND (
+             (f.FloorNo = -1 AND u.FloorNo IS NULL)
+             OR
+             (f.FloorNo <> -1 AND u.FloorNo = f.FloorNo)
+           )
+        ) AS GeneratedUnitCount
       FROM dbo.CrmProjectAutoSetupFloor f
       WHERE f.ProjectId = @pid AND f.IsActive = 1
       ORDER BY f.BlockId, f.FloorNo
@@ -368,18 +435,35 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
     // real, active Units under this project with no FloorNo at all can't be
     // represented in the per-floor tree (syncExistingStructure above only
     // ever backfills Units that already have one), so they'd otherwise sit
-    // invisible here while still showing up in Unit Matrix — flagged to the
-    // UI instead of silently doing nothing about them.
-    const legacyCount = await pool.request().input("pid", sql.Int, projectId).query(`
-      SELECT COUNT(*) AS c FROM dbo.UnitMaster u
+    // invisible here while still showing up in Unit Matrix — returned as a
+    // full list (Id + UnitName + BlockName) so the UI can show which units
+    // are affected, not just how many. legacyUnitCount kept for back-compat
+    // with any other consumer that reads the count directly.
+    const legacyUnitsRes = await pool.request().input("pid", sql.Int, projectId).query(`
+      SELECT u.Id, u.UnitName, b.BlockName
+      FROM dbo.UnitMaster u
       JOIN dbo.BlockMaster b ON b.Id = u.BlockId
       WHERE b.ProjectId = @pid AND b.IsActive = 1 AND u.IsActive = 1 AND u.FloorNo IS NULL
+      ORDER BY b.BlockName, u.UnitName
+    `);
+
+    // Parking slots whose BlockId IS NULL are visible in the parking matrix
+    // but completely invisible to the wizard's per-block totals — the same
+    // structural gap as floor-less units, but for parking. parkingSlotMaster.js
+    // POST allows BlockId to be optional, so this can accumulate silently.
+    // No equivalent of legacyUnitCount existed here before; adding it so the
+    // Parking tab can surface the same class of warning.
+    const orphanParkingRes = await pool.request().input("pid", sql.Int, projectId).query(`
+      SELECT COUNT(*) AS c FROM dbo.ParkingSlot
+      WHERE ProjectId = @pid AND IsActive = 1 AND BlockId IS NULL
     `);
 
     res.json({
       project: { Id: project.Id, Name: project.Name, ShortCode: shortCode },
       shortCodeValid: isValidShortCode(shortCode),
-      legacyUnitCount: legacyCount.recordset[0].c,
+      legacyUnitCount: legacyUnitsRes.recordset.length,
+      legacyUnits: legacyUnitsRes.recordset,
+      orphanParkingSlotCount: orphanParkingRes.recordset[0].c,
       blocks: blocks.recordset,
       floors: floors.recordset,
     });
@@ -1016,24 +1100,47 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
     if (!floor.recordset.length) return res.status(404).json({ error: "Floor not found" });
     const { BlockId, FloorNo } = floor.recordset[0];
 
-    const units = await pool.request().input("bid", sql.Int, BlockId).input("fno", sql.Int, FloorNo).query(`
-      SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType,
-        u.AreaSqFt, u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
-        u.IsActive,
-        tags.PlanIds AS PaymentPlanIds,
-        bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId, app.ApplicationNo AS LockApplicationNo
-      FROM dbo.UnitMaster u
-      OUTER APPLY (
-        SELECT STRING_AGG(CAST(upp.PlanId AS VARCHAR(20)), ',') AS PlanIds
-        FROM dbo.CrmUnitPaymentPlan upp
-        WHERE upp.UnitId = u.Id AND upp.IsActive = 1
-      ) tags
-      LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
-      LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
-      LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
-      WHERE u.BlockId = @bid AND u.FloorNo = @fno AND u.IsActive = 1
-      ORDER BY u.UnitName
-    `);
+    // Synthetic Unassigned bucket (FloorNo = -1) holds units whose FloorNo
+    // IS NULL in UnitMaster — a regular equality filter would return nothing.
+    // All other floors use the normal equality join.
+    const unitsQuery = FloorNo === -1
+      ? pool.request().input("bid", sql.Int, BlockId).query(`
+          SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType,
+            u.AreaSqFt, u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
+            u.IsActive,
+            tags.PlanIds AS PaymentPlanIds,
+            bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId, app.ApplicationNo AS LockApplicationNo
+          FROM dbo.UnitMaster u
+          OUTER APPLY (
+            SELECT STRING_AGG(CAST(upp.PlanId AS VARCHAR(20)), ',') AS PlanIds
+            FROM dbo.CrmUnitPaymentPlan upp
+            WHERE upp.UnitId = u.Id AND upp.IsActive = 1
+          ) tags
+          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
+          LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          WHERE u.BlockId = @bid AND u.FloorNo IS NULL AND u.IsActive = 1
+          ORDER BY u.UnitName
+        `)
+      : pool.request().input("bid", sql.Int, BlockId).input("fno", sql.Int, FloorNo).query(`
+          SELECT u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType,
+            u.AreaSqFt, u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
+            u.IsActive,
+            tags.PlanIds AS PaymentPlanIds,
+            bk.BookingNo AS LockBookingNo, h.Id AS LockHoldId, app.ApplicationNo AS LockApplicationNo
+          FROM dbo.UnitMaster u
+          OUTER APPLY (
+            SELECT STRING_AGG(CAST(upp.PlanId AS VARCHAR(20)), ',') AS PlanIds
+            FROM dbo.CrmUnitPaymentPlan upp
+            WHERE upp.UnitId = u.Id AND upp.IsActive = 1
+          ) tags
+          LEFT JOIN dbo.CrmBooking bk ON bk.UnitId = u.Id AND bk.IsActive = 1 AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          LEFT JOIN dbo.CrmInventoryHold h ON h.EntityType = 'Unit' AND h.EntityId = u.Id AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
+          LEFT JOIN dbo.CrmApplication app ON app.PreferredUnitId = u.Id AND app.IsActive = 1 AND app.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+          WHERE u.BlockId = @bid AND u.FloorNo = @fno AND u.IsActive = 1
+          ORDER BY u.UnitName
+        `);
+    const units = await unitsQuery;
     res.json({ units: units.recordset });
   } catch (e) {
     console.error("[crm-project-auto-setup] GET /floors/:id/units error:", e.message);
@@ -1147,72 +1254,91 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
         const unitCode = `${floor.FloorLabel}${String(seq).padStart(2, "0")}`;
         const unitName = `${shortCode}/${floor.BlockName}/${unitCode}`;
         const typeSlot = sequence.length ? sequence[(seq - 1) % sequence.length] : null;
-
-        const dupe = await pool.request()
-          .input("pid", sql.Int, projectId).input("bid", sql.Int, floor.BlockId).input("name", sql.NVarChar(100), unitName)
-          .query("SELECT Id, IsActive FROM dbo.UnitMaster WHERE ProjectId = @pid AND BlockId = @bid AND UnitName = @name");
-
         const blockPlanIds = plansByBlock.get(floor.BlockId) || [];
-        if (dupe.recordset.length) {
-          if (!dupe.recordset[0].IsActive) {
-            const reactivatedId = dupe.recordset[0].Id;
-            await pool.request()
-              .input("id",             sql.Int,         reactivatedId)
-              .input("fno",            sql.Int,         floor.FloorNo)
-              .input("utype",          sql.NVarChar(50),typeSlot?.UnitType || null)
-              .input("area",           sql.Decimal(18,2),typeSlot?.AreaSqFt ?? null)
-              .input("carpetArea",     sql.Decimal(18,2),typeSlot?.CarpetAreaSqFt ?? null)
-              .input("builtUp",        sql.Decimal(18,2),typeSlot?.BuiltUpAreaSqFt ?? null)
-              .input("superBuiltUp",   sql.Decimal(18,2),typeSlot?.SuperBuiltUpAreaSqFt ?? null)
-              .input("openTerrace",    sql.Decimal(18,2),typeSlot?.OpenTerraceAreaSqFt ?? null)
-              .input("rate",           sql.Decimal(18,2),typeSlot?.RatePerSqFt ?? null)
-              .query(`UPDATE dbo.UnitMaster SET
-                IsActive = 1, FloorNo = @fno,
-                UnitType           = ISNULL(UnitType, @utype),
-                AreaSqFt           = ISNULL(AreaSqFt, @area),
-                CarpetAreaSqFt     = ISNULL(CarpetAreaSqFt, @carpetArea),
-                BuiltUpAreaSqFt    = ISNULL(BuiltUpAreaSqFt, @builtUp),
-                SuperBuiltUpAreaSqFt = ISNULL(SuperBuiltUpAreaSqFt, @superBuiltUp),
-                OpenTerraceAreaSqFt  = ISNULL(OpenTerraceAreaSqFt, @openTerrace),
-                RatePerSqFt          = ISNULL(RatePerSqFt, @rate),
-                UpdatedAt = SYSDATETIME()
-              WHERE Id = @id`);
-            if (blockPlanIds.length) await syncUnitPaymentPlanTags(pool, reactivatedId, blockPlanIds);
+
+        // Wrap the check+INSERT in a transaction with UPDLOCK so that two
+        // concurrent generate-units requests for the same project serialise
+        // on a per-unit-name basis. Without this, both can pass the dupe-check
+        // SELECT before either INSERT commits and produce duplicate rows.
+        // Mirrors the identical fix in applyAddParking() / crmEntityCreation.js.
+        const tx = pool.transaction();
+        await tx.begin();
+        try {
+          const dupe = await tx.request()
+            .input("pid", sql.Int, projectId).input("bid", sql.Int, floor.BlockId).input("name", sql.NVarChar(100), unitName)
+            .query("SELECT Id, IsActive FROM dbo.UnitMaster WITH (UPDLOCK, ROWLOCK) WHERE ProjectId = @pid AND BlockId = @bid AND UnitName = @name");
+
+          if (dupe.recordset.length) {
+            if (!dupe.recordset[0].IsActive) {
+              const reactivatedId = dupe.recordset[0].Id;
+              await tx.request()
+                .input("id",             sql.Int,         reactivatedId)
+                .input("fno",            sql.Int,         floor.FloorNo)
+                .input("utype",          sql.NVarChar(50),typeSlot?.UnitType || null)
+                .input("area",           sql.Decimal(18,2),typeSlot?.AreaSqFt ?? null)
+                .input("carpetArea",     sql.Decimal(18,2),typeSlot?.CarpetAreaSqFt ?? null)
+                .input("builtUp",        sql.Decimal(18,2),typeSlot?.BuiltUpAreaSqFt ?? null)
+                .input("superBuiltUp",   sql.Decimal(18,2),typeSlot?.SuperBuiltUpAreaSqFt ?? null)
+                .input("openTerrace",    sql.Decimal(18,2),typeSlot?.OpenTerraceAreaSqFt ?? null)
+                .input("rate",           sql.Decimal(18,2),typeSlot?.RatePerSqFt ?? null)
+                .query(`UPDATE dbo.UnitMaster SET
+                  IsActive = 1, FloorNo = @fno,
+                  UnitType           = ISNULL(UnitType, @utype),
+                  AreaSqFt           = ISNULL(AreaSqFt, @area),
+                  CarpetAreaSqFt     = ISNULL(CarpetAreaSqFt, @carpetArea),
+                  BuiltUpAreaSqFt    = ISNULL(BuiltUpAreaSqFt, @builtUp),
+                  SuperBuiltUpAreaSqFt = ISNULL(SuperBuiltUpAreaSqFt, @superBuiltUp),
+                  OpenTerraceAreaSqFt  = ISNULL(OpenTerraceAreaSqFt, @openTerrace),
+                  RatePerSqFt          = ISNULL(RatePerSqFt, @rate),
+                  UpdatedAt = SYSDATETIME()
+                WHERE Id = @id`);
+              await tx.commit();
+              if (blockPlanIds.length) await syncUnitPaymentPlanTags(pool, reactivatedId, blockPlanIds);
+              totalCreated++;
+            } else {
+              // Already active — leave it alone, it's already real inventory.
+              await tx.commit();
+            }
+          } else {
+            const ins = await tx.request()
+              .input("pid",          sql.Int,          projectId)
+              .input("bid",          sql.Int,          floor.BlockId)
+              .input("name",         sql.NVarChar(100),unitName)
+              .input("fno",          sql.Int,          floor.FloorNo)
+              .input("utype",        sql.NVarChar(50), typeSlot?.UnitType || null)
+              .input("area",         sql.Decimal(18,2),typeSlot?.AreaSqFt ?? null)
+              .input("carpetArea",   sql.Decimal(18,2),typeSlot?.CarpetAreaSqFt ?? null)
+              .input("builtUp",      sql.Decimal(18,2),typeSlot?.BuiltUpAreaSqFt ?? null)
+              .input("superBuiltUp", sql.Decimal(18,2),typeSlot?.SuperBuiltUpAreaSqFt ?? null)
+              .input("openTerrace",  sql.Decimal(18,2),typeSlot?.OpenTerraceAreaSqFt ?? null)
+              .input("rate",         sql.Decimal(18,2),typeSlot?.RatePerSqFt ?? null)
+              .input("cb",           sql.Int,          createdBy)
+              .query(`
+                INSERT INTO dbo.UnitMaster
+                  (ProjectId, BlockId, UnitName, FloorNo, UnitType,
+                   AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt,
+                   IsActive, CreatedBy, CreatedAt)
+                OUTPUT INSERTED.Id
+                VALUES
+                  (@pid, @bid, @name, @fno, @utype,
+                   @area, @carpetArea, @builtUp, @superBuiltUp, @openTerrace, @rate,
+                   1, @cb, SYSDATETIME())
+              `);
+            const newId = ins.recordset[0]?.Id;
+            await tx.commit();
+            if (newId && blockPlanIds.length) await syncUnitPaymentPlanTags(pool, newId, blockPlanIds);
             totalCreated++;
           }
-          // Already active — leave it alone, it's already real inventory.
-        } else {
-          const ins = await pool.request()
-            .input("pid",          sql.Int,          projectId)
-            .input("bid",          sql.Int,          floor.BlockId)
-            .input("name",         sql.NVarChar(100),unitName)
-            .input("fno",          sql.Int,          floor.FloorNo)
-            .input("utype",        sql.NVarChar(50), typeSlot?.UnitType || null)
-            .input("area",         sql.Decimal(18,2),typeSlot?.AreaSqFt ?? null)
-            .input("carpetArea",   sql.Decimal(18,2),typeSlot?.CarpetAreaSqFt ?? null)
-            .input("builtUp",      sql.Decimal(18,2),typeSlot?.BuiltUpAreaSqFt ?? null)
-            .input("superBuiltUp", sql.Decimal(18,2),typeSlot?.SuperBuiltUpAreaSqFt ?? null)
-            .input("openTerrace",  sql.Decimal(18,2),typeSlot?.OpenTerraceAreaSqFt ?? null)
-            .input("rate",         sql.Decimal(18,2),typeSlot?.RatePerSqFt ?? null)
-            .input("cb",           sql.Int,          createdBy)
-            .query(`
-              INSERT INTO dbo.UnitMaster
-                (ProjectId, BlockId, UnitName, FloorNo, UnitType,
-                 AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt,
-                 IsActive, CreatedBy, CreatedAt)
-              OUTPUT INSERTED.Id
-              VALUES
-                (@pid, @bid, @name, @fno, @utype,
-                 @area, @carpetArea, @builtUp, @superBuiltUp, @openTerrace, @rate,
-                 1, @cb, SYSDATETIME())
-            `);
-          const newId = ins.recordset[0]?.Id;
-          if (newId && blockPlanIds.length) await syncUnitPaymentPlanTags(pool, newId, blockPlanIds);
-          totalCreated++;
+        } catch (txErr) {
+          try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+          throw txErr;
         }
         if (sample.length < 5) sample.push(unitName);
       }
 
+      // IsGenerated flag is a progress marker, not inventory — kept outside
+      // the per-unit transaction so a unit-level failure doesn't prevent the
+      // floor from being marked done once the remaining units succeed.
       await pool.request().input("id", sql.Int, floor.Id)
         .query("UPDATE dbo.CrmProjectAutoSetupFloor SET IsGenerated = 1, UpdatedAt = SYSDATETIME() WHERE Id = @id");
     }
@@ -1277,27 +1403,41 @@ router.post("/generate-parking-slots", requirePageRight("crm-auto-project-setup"
         const slotNo = `${shortCode}/${block.BlockName}/P${String(seq).padStart(2, "0")}`;
         const parkingType = sequence[seq - 1];
 
-        const dupe = await pool.request()
-          .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId).input("slot", sql.NVarChar(50), slotNo)
-          .query("SELECT Id, IsActive FROM dbo.ParkingSlot WHERE ProjectId = @pid AND BlockId = @bid AND SlotNo = @slot");
+        // Wrap the check+INSERT in a transaction with UPDLOCK so that two
+        // concurrent generate-parking-slots requests for the same project
+        // serialise on a per-slot-number basis — same fix as generate-units.
+        const tx = pool.transaction();
+        await tx.begin();
+        try {
+          const dupe = await tx.request()
+            .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId).input("slot", sql.NVarChar(50), slotNo)
+            .query("SELECT Id, IsActive FROM dbo.ParkingSlot WITH (UPDLOCK, ROWLOCK) WHERE ProjectId = @pid AND BlockId = @bid AND SlotNo = @slot");
 
-        if (dupe.recordset.length) {
-          if (!dupe.recordset[0].IsActive) {
-            await pool.request().input("id", sql.Int, dupe.recordset[0].Id).input("type", sql.NVarChar(50), parkingType)
-              .query("UPDATE dbo.ParkingSlot SET IsActive = 1, ParkingType = ISNULL(ParkingType, @type), UpdatedAt = SYSDATETIME() WHERE Id = @id");
+          if (dupe.recordset.length) {
+            if (!dupe.recordset[0].IsActive) {
+              await tx.request().input("id", sql.Int, dupe.recordset[0].Id).input("type", sql.NVarChar(50), parkingType)
+                .query("UPDATE dbo.ParkingSlot SET IsActive = 1, ParkingType = ISNULL(ParkingType, @type), UpdatedAt = SYSDATETIME() WHERE Id = @id");
+              await tx.commit();
+              totalCreated++;
+            } else {
+              // Already active — leave it alone, it's already real inventory.
+              await tx.commit();
+            }
+          } else {
+            await tx.request()
+              .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId)
+              .input("slot", sql.NVarChar(50), slotNo).input("type", sql.NVarChar(50), parkingType)
+              .input("cb", sql.Int, createdBy)
+              .query(`
+                INSERT INTO dbo.ParkingSlot (ProjectId, BlockId, SlotNo, ParkingType, IsActive, CreatedBy, CreatedAt)
+                VALUES (@pid, @bid, @slot, @type, 1, @cb, SYSDATETIME())
+              `);
+            await tx.commit();
             totalCreated++;
           }
-          // Already active — leave it alone, it's already real inventory.
-        } else {
-          await pool.request()
-            .input("pid", sql.Int, projectId).input("bid", sql.Int, block.BlockId)
-            .input("slot", sql.NVarChar(50), slotNo).input("type", sql.NVarChar(50), parkingType)
-            .input("cb", sql.Int, createdBy)
-            .query(`
-              INSERT INTO dbo.ParkingSlot (ProjectId, BlockId, SlotNo, ParkingType, IsActive, CreatedBy, CreatedAt)
-              VALUES (@pid, @bid, @slot, @type, 1, @cb, SYSDATETIME())
-            `);
-          totalCreated++;
+        } catch (txErr) {
+          try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+          throw txErr;
         }
         if (sample.length < 5) sample.push(slotNo);
       }

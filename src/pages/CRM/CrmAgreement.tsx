@@ -26,7 +26,7 @@ const API = "/api/crm/agreements";
 // which wasn't available. If it's mounted elsewhere, this is a one-line fix.
 const USERS_API = "/api/users";
 
-const DOC_TYPES = ["SaleAgreement", "AllotmentLetter", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
+const DOC_TYPES = ["SaleAgreement", "PossessionLetter", "RegistrationDoc", "NOC", "IdentityProof", "Other"];
 
 const agrStatusColor: Record<string, string> = {
   Draft:      "text-muted-foreground bg-muted/50 border-border",

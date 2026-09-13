@@ -122,6 +122,7 @@ interface Customer {
   LHeadStatus: boolean;
   LBelongsTo: number | null;
   GroupName: string | null;
+  InvoiceMode: "Invoice" | "NonInvoice" | null;
 }
 
 interface CustomerForm {
@@ -137,6 +138,7 @@ interface CustomerForm {
   LHeadAddress: string;
   LHeadStatus: boolean;
   LBelongsTo: string; // string id; converted to Number on save
+  InvoiceMode: "Invoice" | "NonInvoice";
 }
 
 const EMPTY_FORM: CustomerForm = {
@@ -152,6 +154,7 @@ const EMPTY_FORM: CustomerForm = {
   LHeadAddress: "",
   LHeadStatus: true,
   LBelongsTo: "",
+  InvoiceMode: "NonInvoice",
 };
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
@@ -412,6 +415,7 @@ const CustomerMaster: React.FC = () => {
       LHeadStatus: Boolean(item.LHeadStatus),
       LBelongsTo: item.LBelongsTo ?? null,
       GroupName: item.GroupName ?? null,
+      InvoiceMode: item.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice",
     }));
   }, [rawData]);
 
@@ -436,6 +440,7 @@ const CustomerMaster: React.FC = () => {
     LCountry: "India",
     LBelongsTo: f.LBelongsTo ? Number(f.LBelongsTo) : null,
     LDescription: null,
+    InvoiceMode: f.InvoiceMode,
   });
 
   const createMut = useMutation({
@@ -487,6 +492,7 @@ const CustomerMaster: React.FC = () => {
       LHeadAddress: c.LHeadAddress ?? "",
       LHeadStatus: c.LHeadStatus,
       LBelongsTo: c.LBelongsTo != null ? String(c.LBelongsTo) : "",
+      InvoiceMode: c.InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice",
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -926,6 +932,24 @@ const CustomerMaster: React.FC = () => {
                   {form.LHeadStatus ? "Active" : "Inactive"}
                 </span>
               </span>
+            </div>
+
+            {/* ── Invoice / Non-Invoice ── */}
+            <div className="flex items-center gap-4 pt-1">
+              <span className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+                Billing —
+              </span>
+              {(["NonInvoice", "Invoice"] as const).map((mode) => (
+                <label key={mode} className="flex items-center gap-1.5 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="customerInvoiceMode"
+                    checked={form.InvoiceMode === mode}
+                    onChange={() => setForm((p) => ({ ...p, InvoiceMode: mode }))}
+                  />
+                  {mode === "NonInvoice" ? "Non-Invoice (default — no invoice ever generated)" : "Invoice"}
+                </label>
+              ))}
             </div>
           </div>
         </div>

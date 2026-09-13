@@ -723,6 +723,18 @@ const CrmAfsQueryPayment: React.FC<{
   const goPrev = () => setStep((s) => Math.max(1, s - 1));
 
   // ── Inline workflow panel (shown when deep-linked to a booking with an existing record) ──
+  // Defined as a plain function, called directly as `InlineDetail()` at its
+  // call sites below — NEVER invoked as JSX (`<InlineDetail />`). Because this
+  // is declared inside the parent component's body, every parent re-render
+  // creates a brand-new function value; if it were rendered as `<InlineDetail />`,
+  // React would treat that as a different component type each time and
+  // unmount+remount this entire subtree on every single re-render — including
+  // the one triggered by each keystroke in the Amount/Remarks inputs below,
+  // which loses focus mid-type and made typing multi-character values here
+  // effectively broken (confirmed live: a real "type 16500" landed as "").
+  // Calling it as a plain function instead just inlines its returned JSX with
+  // no separate component identity, so normal reconciliation applies and
+  // input focus survives re-renders like anywhere else in this file.
   const InlineDetail = () => {
     if (!detail) return <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>;
     return (
@@ -854,7 +866,10 @@ const CrmAfsQueryPayment: React.FC<{
                   <p className="text-sm font-semibold">Confirm Customer Paid the Government</p>
                 </div>
                 {step !== 2 && (
-                  <button onClick={() => setStep(2)} className="text-xs text-amber-600 dark:text-amber-400 font-medium hover:underline shrink-0">Open →</button>
+                  <button onClick={() => setStep(2)}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-amber-300 dark:border-amber-800/60 text-amber-700 dark:text-amber-400 font-semibold hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-colors shrink-0">
+                    Open →
+                  </button>
                 )}
               </div>
               {step === 2 && (
@@ -925,7 +940,7 @@ const CrmAfsQueryPayment: React.FC<{
         {embeddedLoading ? (
           <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>
         ) : selectedId && detail ? (
-          <InlineDetail />
+          InlineDetail()
         ) : registered ? (
           <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-500/[0.05] px-5 py-5 flex items-start gap-4">
             <div className="w-10 h-10 shrink-0 rounded-full bg-emerald-100 dark:bg-emerald-900/40 border-2 border-emerald-400 dark:border-emerald-600 flex items-center justify-center">
@@ -1038,7 +1053,7 @@ const CrmAfsQueryPayment: React.FC<{
             )}
 
             {/* Case B: existing record — show inline workflow */}
-            {deepLinkedRow && selectedId && <InlineDetail />}
+            {deepLinkedRow && selectedId && InlineDetail()}
 
             {/* Case C: Executed but no record yet — inline start form */}
             {deepLinkedBooking && !deepLinkedRow && deepLinkedBooking.AgreementStatus !== "Registered" && canCreate && (
