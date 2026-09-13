@@ -127,7 +127,7 @@ router.get("/", async (req, res) => {
                 gle.SourceType <> 'OnAccountAdjustment'
                 OR NOT EXISTS (
                   SELECT 1 FROM dbo.OnAccountLedger oal
-                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Contractor')
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
                 )
               )
               AND gle.VoucherDate < @from
@@ -155,7 +155,7 @@ router.get("/", async (req, res) => {
                 gle.SourceType <> 'OnAccountAdjustment'
                 OR NOT EXISTS (
                   SELECT 1 FROM dbo.OnAccountLedger oal
-                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Contractor')
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
                 )
               )
               AND gle.VoucherDate < @from
@@ -174,7 +174,7 @@ router.get("/", async (req, res) => {
                 gle.SourceType <> 'OnAccountAdjustment'
                 OR NOT EXISTS (
                   SELECT 1 FROM dbo.OnAccountLedger oal
-                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Contractor')
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
                 )
               )
               AND gle.VoucherDate BETWEEN @from AND @to
@@ -193,7 +193,7 @@ router.get("/", async (req, res) => {
                 gle.SourceType <> 'OnAccountAdjustment'
                 OR NOT EXISTS (
                   SELECT 1 FROM dbo.OnAccountLedger oal
-                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Contractor')
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
                 )
               )
               AND gle.VoucherDate BETWEEN @from AND @to
@@ -238,7 +238,7 @@ router.get("/", async (req, res) => {
           SUM(CASE WHEN TxnDate < @from THEN Amount ELSE 0 END) AS openingAdvance,
           SUM(CASE WHEN TxnDate >= @from AND TxnDate <= @to THEN Amount ELSE 0 END) AS txnAdvance
         FROM dbo.OnAccountLedger
-        WHERE PartyType IN ('Supplier', 'Contractor') AND TxnType = 'CREDIT'
+        WHERE PartyType IN ('Supplier', 'Vendor', 'Contractor') AND TxnType = 'CREDIT'
           AND TxnDate <= @to
           AND (@companyId IS NULL OR CompanyId = @companyId)
           AND (@enterpriseId IS NULL OR CompanyId IN (SELECT id FROM dbo.enterprise WHERE enterprise_id = @enterpriseId))
@@ -580,7 +580,7 @@ router.get("/:lheadId/transactions", async (req, res) => {
             gle.SourceType <> 'OnAccountAdjustment'
             OR NOT EXISTS (
               SELECT 1 FROM dbo.OnAccountLedger oal
-              WHERE oal.PartyId = @LHeadId AND oal.PartyType IN ('Supplier', 'Contractor')
+              WHERE oal.PartyId = @LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
             )
           )
           AND gle.VoucherDate >= @from AND gle.VoucherDate <= @to

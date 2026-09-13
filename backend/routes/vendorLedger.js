@@ -193,7 +193,7 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
 // straight against the customer's own head, so those already show up via
 // GeneralLedgerEntry and don't need this merge. Scoped to Supplier/
 // Contractor only for that reason.
-const ON_ACCOUNT_PARTY_TYPES = ["Supplier", "Contractor"];
+const ON_ACCOUNT_PARTY_TYPES = ["Supplier", "Vendor", "Contractor"];
 
 // Only CREDIT rows (the advance/excess payment itself) are ever surfaced on
 // this report. A DEBIT row ("applied to invoice") and its paired real

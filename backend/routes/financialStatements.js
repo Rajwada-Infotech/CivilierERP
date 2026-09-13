@@ -238,7 +238,7 @@ router.get("/balance-sheet", async (req, res) => {
                 gle.SourceType <> 'OnAccountAdjustment'
                 OR NOT EXISTS (
                   SELECT 1 FROM dbo.OnAccountLedger oal
-                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Contractor')
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
                 )
               )
               AND gle.VoucherDate <= @asOf
@@ -265,7 +265,7 @@ router.get("/balance-sheet", async (req, res) => {
                 gle.SourceType <> 'OnAccountAdjustment'
                 OR NOT EXISTS (
                   SELECT 1 FROM dbo.OnAccountLedger oal
-                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Contractor')
+                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
                 )
               )
               AND gle.VoucherDate <= @asOf
@@ -318,7 +318,7 @@ router.get("/balance-sheet", async (req, res) => {
       .query(`
         SELECT PartyId, SUM(Amount) AS advance
         FROM dbo.OnAccountLedger
-        WHERE PartyType IN ('Supplier', 'Contractor') AND TxnType = 'CREDIT'
+        WHERE PartyType IN ('Supplier', 'Vendor', 'Contractor') AND TxnType = 'CREDIT'
           AND TxnDate <= @asOf
           AND (@companyId IS NULL OR CompanyId = @companyId)
           AND (@projectId IS NULL OR ProjectId = @projectId)
