@@ -36,32 +36,19 @@ const brokerCertUpload = multer({
   },
 });
 
-// SUNDRY CREDITORS (migration 260628/154, Code='SCS') — every broker's ledger
-// head lands here automatically instead of staff manually picking an Account
-// Group. Mirrors crmLedger.js's getSundryDebtorsGroupId() cache-once pattern
-// exactly, just the payable-side equivalent for brokers (who are owed
-// commission) instead of the receivable-side one CRM customers use.
+// SUNDRY CREDITORS (migration 260628/154, Code='SCS') — every broker's
+// ledger head lands here automatically instead of staff manually picking an
+// Account Group; also the default for a new Customer/Applicant
+// (LHeadType='A', CustomerMaster.tsx) when no group is explicitly chosen —
+// Customer Master's Account Group field is a normal editable picker (not
+// force-locked the way Broker/Supplier/Contractor's still is), so this only
+// covers the "nothing sent" case, not every Customer unconditionally.
 let _sundryCreditorsGroupId;
 async function getSundryCreditorsGroupId(pool) {
   if (_sundryCreditorsGroupId !== undefined) return _sundryCreditorsGroupId;
   const r = await pool.request().query("SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SCS'");
   _sundryCreditorsGroupId = r.recordset[0]?.AGId ?? null;
   return _sundryCreditorsGroupId;
-}
-
-// SUNDRY DEBTORS (ASSETS > CURRENT ASSETS > TRADE RECEIVABLES > SUNDRY
-// DEBTORS, Code='SDS') — the receivable-side equivalent of
-// getSundryCreditorsGroupId above. Every Customer/Applicant (LHeadType='A')
-// created via CustomerMaster.tsx lands here automatically. Mirrors
-// crmLedger.js's getSundryDebtorsGroupId() (kept as a separate cache here
-// rather than importing that module, matching how this file already
-// duplicates the Creditors pattern instead of sharing it).
-let _sundryDebtorsGroupId;
-async function getSundryDebtorsGroupId(pool) {
-  if (_sundryDebtorsGroupId !== undefined) return _sundryDebtorsGroupId;
-  const r = await pool.request().query("SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SDS'");
-  _sundryDebtorsGroupId = r.recordset[0]?.AGId ?? null;
-  return _sundryDebtorsGroupId;
 }
 
 // Matches backend/routes/users.js's SALT_ROUNDS exactly — reusing the same
@@ -429,11 +416,15 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
     ) {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
-    } else if (LHeadType === "A") {
-      // Customers/Applicants (CustomerMaster.tsx) always land in SUNDRY
-      // DEBTORS — same never-trust-the-client treatment as the Creditors
-      // block above, just the receivable side.
-      effectiveLBelongsTo = await getSundryDebtorsGroupId(pool);
+    } else if (LHeadType === "A" && !LBelongsTo) {
+      // Customers/Applicants (CustomerMaster.tsx) used to always be
+      // force-assigned SUNDRY DEBTORS here, the same never-trust-the-client
+      // treatment as the Creditors block above. That lock is now open —
+      // CustomerMaster.tsx's Account Group field is a normal editable
+      // picker (defaulting to Sundry Creditors) and whatever the client
+      // actually sends is respected; this only fills in a default when the
+      // client sends nothing at all.
+      effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
     }
 
     // Both need to be resolved before the insert (email generation queries
@@ -911,8 +902,9 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
       (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
     ) {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
-    } else if (LHeadType === "A") {
-      effectiveLBelongsTo = await getSundryDebtorsGroupId(pool);
+    } else if (LHeadType === "A" && !LBelongsTo) {
+      // Same open lock as POST / — only defaults when nothing was sent.
+      effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
     }
 
     let newSupplierPasswordHash = null;

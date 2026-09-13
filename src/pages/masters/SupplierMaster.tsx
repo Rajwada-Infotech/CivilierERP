@@ -58,7 +58,7 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUPPLIER_TYPE = "S";
 
-const SUPPLIER_CATEGORIES = ["Goods", "Services", "Both"] as const;
+const SUPPLIER_CATEGORIES = ["Goods", "Services", "Both", "Landlord"] as const;
 const GST_TYPES = ["Registered", "Unregistered"] as const;
 const GST_STATES = [
   "Andaman and Nicobar Islands",
@@ -171,7 +171,7 @@ const EMPTY_FORM: SupplierForm = {
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
 const EXPORT_COLUMNS: ExportColumn[] = [
-  { header: "Supplier Name", accessor: "LHeadName" },
+  { header: "Vendor Name", accessor: "LHeadName" },
   { header: "Contact Person", accessor: "LHeadContactPerson" },
   { header: "Phone", accessor: "LHeadPhone" },
   { header: "Email", accessor: "LHeadEmail" },
@@ -206,13 +206,13 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 // Single source of truth for both the downloadable template and the importer,
 // so the headers a user downloads are exactly the headers the importer reads.
 const CSV_HEADERS = {
-  name: "Supplier Name",
+  name: "Vendor Name",
   contactPerson: "Contact Person",
   phone: "Phone",
   email: "Email",
   gst: "GST Number",
   pan: "PAN Number",
-  category: "Category (Goods/Services/Both)",
+  category: "Category (Goods/Services/Both/Landlord)",
   gstType: "GST Type (Registered/Unregistered)",
   gstState: "GST State",
   group: "Group Name",
@@ -267,7 +267,7 @@ function buildSupplierColumns(
   return [
     {
       accessorKey: "LHeadName",
-      header: "Supplier Name",
+      header: "Vendor Name",
       cell: ({ getValue }) => (
         <span className="font-medium text-foreground">
           {getValue() as string}
@@ -546,8 +546,8 @@ const SupplierMaster: React.FC = () => {
         : "";
       toast.success(
         res?.SupplierLoginEmail
-          ? `Supplier created — login email: ${res.SupplierLoginEmail}${passwordNote}`
-          : "Supplier created",
+          ? `Vendor created — login email: ${res.SupplierLoginEmail}${passwordNote}`
+          : "Vendor created",
       );
       invalidate();
       resetForm();
@@ -559,7 +559,7 @@ const SupplierMaster: React.FC = () => {
     mutationFn: ({ id, data }: { id: number; data: SupplierForm }) =>
       updateRecord(id, buildPayload(data), SUPPLIER_TYPE),
     onSuccess: () => {
-      toast.success("Supplier updated");
+      toast.success("Vendor updated");
       invalidate();
       resetForm();
     },
@@ -569,7 +569,7 @@ const SupplierMaster: React.FC = () => {
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteRecord(id),
     onSuccess: () => {
-      toast.success("Supplier deleted");
+      toast.success("Vendor deleted");
       invalidate();
       setDeleteConfirm(null);
     },
@@ -586,7 +586,7 @@ const SupplierMaster: React.FC = () => {
   );
 
   const handleDownloadTemplate = () => {
-    exportToCsv([], SUPPLIER_CSV_TEMPLATE_COLUMNS, "supplier-master-template");
+    exportToCsv([], SUPPLIER_CSV_TEMPLATE_COLUMNS, "vendor-master-template");
     toast.success("Template downloaded — fill it in and use Import.");
   };
 
@@ -645,7 +645,7 @@ const SupplierMaster: React.FC = () => {
             .trim()
             .toLowerCase();
 
-          if (!name) throw new Error("Supplier Name is required");
+          if (!name) throw new Error("Vendor Name is required");
           if (!pan) throw new Error("PAN Number is required");
           // Password is optional on import — left blank, the backend defaults
           // the login to "123456" (changeable later from the Edit form).
@@ -660,7 +660,7 @@ const SupplierMaster: React.FC = () => {
             : "";
           if (categoryRaw && !category)
             throw new Error(
-              `Category must be one of Goods, Services, Both (got "${categoryRaw}")`,
+              `Category must be one of ${SUPPLIER_CATEGORIES.join(", ")} (got "${categoryRaw}")`,
             );
 
           // GST Type is optional — when given must be Registered/Unregistered.
@@ -750,7 +750,7 @@ const SupplierMaster: React.FC = () => {
       }
       if (errorCount === 0) {
         toast.success(
-          `Imported ${successCount} supplier${successCount === 1 ? "" : "s"} ✓`,
+          `Imported ${successCount} vendor${successCount === 1 ? "" : "s"} ✓`,
         );
       } else if (successCount === 0) {
         toast.error(
@@ -856,12 +856,12 @@ const SupplierMaster: React.FC = () => {
     const win = window.open("", "_blank", "width=700,height=600");
     if (!win) return;
     win.document.write(safeHtml`
-      <html><head><title>Supplier — ${s.LHeadName}</title>
+      <html><head><title>Vendor — ${s.LHeadName}</title>
       <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
       </head><body>
-      <h2>Supplier Card</h2>
+      <h2>Vendor Card</h2>
       <table>
-        <tr><td>Supplier Name</td><td>${s.LHeadName || "—"}</td></tr>
+        <tr><td>Vendor Name</td><td>${s.LHeadName || "—"}</td></tr>
         <tr><td>Contact Person</td><td>${s.LHeadContactPerson || "—"}</td></tr>
         <tr><td>Phone</td><td>${s.LHeadPhone || "—"}</td></tr>
         <tr><td>Email</td><td>${s.LHeadEmail || "—"}</td></tr>
@@ -952,11 +952,11 @@ const SupplierMaster: React.FC = () => {
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <>
-      <Breadcrumbs items={["Masters", "Supplier Master"]} />
+      <Breadcrumbs items={["Masters", "Vendor Master"]} />
 
       <FinanceShell
-        title="Supplier Master"
-        subtitle="Manage supplier accounts with contact, GST and category details"
+        title="Vendor Master"
+        subtitle="Manage vendor accounts with contact, GST and category details"
         action={
           <div className="flex items-center gap-2">
             <span
@@ -967,7 +967,7 @@ const SupplierMaster: React.FC = () => {
                 color: "#818cf8",
               }}
             >
-              {suppliers.length} Suppliers
+              {suppliers.length} Vendors
             </span>
             <input
               ref={importFileInputRef}
@@ -978,7 +978,7 @@ const SupplierMaster: React.FC = () => {
             />
             <button
               onClick={handleDownloadTemplate}
-              title="Download a blank CSV with all supplier fields"
+              title="Download a blank CSV with all vendor fields"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
             >
               <Download size={13} />
@@ -987,7 +987,7 @@ const SupplierMaster: React.FC = () => {
             <button
               onClick={handleImportClick}
               disabled={importing}
-              title="Import suppliers from a filled-in CSV"
+              title="Import vendors from a filled-in CSV"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {importing ? (
@@ -1034,7 +1034,7 @@ const SupplierMaster: React.FC = () => {
           >
             <div>
               <h2 className="text-sm font-heading font-semibold text-foreground">
-                {editingId ? "Edit Supplier" : "Add Supplier"}
+                {editingId ? "Edit Vendor" : "Add Vendor"}
               </h2>
               <p className="text-[11px] text-muted-foreground mt-0.5">
                 Fields marked <span className="text-destructive">*</span> are
@@ -1055,10 +1055,10 @@ const SupplierMaster: React.FC = () => {
                 </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-                {/* Supplier Name */}
+                {/* Vendor Name */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-                    Supplier Name <span className="text-destructive">*</span>
+                    Vendor Name <span className="text-destructive">*</span>
                   </label>
                   <input
                     value={form.LHeadName}
@@ -1100,10 +1100,10 @@ const SupplierMaster: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Supplier Category */}
+                {/* Vendor Category */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Supplier Category
+                    Vendor Category
                   </label>
                   <TreeDropdown
                     variant="flat"
@@ -1553,8 +1553,8 @@ const SupplierMaster: React.FC = () => {
                 {saving
                   ? "Saving…"
                   : editingId
-                    ? "Update Supplier"
-                    : "Save Supplier"}
+                    ? "Update Vendor"
+                    : "Save Vendor"}
               </button>
             </div>
           </div>
@@ -1621,14 +1621,14 @@ const SupplierMaster: React.FC = () => {
               getRowId={(row) => String(row.LHeadId)}
               emptyMessage={
                 isError
-                  ? "Failed to load suppliers."
+                  ? "Failed to load vendors."
                   : suppliers.length === 0
-                    ? "No suppliers yet."
+                    ? "No vendors yet."
                     : "No results match your search."
               }
               exportConfig={{
-                title: "Supplier Master",
-                filename: "supplier-master",
+                title: "Vendor Master",
+                filename: "vendor-master",
                 columns: EXPORT_COLUMNS,
               }}
               rowClassName={(row) =>
@@ -1725,7 +1725,7 @@ const SupplierMaster: React.FC = () => {
               <div className="flex items-center gap-2">
                 <Building2 size={15} className="text-primary" />
                 <h3 className="font-heading font-semibold text-sm text-foreground">
-                  Supplier Details
+                  Vendor Details
                 </h3>
               </div>
               <button
@@ -1737,7 +1737,7 @@ const SupplierMaster: React.FC = () => {
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               {[
-                { label: "Supplier Name", value: viewRecord.LHeadName },
+                { label: "Vendor Name", value: viewRecord.LHeadName },
                 {
                   label: "Contact Person",
                   value: viewRecord.LHeadContactPerson || "—",
@@ -1761,7 +1761,7 @@ const SupplierMaster: React.FC = () => {
                 { label: "GST Type", value: viewRecord.LGSTType || "—" },
                 { label: "GST State", value: viewRecord.LGSTState || "—" },
                 {
-                  label: "Supplier Category",
+                  label: "Vendor Category",
                   value: viewRecord.supplierCategory || "—",
                 },
                 {
@@ -1817,7 +1817,7 @@ const SupplierMaster: React.FC = () => {
                 }}
                 className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white shadow-sm flex items-center gap-1.5"
               >
-                <Pencil size={13} /> Edit Supplier
+                <Pencil size={13} /> Edit Vendor
               </button>
             </div>
           </div>
