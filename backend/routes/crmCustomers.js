@@ -141,11 +141,16 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
   try {
     const pool = getPool();
     const { mobile, pan, email, name, excludeId } = req.query;
-    const excl = excludeId ? "AND c.Id <> @excl" : "";
     const req0 = pool.request();
     if (excludeId) req0.input("excl", sql.Int, parseInt(excludeId));
 
-    const conds = ["c.IsActive = 1", excl];
+    // Plain predicates only — joined with " AND " below. A stray pre-baked
+    // "AND c.Id <> @excl" fragment here used to produce a doubled "AND AND"
+    // (or, with no excludeId, an empty predicate between two ANDs) — this
+    // endpoint threw a SQL syntax error on every single call, regardless of
+    // excludeId, and had apparently never actually been exercised live.
+    const conds = ["c.IsActive = 1"];
+    if (excludeId) conds.push("c.Id <> @excl");
     const orClauses = [];
 
     if (mobile?.toString().trim()) {
@@ -160,9 +165,18 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
       req0.input("email", sql.NVarChar(200), email.toString().trim().toLowerCase());
       orClauses.push("LOWER(c.Email) = @email");
     }
+    // Name is a REFINEMENT signal only, never an independent match trigger —
+    // it still feeds @name into scoreExpr below to rank an already-real
+    // (mobile/PAN/email) match higher when the name also lines up. Used to
+    // also push its own bare LIKE '%name%' into orClauses, which meant any
+    // two unrelated customers merely sharing a name substring (a common
+    // first name, "KUMAR", "DEVI", ...) got flagged as "possible duplicates"
+    // even with completely different mobile numbers and PANs — the frontend
+    // always sends the current name alongside mobile/PAN on every check
+    // (CrmCustomers.tsx checkDuplicates), so this fired constantly on
+    // ordinary, unrelated registrations.
     if (name?.toString().trim()) {
       req0.input("name", sql.NVarChar(200), `%${name.toString().trim()}%`);
-      orClauses.push("c.CustomerName LIKE @name");
     }
 
     if (!orClauses.length) return res.json([]);
