@@ -310,7 +310,8 @@ export const previewNextGRNNumber = async (
 // â"€â"€ Dropdown fetches â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 export const getSuppliers = async (): Promise<Supplier[]> => {
-  const res = await fetch("/api/account-head?type=S", {
+  // Vendors and Suppliers, not Landlords — see purchaseOrdersApi.ts's getSuppliers.
+  const res = await fetch("/api/account-head?type=S,V&excludeCategory=Landlord", {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch suppliers");

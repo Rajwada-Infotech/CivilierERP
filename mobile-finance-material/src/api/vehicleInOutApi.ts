@@ -217,7 +217,7 @@ export interface SupplierOption {
 }
 
 export const fetchSupplierOptions = async (): Promise<SupplierOption[]> => {
-  const res = await fetchWithAuth("/api/account-head/options?type=S");
+  const res = await fetchWithAuth("/api/account-head/options?type=S,V&excludeCategory=Landlord");
   if (!res.ok) return [];
   return res.json().catch(() => []);
 };

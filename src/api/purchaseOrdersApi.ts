@@ -267,9 +267,13 @@ export const rejectPurchaseOrder = (id: number | string, note?: string) =>
   }).then((r) => handleResponse(r));
 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
-// Returns [{ LHeadId, LHeadName, ... }]
+// Returns [{ LHeadId, LHeadName, ... }] — Vendors and Suppliers, not Landlords
+// (a Landlord is stored as LHeadType='S'/LHeadCategory='Landlord' — see
+// SupplierMaster.tsx — and has no place on a Purchase Order).
 export const getSuppliers = () =>
-  fetchWithAuth("/api/account-head?type=S").then((r) => handleResponse(r));
+  fetchWithAuth("/api/account-head?type=S,V&excludeCategory=Landlord").then((r) =>
+    handleResponse(r),
+  );
 
 // ─── Companies ────────────────────────────────────────────────────────────────
 // Returns [{ id, label, ... }] from enterprises/options?business_type=C

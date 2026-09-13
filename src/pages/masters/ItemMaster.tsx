@@ -401,7 +401,7 @@ const ItemMaster: React.FC = () => {
   const { data: dbSuppliers = [] } = useQuery({
     queryKey: ["suppliers-for-item-master"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/account-head/options?type=S");
+      const res = await fetchWithAuth("/api/account-head/options?type=S,V&excludeCategory=Landlord");
       if (!res.ok) return [];
       const data = await res.json().catch(() => ({}));
       return Array.isArray(data)

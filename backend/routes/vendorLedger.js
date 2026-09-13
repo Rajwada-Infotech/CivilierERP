@@ -36,7 +36,7 @@ const HEAD_SELECT = `
 // place in this file that used to hard-filter to just 'S' left Contractors
 // invisible here even though they're posted against the exact same
 // GeneralLedgerEntry table via the exact same postVoucher() path.
-const VENDOR_HEAD_TYPES = ["S", "C"];
+const VENDOR_HEAD_TYPES = ["S", "V", "C"];
 const VENDOR_HEAD_TYPES_SQL = `'${VENDOR_HEAD_TYPES.join("','")}'`;
 
 // ── GET /search?q= — find a party/GL head by name ───────────────────────────

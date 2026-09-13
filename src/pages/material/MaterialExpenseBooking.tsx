@@ -644,7 +644,10 @@ export default function MaterialExpenseBooking() {
           err instanceof Error ? err.message : "Something went wrong",
         );
       });
-    apiFetch("/api/account-head?type=S")
+    // Invoices/expense bookings can be Payable To a Vendor, Supplier, or
+    // Landlord (all stored as LHeadType 'S'/'V', Landlord distinguished only
+    // by LHeadCategory) — so no excludeCategory here, unlike PO/GRN.
+    apiFetch("/api/account-head?type=S,V")
       .then((list: any[]) => {
         const heads = (Array.isArray(list) ? list : []).map((h) => ({
           id: h.LHeadId,

@@ -73,7 +73,7 @@ export interface Supplier {
 }
 
 export const getSuppliers = (): Promise<Supplier[]> =>
-  getJson("/api/account-head?type=S", "Failed to load suppliers");
+  getJson("/api/account-head?type=S,V", "Failed to load suppliers");
 
 // ── SAC codes (HSN rows with the Is-SAC toggle) — "Type of Repairs" field ──
 export interface SacCode {

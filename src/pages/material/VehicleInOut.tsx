@@ -697,7 +697,7 @@ export default function VehicleInOut() {
   const { data: suppliers = [] } = useQuery({
     queryKey: ["account-head-suppliers-v2"],
     queryFn: () =>
-      fetchWithAuth("/api/account-head/options?type=S").then((r) => r.json().catch(() => ({}))),
+      fetchWithAuth("/api/account-head/options?type=S,V&excludeCategory=Landlord").then((r) => r.json().catch(() => ({}))),
     staleTime: 300_000,
   });
 
