@@ -856,6 +856,20 @@ const CrmSalesDeed: React.FC = () => {
   const cancelled = detail?.Status === CrmStatus.CANCELLED;
   const progressLocked = registered || cancelled;
 
+  // Mirrors the backend's requireAssignedLegalOrApprover (crmSalesDeed.js) —
+  // uploading/attaching/submitting this deed's documents is locked to the
+  // specific Legal Executive assigned via LegalExecutiveId, not just anyone
+  // with page rights. Kept in sync here purely for UX (grey the buttons out
+  // with a clear reason instead of letting staff hit a 403 after picking a
+  // file) — the server-side check is the real enforcement.
+  const canActAsLegal = !detail?.LegalExecutiveId
+    ? false
+    : CRM_REGISTRY_APPROVER_ROLES.includes(String(currentUser?.role || "").toLowerCase()) ||
+      String(detail.LegalExecutiveId) === String(currentUser?.id ?? "");
+  const legalLockReason = !detail?.LegalExecutiveId
+    ? "Assign a Legal Executive to this deed first"
+    : "Locked to the assigned Legal Executive (or Legal/admin)";
+
   useEffect(() => {
     if (!rights.canCreate || !deepLinkBookingId || dialogOpen) return;
     if ((deeds as any[]).some((d: any) => String(d.BookingId) === deepLinkBookingId)) return;
@@ -1913,8 +1927,8 @@ const CrmSalesDeed: React.FC = () => {
                                   <div className="pt-0.5">
                                     <button
                                       onClick={handleResubmit}
-                                      disabled={!docsReady}
-                                      title={!docsReady ? `${docs.uploaded}/${docs.required} mandatory documents verified — all must be Verified first` : undefined}
+                                      disabled={!docsReady || !canActAsLegal}
+                                      title={!canActAsLegal ? legalLockReason : !docsReady ? `${docs.uploaded}/${docs.required} mandatory documents verified — all must be Verified first` : undefined}
                                       className="text-xs px-3 py-1.5 bg-primary text-primary-foreground rounded font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
                                     >
                                       Submit for Senior Approval
@@ -2631,7 +2645,12 @@ const CrmSalesDeed: React.FC = () => {
                           {['Requested', 'Rejected'].includes(doc.Status) && !progressLocked && (
                             <>
                               <input type="file" className="hidden" id={`doc-attach-${doc.Id}`} onChange={e => e.target.files?.[0] && handleAttachDoc(doc.Id, e.target.files[0])} />
-                              <button onClick={() => document.getElementById(`doc-attach-${doc.Id}`)?.click()} className="text-xs bg-primary text-primary-foreground px-2.5 py-1 rounded font-medium hover:bg-primary/90">
+                              <button
+                                onClick={() => document.getElementById(`doc-attach-${doc.Id}`)?.click()}
+                                disabled={!canActAsLegal}
+                                title={!canActAsLegal ? legalLockReason : undefined}
+                                className="text-xs bg-primary text-primary-foreground px-2.5 py-1 rounded font-medium hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
                                 {doc.Status === 'Rejected' ? 'Re-attach File' : 'Attach File'}
                               </button>
                             </>
@@ -2716,7 +2735,8 @@ const CrmSalesDeed: React.FC = () => {
                             <div className="shrink-0 space-y-1">
                               <label className="text-[10px] font-medium text-transparent">.</label>
                               <input type="file" className="hidden" ref={fileInputRef} onChange={e => e.target.files?.[0] && handleUploadDoc(e.target.files[0], newDocType, newDocLabel)} />
-                              <button onClick={() => fileInputRef.current?.click()} disabled={uploadingDoc}
+                              <button onClick={() => fileInputRef.current?.click()} disabled={uploadingDoc || !canActAsLegal}
+                                title={!canActAsLegal ? legalLockReason : undefined}
                                 className="h-8 px-3 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 flex items-center gap-1.5 font-medium disabled:opacity-50">
                                 <Upload size={12}/> {uploadingDoc ? "Uploading..." : "Upload"}
                               </button>

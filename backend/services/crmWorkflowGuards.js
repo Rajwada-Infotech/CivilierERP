@@ -445,13 +445,19 @@ async function getProjectSaleGate(pool, bookingId) {
 }
 
 /**
- * Auto-advance step: the moment an agreement is Executed AND every payment
- * milestone is Paid/Waived (in either order), automatically create the
- * sales deed shell — instead of waiting for staff to notice both conditions
- * landed. No-op if a deed already exists for the booking (UNIQUE BookingId)
- * or either prerequisite is still outstanding.
- * Call sites: crmAgreements.js (after /:id/mark-executed) and
- * crmPayments.js (after a milestone becomes Paid or is waived).
+ * Auto-advance step: the moment Handover is Completed AND the Agreement is
+ * Registered (in either order), automatically create the sales deed shell —
+ * instead of waiting for staff to notice both conditions landed. No-op if a
+ * deed already exists for the booking (UNIQUE BookingId) or either
+ * prerequisite is still outstanding. (Sale Deed/Conveyance Deed is executed
+ * AFTER possession handover in the under-construction workflow, not before —
+ * see commit 566b6cbb.)
+ * Real call site: crmHandover.js (after a Handover's status transitions to
+ * Completed). Also called from crmPayments.js (after a milestone becomes
+ * Paid or is waived) — a holdover from when milestone-settlement was the
+ * trigger; harmless no-op there now since Handover/Agreement are checked
+ * fresh on every call, but Handover completion is the only path that can
+ * actually flip this from no-op to creating the deed.
  */
 async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   const existing = await pool.request().input("bid", sql.Int, bookingId)
