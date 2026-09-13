@@ -255,7 +255,7 @@ function buildUserColumns(
       cell: ({ row }) => {
         const user = row.original;
         return (
-          <div className="flex items-center justify-end gap-1">
+          <div className="flex items-center justify-end gap-2.5">
             <button onClick={() => setViewUserId(user.id)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition" title="View"><Eye size={15} /></button>
             <button onClick={() => setEditUserId(user.id)} className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition" title="Edit"><Edit size={15} /></button>
             <button
