@@ -1437,16 +1437,6 @@ const CrmApplication: React.FC = () => {
   };
 
   const handleFinalSave = async () => {
-    // Same mandatory-bank rule as every other place money moves in this
-    // app (CrmBooking.tsx, CrmBookingDetail.tsx, CrmPaymentMilestones.tsx):
-    // if the project has tagged banks (or even just the open bank list is
-    // non-empty), a bank must be picked before this can go through — only
-    // gated when a real token amount is actually being captured. Checked
-    // here (not just server-side) so staff get an immediate, specific
-    // message instead of a round-trip 400 that translateError's generic
-    // "required" fallback used to flatten into an unhelpful "fill in all
-    // required fields" toast pointing at nothing.
-
     setSaving(true);
     try {
       await saveApplicationFields({

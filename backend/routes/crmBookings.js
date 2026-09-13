@@ -1230,12 +1230,12 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       throw txErr;
     }
 
-    // Revert the Application from Approved → back to a cancellable/re-bookable
-    // state. createCrmBookingRecord force-advanced Application to Approved when
-    // the booking was created; without this call the Application stays at
-    // Approved forever with no live booking behind it — it can't be cancelled
-    // through the normal UI (APPLICATION_TRANSITIONS['Approved'] = []) and
-    // can't be re-booked, leaving the Application orphaned with no recovery path.
+    // Mirror the Booking's deletion onto its parent Application so it's not
+    // left looking like a live/converted deal with no Booking behind it —
+    // and, for any legacy row still sitting at Status='Approved' from before
+    // that ever stopped being set (see crmApplicationWorkflow.js's module
+    // docstring), so it can be cancelled through the normal UI again
+    // instead of being stuck (APPLICATION_TRANSITIONS['Approved'] = []).
     // For cancelled bookings these steps were already executed when the
     // cancellation was approved — skip to avoid double-sync and ghost holds.
     if (!isCancelled) {

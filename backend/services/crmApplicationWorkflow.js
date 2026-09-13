@@ -1,20 +1,28 @@
 /**
- * CRM Application — the Cancel action and the AutoBooking cascade only.
+ * CRM Application — the Cancel action, plus shared status-transition
+ * plumbing used by a couple of system-triggered cascades.
  *
  * There is no Application-level approval step anymore — a Booking is
  * created straight off a submitted (Pending) Application (see
  * crmApplications.js PUT /:id/submit), no admin approve/reject gate in
- * between. Approved is now purely a system-set marker meaning "this
- * Application successfully became a real Booking" — reached exclusively via
- * the AutoBooking force-advance below, the moment createCrmBookingRecord
- * finishes. Rejected is legacy-only: nothing in current code sets it, but
- * old data may still carry it, so it stays a valid terminal state
+ * between; all real review/approval now happens on the Booking itself
+ * (crmBookingStageService.js). Both Approved and Rejected are legacy-only:
+ * nothing in current code ever sets either one. Historical rows may still
+ * carry Approved from when an "AutoBooking" force-advance genuinely ran
+ * (see migration 241's one-time cleanup for the staleness that caused, and
+ * createCrmBookingRecord in crmEntityCreation.js, which no longer contains
+ * any such call) — this module does NOT reintroduce that cascade, since the
+ * real "does this Application already have a live Booking" guard today is
+ * Stage (computed live from CrmBooking's own existence/status — see
+ * crmApplications.js's APP_SELECT), not CrmApplication.Status. Rejected
+ * stays a valid terminal state for any old data that carries it
  * (resubmittable back to Pending via PUT /:id/submit).
- * This module keeps two things:
+ * This module keeps:
  *   - Cancel: a business action any editor can take, not an approval.
- *   - AutoBooking: booking creation force-advances the application to
- *     Approved as a system-triggered cascade (a real booking is stronger
- *     proof than any manual approval click ever was).
+ *   - advanceApplicationStatus/syncApplicationOnBookingTerminal: shared
+ *     plumbing so a Booking's Cancelled/Rejected/Expired terminal states
+ *     still get mirrored onto the parent Application (used by the Cancel
+ *     action and by crmBookings.js's admin-delete revert).
  * Every transition here is still written to CrmApplicationStatusLog for
  * audit purposes, distinct from ApprovalAuditLog (which approvalService.js's
  * transition() engine uses — still called from PUT /:id/submit for the
@@ -93,15 +101,18 @@ async function advanceApplicationStatus(pool, applicationId, toStatus, trigger, 
   return { ok: true, from: fromStatus, to: toStatus };
 }
 
-// The Application's Status is only ever force-advanced to 'Approved' once,
-// the moment its Booking is created (createCrmBookingRecord) — nothing
-// afterwards ever revisits it. So when the Booking later dies (Cancelled by
-// the cancellation-request flow, Rejected while still Pending, or
-// Expired by the confirm-deadline sweep), the Application is left sitting
-// at 'Approved' forever with no live Booking underneath it — indistinguishable
-// from a genuinely active sale unless someone opens the Booking itself.
-// Call this from every place CrmBooking.Status is set to one of those three
-// terminal values so the Application always reflects reality. Force-advances
+// Historically, the Application's Status was force-advanced to 'Approved'
+// the moment its Booking was created; nothing since has ever set that
+// (see crmApplicationWorkflow.js's module docstring). A row from that era
+// could still be sitting at Status='Approved'. When such a Booking later
+// dies (Cancelled by the cancellation-request flow, Rejected while still
+// Pending, or Expired by the confirm-deadline sweep), this keeps that old
+// Application from being left stuck at 'Approved' forever with no live
+// Booking underneath it — indistinguishable from a genuinely active sale
+// unless someone opens the Booking itself. Call this from every place
+// CrmBooking.Status is set to one of those three terminal values so the
+// Application always reflects reality, regardless of which status it
+// started from. Force-advances
 // (system-triggered, not a manual user transition) and is intentionally
 // silent/non-throwing on failure — the caller's own action (cancelling,
 // rejecting, expiring the Booking) has already committed and must not be
