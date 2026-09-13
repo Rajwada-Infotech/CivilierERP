@@ -312,8 +312,18 @@
    overlay modals opt back in by matching that same ceiling value; DOM
    order (they mount/portal in *after* the header) breaks the resulting
    tie in their favour, so they still end up on top like in every theme. */
-[data-theme="bw"] .expense-preview-modal {
+[data-theme="bw"] .expense-preview-modal,
+[data-theme="bw"] .bw-modal-topmost {
     z-index: 2147483647;
+}
+/* Lifting these modals above the overlay (to escape the header, above) is
+   a z-order fix only -- it also accidentally let their OWN hard-coded
+   accent colours (e.g. the Edit button's emerald/teal/cyan gradient)
+   escape the overlay's greyscale too. Re-grey everything inside them;
+   unlike the header/login-page lifts there's no logo to exempt here. */
+[data-theme="bw"] .expense-preview-modal > *,
+[data-theme="bw"] .bw-modal-topmost > * {
+    filter: grayscale(1) contrast(1.02);
 }
 
 /* Login page: lift the two-column grid above the greyscale overlay so the
