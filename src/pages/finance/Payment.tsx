@@ -3986,18 +3986,16 @@ const Payment: React.FC = () => {
                   label="Bank"
                   required={isChequeMode || isDigitalMode}
                   hint={
-                    !form.mode
-                      ? "Select a payment mode first."
-                      : isCashMode
-                        ? "Not applicable for cash payments."
-                        : isChequeMode
-                          ? "Required — used to filter cheque lots."
+                    isCashMode
+                      ? "Not applicable for cash payments."
+                      : isChequeMode
+                        ? "Required — used to filter cheque lots."
+                        : !form.mode
+                          ? "Pick a bank now, or after choosing a Payment Mode below — either order works."
                           : "Bank account from which the transfer was made."
                   }
                 >
-                  <div
-                    className={`relative ${isCashMode || !form.mode ? "opacity-40 pointer-events-none" : ""}`}
-                  >
+                  <div className={`relative ${isCashMode ? "opacity-40 pointer-events-none" : ""}`}>
                     <Landmark
                       size={13}
                       className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
@@ -4005,7 +4003,7 @@ const Payment: React.FC = () => {
                     <select
                       value={form.bankId ? String(form.bankId) : ""}
                       onChange={(e) => handleBankSelect(e.target.value)}
-                      disabled={isCashMode || !form.mode}
+                      disabled={isCashMode}
                       className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed"
                     >
                       <option value="">— Select bank account —</option>
@@ -4021,7 +4019,6 @@ const Payment: React.FC = () => {
                     />
                   </div>
                   {!isCashMode &&
-                    !!form.mode &&
                     form.bankId &&
                     (() => {
                       const selected = banks.find((b) => b.id === form.bankId);
