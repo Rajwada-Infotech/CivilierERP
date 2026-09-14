@@ -219,8 +219,11 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   }
 
   // Not new cash — the deposit's cash was already posted to GL when it was
-  // received. This just moves the party's advance balance (OnAccountLedger)
-  // from "unapplied" to "applied against this milestone."
+  // received. Moves the party's advance balance (OnAccountLedger) from
+  // "unapplied" to "applied against this milestone," and — for deposits
+  // originally posted to the pooled "Advance from Customers A/c" head —
+  // also posts a reallocation voucher onto the customer's own head (see
+  // postCrmOnAccountApplied's docstring in crmLedger.js).
   try {
     await postCrmOnAccountApplied(pool, onAccountId, requested, actorEmail);
   } catch (glErr) {

@@ -101,6 +101,17 @@ const MODE_COLOR: Record<string, string> = {
   Card: "bg-orange-500/10 text-orange-600",
 };
 
+// The stored PaymentMode value is still literally "Check" (renaming it
+// would mean a DB migration for every historical row's RPMode) — the
+// dropdown already shows the friendly "Cheque" label instead of the raw
+// value, but the list/table below used to render r.RPMode directly,
+// showing the raw "Check" spelling. This is the same {value, label}
+// lookup PAYMENT_MODES already carries, just applied where the badge
+// renders too.
+const MODE_LABEL: Record<string, string> = Object.fromEntries(
+  PAYMENT_MODES.map((m) => [m.value, m.label]),
+);
+
 const STATUS_CONFIG: Record<
   string,
   { cls: string; icon: React.ReactNode; label: string }
@@ -370,7 +381,7 @@ function PaymentHistoryTable({
                     <span
                       className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${MODE_COLOR[r.RPMode] ?? "bg-muted text-muted-foreground"}`}
                     >
-                      {r.RPMode}
+                      {MODE_LABEL[r.RPMode] ?? r.RPMode}
                     </span>
                   </td>
                   <td className="px-4 py-3 font-semibold text-foreground whitespace-nowrap">
@@ -451,7 +462,7 @@ function PaymentHistoryTable({
                   <p className="text-[10px] text-muted-foreground uppercase tracking-widest mb-0.5">
                     Mode
                   </p>
-                  <p>{viewing.RPMode}</p>
+                  <p>{MODE_LABEL[viewing.RPMode] ?? viewing.RPMode}</p>
                 </div>
                 {viewing.RPTransactionID && (
                   <div className="col-span-2">

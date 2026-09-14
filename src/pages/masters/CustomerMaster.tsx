@@ -363,13 +363,16 @@ const CustomerMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Account Group — used to be force-locked server-side to Sundry Debtors
-  // (see accountHeadMaster.js's now-removed getSundryDebtorsGroupId), never
-  // shown as more than a static "Sundry Debtors" label. Now a normal
-  // editable picker, same TreeDropdown pattern this file already uses for
-  // Payment Terms/GST Type — defaults new customers to Sundry Creditors
-  // (Code='SCS'), resolved by Code rather than a hardcoded AGId since AGId
-  // is not stable across environments.
+  // Account Group — used to be force-locked server-side to Sundry Debtors,
+  // never shown as more than a static "Sundry Debtors" label; briefly
+  // defaulted to Sundry Creditors instead when the lock was first opened,
+  // then reverted — customers are Sundry Debtors, full stop (see migration
+  // 423, which also moved every existing Customer Master head back). Still
+  // a normal editable picker (same TreeDropdown pattern this file already
+  // uses for Payment Terms/GST Type) — this only sets the DEFAULT for a
+  // brand-new customer, an accountant can still pick a different group by
+  // hand. Resolved by Code, not a hardcoded AGId, since AGId is not stable
+  // across environments.
   const { data: accountGroupsData } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
@@ -383,8 +386,8 @@ const CustomerMaster: React.FC = () => {
   }, [accountGroupsData]);
   const defaultAccountGroupId = useMemo(() => {
     if (!Array.isArray(accountGroupsData)) return "";
-    const scs = (accountGroupsData as any[]).find((g) => g.Code === "SCS");
-    return scs ? String(scs.AGId) : "";
+    const sds = (accountGroupsData as any[]).find((g) => g.Code === "SDS");
+    return sds ? String(sds.AGId) : "";
   }, [accountGroupsData]);
   // Groups load asynchronously — if the Add form is already open (or
   // restored from a draft) before they resolve, backfill the default the
@@ -712,7 +715,7 @@ const CustomerMaster: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Account Group — editable (defaults to Sundry Creditors
+                {/* Account Group — editable (defaults to Sundry Debtors
                     for a new customer); see accountHeadMaster.js, which
                     only fills this in server-side when nothing is sent. */}
                 <div className="space-y-1.5">
