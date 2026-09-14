@@ -325,6 +325,13 @@ const hrPayrollSetupItems = [
     color: "text-green-500",
     pageKey: "designation-master",
   },
+  {
+    icon: UserSquare,
+    label: "Candidate Master",
+    path: "/hr-payroll/setup/candidate-master",
+    color: "text-green-500",
+    pageKey: "candidate-master",
+  },
 ];
 
 const materialSetupItems = [
