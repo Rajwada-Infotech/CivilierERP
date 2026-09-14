@@ -2297,7 +2297,7 @@ router.get("/:id/posting", async (req, res) => {
     // Payment row + bank ledger
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PDate, np.PAmount, np.PMode, np.PExpenseRef,
-             np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany,
              np.TDSId, np.TDSNature, np.TDSName, np.TDSPercentage, np.TDSAmount,
              bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
              np.Status
@@ -2368,7 +2368,7 @@ router.get("/:id/posting", async (req, res) => {
       ? { id: pmt.PBankID, label: pmt.BankLedgerName || pmt.PBankName, code: pmt.BankLedgerCode ?? null }
       : null;
     if (!bankAccount && pmt.PMode === "Cash") {
-      const cashHeadId = await getCashInHandBankId(pool).catch(() => null);
+      const cashHeadId = await getCashInHandBankId(pool, parseInt(pmt.PCompany, 10) || null).catch(() => null);
       if (cashHeadId) bankAccount = { id: cashHeadId, label: "Cash in Hand", code: "CASH-IN-HAND" };
     }
 
@@ -2458,7 +2458,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
-             np.PBankID, np.PBankName, np.ContractId, np.PPartyId,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany,
              ISNULL(np.TDSAmount, 0) AS TDSAmount,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
       FROM dbo.NewPayment np
@@ -2503,7 +2503,11 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // Bank field for Cash) — the seeded Cash in Hand bank (migration 418)
     // stands in for the bank leg instead of hard-failing for lack of one.
     if (!bankId && isCash) {
-      bankId = await getCashInHandBankId(pool).catch(() => null);
+      // Prefer the payment's own PCompany (always set) over the
+      // ExpenseBooking-joined CompanyId above (NULL for a JV/PPartyId
+      // payment with no linked invoice) — a cash payment's own company is
+      // whose physical cash-in-hand actually shrinks.
+      bankId = await getCashInHandBankId(pool, parseInt(pmt.PCompany, 10) || pmt.CompanyId || null, userEmail).catch(() => null);
     }
 
     if (!supplierId) return res.status(422).json({ error: "Could not resolve this payment's supplier/party account." });

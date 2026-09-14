@@ -307,6 +307,17 @@ router.post("/", authenticateToken, requirePageRight("fund-transfer", "create"),
   try {
     const pool = getPool();
     const b = req.body;
+    // Inter-company Fund Transfer removed (kept only for reading/editing
+    // the historical rows already created this way — validateTransfer
+    // itself still accepts both types for that reason). Moving money
+    // between two different companies is a loan (one now owes the other),
+    // so it belongs in the Loan Sanction module, which already has the
+    // interest/installment tracking this form never did.
+    if (b.TransferType === "Inter") {
+      return res.status(400).json({
+        error: "Inter-company transfers are no longer created from Fund Transfer — use the Loan Sanction module instead.",
+      });
+    }
     const linesError = validateTransfer(b);
     if (linesError) return res.status(400).json({ error: linesError });
 

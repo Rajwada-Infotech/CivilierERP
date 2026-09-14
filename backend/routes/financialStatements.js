@@ -553,14 +553,18 @@ router.get("/balance-sheet", async (req, res) => {
     const totalCurrentAssets = sumTotal(currentAssets);
     const totalFictitiousAssets = sumTotal(fictitiousAssets);
 
-    // Partners' Capital = Opening + Retained Earnings b/f + Further Capital
-    // + Net Profit (current period) − Drawings, per spec.
+    // Partners' Capital = Opening + Further Capital + Net Profit (current
+    // period) − Drawings. Retained Earnings b/f (prior years' net P&L) is
+    // NOT a partner capital contribution — it's the accumulated result of
+    // invoices/payments posted in earlier financial years, so it's reported
+    // as its own "Reserves & Surplus" liability line instead of being
+    // folded into Partners' Capital.
     const partnersCapitalTotal = Math.round(
-      (capitalOpening + retainedEarningsPrior + capitalFurther + netProfitCurrent - totalDrawings) * 100,
+      (capitalOpening + capitalFurther + netProfitCurrent - totalDrawings) * 100,
     ) / 100;
 
     const totalLiabilities = Math.round(
-      (partnersCapitalTotal + totalProvisionsReserves + totalFixedLiabilities + totalCurrentLiabilities) * 100,
+      (partnersCapitalTotal + retainedEarningsPrior + totalProvisionsReserves + totalFixedLiabilities + totalCurrentLiabilities) * 100,
     ) / 100;
     const totalAssets = Math.round(
       (totalFixedAssetsTangible + totalFixedAssetsIntangible + totalInvestments + totalCurrentAssets + totalFictitiousAssets) * 100,
@@ -576,10 +580,14 @@ router.get("/balance-sheet", async (req, res) => {
     }
     const totalNonCurrentAssets = Math.round((totalAssets - totalCurrentAssets) * 100) / 100;
     const totalNonCurrentLiabilities = Math.round((totalFixedLiabilities + totalProvisionsReserves) * 100) / 100;
-    const totalEquity = partnersCapitalTotal;
+    // Equity = Partners' Capital + Reserves & Surplus (retained earnings)
+    // — Retained Earnings b/f no longer nests inside Partners' Capital's
+    // own sub-total (see reservesAndSurplus below), but it's still
+    // genuinely equity, not debt, for ratio purposes.
+    const totalEquity = Math.round((partnersCapitalTotal + retainedEarningsPrior) * 100) / 100;
 
     const safeDiv = (n, d) => (Math.abs(d) < 0.005 ? null : Math.round((n / d) * 10000) / 10000);
-    // Debt = Total Liabilities (all groups) minus Equity (Partners' Capital).
+    // Debt = Total Liabilities (all groups) minus Equity (Partners' Capital + Reserves & Surplus).
     const totalDebt = Math.round((totalLiabilities - totalEquity) * 100) / 100;
     const currentRatio = safeDiv(totalCurrentAssets, totalCurrentLiabilities);
     const quickRatio   = safeDiv(totalCurrentAssets - totalInventories, totalCurrentLiabilities);
@@ -594,13 +602,18 @@ router.get("/balance-sheet", async (req, res) => {
       entityType,
       partnersCapital: {
         openingCapital: capitalOpening,
-        retainedEarningsPrior,
         furtherCapital: capitalFurther,
         netProfitCurrent,
         drawings: totalDrawings,
         total: partnersCapitalTotal,
         capitalHeads,
       },
+      // Retained Earnings b/f (prior years' net P&L, adjusted for whatever's
+      // already been transferred via the Income Summary head) — reported as
+      // its own liability line, not folded into Partners' Capital. It's the
+      // result of invoices/payments posted in earlier financial years, not
+      // a partner capital contribution.
+      reservesAndSurplus: { retainedEarningsPrior, total: retainedEarningsPrior },
       partnersDrawings: partnersDrawingsRows,
       provisionsReserves,
       fixedLiabilities,
