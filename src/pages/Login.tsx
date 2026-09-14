@@ -11,6 +11,7 @@ import {
 } from "framer-motion";
 import { toast } from "sonner";
 import { useAppVersion } from "@/hooks/useAppVersion";
+import { useFeatureAnnouncement } from "@/hooks/useFeatureAnnouncement";
 
 // ── Typewriter ────────────────────────────────────────────────────────────────
 function useTypewriter(words: string[], speed = 80, pause = 2400) {
@@ -518,6 +519,7 @@ interface PublicStats {
 
 export default function Login() {
   const { appVersion } = useAppVersion();
+  const { title: featureAnnouncement } = useFeatureAnnouncement();
   const [showPass, setShowPass] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -624,12 +626,14 @@ export default function Login() {
 
           {/* All text/cards sit above the crane */}
           <div className="relative z-10 flex flex-col gap-6">
-          <motion.div className="inline-flex items-center gap-2 self-start px-3 py-1.5 rounded-full text-xs font-medium"
-            style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(167,139,250,0.30)", color: "#c4b5fd" }}
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-            <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-purple-500" />
-            New: L1 Chart &amp; Supplier Portal just launched
-          </motion.div>
+          {featureAnnouncement && (
+            <motion.div className="inline-flex items-center gap-2 self-start px-3 py-1.5 rounded-full text-xs font-medium"
+              style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(167,139,250,0.30)", color: "#c4b5fd" }}
+              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse bg-purple-500" />
+              New: {featureAnnouncement}
+            </motion.div>
+          )}
 
           <div>
             <motion.h1 className="text-4xl sm:text-5xl lg:text-[3.25rem] font-bold leading-[1.12] tracking-tight text-white"
