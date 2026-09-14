@@ -339,6 +339,13 @@ const hrPayrollSetupItems = [
     color: "text-yellow-500",
     pageKey: "grace-time-master",
   },
+  {
+    icon: UserSquare,
+    label: "Holiday Master",
+    path: "/hr-payroll/setup/holiday-master",
+    color: "text-yellow-500",
+    pageKey: "holiday-master",
+  },
 ];
 
 const materialSetupItems = [
