@@ -1887,12 +1887,14 @@ const Payment: React.FC = () => {
     set("chequeNo", "");
     // Reset selected card when bank changes (cards are bank-specific)
     set("cardId", null);
-    // The seeded "Cash in Hand" bank (migration 418) isn't a real bank
-    // account — picking it locks the Payment Mode to Cash the same way
-    // clicking the Cash chip would, instead of leaving it possible to
-    // record e.g. a Cheque "from" cash-in-hand. Matched by LHeadCode, not
-    // the display label, so a rename in Bank Master can't silently break it.
-    if (bank?.code === "CASH-IN-HAND") {
+    // A Cash in Hand bank isn't a real bank account — picking one locks the
+    // Payment Mode to Cash the same way clicking the Cash chip would,
+    // instead of leaving it possible to record e.g. a Cheque "from"
+    // cash-in-hand. Matched by LHeadCode prefix, not the display label, so
+    // a rename in Bank Master can't silently break it — "CASH-IN-HAND" is
+    // the original global head (migration 418), "CASH-C-<companyId>" is
+    // each company's own (see generalLedger.js's ensureCashInHandHead).
+    if (bank?.code?.startsWith("CASH-")) {
       handleModeChange("Cash");
     }
   };
