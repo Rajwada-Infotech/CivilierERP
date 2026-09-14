@@ -61,6 +61,18 @@ async function resolveLoansGroupId(pool) {
   return res.recordset[0]?.AGId ?? null;
 }
 
+// SUNDRY DEBTORS (Code='SDS', same resolution accountHeadMaster.js's
+// getSundryDebtorsGroupId already uses) — a customer head sitting here
+// with a CREDIT balance (net < 0) means they've paid more than they
+// currently owe: an advance, a liability, not a debtor. Reclassified
+// per-head into the "Advance from Customers" bucket instead of showing as
+// a negative figure under Sundry Debtors — same sign-flip convention the
+// LOANS AND ADVANCES group above already uses.
+async function resolveSundryDebtorsGroupId(pool) {
+  const res = await pool.request().query(`SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SDS'`);
+  return res.recordset[0]?.AGId ?? null;
+}
+
 async function loadGroups(pool) {
   const res = await pool.request().query(`
     SELECT AGId,
@@ -200,6 +212,7 @@ router.get("/balance-sheet", async (req, res) => {
     const groupMap = await loadGroups(pool);
     const rootIds = await resolveRootIds(pool);
     const loansGroupId = await resolveLoansGroupId(pool);
+    const sundryDebtorsGroupId = await resolveSundryDebtorsGroupId(pool);
 
     const headsRes = await pool
       .request()
@@ -433,6 +446,7 @@ router.get("/balance-sheet", async (req, res) => {
       investments: new Map(),
       currentAssets: new Map(),
       fictitiousAssets: new Map(),
+      advanceFromCustomers: new Map(),
     };
 
     const pushHead = (bucket, groupId, groupName, head) => {
@@ -486,6 +500,17 @@ router.get("/balance-sheet", async (req, res) => {
         groupName = net > 0 ? "Loan Receivable" : "Loan Payable";
       }
 
+      // A Sundry Debtors head with a CREDIT balance (net < 0) has paid
+      // more than they currently owe — an advance, a liability, not a
+      // debtor. Reclassified into its own bucket instead of showing as a
+      // negative figure under Sundry Debtors (same sign-flip convention
+      // as the LOANS AND ADVANCES special case above). Bypasses the
+      // normal per-group asset classification entirely for this head.
+      if (gid === sundryDebtorsGroupId && net < 0) {
+        pushHead(sectionBuckets.advanceFromCustomers, gid, "Advance from Customers", { id: h.id, name: h.name, amount: -net });
+        continue;
+      }
+
       if (root === rootIds.ASSETS) {
         // Asset head: positive (debit) balance is normal. A credit balance
         // on an asset head still reports under Assets, shown as a negative
@@ -536,6 +561,7 @@ router.get("/balance-sheet", async (req, res) => {
     const provisionsReserves = toRows(sectionBuckets.provisionsReserves);
     const fixedLiabilities = toRows(sectionBuckets.fixedLiabilities);
     const currentLiabilities = toRows(sectionBuckets.currentLiabilities);
+    const advanceFromCustomers = toRows(sectionBuckets.advanceFromCustomers);
     const fixedAssetsTangible = toRows(sectionBuckets.fixedAssetsTangible);
     const fixedAssetsIntangible = toRows(sectionBuckets.fixedAssetsIntangible);
     const investments = toRows(sectionBuckets.investments);
@@ -547,6 +573,7 @@ router.get("/balance-sheet", async (req, res) => {
     const totalProvisionsReserves = sumTotal(provisionsReserves);
     const totalFixedLiabilities = sumTotal(fixedLiabilities);
     const totalCurrentLiabilities = sumTotal(currentLiabilities);
+    const totalAdvanceFromCustomers = sumTotal(advanceFromCustomers);
     const totalFixedAssetsTangible = sumTotal(fixedAssetsTangible);
     const totalFixedAssetsIntangible = sumTotal(fixedAssetsIntangible);
     const totalInvestments = sumTotal(investments);
@@ -564,7 +591,7 @@ router.get("/balance-sheet", async (req, res) => {
     ) / 100;
 
     const totalLiabilities = Math.round(
-      (partnersCapitalTotal + retainedEarningsPrior + totalProvisionsReserves + totalFixedLiabilities + totalCurrentLiabilities) * 100,
+      (partnersCapitalTotal + retainedEarningsPrior + totalProvisionsReserves + totalFixedLiabilities + totalCurrentLiabilities + totalAdvanceFromCustomers) * 100,
     ) / 100;
     const totalAssets = Math.round(
       (totalFixedAssetsTangible + totalFixedAssetsIntangible + totalInvestments + totalCurrentAssets + totalFictitiousAssets) * 100,
@@ -580,6 +607,10 @@ router.get("/balance-sheet", async (req, res) => {
     }
     const totalNonCurrentAssets = Math.round((totalAssets - totalCurrentAssets) * 100) / 100;
     const totalNonCurrentLiabilities = Math.round((totalFixedLiabilities + totalProvisionsReserves) * 100) / 100;
+    // Advance from Customers is a short-term liability (applied to an
+    // invoice soon) — folded into the current-liabilities figure used for
+    // ratios, even though it's shown as its own line item in the statement.
+    const totalCurrentLiabilitiesForRatios = Math.round((totalCurrentLiabilities + totalAdvanceFromCustomers) * 100) / 100;
     // Equity = Partners' Capital + Reserves & Surplus (retained earnings)
     // — Retained Earnings b/f no longer nests inside Partners' Capital's
     // own sub-total (see reservesAndSurplus below), but it's still
@@ -589,9 +620,9 @@ router.get("/balance-sheet", async (req, res) => {
     const safeDiv = (n, d) => (Math.abs(d) < 0.005 ? null : Math.round((n / d) * 10000) / 10000);
     // Debt = Total Liabilities (all groups) minus Equity (Partners' Capital + Reserves & Surplus).
     const totalDebt = Math.round((totalLiabilities - totalEquity) * 100) / 100;
-    const currentRatio = safeDiv(totalCurrentAssets, totalCurrentLiabilities);
-    const quickRatio   = safeDiv(totalCurrentAssets - totalInventories, totalCurrentLiabilities);
-    const workingCapital = Math.round((totalCurrentAssets - totalCurrentLiabilities) * 100) / 100;
+    const currentRatio = safeDiv(totalCurrentAssets, totalCurrentLiabilitiesForRatios);
+    const quickRatio   = safeDiv(totalCurrentAssets - totalInventories, totalCurrentLiabilitiesForRatios);
+    const workingCapital = Math.round((totalCurrentAssets - totalCurrentLiabilitiesForRatios) * 100) / 100;
     const debtToEquity = safeDiv(totalDebt, totalEquity);
 
     const difference = Math.round((totalAssets - totalLiabilities) * 100) / 100;
@@ -618,6 +649,10 @@ router.get("/balance-sheet", async (req, res) => {
       provisionsReserves,
       fixedLiabilities,
       currentLiabilities,
+      // A Sundry Debtors head with a credit balance, reclassified here
+      // instead of showing as a negative figure under Sundry Debtors — see
+      // the sundryDebtorsGroupId sign-flip above.
+      advanceFromCustomers,
       fixedAssets: { tangible: fixedAssetsTangible, intangible: fixedAssetsIntangible },
       investments,
       currentAssets,
@@ -632,7 +667,7 @@ router.get("/balance-sheet", async (req, res) => {
         debtToEquity,
         totalCurrentAssets,
         totalNonCurrentAssets,
-        totalCurrentLiabilities,
+        totalCurrentLiabilities: totalCurrentLiabilitiesForRatios,
         totalNonCurrentLiabilities,
         totalEquity,
       },
