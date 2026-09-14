@@ -169,6 +169,7 @@ const ALL_ROUTES = [
   { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },
   { path: "/api/holiday-master", file: "./routes/holidayMaster" },
   { path: "/api/interviews", file: "./routes/interview" },
+  { path: "/api/offer-letter", file: "./routes/offerLetter" },
   { path: "/api/payment-terms", file: "./routes/vendorPaymentTerm" },
   { path: "/api/profit-center", file: "./routes/profitCenter" },
   { path: "/api/document-type", file: "./routes/document-type" },

@@ -132,6 +132,7 @@ const ShiftMaster = lazy(() => import("./pages/hrpayroll/ShiftMaster"));
 const GraceTimeMaster = lazy(() => import("./pages/hrpayroll/GraceTimeMaster"));
 const HolidayMaster = lazy(() => import("./pages/hrpayroll/HolidayMaster"));
 const Interview = lazy(() => import("./pages/hrpayroll/Interview"));
+const OfferLetterJoining = lazy(() => import("./pages/hrpayroll/OfferLetterJoining"));
 const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceDirectory"));
 const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/CustomerMaintenanceProfile"));
 const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
@@ -1008,6 +1009,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="interview">
             <Interview />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/offer-letter-joining"
+        element={
+          <ProtectedRoute pageKey="offer-letter-joining">
+            <OfferLetterJoining />
           </ProtectedRoute>
         }
       />

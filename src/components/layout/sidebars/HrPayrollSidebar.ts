@@ -21,6 +21,7 @@ export const hrPayrollNavItems: NavItem[] = [
     icon: UserSquare,
     children: [
       { label: "Interview", path: "/hr-payroll/interviews", pageKey: "interview" },
+      { label: "Offer Letter & Joining", path: "/hr-payroll/offer-letter-joining", pageKey: "offer-letter-joining" },
     ],
   },
 ];
