@@ -339,6 +339,13 @@ const hrPayrollSetupItems = [
     color: "text-green-500",
     pageKey: "shift-master",
   },
+  {
+    icon: UserSquare,
+    label: "Grace Time Master",
+    path: "/hr-payroll/setup/grace-time-master",
+    color: "text-green-500",
+    pageKey: "grace-time-master",
+  },
 ];
 
 const materialSetupItems = [
