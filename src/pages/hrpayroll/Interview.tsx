@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { UserTick } from "iconsax-react";
@@ -9,7 +9,6 @@ import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { getEmployeeCompanyOptions, type EmployeeCompanyOption } from "@/api/employeeMasterApi";
-import { getProjects } from "@/api/projectMasterApi";
 import { getCandidates, type CandidateRow } from "@/api/candidateMasterApi";
 import {
   getInterviews,
@@ -34,18 +33,16 @@ const STATUS_META: Record<InterviewStatus, { label: string; className: string }>
 interface FormState {
   candidateId: string;
   companyId: string;
-  projectId: string;
   interviewDate: string;
   remarks: string;
 }
 
-const emptyForm: FormState = { candidateId: "", companyId: "", projectId: "", interviewDate: "", remarks: "" };
+const emptyForm: FormState = { candidateId: "", companyId: "", interviewDate: "", remarks: "" };
 
 const exportColumns: ExportColumn[] = [
   { header: "Doc No", accessor: "docNo" },
   { header: "Candidate", accessor: "candidateName" },
   { header: "Company", accessor: "companyName" },
-  { header: "Project", accessor: "projectName" },
   { header: "Date", accessor: "date" },
   { header: "Status", accessor: "statusLabel" },
   { header: "Remarks", accessor: "remarks" },
@@ -76,24 +73,9 @@ const InterviewPage: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: projectData } = useQuery({
-    queryKey: ["project-master-options"],
-    queryFn: getProjects,
-    staleTime: 5 * 60 * 1000,
-  });
-
   const rows: InterviewRow[] = Array.isArray(data) ? data : [];
   const candidates: CandidateRow[] = Array.isArray(candidateData) ? candidateData : [];
   const companies: EmployeeCompanyOption[] = Array.isArray(companyData) ? companyData : [];
-  const allProjects: any[] = Array.isArray(projectData) ? projectData : [];
-
-  const scopedProjects = useMemo(
-    () =>
-      form.companyId
-        ? allProjects.filter((p) => String(p.CompanyId) === form.companyId)
-        : allProjects,
-    [allProjects, form.companyId],
-  );
 
   const selectedCandidate = candidates.find((c) => String(c.CandidateId) === form.candidateId) || null;
 
@@ -103,11 +85,7 @@ const InterviewPage: React.FC = () => {
   };
 
   const setField = (key: keyof FormState, value: string) =>
-    setForm((prev) => ({
-      ...prev,
-      [key]: value,
-      ...(key === "companyId" ? { projectId: "" } : {}),
-    }));
+    setForm((prev) => ({ ...prev, [key]: value }));
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["interview"] });
 
@@ -126,7 +104,6 @@ const InterviewPage: React.FC = () => {
     setForm({
       candidateId: String(row.CandidateId),
       companyId: row.CompanyId ? String(row.CompanyId) : "",
-      projectId: row.ProjectId ? String(row.ProjectId) : "",
       interviewDate: row.InterviewDate ? row.InterviewDate.slice(0, 10) : "",
       remarks: row.Remarks || "",
     });
@@ -152,7 +129,7 @@ const InterviewPage: React.FC = () => {
     const payload = {
       CandidateId: Number(form.candidateId),
       CompanyId: form.companyId ? Number(form.companyId) : null,
-      ProjectId: form.projectId ? Number(form.projectId) : null,
+      ProjectId: null,
       InterviewDate: form.interviewDate,
       Remarks: form.remarks?.trim() || null,
     };
@@ -176,7 +153,6 @@ const InterviewPage: React.FC = () => {
     docNo: r.DocNo,
     candidateName: r.CandidateName,
     companyName: r.CompanyName || "-",
-    projectName: r.ProjectName || "-",
     date: r.InterviewDate ? r.InterviewDate.slice(0, 10) : "",
     statusLabel: STATUS_META[r.Status]?.label || r.Status,
     remarks: r.Remarks || "",
@@ -258,22 +234,13 @@ const InterviewPage: React.FC = () => {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
                   <label className={labelCls}>Company</label>
                   <select className={inputCls} value={form.companyId} onChange={(e) => setField("companyId", e.target.value)}>
                     <option value="">Select...</option>
                     {companies.map((c) => (
                       <option key={c.id} value={c.id}>{c.label}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className={labelCls}>Project</label>
-                  <select className={inputCls} value={form.projectId} onChange={(e) => setField("projectId", e.target.value)}>
-                    <option value="">Select...</option>
-                    {scopedProjects.map((p) => (
-                      <option key={p.Id} value={p.Id}>{p.Name}</option>
                     ))}
                   </select>
                 </div>
@@ -312,7 +279,6 @@ const InterviewPage: React.FC = () => {
                     <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
                     <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Candidate</th>
                     <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Company</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Project</th>
                     <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Date</th>
                     <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
                     <th className="px-4 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
@@ -321,7 +287,7 @@ const InterviewPage: React.FC = () => {
                 <tbody>
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-sm text-muted-foreground">No records yet. Schedule one above.</td>
+                      <td colSpan={6} className="px-4 py-8 text-center text-sm text-muted-foreground">No records yet. Schedule one above.</td>
                     </tr>
                   )}
                   {rows.map((r) => (
@@ -332,7 +298,6 @@ const InterviewPage: React.FC = () => {
                         <div className="text-[11px] text-muted-foreground">{r.CandidateCode}</div>
                       </td>
                       <td className="px-4 py-2.5 hidden sm:table-cell">{r.CompanyName || "-"}</td>
-                      <td className="px-4 py-2.5 hidden sm:table-cell">{r.ProjectName || "-"}</td>
                       <td className="px-4 py-2.5">{r.InterviewDate ? r.InterviewDate.slice(0, 10) : "-"}</td>
                       <td className="px-4 py-2.5">
                         {rights.canEdit ? (
