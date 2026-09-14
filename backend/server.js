@@ -163,6 +163,7 @@ const ALL_ROUTES = [
   { path: "/api/loan-sanction", file: "./routes/loanSanction" },
   { path: "/api/cost-center", file: "./routes/costCenter" },
   { path: "/api/employee-master", file: "./routes/employeeMaster" },
+  { path: "/api/designation-master", file: "./routes/designationMaster" },
   { path: "/api/payment-terms", file: "./routes/vendorPaymentTerm" },
   { path: "/api/profit-center", file: "./routes/profitCenter" },
   { path: "/api/document-type", file: "./routes/document-type" },

@@ -318,6 +318,13 @@ const hrPayrollSetupItems = [
     color: "text-green-500",
     pageKey: "employee-master",
   },
+  {
+    icon: UserSquare,
+    label: "Designation Master",
+    path: "/hr-payroll/setup/designation-master",
+    color: "text-green-500",
+    pageKey: "designation-master",
+  },
 ];
 
 const materialSetupItems = [
