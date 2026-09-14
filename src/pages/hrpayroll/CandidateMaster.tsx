@@ -41,6 +41,23 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
+// Read-only display for the server-generated Candidate ID (CAND-00001
+// style) — same "(auto-generated on save)" placeholder pattern as
+// Interview's Document Number field. formData._id is only present once
+// MasterPage has seeded the form from an existing row (edit mode), so
+// that's what distinguishes "show the real code" from "still unsaved".
+const CandidateIdField: React.FC<{
+  value: unknown;
+  formData: Record<string, unknown>;
+}> = ({ value, formData }) => (
+  <input
+    className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border font-mono opacity-70 text-foreground"
+    value={formData._id ? (value as string) || "" : "(auto-generated on save)"}
+    readOnly
+    disabled
+  />
+);
+
 // Resume upload for the "custom" FieldDef slot — stores a data URI + the
 // original filename directly on the candidate record (same approach as
 // Employee Master's Photo field), no separate attachment table needed for
@@ -139,7 +156,12 @@ const toPayload = (r: Record<string, any>) => {
 };
 
 const fields: FieldDef[] = [
-  { name: "candidateCode", label: "Candidate ID", type: "text", required: true, uppercase: true, placeholder: "e.g. CAND-0001" },
+  {
+    name: "candidateCode",
+    label: "Candidate ID",
+    type: "custom",
+    render: (p) => <CandidateIdField value={p.value} formData={p.formData} />,
+  },
   { name: "candidateName", label: "Name", type: "text", required: true },
   { name: "contact", label: "Contact", type: "text" },
   { name: "email", label: "Email", type: "text" },
