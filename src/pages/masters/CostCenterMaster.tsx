@@ -91,36 +91,32 @@ const CostCenterMaster: React.FC = () => {
   };
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const record = event.record as Record<string, unknown>;
-        await addCostCenter({
-          Code: String(record.Code ?? "").trim(),
-          Name: String(record.Name ?? "").trim(),
-          Description: String(record.Description ?? ""),
-          IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
-          ProjectId: null,
-        });
-        toast.success("Cost center added!");
-        await refetch();
-      } else if (event.action === "update") {
-        const record = event.record as Record<string, unknown>;
-        await updateCostCenter(Number(event.id), {
-          Code: String(record.Code ?? "").trim(),
-          Name: String(record.Name ?? "").trim(),
-          Description: String(record.Description ?? ""),
-          IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
-          ProjectId: null,
-        });
-        toast.success("Cost center updated!");
-        await refetch();
-      } else if (event.action === "delete") {
-        await deleteCostCenter(Number(event.id));
-        toast.success("Cost center deleted!");
-        await refetch();
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Something went wrong");
+    if (event.action === "add") {
+      const record = event.record as Record<string, unknown>;
+      await addCostCenter({
+        Code: String(record.Code ?? "").trim(),
+        Name: String(record.Name ?? "").trim(),
+        Description: String(record.Description ?? ""),
+        IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
+        ProjectId: null,
+      });
+      toast.success("Cost center added!");
+      await refetch();
+    } else if (event.action === "update") {
+      const record = event.record as Record<string, unknown>;
+      await updateCostCenter(Number(event.id), {
+        Code: String(record.Code ?? "").trim(),
+        Name: String(record.Name ?? "").trim(),
+        Description: String(record.Description ?? ""),
+        IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
+        ProjectId: null,
+      });
+      toast.success("Cost center updated!");
+      await refetch();
+    } else if (event.action === "delete") {
+      await deleteCostCenter(Number(event.id));
+      toast.success("Cost center deleted!");
+      await refetch();
     }
   };
 

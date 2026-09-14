@@ -747,31 +747,32 @@ export default function HomePage() {
     <div className="relative min-h-[calc(100vh-3.5rem)] bg-background overflow-hidden font-body">
       <BgGrid />
 
-      <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      <div className="relative z-10 w-full px-4 sm:px-6 md:px-8 lg:px-12 xl:px-16 2xl:px-24 py-6 sm:py-8 lg:py-10">
         {/* ── Hero ── */}
-        <div className="mb-11">
+        <div className="mb-8 sm:mb-11">
           <motion.div
             initial={{ opacity: 0, y: -8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.45 }}
-            className="flex items-center gap-3 mb-5"
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-5"
           >
             <motion.div
               animate={{ rotate: [0, 12, -6, 0] }}
               transition={{ duration: 3.5, repeat: Infinity, repeatDelay: 7 }}
+              className="shrink-0"
             >
               <HardHat size={14} className="text-primary/70" />
             </motion.div>
-            <span className="font-heading text-[10px] font-bold uppercase tracking-[0.24em] text-primary/55">
+            <span className="font-heading text-[10px] font-bold uppercase tracking-[0.24em] text-primary/55 shrink-0">
               CivilierERP
             </span>
-            <span className="relative flex h-1.5 w-1.5">
+            <span className="relative flex h-1.5 w-1.5 shrink-0">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
             </span>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-2 shrink-0">
               {lastUpdated && (
-                <span className="text-[10px] text-muted-foreground/35 font-mono tabular-nums">
+                <span className="text-[10px] text-muted-foreground/35 font-mono tabular-nums hidden sm:inline">
                   {lastUpdated}
                 </span>
               )}
@@ -793,7 +794,7 @@ export default function HomePage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.9, delay: 0.07, ease: [0.16, 1, 0.3, 1] }}
-            className="font-heading font-bold text-5xl md:text-[4rem] tracking-tight leading-[1.06] text-foreground mb-3"
+            className="font-heading font-bold text-4xl sm:text-5xl md:text-[4rem] 2xl:text-[4.5rem] tracking-tight leading-[1.06] text-foreground mb-3 break-words"
           >
             {greeting},{" "}
             <motion.span
@@ -929,7 +930,7 @@ export default function HomePage() {
 
               <div>
                 <SectionLabel>Key numbers</SectionLabel>
-                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
                   {kpis.map((k, i) => (
                     <KpiPill key={k.label} label={k.label} value={k.value} prefix={k.prefix} suffix={k.suffix} color={k.color} icon={k.icon} i={i} />
                   ))}
@@ -960,7 +961,14 @@ export default function HomePage() {
                   {isLoading ? "Loading activity…" : "No recent activity."}
                 </div>
               ) : (
-                <div className="max-h-[calc(100vh-11rem)] min-h-[300px] overflow-y-auto">
+                // Capped to a fixed height on mobile — it's the SECOND item
+                // in the grid there (grid-cols-1 below lg), stacked under
+                // the attention/KPI column, so tying it to 100vh like the
+                // desktop sticky-sidebar layout does would make it as tall
+                // as the whole viewport on top of everything already above
+                // it. Only ties to viewport height once it's actually a
+                // sticky side column (lg+).
+                <div className="max-h-[360px] lg:max-h-[calc(100vh-11rem)] min-h-[240px] lg:min-h-[300px] overflow-y-auto">
                   {feedItems.map((it, i) => (
                     <LiveRow key={`${it.Kind}-${it.DocNo ?? i}-${it.At}`} item={it} onGo={navigate} />
                   ))}

@@ -290,33 +290,21 @@ export default function UnitOfMeasurementMaster() {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        await addUom(toPayload(event.record));
-        toast.success("UOM saved!");
-        await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
+      await addUom(toPayload(event.record));
+      toast.success("UOM saved!");
+      await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
     }
 
     if (event.action === "update") {
-      try {
-        await updateUom(Number(event.id), toPayload(event.record));
-        toast.success("UOM updated!");
-        await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateUom(Number(event.id), toPayload(event.record));
+      toast.success("UOM updated!");
+      await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
     }
 
     if (event.action === "delete") {
-      try {
-        await deleteUom(Number(event.id));
-        toast.success("UOM deleted!");
-        await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
-      }
+      await deleteUom(Number(event.id));
+      toast.success("UOM deleted!");
+      await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
     }
   };
 

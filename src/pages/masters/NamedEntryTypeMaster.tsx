@@ -277,22 +277,17 @@ const NamedEntryTypeMaster: React.FC = () => {
       "ID:",
       "id" in event ? event.id : "(new)",
     );
-    try {
-      if (event.action === "add") {
-        await addEntryType(toPayload(event.record));
-        toast.success("Entry type added successfully!");
-      } else if (event.action === "update") {
-        await updateEntryType(event.id, toPayload(event.record));
-        toast.success("Entry type updated successfully!");
-      } else if (event.action === "delete") {
-        await deleteEntryType(event.id);
-        toast.success("Entry type deleted successfully!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["entry-types"] });
-    } catch (err: any) {
-      console.error("Full error:", err);
-      toast.error(`Operation failed: ${err.message}`);
+    if (event.action === "add") {
+      await addEntryType(toPayload(event.record));
+      toast.success("Entry type added successfully!");
+    } else if (event.action === "update") {
+      await updateEntryType(event.id, toPayload(event.record));
+      toast.success("Entry type updated successfully!");
+    } else if (event.action === "delete") {
+      await deleteEntryType(event.id);
+      toast.success("Entry type deleted successfully!");
     }
+    await queryClient.invalidateQueries({ queryKey: ["entry-types"] });
   };
 
   const handleFormChange = (

@@ -147,46 +147,34 @@ export default function TCMaster() {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        await addTCRecord(toPayload(event.record));
-        toast.success("T&C record saved!");
-        // Remove cached data entirely so MasterPage gets fresh array on refetch
-        queryClient.removeQueries({ queryKey: ["tc-master"] });
-        await queryClient.fetchQuery({
-          queryKey: ["tc-master"],
-          queryFn: getTCRecords,
-        });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
+      await addTCRecord(toPayload(event.record));
+      toast.success("T&C record saved!");
+      // Remove cached data entirely so MasterPage gets fresh array on refetch
+      queryClient.removeQueries({ queryKey: ["tc-master"] });
+      await queryClient.fetchQuery({
+        queryKey: ["tc-master"],
+        queryFn: getTCRecords,
+      });
     }
 
     if (event.action === "update") {
-      try {
-        await updateTCRecord(Number(event.id), toPayload(event.record));
-        toast.success("T&C record updated!");
-        queryClient.removeQueries({ queryKey: ["tc-master"] });
-        await queryClient.fetchQuery({
-          queryKey: ["tc-master"],
-          queryFn: getTCRecords,
-        });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateTCRecord(Number(event.id), toPayload(event.record));
+      toast.success("T&C record updated!");
+      queryClient.removeQueries({ queryKey: ["tc-master"] });
+      await queryClient.fetchQuery({
+        queryKey: ["tc-master"],
+        queryFn: getTCRecords,
+      });
     }
 
     if (event.action === "delete") {
-      try {
-        await deleteTCRecord(Number(event.id));
-        toast.success("T&C record deleted!");
-        queryClient.removeQueries({ queryKey: ["tc-master"] });
-        await queryClient.fetchQuery({
-          queryKey: ["tc-master"],
-          queryFn: getTCRecords,
-        });
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
-      }
+      await deleteTCRecord(Number(event.id));
+      toast.success("T&C record deleted!");
+      queryClient.removeQueries({ queryKey: ["tc-master"] });
+      await queryClient.fetchQuery({
+        queryKey: ["tc-master"],
+        queryFn: getTCRecords,
+      });
     }
   };
 

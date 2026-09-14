@@ -124,31 +124,19 @@ const TdsMaster: React.FC = () => {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        await addTds(toPayload(event.record));
-        toast.success("TDS saved!");
-        await queryClient.invalidateQueries({ queryKey: ["tds"] });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
+      await addTds(toPayload(event.record));
+      toast.success("TDS saved!");
+      await queryClient.invalidateQueries({ queryKey: ["tds"] });
     }
     if (event.action === "update") {
-      try {
-        await updateTds(event.id, toPayload(event.record));
-        toast.success("TDS updated!");
-        await queryClient.invalidateQueries({ queryKey: ["tds"] });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateTds(event.id, toPayload(event.record));
+      toast.success("TDS updated!");
+      await queryClient.invalidateQueries({ queryKey: ["tds"] });
     }
     if (event.action === "delete") {
-      try {
-        await deleteTds(event.id);
-        toast.success("TDS deleted!");
-        await queryClient.invalidateQueries({ queryKey: ["tds"] });
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
-      }
+      await deleteTds(event.id);
+      toast.success("TDS deleted!");
+      await queryClient.invalidateQueries({ queryKey: ["tds"] });
     }
   };
 

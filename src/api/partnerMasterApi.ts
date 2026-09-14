@@ -31,6 +31,10 @@ export interface PartnerRecord {
   capitalGroupName: string | null;
   currentGroupName: string | null;
   createdAt?: string | null;
+  // Optional, note-only reference to another existing Partner (e.g. a
+  // spouse/family relation) — never required, no accounting effect.
+  belongsToCode: string | null;
+  belongsToName: string | null;
 }
 
 export interface PartnerGroupOption {
@@ -42,11 +46,13 @@ export interface PartnerGroupOption {
 export interface PartnerCreatePayload {
   PartnerName: string;
   PartnerCode: string;
+  BelongsTo?: string;
 }
 
 export interface PartnerUpdatePayload {
   PartnerName?: string;
   Status?: boolean;
+  BelongsTo?: string;
 }
 
 export const getPartners = async (): Promise<PartnerRecord[]> => {

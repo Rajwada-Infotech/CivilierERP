@@ -143,38 +143,34 @@ const ProfitCenterMaster: React.FC = () => {
   };
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const record = event.record as Record<string, unknown>;
-        await addProfitCenter({
-          Code: String(record.Code ?? "").trim(),
-          Name: String(record.Name ?? "").trim(),
-          Description: String(record.Description ?? ""),
-          IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
-          ProjectId: record.ProjectId ? Number(record.ProjectId) : null,
-          GLAccountIds: (record.GLAccountIds as string[]) ?? [],
-        });
-        toast.success("Profit center added!");
-        await refetch();
-      } else if (event.action === "update") {
-        const record = event.record as Record<string, unknown>;
-        await updateProfitCenter(Number(event.id), {
-          Code: String(record.Code ?? "").trim(),
-          Name: String(record.Name ?? "").trim(),
-          Description: String(record.Description ?? ""),
-          IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
-          ProjectId: record.ProjectId ? Number(record.ProjectId) : null,
-          GLAccountIds: (record.GLAccountIds as string[]) ?? [],
-        });
-        toast.success("Profit center updated!");
-        await refetch();
-      } else if (event.action === "delete") {
-        await deleteProfitCenter(Number(event.id));
-        toast.success("Profit center deleted!");
-        await refetch();
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Something went wrong");
+    if (event.action === "add") {
+      const record = event.record as Record<string, unknown>;
+      await addProfitCenter({
+        Code: String(record.Code ?? "").trim(),
+        Name: String(record.Name ?? "").trim(),
+        Description: String(record.Description ?? ""),
+        IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
+        ProjectId: record.ProjectId ? Number(record.ProjectId) : null,
+        GLAccountIds: (record.GLAccountIds as string[]) ?? [],
+      });
+      toast.success("Profit center added!");
+      await refetch();
+    } else if (event.action === "update") {
+      const record = event.record as Record<string, unknown>;
+      await updateProfitCenter(Number(event.id), {
+        Code: String(record.Code ?? "").trim(),
+        Name: String(record.Name ?? "").trim(),
+        Description: String(record.Description ?? ""),
+        IsActive: record.IsActive !== undefined ? Boolean(record.IsActive) : true,
+        ProjectId: record.ProjectId ? Number(record.ProjectId) : null,
+        GLAccountIds: (record.GLAccountIds as string[]) ?? [],
+      });
+      toast.success("Profit center updated!");
+      await refetch();
+    } else if (event.action === "delete") {
+      await deleteProfitCenter(Number(event.id));
+      toast.success("Profit center deleted!");
+      await refetch();
     }
   };
 
