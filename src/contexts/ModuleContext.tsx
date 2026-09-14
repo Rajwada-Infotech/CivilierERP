@@ -65,6 +65,8 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
                       ? "🏦 Loan"
                     : activeModule === "maintenance"
                       ? "🔧 Maintenance"
+                    : activeModule === "hr-payroll"
+                      ? "🧑‍💼 HR and Payroll"
                     : activeModule === "admin"
                       ? "🔧 Admin"
                       : "No Module Selected";
@@ -116,6 +118,7 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
       "crm",
       "loan",
       "maintenance",
+      "hr-payroll",
       "admin",
     ];
 
@@ -158,6 +161,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/maintenance")) {
       setActiveModuleState("maintenance");
       localStorage.setItem("activeModule", "maintenance");
+    } else if (pathname.startsWith("/hr-payroll")) {
+      setActiveModuleState("hr-payroll");
+      localStorage.setItem("activeModule", "hr-payroll");
     } else if (
       pathname.startsWith("/finance") ||
       pathname === "/finance" ||

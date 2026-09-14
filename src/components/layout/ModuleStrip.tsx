@@ -15,6 +15,7 @@ import {
   VideoPlay,
   Shield,
   MoneyRecive,
+  Profile2User,
 } from "iconsax-react";
 import { HardHat, Wrench } from "lucide-react";
 import { TimelineIcon } from "@/components/icons/TimelineIcon";
@@ -151,6 +152,15 @@ const MODULES = [
     bg: "rgba(101,163,13,0.22)",
     ringRgb: "101,163,13",
   },
+  {
+    id: "hr-payroll" as Module,
+    icon: Profile2User,
+    label: "HR and Payroll",
+    desc: "Employees, attendance & payroll",
+    color: "#8b5cf6",
+    bg: "rgba(139,92,246,0.22)",
+    ringRgb: "139,92,246",
+  },
   // Records is always last — new modules get inserted above this entry
   {
     id: "records" as Module,
@@ -230,6 +240,7 @@ export const ModuleStrip: React.FC = () => {
     "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
     maintenance: ["maintenance-dashboard"],
     loan:        ["loan-dashboard", "loan-sanction"],
+    "hr-payroll": ["hr-payroll-dashboard"],
     records:     ["records"],
     crm:         ["crm-dashboard", "crm-bookings", "crm-applications", "crm-agreements", "crm-sales-deed"],
   };
