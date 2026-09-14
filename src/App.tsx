@@ -128,6 +128,7 @@ const HrPayrollDashboard = lazy(() => import("./pages/hrpayroll/HrPayrollDashboa
 const EmployeeMaster = lazy(() => import("./pages/hrpayroll/EmployeeMaster"));
 const DesignationMaster = lazy(() => import("./pages/hrpayroll/DesignationMaster"));
 const CandidateMaster = lazy(() => import("./pages/hrpayroll/CandidateMaster"));
+const ShiftMaster = lazy(() => import("./pages/hrpayroll/ShiftMaster"));
 const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceDirectory"));
 const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/CustomerMaintenanceProfile"));
 const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
@@ -972,6 +973,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="candidate-master">
             <CandidateMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/shift-master"
+        element={
+          <ProtectedRoute pageKey="shift-master">
+            <ShiftMaster />
           </ProtectedRoute>
         }
       />

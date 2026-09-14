@@ -332,6 +332,13 @@ const hrPayrollSetupItems = [
     color: "text-green-500",
     pageKey: "candidate-master",
   },
+  {
+    icon: UserSquare,
+    label: "Shift Master",
+    path: "/hr-payroll/setup/shift-master",
+    color: "text-green-500",
+    pageKey: "shift-master",
+  },
 ];
 
 const materialSetupItems = [
