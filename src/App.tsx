@@ -125,6 +125,7 @@ const LoanDashboard = lazy(() => import("./pages/loan/LoanDashboard"));
 const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
 const MaintenanceDashboard = lazy(() => import("./pages/maintenance/MaintenanceDashboard"));
 const HrPayrollDashboard = lazy(() => import("./pages/hrpayroll/HrPayrollDashboard"));
+const EmployeeMaster = lazy(() => import("./pages/hrpayroll/EmployeeMaster"));
 const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceDirectory"));
 const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/CustomerMaintenanceProfile"));
 const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
@@ -945,6 +946,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="hr-payroll-dashboard">
             <HrPayrollDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/employees"
+        element={
+          <ProtectedRoute pageKey="employee-master">
+            <EmployeeMaster />
           </ProtectedRoute>
         }
       />
