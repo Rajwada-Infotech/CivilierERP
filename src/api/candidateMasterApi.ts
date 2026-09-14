@@ -70,6 +70,17 @@ export const updateCandidate = async (id: number, payload: CandidatePayload) => 
   return handle<{ message: string }>(res);
 };
 
+export type InterviewResult = "Selected" | "Rejected" | "On Hold";
+
+export const updateCandidateInterviewStatus = async (id: number, status: InterviewResult) => {
+  const res = await fetchWithAuth(`${BASE}/${id}/interview-status`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ InterviewStatus: status }),
+  });
+  return handle<{ message: string }>(res);
+};
+
 export const deleteCandidate = async (id: number) => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   return handle<{ message: string }>(res);

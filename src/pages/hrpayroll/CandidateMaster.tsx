@@ -1,5 +1,5 @@
 import React from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ProfileAdd, DocumentText } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -18,26 +18,64 @@ import {
   addCandidate,
   updateCandidate,
   deleteCandidate,
+  updateCandidateInterviewStatus,
   type CandidateRow,
+  type InterviewResult,
 } from "@/api/candidateMasterApi";
 
-// Interview Status only ever lands here via the Interview page's status
-// sync (Selected/Rejected/Hold -- see backend/routes/interview.js), so it
-// only ever needs these 3 badge states, plus "no interview yet".
+// Interview Result can be set two ways -- directly here, or via the
+// Interview page's own status sync (see backend/routes/interview.js) --
+// both write the same CandidateMaster.InterviewStatus column, so it only
+// ever needs these 3 states, plus "no result yet".
 const INTERVIEW_RESULT_META: Record<string, { label: string; className: string }> = {
   Selected: { label: "Selected", className: "bg-green-500/10 text-green-600 border-green-500/30" },
   Rejected: { label: "Rejected", className: "bg-red-500/10 text-red-600 border-red-500/30" },
   "On Hold": { label: "Hold", className: "bg-amber-500/10 text-amber-600 border-amber-500/30" },
 };
+const DEFAULT_RESULT_CLASS = "bg-muted text-muted-foreground border-border";
 
-const InterviewResultBadge: React.FC<{ value: unknown }> = ({ value }) => {
-  const status = value as string;
-  const meta = INTERVIEW_RESULT_META[status];
-  if (!meta) return <span className="text-xs text-muted-foreground">-</span>;
+// Inline editable dropdown for the "Interview Result" column -- calls its
+// own usePageRights so it can fall back to a read-only badge for viewers
+// without needing canEdit threaded down from the parent column config.
+const InterviewResultSelect: React.FC<{ candidateId: number; value: string }> = ({ candidateId, value }) => {
+  const rights = usePageRights("candidate-master");
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: (status: InterviewResult) => updateCandidateInterviewStatus(candidateId, status),
+    onSuccess: async () => {
+      toast.success("Interview result updated");
+      await queryClient.invalidateQueries({ queryKey: ["candidate-master"] });
+    },
+    onError: (err: any) => toast.error(err?.message || "Failed to update interview result"),
+  });
+
+  const className = INTERVIEW_RESULT_META[value]?.className || DEFAULT_RESULT_CLASS;
+
+  if (!rights.canEdit) {
+    if (!INTERVIEW_RESULT_META[value]) return <span className="text-xs text-muted-foreground">-</span>;
+    return (
+      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${className}`}>
+        {INTERVIEW_RESULT_META[value].label}
+      </span>
+    );
+  }
+
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${meta.className}`}>
-      {meta.label}
-    </span>
+    <select
+      value={value}
+      disabled={mutation.isPending}
+      onChange={(e) => {
+        const next = e.target.value;
+        if (next) mutation.mutate(next as InterviewResult);
+      }}
+      className={`text-xs px-2 py-1 rounded-full border font-medium ${className}`}
+    >
+      <option value="">Select...</option>
+      <option value="Selected">Selected</option>
+      <option value="On Hold">Hold</option>
+      <option value="Rejected">Rejected</option>
+    </select>
   );
 };
 
@@ -194,8 +232,10 @@ const columns: ColumnDef[] = [
   { key: "isActive", label: "Status" },
 ];
 
-const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
-  interviewStatus: (value) => <InterviewResultBadge value={value} />,
+const columnRenderers: Record<string, (value: unknown, row: RecordWithId) => React.ReactNode> = {
+  interviewStatus: (value, row) => (
+    <InterviewResultSelect candidateId={Number(row._id)} value={(value as string) || ""} />
+  ),
 };
 
 const exportColumns: ExportColumn[] = [

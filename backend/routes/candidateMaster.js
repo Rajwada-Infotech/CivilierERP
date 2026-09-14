@@ -146,6 +146,42 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   }
 });
 
+const INTERVIEW_RESULT_VALUES = ["Selected", "Rejected", "On Hold"];
+
+// PATCH -- set the interview result directly from Candidate Master
+// (Selected / Rejected / On Hold), independent of the Interview page's
+// own status sync -- both write the same column.
+router.patch("/:id/interview-status", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { InterviewStatus } = req.body;
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  if (!INTERVIEW_RESULT_VALUES.includes(InterviewStatus)) {
+    return res.status(400).json({ error: `InterviewStatus must be one of: ${INTERVIEW_RESULT_VALUES.join(", ")}` });
+  }
+  const updatedBy = (req.user && (req.user.name || req.user.email)) || null;
+  try {
+    const pool = getPool();
+    const existing = await pool.request().input("Id", sql.Int, id)
+      .query("SELECT CandidateId FROM dbo.CandidateMaster WHERE CandidateId = @Id");
+    if (!existing.recordset.length) return res.status(404).json({ error: "Candidate not found" });
+
+    await pool
+      .request()
+      .input("Id", sql.Int, id)
+      .input("InterviewStatus", sql.NVarChar(30), InterviewStatus)
+      .input("UpdatedBy", sql.NVarChar(150), updatedBy)
+      .query(`
+        UPDATE dbo.CandidateMaster SET InterviewStatus = @InterviewStatus, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
+        WHERE CandidateId = @Id
+      `);
+    await bumpCacheVersion("candidate-master");
+    res.json({ message: "Interview result updated successfully" });
+  } catch (err) {
+    console.error("[candidate-master] PATCH interview-status error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE
 router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
