@@ -10,15 +10,15 @@ export const hrPayrollNavItems: NavItem[] = [
   {
     label: "Payroll",
     icon: MoneyRecive,
-    children: [],
+    children: [
+      { label: "Employee Master", path: "/hr-payroll/employees", pageKey: "employee-master" },
+    ],
   },
 
   // HR section
   {
     label: "HR",
     icon: UserSquare,
-    children: [
-      { label: "Employee Master", path: "/hr-payroll/employees", pageKey: "employee-master" },
-    ],
+    children: [],
   },
 ];
