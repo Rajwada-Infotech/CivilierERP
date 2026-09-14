@@ -172,7 +172,7 @@ export default function Contract() {
   const [docTypeLoading, setDocTypeLoading] = useState(false);
   const [contactPersonOpen, setContactPersonOpen] = useState(false);
   const [selectedParties, setSelectedParties] = useState<PartyPill[]>([]);
-  const [partyTab, setPartyTab] = useState<"Supplier" | "Contractor" | "Applicant">("Supplier");
+  const [partyTab, setPartyTab] = useState<"Vendor" | "Supplier" | "Contractor" | "Applicant">("Supplier");
   const [partySearch, setPartySearch] = useState("");
 
   const setField = <K extends keyof ReturnType<typeof emptyForm>>(
@@ -756,13 +756,13 @@ export default function Contract() {
                       <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-xl shadow-xl overflow-hidden">
                         {/* Category tabs */}
                         <div className="flex border-b border-border">
-                          {(["S", "C", "A"] as const).map((typeCode) => {
-                            const label = typeCode === "S" ? "Supplier" : typeCode === "C" ? "Contractor" : "Applicant";
+                          {(["V", "S", "C", "A"] as const).map((typeCode) => {
+                            const label = typeCode === "V" ? "Vendor" : typeCode === "S" ? "Supplier" : typeCode === "C" ? "Contractor" : "Applicant";
                             const count = contactPersonsRaw.filter((p) => p.type === typeCode).length;
-                            const isActive = partyTab === (typeCode === "S" ? "Supplier" : typeCode === "C" ? "Contractor" : "Applicant");
+                            const isActive = partyTab === label;
                             return (
                               <button key={typeCode} type="button"
-                                onClick={() => setPartyTab(typeCode === "S" ? "Supplier" : typeCode === "C" ? "Contractor" : "Applicant")}
+                                onClick={() => setPartyTab(label)}
                                 className={`flex-1 py-2 text-xs font-semibold transition-colors border-b-2 ${isActive ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
                               >
                                 {label} <span className="opacity-60">({count})</span>
@@ -787,7 +787,7 @@ export default function Contract() {
                         {/* List */}
                         <div className="max-h-56 overflow-y-auto divide-y divide-border/50">
                           {(() => {
-                            const typeCode = partyTab === "Supplier" ? "S" : partyTab === "Contractor" ? "C" : "A";
+                            const typeCode = partyTab === "Vendor" ? "V" : partyTab === "Supplier" ? "S" : partyTab === "Contractor" ? "C" : "A";
                             const filtered = contactPersonsRaw
                               .filter((p) => p.type === typeCode && p.name.toLowerCase().includes(partySearch.toLowerCase()));
                             if (!filtered.length) return (
@@ -820,12 +820,14 @@ export default function Contract() {
                       </div>
                       {(() => {
                         const t = selectedContactDetail.type;
-                        const cfg = t === "S"
+                        const cfg = t === "V"
+                          ? "bg-indigo-500/10 text-indigo-500 border-indigo-500/20"
+                          : t === "S"
                           ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
                           : t === "C"
                           ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
                           : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
-                        const lbl = t === "S" ? "Supplier" : t === "C" ? "Contractor" : "Applicant";
+                        const lbl = t === "V" ? "Vendor" : t === "S" ? "Supplier" : t === "C" ? "Contractor" : "Applicant";
                         return (
                           <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border shrink-0 ${cfg}`}>{lbl}</span>
                         );

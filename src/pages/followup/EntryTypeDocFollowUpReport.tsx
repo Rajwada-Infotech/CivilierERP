@@ -33,7 +33,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import type { ExportColumn } from "@/lib/export";
 
 const REPORT_API = "/api/entry-type-doc-followup-report";
@@ -165,7 +165,7 @@ function formatDateTime(value: string | null): string {
 
 function useGlass() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const cardStyle = {
     background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
     border: `1px solid ${ACCENT}26`,

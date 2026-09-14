@@ -407,50 +407,46 @@ const RoomMaster: React.FC = () => {
   };
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const res = await fetchWithAuth(API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to add room");
-        const body = await res.json().catch(() => ({}));
-        toast.success("Room added!");
-        try {
-          await uploadBlueprintIfStaged(String(body.id), event.record);
-        } catch (err: any) {
-          toast.error(`Room saved, but blueprint upload failed: ${err.message}`);
-        }
+    if (event.action === "add") {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to add room");
+      const body = await res.json().catch(() => ({}));
+      toast.success("Room added!");
+      try {
+        await uploadBlueprintIfStaged(String(body.id), event.record);
+      } catch (err: any) {
+        toast.error(`Room saved, but blueprint upload failed: ${err.message}`);
       }
-      if (event.action === "update") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to update room");
-        toast.success("Room updated!");
-        try {
-          await uploadBlueprintIfStaged(event.id, event.record);
-        } catch (err: any) {
-          toast.error(`Room updated, but blueprint upload failed: ${err.message}`);
-        }
-      }
-      if (event.action === "delete") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "DELETE",
-        });
-        if (!res.ok)
-          throw new Error((await res.json()).error || "Failed to delete room");
-        toast.success("Room deleted!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["room-master"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
     }
+    if (event.action === "update") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to update room");
+      toast.success("Room updated!");
+      try {
+        await uploadBlueprintIfStaged(event.id, event.record);
+      } catch (err: any) {
+        toast.error(`Room updated, but blueprint upload failed: ${err.message}`);
+      }
+    }
+    if (event.action === "delete") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to delete room");
+      toast.success("Room deleted!");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["room-master"] });
   };
 
   if (isLoading)

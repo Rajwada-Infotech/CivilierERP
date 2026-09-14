@@ -1,5 +1,5 @@
 import React from "react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Link2, X } from "lucide-react";
 import { MODE_STYLE } from "../constants";
 
@@ -36,7 +36,7 @@ export function SectionHeader({
   badge?: React.ReactNode;
 }) {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   return (
     <div
       className="flex items-center gap-2.5 px-3 py-2 rounded-lg"

@@ -468,7 +468,7 @@ const CrmPaymentPlans: React.FC = () => {
       {/* Read-only preview — tapping a card opens this instead of dropping
           straight into a greyed-out copy of the edit form. */}
       <Dialog open={!!previewPlan} onOpenChange={(o) => { if (!o) setPreviewPlan(null); }}>
-        <DialogContent className="max-w-3xl max-h-[88vh] overflow-y-auto">
+        <DialogContent accent="crm" className="max-w-3xl max-h-[88vh] overflow-y-auto">
           {previewPlan && (
             <>
               <DialogHeader>
@@ -596,7 +596,7 @@ const CrmPaymentPlans: React.FC = () => {
 
       {/* Create / Edit form — always editable while open. */}
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); resetForm(); } }}>
-        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent accent="crm" className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading">
               {editingId != null ? "Edit Payment Plan" : "New Payment Plan"}

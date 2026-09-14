@@ -36,11 +36,13 @@ const brokerCertUpload = multer({
   },
 });
 
-// SUNDRY CREDITORS (migration 260628/154, Code='SCS') — every broker's ledger
-// head lands here automatically instead of staff manually picking an Account
-// Group. Mirrors crmLedger.js's getSundryDebtorsGroupId() cache-once pattern
-// exactly, just the payable-side equivalent for brokers (who are owed
-// commission) instead of the receivable-side one CRM customers use.
+// SUNDRY CREDITORS (migration 260628/154, Code='SCS') — every broker's
+// ledger head lands here automatically instead of staff manually picking an
+// Account Group; also the default for a new Customer/Applicant
+// (LHeadType='A', CustomerMaster.tsx) when no group is explicitly chosen —
+// Customer Master's Account Group field is a normal editable picker (not
+// force-locked the way Broker/Supplier/Contractor's still is), so this only
+// covers the "nothing sent" case, not every Customer unconditionally.
 let _sundryCreditorsGroupId;
 async function getSundryCreditorsGroupId(pool) {
   if (_sundryCreditorsGroupId !== undefined) return _sundryCreditorsGroupId;
@@ -49,13 +51,13 @@ async function getSundryCreditorsGroupId(pool) {
   return _sundryCreditorsGroupId;
 }
 
-// SUNDRY DEBTORS (ASSETS > CURRENT ASSETS > TRADE RECEIVABLES > SUNDRY
-// DEBTORS, Code='SDS') — the receivable-side equivalent of
-// getSundryCreditorsGroupId above. Every Customer/Applicant (LHeadType='A')
-// created via CustomerMaster.tsx lands here automatically. Mirrors
-// crmLedger.js's getSundryDebtorsGroupId() (kept as a separate cache here
-// rather than importing that module, matching how this file already
-// duplicates the Creditors pattern instead of sharing it).
+// SUNDRY DEBTORS (Code='SDS') — the default for a new Customer/Applicant
+// (LHeadType='A', CustomerMaster.tsx) when no group is explicitly chosen.
+// Briefly defaulted to Sundry Creditors instead when the Account Group
+// field's lock was first opened; reverted — customers are Sundry Debtors
+// (see migration 423, which also moved every existing Customer Master
+// head back). The field itself stays a normal editable picker either way;
+// this only covers the "nothing sent" case.
 let _sundryDebtorsGroupId;
 async function getSundryDebtorsGroupId(pool) {
   if (_sundryDebtorsGroupId !== undefined) return _sundryDebtorsGroupId;
@@ -285,8 +287,18 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
     const request = pool.request();
     const conditions = [];
     if (req.query.type) {
-      conditions.push("lh.LHeadType = @type");
-      request.input("type", sql.VarChar(50), req.query.type);
+      // Accepts a single type ("S") or a comma-separated list ("S,V") —
+      // SupplierMaster.tsx's Vendor Master list fetches Supplier+Vendor
+      // heads together since Vendor entries save as LHeadType='V'.
+      const types = String(req.query.type).split(",").map((t) => t.trim()).filter(Boolean);
+      if (types.length > 1) {
+        const params = types.map((t, i) => `@type${i}`);
+        conditions.push(`lh.LHeadType IN (${params.join(",")})`);
+        types.forEach((t, i) => request.input(`type${i}`, sql.VarChar(50), t));
+      } else {
+        conditions.push("lh.LHeadType = @type");
+        request.input("type", sql.VarChar(50), req.query.type);
+      }
       // LHeadType='C' collides with projectMaster.js's ensureProjectLedgerHeads,
       // which reuses 'C' for a project's own auto-created Customer ledger head
       // (LHeadCode 'PRJ-<id>-CUST') rather than "Contractor". Every caller of
@@ -297,6 +309,22 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       // customer-ledger rows.
       if (req.query.type === "C") {
         conditions.push("ISNULL(lh.LHeadCode, '') NOT LIKE '%CUST%'");
+      }
+      // Partner Master gives every Partner TWO heads (Capital + Current
+      // Account) — a party picker asking for type=P wants one row per
+      // Partner, not two. Always resolves to the Current Account head; the
+      // Capital side isn't posted to from a generic party picker (yet).
+      if (req.query.type === "P") {
+        conditions.push("lh.LHeadCode LIKE '%-CUR'");
+      }
+      // Landlord is stored as LHeadType='S' with LHeadCategory='Landlord'
+      // (see SupplierMaster.tsx's vendorTypeFromCategory) — there's no
+      // separate LHeadType for it, so procurement pickers (PO/GRN/Item
+      // Master/Work Order/Vehicle In-Out) that want Vendors+Suppliers but
+      // NOT Landlords ask for this explicitly via ?excludeCategory=Landlord.
+      if (req.query.excludeCategory) {
+        conditions.push("ISNULL(lh.LHeadCategory, '') <> @excludeCategory");
+        request.input("excludeCategory", sql.NVarChar(100), req.query.excludeCategory);
       }
     }
     if (req.query.groupId) {
@@ -377,6 +405,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     if (
       !LBelongsTo &&
       LHeadType !== "S" &&
+      LHeadType !== "V" &&
       LHeadType !== "A" &&
       LHeadType !== "C" &&
       LHeadType !== "BR"
@@ -424,13 +453,16 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     let effectiveLBelongsTo = LBelongsTo;
     if (
       !isCustomerHeadMislabelledC &&
-      (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
+      (LHeadType === "BR" || LHeadType === "S" || LHeadType === "V" || LHeadType === "C")
     ) {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
-    } else if (LHeadType === "A") {
-      // Customers/Applicants (CustomerMaster.tsx) always land in SUNDRY
-      // DEBTORS — same never-trust-the-client treatment as the Creditors
-      // block above, just the receivable side.
+    } else if (LHeadType === "A" && !LBelongsTo) {
+      // Customers/Applicants (CustomerMaster.tsx) default to SUNDRY
+      // DEBTORS — briefly defaulted to Sundry Creditors instead when the
+      // Account Group field's lock was first opened, then reverted (see
+      // migration 423). The field itself stays a normal editable picker
+      // (whatever the client actually sends is respected); this only fills
+      // in a default when the client sends nothing at all.
       effectiveLBelongsTo = await getSundryDebtorsGroupId(pool);
     }
 
@@ -624,8 +656,22 @@ router.get("/options", async (req, res) => {
     // so this exclusion is unconditional rather than gated on the requested
     // type — without it the same project name shows up twice (once as its
     // legitimate Supplier ledger, once as this mislabelled Customer one).
-    let query = `SELECT LHeadId AS id, LHeadName AS label, LHeadContactPerson AS contactPerson, RTRIM(LHeadType) AS type
-                 FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1 AND ISNULL(LHeadCode, '') NOT LIKE '%CUST%'`;
+    // Partner Master (LHeadType='P') gives every Partner TWO heads (Capital
+    // + Current Account) — general party pickers (Invoice Payable To,
+    // Payment Payee/Party, Vendor filter) show a Partner as ONE entry, not
+    // two, and that one entry always resolves to the Current Account head;
+    // the Capital Account side is posted to separately (not from a generic
+    // party picker) once that flow exists. Label stays the plain
+    // LHeadName here (no "(Current Account)" suffix) since there's only
+    // ever one row per partner in this filtered list — the suffix only
+    // earns its keep where both heads legitimately appear together (e.g.
+    // Partner Master's own listing, Trial Balance).
+    let query = `SELECT LHeadId AS id,
+                 CASE WHEN LHeadType = 'P' THEN LHeadName ELSE ISNULL(DisplayName, LHeadName) END AS label,
+                 LHeadContactPerson AS contactPerson, RTRIM(LHeadType) AS type
+                 FROM dbo.AccountHeadMaster
+                 WHERE LHeadStatus = 1 AND ISNULL(LHeadCode, '') NOT LIKE '%CUST%'
+                   AND (LHeadType <> 'P' OR LHeadCode LIKE '%-CUR')`;
     const request = pool.request();
     if (req.query.type) {
       // Accepts a single type ("S") or a comma-separated list ("S,C") —
@@ -640,6 +686,13 @@ router.get("/options", async (req, res) => {
         query += ` AND LHeadType IN (${params.join(",")})`;
         types.forEach((t, i) => request.input(`type${i}`, sql.VarChar(50), t));
       }
+    }
+    // See the /GET route's identical excludeCategory handling — Landlord
+    // has no dedicated LHeadType, only LHeadCategory='Landlord' on an
+    // LHeadType='S' row, so procurement pickers exclude it this way.
+    if (req.query.excludeCategory) {
+      query += " AND ISNULL(LHeadCategory, '') <> @excludeCategory";
+      request.input("excludeCategory", sql.NVarChar(100), req.query.excludeCategory);
     }
     query += " ORDER BY LHeadName";
     const result = await request.query(query);
@@ -869,6 +922,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     if (
       !LBelongsTo &&
       LHeadType !== "S" &&
+      LHeadType !== "V" &&
       LHeadType !== "A" &&
       LHeadType !== "C" &&
       LHeadType !== "BR"
@@ -905,11 +959,12 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     let effectiveLBelongsTo = LBelongsTo;
     if (
       !isCustomerHeadMislabelledC &&
-      (LHeadType === "BR" || LHeadType === "S" || LHeadType === "C")
+      (LHeadType === "BR" || LHeadType === "S" || LHeadType === "V" || LHeadType === "C")
     ) {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
-    } else if (LHeadType === "A") {
-      effectiveLBelongsTo = await getSundryDebtorsGroupId(pool);
+    } else if (LHeadType === "A" && !LBelongsTo) {
+      // Same open lock as POST / — only defaults when nothing was sent.
+      effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
     }
 
     let newSupplierPasswordHash = null;

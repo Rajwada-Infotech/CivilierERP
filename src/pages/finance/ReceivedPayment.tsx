@@ -4,7 +4,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { StatusBadge } from "@/components/StatusBadge";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
@@ -382,7 +382,7 @@ function EmptyState() {
 
 export default function ReceivedPaymentPage() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const { finYears } = useFinYear();
   const rights = usePageRights("received-payment");
 
@@ -2117,7 +2117,7 @@ export default function ReceivedPaymentPage() {
       {/* ── View Receipt Modal ───────────────────────────────────────────────── */}
       {viewingPayment && (
         <div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm bw-modal-topmost"
           onClick={() => setViewingPayment(null)}
         >
           <div

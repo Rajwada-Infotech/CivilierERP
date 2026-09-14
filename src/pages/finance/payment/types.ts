@@ -18,6 +18,9 @@ export interface DbPayment {
   PSupplierName?: string | null;
   PSupplierContact?: string | null;
   PExpenseRef: string | null;
+  // Journal Voucher this payment settles (JVLineId, migration 417) —
+  // resolved server-side to the JV's own doc number for display.
+  JVNo?: string | null;
   DocNo?: string | null;
   ParentDocNo?: string | null;
   RootExBDocNo?: string | null;
@@ -56,6 +59,10 @@ export interface BankOption {
   // dropdown to the payment's selected company, same convention
   // ReceivedPayment.tsx already uses.
   companyName?: string | null;
+  // AccountHeadMaster.LHeadCode — used to reliably pick out sentinel heads
+  // like the seeded "Cash in Hand" bank (LHeadCode='CASH-IN-HAND') without
+  // matching on a display label that could be renamed.
+  code?: string | null;
 }
 
 export interface CardOption {
@@ -162,6 +169,10 @@ export interface PaymentRecord {
   projectSite: string;
   expenseRef: string;
   expenseId: string;
+  // Journal Voucher doc number this payment settles, if any (see JVNo on
+  // DbPayment) — shown as its own chip in the list where expenseRef would
+  // otherwise be blank.
+  jvNo: string | null;
   docNo: string;
   parentDocNo: string;
   rootExBDocNo: string;
@@ -211,6 +222,10 @@ export interface PaymentRecord {
   tdsName: string | null;
   tdsPercentage: number | null;
   tdsAmount: number;
+  // Journal Voucher credit line this payment settles (migration 417) — set
+  // when picked from the Payment form's "Journal Vouchers" tab. Stored as
+  // JVLineId on NewPayment; resolves the same LHeadId into partyId below.
+  jvLineId: number | null;
 }
 
 export const PAYMENT_MODES = [

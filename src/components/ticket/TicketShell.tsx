@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { MessageCircle } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface TicketShellProps {
   title: string;
@@ -22,7 +22,7 @@ export const TicketShell: React.FC<TicketShellProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {

@@ -349,7 +349,7 @@ const CrmBrokerage: React.FC = () => {
       <CrmPaginationBar page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} />
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle className="font-heading">{editingId ? "Customize Brokerage" : "Add Broker Involvement"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>

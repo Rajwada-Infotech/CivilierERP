@@ -1,6 +1,7 @@
 import React from "react";
 import { ChevronDown, Search } from "lucide-react";
 import type { ExpenseOption } from "../types";
+import type { PayableJVLine } from "@/api/journalVoucherApi";
 
 export function ExpenseBookingPicker({
   options,
@@ -12,6 +13,11 @@ export function ExpenseBookingPicker({
   selectedContract = null,
   onContractSelect,
   onContractClear,
+  jvLines = [],
+  jvLinesLoading = false,
+  selectedJVLine = null,
+  onJVLineSelect,
+  onJVLineClear,
 }: {
   options: ExpenseOption[];
   value: string;
@@ -22,10 +28,15 @@ export function ExpenseBookingPicker({
   selectedContract?: any | null;
   onContractSelect?: (c: any) => void;
   onContractClear?: () => void;
+  jvLines?: PayableJVLine[];
+  jvLinesLoading?: boolean;
+  selectedJVLine?: PayableJVLine | null;
+  onJVLineSelect?: (line: PayableJVLine) => void;
+  onJVLineClear?: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
-  const [source, setSource] = React.useState<"invoice" | "contract">("invoice");
+  const [source, setSource] = React.useState<"invoice" | "contract" | "jv">("invoice");
   const [typeFilter, setTypeFilter] = React.useState<"all" | "booking" | "emi" | "partial">("all");
   const ref = React.useRef<HTMLDivElement>(null);
 
@@ -38,7 +49,22 @@ export function ExpenseBookingPicker({
   }, []);
 
   const selected = options.find((o) => o.id === value);
-  const hasSelection = !!selected || !!selectedContract;
+  const hasSelection = !!selected || !!selectedContract || !!selectedJVLine;
+
+  const filteredJVLines = jvLines.filter((l) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      (l.JVNo ?? "").toLowerCase().includes(q) ||
+      (l.LHeadName ?? "").toLowerCase().includes(q) ||
+      (l.Narration ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  const clearOthers = () => {
+    onChange("");
+    if (onContractClear) onContractClear();
+  };
 
   // isPartiallyPaid: DB status OR derived from totalPaid/remainingAmount when status is stale
   const isPartiallyPaid = (o: ExpenseOption) =>
@@ -91,10 +117,17 @@ export function ExpenseBookingPicker({
           onClick={() => setOpen((v) => !v)}
           className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-wait hover:border-primary/40 transition-colors"
         >
-          {loading && !selectedContract ? (
+          {loading && !selectedContract && !selectedJVLine ? (
             <span className="flex items-center gap-2 text-muted-foreground">
               <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               Loading…
+            </span>
+          ) : selectedJVLine ? (
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold bg-teal-500/10 text-teal-600 border border-teal-500/20">JV</span>
+              <span className="font-mono text-xs text-teal-600 dark:text-teal-400 font-semibold truncate">
+                {selectedJVLine.JVNo || `JV-${selectedJVLine.JVID}`} · {selectedJVLine.LHeadName}
+              </span>
             </span>
           ) : selectedContract ? (
             <span className="flex items-center gap-2 min-w-0">
@@ -116,6 +149,20 @@ export function ExpenseBookingPicker({
           <ChevronDown size={14} className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
 
+        {selectedJVLine && (
+          <p className="mt-1.5 px-0.5 text-[11px] flex items-center gap-3">
+            <span className="text-muted-foreground">
+              Liability <span className="font-mono font-semibold text-foreground/80">₹{Number(selectedJVLine.CreditAmount || 0).toLocaleString("en-IN")}</span>
+            </span>
+            <span className="text-emerald-600 dark:text-emerald-400">
+              Already paid <span className="font-mono font-semibold">₹{Number(selectedJVLine.PaidAmount || 0).toLocaleString("en-IN")}</span>
+            </span>
+            <span className="text-amber-600 dark:text-amber-400">
+              Pending <span className="font-mono font-semibold">₹{Number(Math.max(selectedJVLine.RemainingAmount || 0, 0)).toLocaleString("en-IN")}</span>
+            </span>
+          </p>
+        )}
+
         {selectedContract && (selectedContract.TotalPaid > 0 || selectedContract.PendingAmount != null) && (
           <p className="mt-1.5 px-0.5 text-[11px] flex items-center gap-3">
             <span className="text-muted-foreground">
@@ -135,14 +182,14 @@ export function ExpenseBookingPicker({
           <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-xl shadow-xl overflow-hidden">
             {/* Source tabs */}
             <div className="flex border-b border-border">
-              {(["invoice", "contract"] as const).map((s) => (
+              {(["invoice", "contract", "jv"] as const).map((s) => (
                 <button
                   key={s}
                   type="button"
                   onClick={() => { setSource(s); setSearch(""); setTypeFilter("all"); }}
                   className={`flex-1 py-2 text-xs font-semibold transition-colors ${source === s ? "border-b-2 border-primary text-primary" : "text-muted-foreground hover:text-foreground border-b-2 border-transparent"}`}
                 >
-                  {s === "invoice" ? `Invoices (${options.length})` : `Contracts (${contracts.length})`}
+                  {s === "invoice" ? `Invoices (${options.length})` : s === "contract" ? `Contracts (${contracts.length})` : `Journal Vouchers (${jvLines.length})`}
                 </button>
               ))}
             </div>
@@ -154,7 +201,7 @@ export function ExpenseBookingPicker({
                 <input
                   autoFocus
                   type="text"
-                  placeholder={source === "invoice" ? "Search by ref, project…" : "Search by name, reason, doc no…"}
+                  placeholder={source === "invoice" ? "Search by ref, project…" : source === "contract" ? "Search by name, reason, doc no…" : "Search by JV no, head, narration…"}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
@@ -199,6 +246,7 @@ export function ExpenseBookingPicker({
                         : undefined;
                       onChange(o.id, remaining);
                       if (onContractClear) onContractClear();
+                      if (onJVLineClear) onJVLineClear();
                       setOpen(false);
                       setSearch("");
                     }}
@@ -246,7 +294,7 @@ export function ExpenseBookingPicker({
                     })()}
                   </button>
                 ))
-              ) : (
+              ) : source === "contract" ? (
                 contractsLoading ? (
                 <div className="px-4 py-6 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
                   <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> Loading contracts…
@@ -263,6 +311,7 @@ export function ExpenseBookingPicker({
                     // wiping out the company/project/party fields
                     // onContractSelect had just set.
                     if (onContractSelect) onContractSelect(c);
+                    if (onJVLineClear) onJVLineClear();
                     setOpen(false);
                     setSearch("");
                   }}
@@ -283,6 +332,38 @@ export function ExpenseBookingPicker({
                   {c.ContractAmount != null && <span className="shrink-0 text-[11px] font-mono font-semibold text-violet-600/80 mt-0.5">₹{Number(c.ContractAmount).toLocaleString("en-IN")}</span>}
                 </button>
               ))
+              ) : (
+                jvLinesLoading ? (
+                <div className="px-4 py-6 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
+                  <div className="w-3 h-3 border-2 border-primary border-t-transparent rounded-full animate-spin" /> Loading journal vouchers…
+                </div>
+              ) : filteredJVLines.length === 0 ? (
+                <div className="px-4 py-6 text-center text-xs text-muted-foreground">No unpaid Journal Voucher liabilities found</div>
+              ) : filteredJVLines.map((l) => (
+                <button key={l.LineID} type="button"
+                  onClick={() => {
+                    clearOthers();
+                    if (onJVLineSelect) onJVLineSelect(l);
+                    setOpen(false);
+                    setSearch("");
+                  }}
+                  className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${selectedJVLine?.LineID === l.LineID ? "bg-teal-500/5" : ""}`}
+                >
+                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold bg-teal-500/10 text-teal-600 border border-teal-500/20">JV</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-xs font-semibold text-foreground truncate">{l.JVNo || `JV-${l.JVID}`} · {l.LHeadName}</p>
+                    {(l.ProjectName || l.CompanyName) && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{l.ProjectName || l.CompanyName}</p>}
+                    {l.Narration && <p className="text-[10px] text-teal-600/60 mt-0.5 truncate">{l.Narration}</p>}
+                    {l.PaidAmount > 0 && (
+                      <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/25">
+                        <span className="w-1 h-1 rounded-full bg-amber-500 inline-block" />
+                        Partly paid · ₹{Number(l.RemainingAmount).toLocaleString("en-IN")} left
+                      </span>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-[11px] font-mono font-semibold text-teal-600/80 mt-0.5">₹{Number(l.RemainingAmount).toLocaleString("en-IN")}</span>
+                </button>
+              ))
               )}
             </div>
 
@@ -290,7 +371,7 @@ export function ExpenseBookingPicker({
             {hasSelection && (
               <div className="border-t border-border p-2">
                 <button type="button"
-                  onClick={() => { onChange(""); if (onContractClear) onContractClear(); setOpen(false); setSearch(""); }}
+                  onClick={() => { onChange(""); if (onContractClear) onContractClear(); if (onJVLineClear) onJVLineClear(); setOpen(false); setSearch(""); }}
                   className="w-full text-xs text-muted-foreground hover:text-destructive transition-colors py-1"
                 >
                   Clear selection

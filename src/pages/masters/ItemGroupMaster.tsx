@@ -210,31 +210,19 @@ const ItemGroupMaster: React.FC = () => {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        await addItemGroup(toPayload(event.record));
-        toast.success("Item group saved!");
-        await queryClient.invalidateQueries({ queryKey: ["item-groups"] });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
+      await addItemGroup(toPayload(event.record));
+      toast.success("Item group saved!");
+      await queryClient.invalidateQueries({ queryKey: ["item-groups"] });
     }
     if (event.action === "update") {
-      try {
-        await updateItemGroup(event.id, toPayload(event.record));
-        toast.success("Item group updated!");
-        await queryClient.invalidateQueries({ queryKey: ["item-groups"] });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateItemGroup(event.id, toPayload(event.record));
+      toast.success("Item group updated!");
+      await queryClient.invalidateQueries({ queryKey: ["item-groups"] });
     }
     if (event.action === "delete") {
-      try {
-        await deleteItemGroup(event.id);
-        toast.success("Item group deleted!");
-        await queryClient.invalidateQueries({ queryKey: ["item-groups"] });
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
-      }
+      await deleteItemGroup(event.id);
+      toast.success("Item group deleted!");
+      await queryClient.invalidateQueries({ queryKey: ["item-groups"] });
     }
   };
 

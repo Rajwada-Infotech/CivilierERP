@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { Archive } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface RecordsShellProps {
   title: string;
@@ -21,7 +21,7 @@ export const RecordsShell: React.FC<RecordsShellProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {

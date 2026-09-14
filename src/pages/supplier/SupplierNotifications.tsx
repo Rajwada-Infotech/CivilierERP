@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import * as spApi from "@/api/supplierPortalApi";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
   AlertTriangle, Clock, CheckCircle2, Bell, ChevronRight,
   RefreshCw, FileText, Zap, Package,
@@ -41,7 +41,7 @@ type Alert = {
 export default function SupplierNotifications() {
   const navigate = useNavigate();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const { data: quotations = [], isLoading: loadingQ, refetch: refetchQ, isFetching: fetchingQ } = useQuery({
     queryKey: ["supplier-quotations"],

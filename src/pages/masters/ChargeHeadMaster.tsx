@@ -66,31 +66,19 @@ const ChargeHeadMaster: React.FC = () => {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        await addChargeHead(toPayload(event.record));
-        toast.success("Charge Head saved!");
-        await queryClient.invalidateQueries({ queryKey: ["charge-heads"] });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
+      await addChargeHead(toPayload(event.record));
+      toast.success("Charge Head saved!");
+      await queryClient.invalidateQueries({ queryKey: ["charge-heads"] });
     }
     if (event.action === "update") {
-      try {
-        await updateChargeHead(event.id, toPayload(event.record));
-        toast.success("Charge Head updated!");
-        await queryClient.invalidateQueries({ queryKey: ["charge-heads"] });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateChargeHead(event.id, toPayload(event.record));
+      toast.success("Charge Head updated!");
+      await queryClient.invalidateQueries({ queryKey: ["charge-heads"] });
     }
     if (event.action === "delete") {
-      try {
-        const res = await deleteChargeHead(event.id);
-        toast.success(res?.message || "Charge Head removed");
-        await queryClient.invalidateQueries({ queryKey: ["charge-heads"] });
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
-      }
+      const res = await deleteChargeHead(event.id);
+      toast.success(res?.message || "Charge Head removed");
+      await queryClient.invalidateQueries({ queryKey: ["charge-heads"] });
     }
   };
 

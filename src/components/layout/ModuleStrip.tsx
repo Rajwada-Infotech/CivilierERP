@@ -22,7 +22,7 @@ import { useModule } from "@/contexts/ModuleContext";
 import { MODULE_DASHBOARD_ROUTES, Module } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 // ── Module definitions ────────────────────────────────────────────────────────
 // ringRgb: raw "r,g,b" used to build valid RGBA strings at runtime
@@ -190,7 +190,7 @@ export const ModuleStrip: React.FC = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const role = currentUser?.role ?? "";
   const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
 

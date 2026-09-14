@@ -7,7 +7,7 @@ import "leaflet/dist/leaflet.css";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { usePageRights } from "@/hooks/usePageRights";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import {
   getWidgetCatalog,
   getWidgetsDashboard,
@@ -248,7 +248,7 @@ function WidgetTile({
   onClick: () => void;
 }) {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.button

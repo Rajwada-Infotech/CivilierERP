@@ -374,6 +374,16 @@ const ALL_REPORTS: ReportDef[] = [
         header: "Doc Date",
         accessor: (r) => (r.EDocDate ? String(r.EDocDate).slice(0, 10) : "—"),
       },
+      {
+        header: "Company",
+        accessor: (r) => (r.ECompanyName ?? "—") as string,
+      },
+      {
+        // Resolved server-side: the booking's EProjectName if set, else the
+        // linked GRN → PO → Project. See expenseBooking.js EProjectDisplayName.
+        header: "Project",
+        accessor: (r) => (r.EProjectDisplayName ?? "—") as string,
+      },
       { header: "Paid To", accessor: (r) => (r.ESupplierName ?? "—") as string },
       {
         header: "Net Amt",
@@ -2443,9 +2453,10 @@ const LedgerReportGroups: React.FC<{
 const ReportTable: React.FC<{
   report: ReportDef;
   filters: FilterState;
+  companies: CompanyOption[];
   projects: { id: number; name: string }[];
   onClose: () => void;
-}> = ({ report, filters, projects, onClose }) => {
+}> = ({ report, filters, companies, projects, onClose }) => {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -2507,6 +2518,11 @@ const ReportTable: React.FC<{
   const isGrnRegister = report.id === "grn-register";
   const [expenseHeadIds, setExpenseHeadIds] = useState<string[]>([]);
   const [expenseHeadOptions, setExpenseHeadOptions] = useState<MultiSelectOption[]>([]);
+  // Expense Register also gets Company / Project multi-selects (checkbox
+  // dropdowns) — ReportTable remounts per report (key=report.id) so these
+  // reset on their own when you switch reports.
+  const [companyIds, setCompanyIds] = useState<string[]>([]);
+  const [projectIds, setProjectIds] = useState<string[]>([]);
   useEffect(() => {
     if (!isExpenseRegister) return;
     fetchWithAuth("/api/general-ledger/options")
@@ -2602,72 +2618,29 @@ const ReportTable: React.FC<{
     // the backend's expenseHeadId param accepts either one id or a list.
     if (isExpenseRegister && expenseHeadIds.length) f["expenseHeadId"] = expenseHeadIds.join(",");
 
+    // Expense Register: multi-select Company / Project — comma-separated ids.
+    // These supersede the section bar's single Company / Project filters.
+    if (isExpenseRegister && companyIds.length) f["companyId"] = companyIds.join(",");
+    if (isExpenseRegister && projectIds.length) {
+      f["projectId"] = projectIds.join(",");
+      delete f["projectName"];
+    }
+
     // Payment Reason Report: scope to a single reason when selected
     if (isPaymentReasonReport && reasonFilter) f["reason"] = reasonFilter;
 
     return f;
   };
 
-  const load = useCallback(async () => {
-    // VendorLedgerReportBody fetches everything it needs itself — nothing
-    // for this generic apiPath flow to do.
-    if (isVendorLedger) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({
-        ...report.defaultParams,
-        ...buildParams(),
-        limit: "500",
-      });
-      const res = await fetchWithAuth(`${report.apiPath}?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
-      // Some routes return a plain array; others wrap in { data: [...] }.
-      // stock-summary uses { byItem: [...] }. Honour filterConfig.dataKey.
-      const dataKey = report.filterConfig?.dataKey ?? "data";
-      const data: Record<string, unknown>[] = Array.isArray(json)
-        ? json
-        : (json[dataKey] ?? json.data ?? json.records ?? []);
-      setRows(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load");
-    } finally {
-      setLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    report.id,
-    filters.companyId,
-    filters.projectId,
-    filters.finYearId,
-    filters.singleDate,
-    filters.rangeFrom,
-    filters.rangeTo,
-    godownId,
-    reasonFilter,
-    expenseHeadIds,
-    projects,
-  ]);
-
-  useEffect(() => {
-    load();
-    setPage(1);
-  }, [load]);
-
-  // Export must pull every matching row, not just the 500-row on-screen cap
-  // `load()` uses for the paginated table. A single bigger-limit request
-  // isn't enough on its own — several of these routes (e.g. expense-booking)
-  // hard-cap `limit` server-side regardless of what's asked for — so this
-  // pages through with `page`/`limit` (the same params `load()` already
-  // sends) until a page comes back short of a full page, a `total`/
-  // `totalPages` field in the response says there's no more, or a safety
-  // cap of 100 pages is hit (whichever first), then concatenates everything.
-  const fetchAllForExport = useCallback(async (): Promise<Record<string, unknown>[]> => {
-    if (isVendorLedger) return rows; // has its own export path, not reached here
+  // Pages through with `page`/`limit` until a page comes back short of a
+  // full page, a `total`/`totalPages` field in the response says there's no
+  // more, or a safety cap of 100 pages is hit (whichever first), then
+  // concatenates everything. Needed even for the on-screen table (not just
+  // export) — several of these routes (e.g. expense-booking) hard-cap
+  // `limit` server-side to 100 regardless of what's asked for, so a single
+  // request silently truncated the list to that server cap instead of
+  // "500 rows" the old single-fetch `load()` assumed it was getting.
+  const fetchAllRows = useCallback(async (): Promise<Record<string, unknown>[]> => {
     const dataKey = report.filterConfig?.dataKey ?? "data";
     const baseParams = { ...report.defaultParams, ...buildParams() };
     const pageSize = 500;
@@ -2678,6 +2651,8 @@ const ReportTable: React.FC<{
       const res = await fetchWithAuth(`${report.apiPath}?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
+      // Some routes return a plain array; others wrap in { data: [...] }.
+      // stock-summary uses { byItem: [...] }. Honour filterConfig.dataKey.
       const batch: Record<string, unknown>[] = Array.isArray(json)
         ? json
         : (json[dataKey] ?? json.data ?? json.records ?? []);
@@ -2699,11 +2674,50 @@ const ReportTable: React.FC<{
       // supports `page` — one request is all there is, so stop after it
       // regardless of how many rows came back.
       const noPaginationMetadata = Array.isArray(json);
-      if (batch.length === 0 || batch.length < pageSize || doneByPageCount || doneByTotal || noPaginationMetadata) break;
+      // "Short page" only means "last page" when there's no total/totalPages
+      // to trust instead — a route that hard-caps `limit` server-side below
+      // what was asked for (e.g. expense-booking clamping 500 down to 100)
+      // returns a batch shorter than pageSize on page 1 even though
+      // totalPages says there are 3 more pages still to fetch. Relying on
+      // batch.length < pageSize unconditionally stopped the loop right
+      // there, silently truncating the on-screen table to that server cap.
+      const hasPaginationMetadata = totalPages != null || total != null;
+      const doneByShortPage = !hasPaginationMetadata && batch.length < pageSize;
+      if (batch.length === 0 || doneByShortPage || doneByPageCount || doneByTotal || noPaginationMetadata) break;
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, rows, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, projects]);
+
+  const load = useCallback(async () => {
+    // VendorLedgerReportBody fetches everything it needs itself — nothing
+    // for this generic apiPath flow to do.
+    if (isVendorLedger) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      setRows(await fetchAllRows());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+  }, [isVendorLedger, fetchAllRows]);
+
+  useEffect(() => {
+    load();
+    setPage(1);
+  }, [load]);
+
+  // Export reuses the exact same full-pagination fetch as the on-screen
+  // table now uses — no separate "get everything" path needed anymore.
+  const fetchAllForExport = useCallback(async (): Promise<Record<string, unknown>[]> => {
+    if (isVendorLedger) return rows; // has its own export path, not reached here
+    return fetchAllRows();
+  }, [isVendorLedger, rows, fetchAllRows]);
 
   const totalPages = Math.ceil(rows.length / PAGE_SIZE);
   const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -2811,6 +2825,34 @@ const ReportTable: React.FC<{
           {/* Expense Head switcher — expense-register only. Nested (grouped
               by parent Account Group) multi-select — pick any number of
               heads at once instead of one at a time. */}
+          {isExpenseRegister && companies.length > 0 && (
+            <div className="w-44">
+              <MultiSelectDropdown
+                options={companies.map((c) => ({ id: c.id, label: c.name }))}
+                value={companyIds}
+                onChange={setCompanyIds}
+                placeholder="All Companies"
+                searchPlaceholder="Search companies…"
+                itemNoun="company"
+                className="h-[30px] py-1"
+              />
+            </div>
+          )}
+
+          {isExpenseRegister && projects.length > 0 && (
+            <div className="w-44">
+              <MultiSelectDropdown
+                options={projects.map((pr) => ({ id: pr.id, label: pr.name }))}
+                value={projectIds}
+                onChange={setProjectIds}
+                placeholder="All Projects"
+                searchPlaceholder="Search projects…"
+                itemNoun="project"
+                className="h-[30px] py-1"
+              />
+            </div>
+          )}
+
           {isExpenseRegister && expenseHeadOptions.length > 0 && (
             <div className="w-56">
               <MultiSelectDropdown
@@ -3365,6 +3407,7 @@ const Reports: React.FC = () => {
                           key={activeReportDef.id}
                           report={activeReportDef}
                           filters={filters}
+                          companies={companies}
                           projects={projects}
                           onClose={() => setActiveReport(null)}
                         />

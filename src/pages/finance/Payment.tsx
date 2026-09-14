@@ -5,7 +5,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { useTds } from "@/contexts/TdsContext";
 import { Button } from "@/components/ui/button";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -119,6 +119,7 @@ import { ExpenseHeadAllocationEditor } from "@/pages/material/ExpenseBooking/Exp
 import { getUndisbursedLoans, postLoanToGL, disburseLoan, type UndisbursedLoan } from "@/api/loanSanctionApi";
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
+import { getPayableJVLines, type PayableJVLine } from "@/api/journalVoucherApi";
 
 // Same helper ReceivedPayment.tsx uses to compare company names for the
 // bank-company scoping filter below — tolerant of casing/whitespace so
@@ -135,7 +136,7 @@ const Payment: React.FC = () => {
   const rights = usePageRights("new-payment");
   const { theme } = useTheme();
   const { tdsRecords } = useTds();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const queryClient = useQueryClient();
   const location = useLocation();
   const [page, setPage] = useState(1);
@@ -925,6 +926,57 @@ const Payment: React.FC = () => {
   // ── Contract source ─────────────────────────────────────────────────────────
   const [selectedContract, setSelectedContract] = useState<any | null>(null);
 
+  // ── Journal Voucher source ───────────────────────────────────────────────────
+  // Settle a JV's unpaid liability leg (DR that same head, CR bank — the
+  // GL posting is identical to any other payment; see
+  // backend/routes/journalVoucher.js's GET /payable-lines for eligibility).
+  const [selectedJVLine, setSelectedJVLine] = useState<PayableJVLine | null>(null);
+  const { data: jvLineOptions = [], isLoading: jvLinesLoading } = useQuery<PayableJVLine[]>({
+    queryKey: ["payment-payable-jv-lines"],
+    queryFn: () => getPayableJVLines(),
+    staleTime: 30_000,
+  });
+  const handleJVLineSelect = (line: PayableJVLine) => {
+    setSelectedContract(null);
+    setLinkedGRNs([]);
+    setSelectedJVLine(line);
+    const companyOpt = companyOptions.find((c) => c.id === line.CompanyId);
+    const projectOpt = projectOptions.find((p) => p.id === line.ProjectId);
+    const companyLabel = companyOpt?.label || line.CompanyName || String(line.CompanyId || "");
+    const projectLabel = projectOpt?.label || line.ProjectName || String(line.ProjectId || "");
+    setForm((prev) => ({
+      ...prev,
+      paymentName: `Payment against ${line.JVNo || `JV-${line.JVID}`} — ${line.LHeadName}`,
+      expenseId: "",
+      expenseRef: "",
+      parentDocNo: "",
+      rootExBDocNo: "",
+      docType: "",
+      contractId: "",
+      jvLineId: line.LineID,
+      company: companyLabel,
+      project: projectLabel,
+      projectSite: projectLabel,
+      partyId: line.LHeadId,
+      paidTo: line.LHeadName,
+      amount: Math.max(Number(line.RemainingAmount) || 0, 0),
+    }));
+  };
+  const clearJVLineLink = () => {
+    setSelectedJVLine(null);
+    setForm((prev) => ({
+      ...prev,
+      paymentName: "",
+      jvLineId: null,
+      company: "",
+      project: "",
+      projectSite: "",
+      partyId: null,
+      paidTo: "",
+      amount: null,
+    }));
+  };
+
   // TDS — invoice-linked payment. Live preview of exactly what will be
   // inherited (or what will block the save) once an invoice is picked —
   // calls the exact same resolver the save itself uses.
@@ -1144,6 +1196,7 @@ const Payment: React.FC = () => {
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setSelectedContract(null);
+    setSelectedJVLine(null);
     setFormLiveRemaining(null);
     setFormKnownTotalPaid(null);
     setFormKnownTdsAmount(null);
@@ -1159,6 +1212,7 @@ const Payment: React.FC = () => {
 
   const openEdit = (rec: PaymentRecord) => {
     setSelectedContract(null);
+    setSelectedJVLine(null);
     setEditingId(rec.id);
     refetchExpenseOptions();
     const { id, ...rest } = rec;
@@ -1184,6 +1238,7 @@ const Payment: React.FC = () => {
     setSupplierBookingFilter("");
     setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setSelectedContract(null);
+    setSelectedJVLine(null);
   };
 
   const blank = blankForm();
@@ -1832,6 +1887,16 @@ const Payment: React.FC = () => {
     set("chequeNo", "");
     // Reset selected card when bank changes (cards are bank-specific)
     set("cardId", null);
+    // A Cash in Hand bank isn't a real bank account — picking one locks the
+    // Payment Mode to Cash the same way clicking the Cash chip would,
+    // instead of leaving it possible to record e.g. a Cheque "from"
+    // cash-in-hand. Matched by LHeadCode prefix, not the display label, so
+    // a rename in Bank Master can't silently break it — "CASH-IN-HAND" is
+    // the original global head (migration 418), "CASH-C-<companyId>" is
+    // each company's own (see generalLedger.js's ensureCashInHandHead).
+    if (bank?.code?.startsWith("CASH-")) {
+      handleModeChange("Cash");
+    }
   };
 
   // ── Validation ─────────────────────────────────────────────────────────────
@@ -1996,6 +2061,7 @@ const Payment: React.FC = () => {
       cardReference: form.cardReference || null,
       cardId: form.cardId ?? null,
       ContractId: form.contractId ? Number(form.contractId) : null,
+      JVLineId: form.jvLineId ?? null,
       // Direct Expense Payment (migration 303) — pay one or more Expense
       // Heads straight from the bank instead of a Party/Invoice.
       EExpenseHeadAllocations:
@@ -2047,6 +2113,7 @@ const Payment: React.FC = () => {
       }
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+      queryClient.invalidateQueries({ queryKey: ["payment-payable-jv-lines"] });
       setDisbursingCustomerLoan(null);
       cancelForm();
     } catch (err: any) {
@@ -2064,6 +2131,7 @@ const Payment: React.FC = () => {
       toast.success("Payment deleted.");
       queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+      queryClient.invalidateQueries({ queryKey: ["payment-payable-jv-lines"] });
       setDeleteId(null);
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -2428,6 +2496,11 @@ const Payment: React.FC = () => {
                           selectedContract={selectedContract}
                           onContractSelect={handleContractSelect}
                           onContractClear={clearContractLink}
+                          jvLines={jvLineOptions}
+                          jvLinesLoading={jvLinesLoading}
+                          selectedJVLine={selectedJVLine}
+                          onJVLineSelect={handleJVLineSelect}
+                          onJVLineClear={clearJVLineLink}
                         />
                         <div className="flex items-center gap-2 pt-1">
                           {filteredOptions.length === 0 && !loadingExpense && (
@@ -2588,7 +2661,7 @@ const Payment: React.FC = () => {
                               if (!groups.has(key)) groups.set(key, []);
                               groups.get(key)!.push(s);
                             });
-                            const order = ["Suppliers", "Contractors", "Brokers", "Customers", "Other"];
+                            const order = ["Vendors", "Suppliers", "Contractors", "Brokers", "Customers", "Partners", "Other"];
                             const sortedKeys = [...groups.keys()].sort(
                               (a, b) => order.indexOf(a) - order.indexOf(b),
                             );
@@ -3908,7 +3981,66 @@ const Payment: React.FC = () => {
                 </div>
               )}
 
-              {/* ── 3. Payment Mode ── */}
+              {/* ── 3. Bank Account ── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Landmark} label="Bank Account" />
+                <Field
+                  label="Bank"
+                  required={isChequeMode || isDigitalMode}
+                  hint={
+                    isCashMode
+                      ? "Not applicable for cash payments."
+                      : isChequeMode
+                        ? "Required — used to filter cheque lots."
+                        : !form.mode
+                          ? "Pick a bank now, or after choosing a Payment Mode below — either order works."
+                          : "Bank account from which the transfer was made."
+                  }
+                >
+                  <div className={`relative ${isCashMode ? "opacity-40 pointer-events-none" : ""}`}>
+                    <Landmark
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <select
+                      value={form.bankId ? String(form.bankId) : ""}
+                      onChange={(e) => handleBankSelect(e.target.value)}
+                      disabled={isCashMode}
+                      className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed"
+                    >
+                      <option value="">— Select bank account —</option>
+                      {filteredBanks.map((b) => (
+                        <option key={b.id} value={String(b.id)}>
+                          {b.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={14}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                  {!isCashMode &&
+                    form.bankId &&
+                    (() => {
+                      const selected = banks.find((b) => b.id === form.bankId);
+                      if (!selected) return null;
+                      const details = [
+                        selected.ifscCode && `IFSC: ${selected.ifscCode}`,
+                        selected.branch && `Branch: ${selected.branch}`,
+                        selected.accountType && `Type: ${selected.accountType}`,
+                      ].filter(Boolean);
+                      if (!details.length) return null;
+                      return (
+                        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
+                          {details.join(" · ")}
+                        </p>
+                      );
+                    })()}
+                </Field>
+              </div>
+
+              {/* ── 4. Payment Mode ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Wallet} label="Payment Mode" />
                 <Field label="Mode" required>
@@ -3944,68 +4076,6 @@ const Payment: React.FC = () => {
                 </Field>
 
                 {form.mode && <ModeInfoBanner mode={form.mode} />}
-              </div>
-
-              {/* ── 4. Bank Account ── */}
-              <div className="space-y-3">
-                <SectionHeader icon={Landmark} label="Bank Account" />
-                <Field
-                  label="Bank"
-                  required={isChequeMode || isDigitalMode}
-                  hint={
-                    !form.mode
-                      ? "Select a payment mode first."
-                      : isCashMode
-                        ? "Not applicable for cash payments."
-                        : isChequeMode
-                          ? "Required — used to filter cheque lots."
-                          : "Bank account from which the transfer was made."
-                  }
-                >
-                  <div
-                    className={`relative ${isCashMode || !form.mode ? "opacity-40 pointer-events-none" : ""}`}
-                  >
-                    <Landmark
-                      size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                    <select
-                      value={form.bankId ? String(form.bankId) : ""}
-                      onChange={(e) => handleBankSelect(e.target.value)}
-                      disabled={isCashMode || !form.mode}
-                      className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed"
-                    >
-                      <option value="">— Select bank account —</option>
-                      {filteredBanks.map((b) => (
-                        <option key={b.id} value={String(b.id)}>
-                          {b.label}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown
-                      size={14}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                    />
-                  </div>
-                  {!isCashMode &&
-                    !!form.mode &&
-                    form.bankId &&
-                    (() => {
-                      const selected = banks.find((b) => b.id === form.bankId);
-                      if (!selected) return null;
-                      const details = [
-                        selected.ifscCode && `IFSC: ${selected.ifscCode}`,
-                        selected.branch && `Branch: ${selected.branch}`,
-                        selected.accountType && `Type: ${selected.accountType}`,
-                      ].filter(Boolean);
-                      if (!details.length) return null;
-                      return (
-                        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
-                          {details.join(" · ")}
-                        </p>
-                      );
-                    })()}
-                </Field>
               </div>
 
               {/* ── 5. Mode-specific section ── */}
@@ -4728,11 +4798,15 @@ const Payment: React.FC = () => {
                               </p>
                             )}
                           </td>
-                          {/* Expense Ref + GRN stacked */}
+                          {/* Expense Ref + JV + GRN stacked */}
                           <td className="px-4 py-4">
                             {rec.expenseRef ? (
                               <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
                                 {rec.expenseRef}
+                              </span>
+                            ) : rec.jvNo ? (
+                              <span className="font-mono text-[11px] bg-teal-500/10 text-teal-600 border border-teal-500/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
+                                {rec.jvNo}
                               </span>
                             ) : (
                               <span className="text-muted-foreground text-xs">
@@ -5414,7 +5488,10 @@ const Payment: React.FC = () => {
                     label: "Project Site",
                     value: viewingRec.projectSite || "—",
                   },
-                  { label: "Expense Ref", value: viewingRec.expenseRef || "—" },
+                  {
+                    label: "Expense Ref",
+                    value: viewingRec.expenseRef || viewingRec.jvNo || "—",
+                  },
                   ...(viewingRec.notes
                     ? [{ label: "Remarks", value: viewingRec.notes }]
                     : []),

@@ -346,40 +346,28 @@ const ActivityMaster: React.FC = () => {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        const payload = toPayload(event.record, groupOptions);
-        const res = await addActivity(payload);
-        toast.success("Activity saved!");
-        await refetch();
-        // Items can only be linked to an Activity (not a Group) — open its
-        // detail drawer immediately so the "Add Item" button is right there,
-        // instead of making the user hunt for it in the tree below.
-        if (payload.activity_type === 1 && res.id) {
-          const fresh = await getActivities();
-          const created = fresh.find((a) => a.id === res.id);
-          if (created) setViewRecord(created);
-        }
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
+      const payload = toPayload(event.record, groupOptions);
+      const res = await addActivity(payload);
+      toast.success("Activity saved!");
+      await refetch();
+      // Items can only be linked to an Activity (not a Group) — open its
+      // detail drawer immediately so the "Add Item" button is right there,
+      // instead of making the user hunt for it in the tree below.
+      if (payload.activity_type === 1 && res.id) {
+        const fresh = await getActivities();
+        const created = fresh.find((a) => a.id === res.id);
+        if (created) setViewRecord(created);
       }
     }
     if (event.action === "update") {
-      try {
-        await updateActivity(event.id, toPayload(event.record, groupOptions));
-        toast.success("Activity updated!");
-        await refetch();
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateActivity(event.id, toPayload(event.record, groupOptions));
+      toast.success("Activity updated!");
+      await refetch();
     }
     if (event.action === "delete") {
-      try {
-        await deleteActivity(event.id);
-        toast.success("Activity deleted!");
-        await refetch();
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
-      }
+      await deleteActivity(event.id);
+      toast.success("Activity deleted!");
+      await refetch();
     }
   };
 

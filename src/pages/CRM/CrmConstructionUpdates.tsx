@@ -97,7 +97,7 @@ const CrmConstructionUpdates: React.FC = () => {
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); } }}>
-        <DialogContent className="max-w-md">
+        <DialogContent accent="crm" className="max-w-md">
           <DialogHeader><DialogTitle className="font-heading">Log Construction Update</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>

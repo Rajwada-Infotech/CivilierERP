@@ -162,7 +162,7 @@ router.put("/shifts/:id", requirePageRight(PAGE_KEY, "edit"), async (req, res) =
 // LHeadType values that represent a real vendor/party who could plausibly
 // supply security personnel — same set Vendor Ledger Report searches
 // (Supplier/Contractor/Broker/Customer), never Bank/GL/Loan heads.
-const VENDOR_TYPES = ["S", "C", "BR", "A"];
+const VENDOR_TYPES = ["S", "V", "C", "BR", "A"];
 const VENDOR_TYPE_LABEL = { S: "Supplier", C: "Contractor", BR: "Broker", A: "Customer" };
 
 // GET /vendor-search?q= — typeahead for the Personnel form's Vendor field.

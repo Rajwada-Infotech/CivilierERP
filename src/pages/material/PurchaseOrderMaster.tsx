@@ -2906,7 +2906,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
 
         {/* ── PO Preview Modal ─────────────────────────────────────────────── */}
         {viewingPO && (
-          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 bw-modal-topmost">
             <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-5xl max-h-[95vh] sm:max-h-[92vh] overflow-y-auto">
               {/* Modal header */}
               <div className="sticky top-0 bg-card z-10 border-b border-border">

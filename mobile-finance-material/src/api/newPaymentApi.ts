@@ -519,7 +519,7 @@ export const fetchProjectOptions = async (): Promise<{ id: number; label: string
 };
 
 export const fetchSupplierOptions = async (): Promise<{ id: number; label: string }[]> => {
-  const res = await fetchWithAuth("/api/account-head/options?type=S,C");
+  const res = await fetchWithAuth("/api/account-head/options?type=S,V,C");
   if (!res.ok) return [];
   return res.json().catch(() => []);
 };

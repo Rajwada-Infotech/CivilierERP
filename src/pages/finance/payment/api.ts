@@ -27,6 +27,7 @@ export const fetchBankOptions = async (): Promise<BankOption[]> => {
       branch: b.BBranch,
       accountType: b.BAccountType,
       companyName: b.BCompanyName,
+      code: b.BCode ?? null,
     }));
 };
 
@@ -179,24 +180,31 @@ export const fetchProjectOptions = async (): Promise<
 
 export const PARTY_TYPE_LABELS: Record<string, string> = {
   S: "Suppliers",
+  V: "Vendors",
   C: "Contractors",
   BR: "Brokers",
   A: "Customers",
+  P: "Partners",
 };
 
 export const fetchSupplierOptions = async (): Promise<
   { id: number; label: string; type?: string }[]
 > => {
-  // Suppliers + Contractors + Brokers + Customers — the Payee/Party field
-  // also has to resolve a Contract's ContactPartyId, which can point to any
-  // of these. Brokers are ledger accounts with LHeadType='BR' (same
-  // AccountHeadMaster pattern as Suppliers/Contractors — see
-  // crm-brokerage's Broker Master). Customers are LHeadType='A' (the real
-  // Customer/Applicant type — 'C' is Contractors here, not Customers; see
-  // the /options route's isCustomerHeadMislabelledC comment).
-  // `type` (raw LHeadType: 'S'/'C'/'BR'/'A') comes back from the API so the
-  // Payment page can group the dropdown by category — see PARTY_TYPE_LABELS.
-  const res = await fetchWithAuth("/api/account-head/options?type=S,C,BR,A");
+  // Suppliers + Contractors + Brokers + Customers + Partners — the
+  // Payee/Party field also has to resolve a Contract's ContactPartyId,
+  // which can point to any of these. Brokers are ledger accounts with
+  // LHeadType='BR' (same AccountHeadMaster pattern as Suppliers/
+  // Contractors — see crm-brokerage's Broker Master). Customers are
+  // LHeadType='A' (the real Customer/Applicant type — 'C' is Contractors
+  // here, not Customers; see the /options route's isCustomerHeadMislabelledC
+  // comment). Partners are LHeadType='P' (Partner Master) — each Partner has
+  // TWO heads (Capital + Current Account), told apart by the /options
+  // route's ISNULL(DisplayName, LHeadName), since both share one LHeadName.
+  // `type` (raw LHeadType: 'S'/'V'/'C'/'BR'/'A'/'P') comes back from the API
+  // so the Payment page can group the dropdown by category — see
+  // PARTY_TYPE_LABELS. 'V' (Vendor) is included alongside 'S' (Supplier) —
+  // a Landlord is also LHeadType='S', so it was already covered.
+  const res = await fetchWithAuth("/api/account-head/options?type=S,V,C,BR,A,P");
   if (!res.ok) return [];
   return res.json().catch(() => ({}));
 };

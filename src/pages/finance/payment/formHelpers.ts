@@ -21,6 +21,7 @@ export function blankForm(): Omit<PaymentRecord, "id"> {
     company: "",
     expenseRef: "",
     expenseId: "",
+    jvNo: null,
     docNo: "",
     parentDocNo: "",
     rootExBDocNo: "",
@@ -49,6 +50,7 @@ export function blankForm(): Omit<PaymentRecord, "id"> {
     supplierContact: "",
     contractId: "",
     partyId: null,
+    jvLineId: null,
     expenseHeadAllocations: [],
     tdsId: null,
     tdsNature: null,
@@ -75,6 +77,7 @@ export function dbToRecord(item: DbPayment): PaymentRecord {
     company: item.PCompany || "",
     expenseRef: item.PExpenseRef || "",
     expenseId: item.PExpenseId ? String(item.PExpenseId) : "",
+    jvNo: item.JVNo || null,
     docNo: item.DocNo || "",
     parentDocNo: item.ParentDocNo || "",
     rootExBDocNo: item.RootExBDocNo || "",
@@ -110,6 +113,7 @@ export function dbToRecord(item: DbPayment): PaymentRecord {
     billingTermsData: null,
     contractId: String((item as { ContractId?: number }).ContractId ?? ""),
     partyId: (item as any).PPartyId ?? null,
+    jvLineId: (item as any).JVLineId ?? null,
     expenseHeadAllocations: Array.isArray((item as any).EExpenseHeadAllocations)
       ? (item as any).EExpenseHeadAllocations.map((a: any) => ({
           _key: `eha-${a.allocationId}`,

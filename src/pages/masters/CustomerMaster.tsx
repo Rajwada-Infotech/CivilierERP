@@ -50,6 +50,7 @@ import {
 import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import TreeDropdown from "@/components/common/TreeDropdown";
+import { getAccountGroups } from "@/api/accountApi";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -362,6 +363,44 @@ const CustomerMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Account Group — used to be force-locked server-side to Sundry Debtors,
+  // never shown as more than a static "Sundry Debtors" label; briefly
+  // defaulted to Sundry Creditors instead when the lock was first opened,
+  // then reverted — customers are Sundry Debtors, full stop (see migration
+  // 423, which also moved every existing Customer Master head back). Still
+  // a normal editable picker (same TreeDropdown pattern this file already
+  // uses for Payment Terms/GST Type) — this only sets the DEFAULT for a
+  // brand-new customer, an accountant can still pick a different group by
+  // hand. Resolved by Code, not a hardcoded AGId, since AGId is not stable
+  // across environments.
+  const { data: accountGroupsData } = useQuery({
+    queryKey: ["account-groups"],
+    queryFn: getAccountGroups,
+    staleTime: 5 * 60 * 1000,
+  });
+  const accountGroupOptions = useMemo(() => {
+    if (!Array.isArray(accountGroupsData)) return [];
+    return (accountGroupsData as any[])
+      .filter((g) => g.AGId != null && g.Name)
+      .map((g) => ({ value: String(g.AGId), label: g.Name as string }));
+  }, [accountGroupsData]);
+  const defaultAccountGroupId = useMemo(() => {
+    if (!Array.isArray(accountGroupsData)) return "";
+    const sds = (accountGroupsData as any[]).find((g) => g.Code === "SDS");
+    return sds ? String(sds.AGId) : "";
+  }, [accountGroupsData]);
+  // Groups load asynchronously — if the Add form is already open (or
+  // restored from a draft) before they resolve, backfill the default the
+  // moment it's known. Only when not editing and nothing's been picked yet,
+  // so this never clobbers an existing record's real group or a choice the
+  // user already made.
+  useEffect(() => {
+    if (editingId === null && !form.LBelongsTo && defaultAccountGroupId) {
+      setForm((p) => ({ ...p, LBelongsTo: defaultAccountGroupId }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultAccountGroupId]);
+
   const customers: Customer[] = useMemo(() => {
     if (!Array.isArray(rawData)) return [];
     return rawData.map((item: any) => ({
@@ -464,7 +503,7 @@ const CustomerMaster: React.FC = () => {
 
   const resetForm = () => {
     setEditingId(null);
-    setForm(EMPTY_FORM);
+    setForm({ ...EMPTY_FORM, LBelongsTo: defaultAccountGroupId });
     setErrors({});
   };
 
@@ -676,17 +715,20 @@ const CustomerMaster: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Account Group — always Sundry Debtors for customers,
-                    never picked manually (see accountHeadMaster.js's
-                    getSundryDebtorsGroupId, applied server-side on every
-                    create/update regardless of what's sent here). */}
+                {/* Account Group — editable (defaults to Sundry Debtors
+                    for a new customer); see accountHeadMaster.js, which
+                    only fills this in server-side when nothing is sent. */}
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
                     Account Group
                   </label>
-                  <div className="h-9 px-3 flex items-center rounded-lg border border-border/60 bg-muted/30 text-sm text-muted-foreground">
-                    Sundry Debtors
-                  </div>
+                  <TreeDropdown
+                    variant="flat"
+                    value={form.LBelongsTo}
+                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v }))}
+                    options={accountGroupOptions}
+                    placeholder="Select account group…"
+                  />
                 </div>
               </div>
             </div>

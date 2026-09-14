@@ -21,7 +21,7 @@ router.get("/", async (_req, res) => {
         (SELECT COUNT(*) FROM dbo.WorkOrderHeader)                       AS TotalWorkOrders,
         (SELECT COUNT(*) FROM dbo.WorkOrderHeader WHERE Status = 'Completed') AS CompletedWorkOrders,
         (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes WHERE Status <> 'Rejected') AS TotalGRNs,
-        (SELECT COUNT(*) FROM dbo.AccountHeadMaster WHERE LHeadType = 'S' AND LHeadStatus = 1) AS ActiveSuppliers,
+        (SELECT COUNT(*) FROM dbo.AccountHeadMaster WHERE LHeadType IN ('S', 'V') AND LHeadStatus = 1) AS ActiveSuppliers,
         (SELECT COUNT(*) FROM dbo.Quotations WHERE Status NOT IN ('Draft','Cancelled'))         AS TotalQuotations
     `);
 

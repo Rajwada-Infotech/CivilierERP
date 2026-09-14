@@ -154,6 +154,7 @@ const ALL_ROUTES = [
   { path: "/api/account-head", file: "./routes/accountHeadMaster" },
   { path: "/api/activity-master", file: "./routes/activityMaster" },
   { path: "/api/bank-master", file: "./routes/bankMaster" },
+  { path: "/api/partner-master", file: "./routes/partnerMaster" },
   { path: "/api/billing-terms", file: "./routes/billingTerms" },
   { path: "/api/card-master", file: "./routes/cardMaster" },
   { path: "/api/cheque-master", file: "./routes/chequeMaster" },

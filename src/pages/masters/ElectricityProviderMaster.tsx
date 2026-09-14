@@ -45,22 +45,14 @@ const ElectricityProviderMaster: React.FC = () => {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        await createElectricityProvider(toPayload(event.record));
-        toast.success("Provider added");
-        await queryClient.invalidateQueries({ queryKey: ["electricity-providers"] });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
+      await createElectricityProvider(toPayload(event.record));
+      toast.success("Provider added");
+      await queryClient.invalidateQueries({ queryKey: ["electricity-providers"] });
     }
     if (event.action === "update") {
-      try {
-        await updateElectricityProvider(Number(event.id), toPayload(event.record));
-        toast.success("Provider updated");
-        await queryClient.invalidateQueries({ queryKey: ["electricity-providers"] });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateElectricityProvider(Number(event.id), toPayload(event.record));
+      toast.success("Provider updated");
+      await queryClient.invalidateQueries({ queryKey: ["electricity-providers"] });
     }
   };
 

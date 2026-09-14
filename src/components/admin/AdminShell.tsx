@@ -1,7 +1,7 @@
 import React from "react";
 import { motion } from "framer-motion";
 import { ShieldCheck } from "lucide-react";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface AdminShellProps {
   title: string;
@@ -25,7 +25,7 @@ export const AdminShell: React.FC<AdminShellProps> = ({
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const glassCard = isDark
     ? {
@@ -159,7 +159,7 @@ export const AdminGlassCard: React.FC<{
   children,
 }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <motion.div
@@ -242,7 +242,7 @@ export const AdminSection: React.FC<{
   accentColor?: string;
 }> = ({ title, icon: Icon, action, children, accentColor = "#3b82f6" }) => {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   return (
     <div className="space-y-3">

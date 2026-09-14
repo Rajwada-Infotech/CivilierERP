@@ -13,7 +13,7 @@ import { GlassShell, GlassCard } from "@/components/dashboard/GlassShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useFinYear } from "@/contexts/FinYearContext";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getSuppliers } from "@/api/grnApi";
 import { getActiveDepreciationSetups, type DepreciationSetup } from "@/api/depreciationApi";
@@ -567,7 +567,7 @@ export default function FixedAssetRecord() {
   const { finYears } = useFinYear();
   const activeFinYear = finYears.find((f) => f.status === "Active")?.year || "";
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   // Same glass-panel treatment GlassShell/GlassCard use elsewhere in the
   // Fixed Asset module, tinted to this module's own accent (#eab308) —
   // keeps every section visually consistent instead of a one-off flat look.

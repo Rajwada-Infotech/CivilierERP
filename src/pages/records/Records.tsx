@@ -8,7 +8,7 @@ import {
 } from "@/components/finance/FinanceShell";
 import { useRecords, type UnifiedRecord } from "@/hooks/useRecords";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import {
@@ -1169,7 +1169,7 @@ export default function Records() {
   const [search, setSearch] = useState("");
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const counts = useMemo(() => {
     const byModule: Record<string, number> = {};

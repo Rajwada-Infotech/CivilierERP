@@ -140,7 +140,7 @@ function PlaceHoldDialog({ unit, projectId, onClose }: { unit: MatrixUnit; proje
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-md">
+      <DialogContent accent="crm" className="max-w-md">
         <DialogHeader><DialogTitle className="font-heading">Hold Unit {unit.UnitName}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div>
@@ -274,7 +274,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-w-lg">
+      <DialogContent accent="crm" className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="font-heading flex items-center gap-2">
             <Building2 size={18} className="text-primary" />

@@ -8,7 +8,7 @@ import { FollowupShell } from "@/components/followup/FollowupShell";
 import { TaskDrawer } from "@/components/followup/TaskDrawer";
 import { ExportMenu } from "@/components/ExportMenu";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import type { ExportColumn } from "@/lib/export";
 
 const API = "/api/task-master";
@@ -69,7 +69,7 @@ function formatDate(dateStr: string): string {
 
 function useGlass() {
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
   const glassCard = isDark
     ? {
         background: "rgba(6, 20, 19, 0.45)",

@@ -10,7 +10,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { translateError } from "@/lib/translateError";
 import { promptNextStep } from "@/lib/workflowNav";
 import { cn } from "@/lib/utils";
-import { useTheme } from "@/contexts/ThemeContext";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { RefreshButton } from "@/components/ui/RefreshButton";
 import { Input } from "@/components/ui/input";
 import { formatINR } from "@/utils/formatCurrency";
@@ -368,7 +368,7 @@ const CrmAfsQueryPayment: React.FC<{
   const deepLinkBookingId = embedded ? String(embeddedBookingId) : sp.get("bookingId");
   const { canCreate, canEdit } = usePageRights("crm-afs-query-payment");
   const { theme } = useTheme();
-  const isDark = theme !== "light";
+  const isDark = !isLightTheme(theme);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [newForm, setNewForm] = useState({ BookingId: "", StampDuty: "", RegistrationFee: "" });
@@ -1147,7 +1147,7 @@ const CrmAfsQueryPayment: React.FC<{
 
             {/* Start dialog (list-mode only) */}
             <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setDialogFeesLocked(false); setNewForm({ BookingId: "", StampDuty: "", RegistrationFee: "" }); } }}>
-              <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
+              <DialogContent accent="crm" className="max-w-md p-0 gap-0 overflow-hidden">
                 <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
                   <div className="flex items-start gap-3">
                     <div className="w-9 h-9 shrink-0 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
@@ -1227,7 +1227,7 @@ const CrmAfsQueryPayment: React.FC<{
 
             {/* Detail dialog (list-mode: row click → dialog) */}
             <Dialog open={!!selectedId && !deepLinkBookingId} onOpenChange={(o) => { if (!o) { setSelectedId(null); setAwaitingSendConfirm(false); setPendingInfoFiles([]); } }}>
-              <DialogContent className="max-w-lg p-0 gap-0 overflow-hidden rounded-xl">
+              <DialogContent accent="crm" className="max-w-lg p-0 gap-0 overflow-hidden rounded-xl">
                 {/* DialogTitle/Description must always be present for a11y */}
                 <DialogTitle className="sr-only">{detail ? `${detail.AfsQPNo} — AFS Query Payment` : "AFS Query Payment"}</DialogTitle>
                 <DialogDescription className="sr-only">{detail ? `${detail.ApplicantName} · ${detail.BookingNo}` : "Loading record…"}</DialogDescription>
