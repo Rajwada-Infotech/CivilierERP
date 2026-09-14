@@ -81,11 +81,11 @@ interface BalanceSheetResponse {
   partnersDrawings: StatementGroup[];
   provisionsReserves: StatementGroup[];
   fixedLiabilities: StatementGroup[];
+  // Includes an "Advance from Customers" group for any Sundry Debtors head
+  // with a credit balance — an advance, not a debtor — reclassified here
+  // instead of appearing as a negative figure under Sundry Debtors on the
+  // Assets side.
   currentLiabilities: StatementGroup[];
-  // A Sundry Debtors head with a credit balance — an advance, not a
-  // debtor — reclassified here instead of appearing as a negative figure
-  // under Sundry Debtors on the Assets side.
-  advanceFromCustomers: StatementGroup[];
   fixedAssets: { tangible: StatementGroup[]; intangible: StatementGroup[] };
   investments: StatementGroup[];
   currentAssets: StatementGroup[];
@@ -518,7 +518,6 @@ function VerticalStatement({
   const totalProvisionsReserves = data.provisionsReserves.reduce((s, g) => s + g.total, 0);
   const totalFixedLiabilities = data.fixedLiabilities.reduce((s, g) => s + g.total, 0);
   const totalCurrentLiabilities = data.currentLiabilities.reduce((s, g) => s + g.total, 0);
-  const totalAdvanceFromCustomers = data.advanceFromCustomers.reduce((s, g) => s + g.total, 0);
   const totalFixedAssetsTangible = data.fixedAssets.tangible.reduce((s, g) => s + g.total, 0);
   const totalFixedAssetsIntangible = data.fixedAssets.intangible.reduce((s, g) => s + g.total, 0);
   const totalFixedAssets = totalFixedAssetsTangible + totalFixedAssetsIntangible;
@@ -562,15 +561,12 @@ function VerticalStatement({
             <GroupList groups={data.fixedLiabilities} openKey={openKey} onToggle={toggle} emptyLabel="No fixed liabilities" noteRef={noteRef} />
           </SectionBlock>
 
+          {/* Includes an "Advance from Customers" group for any Sundry
+              Debtors head with a credit balance — customers who've paid
+              more than they currently owe — instead of showing as a
+              negative figure under Sundry Debtors on the Assets side. */}
           <SectionBlock label="Current Liabilities" amount={totalCurrentLiabilities}>
             <GroupList groups={data.currentLiabilities} openKey={openKey} onToggle={toggle} emptyLabel="No current liabilities" noteRef={noteRef} />
-          </SectionBlock>
-
-          {/* Sundry Debtors heads with a credit balance — customers who've
-              paid more than they currently owe — show here instead of as a
-              negative figure under Sundry Debtors on the Assets side. */}
-          <SectionBlock label="Advance from Customers" amount={totalAdvanceFromCustomers}>
-            <GroupList groups={data.advanceFromCustomers} openKey={openKey} onToggle={toggle} emptyLabel="No customer advances" noteRef={noteRef} />
           </SectionBlock>
 
           <GrandTotalRow label="Total Liabilities" amount={data.totals.liabilities} variant="liabilities" />
@@ -729,7 +725,6 @@ export default function BalanceSheet() {
         ...data.provisionsReserves.flatMap((g) => g.heads.map((h) => ({ side: "Liabilities", group: "Provisions & Reserves", head: h.name, amount: h.amount }))),
         ...data.fixedLiabilities.flatMap((g) => g.heads.map((h) => ({ side: "Liabilities", group: "Fixed Liabilities", head: h.name, amount: h.amount }))),
         ...data.currentLiabilities.flatMap((g) => g.heads.map((h) => ({ side: "Liabilities", group: "Current Liabilities", head: h.name, amount: h.amount }))),
-        ...data.advanceFromCustomers.flatMap((g) => g.heads.map((h) => ({ side: "Liabilities", group: "Advance from Customers", head: h.name, amount: h.amount }))),
         ...data.fixedAssets.tangible.flatMap((g) => g.heads.map((h) => ({ side: "Assets", group: "Fixed Assets — Tangible", head: h.name, amount: h.amount }))),
         ...data.fixedAssets.intangible.flatMap((g) => g.heads.map((h) => ({ side: "Assets", group: "Fixed Assets — Intangible", head: h.name, amount: h.amount }))),
         ...data.investments.flatMap((g) => g.heads.map((h) => ({ side: "Assets", group: "Investments", head: h.name, amount: h.amount }))),
