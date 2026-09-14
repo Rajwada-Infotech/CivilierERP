@@ -1,0 +1,1 @@
+const sql = require('mssql'); (async () => { try { const pool = await sql.connect({user:'foo',password:'bar',server:'localhost',database:'master'}); const req = pool.request(); req.input('docId', sql.Int, NaN); await req.query('SELECT 1 WHERE 1 = @docId'); console.log('success'); } catch (e) { console.log('error', e.message); } process.exit(0);})();

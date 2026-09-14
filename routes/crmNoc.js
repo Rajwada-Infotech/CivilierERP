@@ -1,0 +1,414 @@
+const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
+const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
+const { requirePageRight } = require("../middleware/requirePageRight");
+const { actorId, requireUserEmail } = require("../services/saAccess");
+const { getNextDocNumber } = require("../services/docNumber");
+// Approve/reject is gated to admin/super_admin/marketing_head via this shared
+// engine — same mechanism BOQ/Purchase Orders/etc. use — instead of any
+// editor being able to self-approve a NOC on this page.
+const { transition: approvalTransition } = require("../services/approvalService");
+const { requireActiveBooking, resolveNocType } = require("../services/crmWorkflowGuards");
+const { applyPagination } = require("../services/crmListPagination");
+
+router.use(authMiddleware);
+router.use(apiRateLimit);
+
+const NOC_TYPES = ["Organisation", "Bank"];
+
+const NOC_SELECT = `
+  SELECT n.*, b.BookingNo,
+         COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+         a.ApplicantName, a.Mobile
+  FROM dbo.CrmNoc n
+  JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+`;
+
+// GET / — all NOCs
+router.get("/", requirePageRight("crm-noc", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { type, status, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = [];
+    if (type)   { req0.input("t",  sql.NVarChar(30), type);   conds.push("n.NocType = @t"); }
+    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("n.Status = @st"); }
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
+    }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const SELECT_WITH_BLOCK = `${NOC_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY n.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("t2", sql.NVarChar(30), type || null)
+        .input("st2", sql.NVarChar(30), status || null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmNoc n
+          JOIN dbo.CrmBooking b ON b.Id = n.BookingId
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE (@t2 IS NULL OR n.NocType = @t2)
+            AND (@st2 IS NULL OR n.Status = @st2)
+            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+  } catch (e) {
+    console.error("[crm-noc] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /booking/:bookingId/context — everything the "Request NOC" dialog
+// needs the instant a booking is picked, so staff see the real gate
+// (Agreement must exist) and every field the form can be pre-filled from
+// *before* filling the form, instead of typing everything and only finding
+// out it's rejected on submit.
+router.get("/booking/:bookingId/context", requirePageRight("crm-noc", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId);
+
+    const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
+             ISNULL(b.GrandTotal, b.TotalValue) AS GrandTotal
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      WHERE b.Id = @bid
+    `);
+    if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
+
+    const agreement = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+
+    const existingNocs = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id, NocNo, NocType, Status FROM dbo.CrmNoc WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+
+    // The customer's own bank account on file (KYC/Welcome Call) — kept in
+    // the response for reference/display only. It is NOT the pre-fill source
+    // for a Bank NOC's lender fields below — that was the bug: a Bank NOC
+    // exists for the LENDING bank, and the customer's personal KYC account is
+    // a different bank entirely more often than not.
+    const bankDetail = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT BankName, AccountNo, IfscCode FROM dbo.CrmCustomerBankDetail WHERE BookingId = @bid");
+
+    // The actual lender record (Home Loan Tracking) — real BankName/
+    // LoanAccountNo/LoanAmount the bank itself sanctioned, not a guess. Null
+    // when no loan has been recorded yet; the frontend leaves the Bank NOC
+    // fields blank in that case rather than falling back to a wrong source.
+    const loanDetail = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT BankName, LoanAccountNo, LoanAmount, SanctionStatus FROM dbo.CrmLoanDetail WHERE BookingId = @bid");
+
+    res.json({
+      booking: booking.recordset[0],
+      agreement: agreement.recordset[0] || null,
+      existingNocs: existingNocs.recordset,
+      customerBankDetail: bankDetail.recordset[0] || null,
+      loanDetail: loanDetail.recordset[0] || null,
+    });
+  } catch (e) {
+    console.error("[crm-noc] GET /booking/:id/context error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /eligible-bookings — bookings eligible for a new NOC. NOC is a single
+// step per booking (never both Bank and Organisation — see resolveNocType in
+// crmWorkflowGuards.js), so this returns each candidate along with its
+// resolved type; the frontend no longer offers a manual type choice.
+// The optional ?type= filter narrows to bookings whose resolved type
+// matches (kept for the page's Bank/Organisation filter tabs).
+router.get("/eligible-bookings", requirePageRight("crm-noc", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { type } = req.query; // "Bank" | "Organisation" | "" (= no filter)
+    const typeFilter = NOC_TYPES.includes(type) ? type : null;
+    const candidates = await pool.request().query(`
+      SELECT b.Id, b.BookingNo,
+             COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+             a.ApplicantName,
+             CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
+               SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
+                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+             ) THEN 'Bank' ELSE 'Organisation' END AS NocType,
+             CASE WHEN b.FinancingType = 'LoanFinanced' OR EXISTS (
+               SELECT 1 FROM dbo.CrmLoanDetail ld WHERE ld.BookingId = b.Id
+                 AND ld.SanctionStatus NOT IN ('NotApplied', 'Rejected')
+             ) THEN 1 ELSE 0 END AS HasLoan
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      WHERE b.IsActive = 1
+        AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')
+        -- Agreement for Sale, registered at the Sub-Registrar, is mandatory
+        -- for every booking regardless of project type — no exception.
+        AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = '${CrmStatus.REGISTERED}')
+        -- one NOC ever per booking, of whichever type applies
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.Status <> '${CrmStatus.REJECTED}')
+      ORDER BY b.BookingNo
+    `);
+    const filtered = typeFilter
+      ? candidates.recordset.filter((c) => c.NocType === typeFilter)
+      : candidates.recordset;
+    res.json(filtered);
+  } catch (e) {
+    console.error("[crm-noc] GET /eligible-bookings error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST / — request a NOC. Gated on an Agreement existing for the booking —
+// deliberately not a stricter "Executed" gate: a Bank NOC (loan clearance/
+// disbursement condition) can legitimately need to be requested while the
+// agreement is still being finalized, unlike Org NOC which typically comes
+// later. Both need the transaction (the agreement) to exist to reference,
+// which is the one threshold true for both types without guessing at
+// exactly when each is supposed to fire.
+router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId);
+
+    const activeErr = await requireActiveBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    // Both NOC types require the Agreement for Sale to be physically registered
+    // at the Sub-Registrar's Office (AgreementStatus = 'Registered') — for
+    // every project type, no exception.
+    // Bank NOC: releases the lender's charge on the unit.
+    // Org NOC: confirms builder has no objection — only meaningful once AFS is
+    // legally registered, not just drafted or executed.
+    const agrStatus = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Status FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+    const agrStatusVal = agrStatus.recordset[0]?.Status;
+    if (!agrStatusVal) {
+      return res.status(400).json({ error: "NOC requires an Agreement for Sale to exist for this booking first" });
+    }
+    if (agrStatusVal !== "Registered") {
+      return res.status(400).json({ error: "NOC can only be requested once the Agreement for Sale is registered at the Sub-Registrar's Office (current status: " + agrStatusVal + ")" });
+    }
+
+    // NOC is a SINGLE step per booking, not a free choice of type — the
+    // bank's NOC and the developer's NOC serve the same purpose (clearing
+    // the booking to proceed), so a booking only ever gets one, decided by
+    // how it's financed (see resolveNocType in crmWorkflowGuards.js). The
+    // client is expected to send the resolved type (it reads it off
+    // /eligible-bookings' HasLoan flag), but this is re-derived and
+    // enforced server-side rather than trusted from the request body.
+    const requestedType = NOC_TYPES.includes(b.NocType) ? b.NocType : null;
+    const { nocType: resolvedType } = await resolveNocType(pool, bookingId);
+    if (requestedType && requestedType !== resolvedType) {
+      return res.status(400).json({
+        error: `This booking's NOC is ${resolvedType} (based on its financing) — a ${requestedType} NOC does not apply here.`,
+      });
+    }
+    const nocType = resolvedType;
+
+    // One NOC per type per booking — enforced above as one NOC per booking
+    // overall, this is just the underlying uniqueness guard.
+    const existingOpen = await pool.request()
+      .input("bid", sql.Int, bookingId)
+      .input("t",   sql.NVarChar(30), nocType)
+      .query("SELECT TOP 1 NocNo FROM dbo.CrmNoc WHERE BookingId = @bid AND NocType = @t AND Status <> 'Rejected'");
+    if (existingOpen.recordset.length) {
+      return res.status(409).json({
+        error: `A ${nocType} NOC (${existingOpen.recordset[0].NocNo}) already exists for this booking.`,
+      });
+    }
+
+    const nocNo = await getNextDocNumber(pool, "NOC", "NOC");
+
+    const result = await pool.request()
+      .input("no",   sql.NVarChar(30),  nocNo)
+      .input("bid",  sql.Int,           parseInt(b.BookingId))
+      .input("type", sql.NVarChar(30),  nocType)
+      .input("dt",   sql.Date,          b.NocDate || null)
+      .input("reason", sql.NVarChar(500), b.Reason || null)
+      .input("bank", sql.NVarChar(255), b.BankName || null)
+      .input("acc",  sql.NVarChar(100), b.LoanAccountNo || null)
+      .input("lamt", sql.Decimal(18,2), b.LoanAmount != null ? parseFloat(b.LoanAmount) : null)
+      .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("cb",   sql.Int,           actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmNoc
+          (NocNo, BookingId, NocType, NocDate, Reason, BankName, LoanAccountNo, LoanAmount, Status, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @type, @dt, @reason, @bank, @acc, @lamt, 'Pending', @note, @cb, SYSDATETIME())
+      `);
+    res.status(201).json({ success: true, id: result.recordset[0].Id, NocNo: nocNo });
+
+  } catch (e) {
+    // A genuine concurrent double-submit (two staff clicking "Request NOC"
+    // within milliseconds of each other) can both pass the pre-check SELECT
+    // above before either INSERT commits — the second one lands here instead,
+    // rejected by UQ_CrmNoc_ActiveNocPerType. Translate that into the same
+    // friendly 409 the synchronous pre-check gives, instead of surfacing the
+    // raw SQL Server constraint-violation message as an ugly 500.
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique") || e.number === 2601 || e.number === 2627) {
+      return res.status(409).json({ error: "An active NOC already exists for this booking — refresh to see it." });
+    }
+    console.error("[crm-noc] POST error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id — update Notes only. Status is never settable here —
+// Approved/Rejected go through the endpoints below, Issued through
+// /:id/mark-issued. The legacy LoanSanctionStatus/LoanSanctionDate/
+// LoanDisbursementStatus/LoanDisbursementDate columns (from migration 152,
+// pre-dating CrmLoanDetail) used to be writable here too — removed: nothing
+// downstream (resolveNocType, checkLoanProcessingCleared, the lifecycle bar,
+// the Sales Deed page) ever read them, so they were a second, disconnected
+// "loan status" a staff member could edit and trust by mistake while the
+// real gating value lived only on the Loan Tracking page. The columns
+// themselves are left in the schema (old data, no migration needed) but are
+// no longer written from here — CrmLoanDetail is the single source of truth.
+router.put("/:id", requirePageRight("crm-noc", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    const id = parseInt(req.params.id);
+
+    const cur0 = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
+    if (!cur0.recordset.length) return res.status(404).json({ error: "NOC not found" });
+    const activeErr0 = await requireActiveBooking(pool, cur0.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
+    await pool.request()
+      .input("id",    sql.Int,  id)
+      .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("ub",    sql.Int,  actorId(req))
+      .query(`
+        UPDATE dbo.CrmNoc SET
+          Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-noc] PUT error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/submit — Rejected -> Pending (resubmit)
+router.put("/:id/submit", requirePageRight("crm-noc", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool0 = getPool();
+    const cur0 = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
+    if (!cur0.recordset.length) return res.status(404).json({ error: "NOC not found" });
+    const activeErr0 = await requireActiveBooking(pool0, cur0.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const result = await approvalTransition("crm-noc", id, CrmStatus.PENDING, userEmail, req.user?.role);
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-noc] submit error:", e.message);
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// PUT /:id/approve — admin/super_admin/marketing_head only, enforced inside
+// approvalTransition().
+router.put("/:id/approve", requirePageRight("crm-noc", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool0 = getPool();
+    const cur0 = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
+    if (!cur0.recordset.length) return res.status(404).json({ error: "NOC not found" });
+    const activeErr0 = await requireActiveBooking(pool0, cur0.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const result = await approvalTransition("crm-noc", id, CrmStatus.APPROVED, userEmail, req.user?.role);
+    await getPool().request()
+      .input("id", sql.Int, id)
+      .query("UPDATE dbo.CrmNoc SET ApprovalDate = ISNULL(ApprovalDate, CAST(SYSDATETIME() AS DATE)) WHERE Id = @id");
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-noc] approve error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// PUT /:id/reject — admin/super_admin/marketing_head only.
+router.put("/:id/reject", requirePageRight("crm-noc", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool0 = getPool();
+    const cur0 = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
+    if (!cur0.recordset.length) return res.status(404).json({ error: "NOC not found" });
+    const activeErr0 = await requireActiveBooking(pool0, cur0.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const result = await approvalTransition("crm-noc", id, CrmStatus.REJECTED, userEmail, req.user?.role, req.body?.note || null);
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-noc] reject error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// PUT /:id/mark-issued — a business action (recording physical issuance),
+// not an approval decision — any editor can do this once Approved.
+router.put("/:id/mark-issued", requirePageRight("crm-noc", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status, BookingId FROM dbo.CrmNoc WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "NOC not found" });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    if (cur.recordset[0].Status !== CrmStatus.APPROVED) {
+      return res.status(400).json({ error: `Cannot mark issued — NOC must be Approved (currently '${cur.recordset[0].Status}')` });
+    }
+
+    await pool.request().input("id", sql.Int, id)
+      .query("UPDATE dbo.CrmNoc SET Status = 'Issued', IssuedDate = CAST(SYSDATETIME() AS DATE), UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-noc] mark-issued error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+module.exports = router;

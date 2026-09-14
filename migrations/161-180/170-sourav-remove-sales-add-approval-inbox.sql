@@ -1,0 +1,32 @@
+-- Migration 170: Update Sourav (UserId=9, Account's Head) personal rights:
+--   - Remove Sales module pages: sale-order, sale-invoice, sales-payment
+--   - Add Admin module: approval-inbox (view only)
+--
+-- Rights are stored as a per-user JSON override in dbo.UserPageRightsJson.
+-- The new JSON is identical to the current one except for the three sales
+-- pages removed and approval-inbox appended.
+
+DECLARE @UserId INT = 9;
+
+DECLARE @CurrentJson NVARCHAR(MAX) = N'[{"page":"trial-balance","actions":["view","create","edit","delete","print","export"]},{"page":"finance-dashboard","actions":["view","create","edit","delete","print","export"]},{"page":"new-payment","actions":["view","create","edit","delete","print","export"]},{"page":"received-payment","actions":["view","create","edit","delete","print","export"]},{"page":"brs","actions":["view","create","edit","delete","print","export"]},{"page":"records","actions":["view","create","edit","delete","print","export"]},{"page":"bank-master","actions":["view","create","edit","delete","print","export"]},{"page":"expenses-master","actions":["view","create","edit","delete","print","export"]},{"page":"financial-year-master","actions":[]},{"page":"cheque-master","actions":["view","create","edit","delete","print","export"]},{"page":"card-master","actions":["view","create","edit","delete","print","export"]},{"page":"tds-master","actions":["view","create","edit","delete","print","export"]},{"page":"account-head","actions":["view","create","edit","delete","print","export"]},{"page":"general-ledger","actions":["view","create","edit","delete","print","export"]},{"page":"billing-terms","actions":["view","create","edit","delete","print","export"]},{"page":"debit-note","actions":["view","create","edit","delete","print","export"]},{"page":"material-dashboard","actions":["view","create","edit","delete","print","export"]},{"page":"grn-master","actions":["view","print"]},{"page":"vehicle-in-out","actions":["view","print"]},{"page":"expense-booking","actions":["view","create","edit","delete","print","export"]},{"page":"material-debit-note","actions":["view","create","edit","delete","print","export"]},{"page":"purchase-orders","actions":["view","create","edit","delete","print","export"]},{"page":"stock-ledger","actions":["view","print"]},{"page":"stock-transfers","actions":["view","print","create"]},{"page":"t-c-master","actions":["view","create","edit","delete","print","export"]},{"page":"contractor-master","actions":["view","create","edit","delete","print","export"]},{"page":"supplier-master","actions":["view","create","edit","delete","print","export"]},{"page":"item-master","actions":["view","create","edit","delete","print","export"]},{"page":"item-group","actions":["view","create","edit","delete","print","export"]},{"page":"hsn-master","actions":["view","create","edit","delete","print","export"]},{"page":"unit-of-measurement","actions":["view","create","edit","delete","print","export"]},{"page":"sale-order","actions":["view","create","edit","delete"]},{"page":"sale-invoice","actions":["view","create"]},{"page":"sales-payment","actions":["view","create"]},{"page":"journal-voucher","actions":["view","create"]}]';
+
+DECLARE @NewJson NVARCHAR(MAX) = N'[{"page":"trial-balance","actions":["view","create","edit","delete","print","export"]},{"page":"finance-dashboard","actions":["view","create","edit","delete","print","export"]},{"page":"new-payment","actions":["view","create","edit","delete","print","export"]},{"page":"received-payment","actions":["view","create","edit","delete","print","export"]},{"page":"brs","actions":["view","create","edit","delete","print","export"]},{"page":"records","actions":["view","create","edit","delete","print","export"]},{"page":"bank-master","actions":["view","create","edit","delete","print","export"]},{"page":"expenses-master","actions":["view","create","edit","delete","print","export"]},{"page":"financial-year-master","actions":[]},{"page":"cheque-master","actions":["view","create","edit","delete","print","export"]},{"page":"card-master","actions":["view","create","edit","delete","print","export"]},{"page":"tds-master","actions":["view","create","edit","delete","print","export"]},{"page":"account-head","actions":["view","create","edit","delete","print","export"]},{"page":"general-ledger","actions":["view","create","edit","delete","print","export"]},{"page":"billing-terms","actions":["view","create","edit","delete","print","export"]},{"page":"debit-note","actions":["view","create","edit","delete","print","export"]},{"page":"material-dashboard","actions":["view","create","edit","delete","print","export"]},{"page":"grn-master","actions":["view","print"]},{"page":"vehicle-in-out","actions":["view","print"]},{"page":"expense-booking","actions":["view","create","edit","delete","print","export"]},{"page":"material-debit-note","actions":["view","create","edit","delete","print","export"]},{"page":"purchase-orders","actions":["view","create","edit","delete","print","export"]},{"page":"stock-ledger","actions":["view","print"]},{"page":"stock-transfers","actions":["view","print","create"]},{"page":"t-c-master","actions":["view","create","edit","delete","print","export"]},{"page":"contractor-master","actions":["view","create","edit","delete","print","export"]},{"page":"supplier-master","actions":["view","create","edit","delete","print","export"]},{"page":"item-master","actions":["view","create","edit","delete","print","export"]},{"page":"item-group","actions":["view","create","edit","delete","print","export"]},{"page":"hsn-master","actions":["view","create","edit","delete","print","export"]},{"page":"unit-of-measurement","actions":["view","create","edit","delete","print","export"]},{"page":"journal-voucher","actions":["view","create"]},{"page":"approval-inbox","actions":["view"]}]';
+
+IF EXISTS (
+  SELECT 1 FROM dbo.UserPageRightsJson
+  WHERE UserId = @UserId AND IsActive = 1 AND RightsJson = @CurrentJson
+)
+BEGIN
+  UPDATE dbo.UserPageRightsJson
+  SET    RightsJson = @NewJson, UpdatedAt = GETDATE()
+  WHERE  UserId = @UserId AND IsActive = 1;
+  PRINT 'Migration 170 applied: removed sale-order/sale-invoice/sales-payment, added approval-inbox for UserId 9 (Sourav)';
+END
+ELSE
+BEGIN
+  PRINT 'Migration 170 SKIPPED: UserId 9 RightsJson differs from expected — apply manually via Rights UI: remove sale-order, sale-invoice, sales-payment; add approval-inbox (view).';
+END
+GO
+
+SELECT UserId, RightsJson FROM dbo.UserPageRightsJson WHERE UserId = 9;
+GO
