@@ -250,7 +250,7 @@ export default function EmployeeMaster() {
     { name: "branchLocation", label: "Branch / Location", type: "text" },
     {
       name: "reportingManagerId",
-      label: "Reporting Manager",
+      label: "Reporting To",
       type: "select",
       optionsProvider: (allData, currentId) =>
         allData
@@ -291,7 +291,7 @@ export default function EmployeeMaster() {
     { key: "designation", label: "Designation", hideOnMobile: true },
     { key: "department", label: "Department", hideOnMobile: true },
     { key: "employmentType", label: "Type", hideOnMobile: true },
-    { key: "reportingManagerName", label: "Reporting Manager", hideOnMobile: true, sortable: false },
+    { key: "reportingManagerName", label: "Reporting To", hideOnMobile: true, sortable: false },
     { key: "documents", label: "Documents", sortable: false },
     { key: "isActive", label: "Status" },
   ];
@@ -348,7 +348,7 @@ export default function EmployeeMaster() {
               { header: "Department", accessor: "department" },
               { header: "Designation", accessor: "designation" },
               { header: "Branch / Location", accessor: "branchLocation" },
-              { header: "Reporting Manager", accessor: "reportingManagerName" },
+              { header: "Reporting To", accessor: "reportingManagerName" },
               { header: "Employment Type", accessor: "employmentType" },
               { header: "Grade / Level", accessor: "gradeLevel" },
               { header: "Cost Centre", accessor: "costCenterName" },
