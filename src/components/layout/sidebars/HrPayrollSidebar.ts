@@ -19,6 +19,8 @@ export const hrPayrollNavItems: NavItem[] = [
   {
     label: "HR",
     icon: UserSquare,
-    children: [],
+    children: [
+      { label: "Interview", path: "/hr-payroll/interviews", pageKey: "interview" },
+    ],
   },
 ];
