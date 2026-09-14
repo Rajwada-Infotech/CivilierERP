@@ -21,6 +21,26 @@ import {
   type CandidateRow,
 } from "@/api/candidateMasterApi";
 
+// Interview Status only ever lands here via the Interview page's status
+// sync (Selected/Rejected/Hold -- see backend/routes/interview.js), so it
+// only ever needs these 3 badge states, plus "no interview yet".
+const INTERVIEW_RESULT_META: Record<string, { label: string; className: string }> = {
+  Selected: { label: "Selected", className: "bg-green-500/10 text-green-600 border-green-500/30" },
+  Rejected: { label: "Rejected", className: "bg-red-500/10 text-red-600 border-red-500/30" },
+  "On Hold": { label: "Hold", className: "bg-amber-500/10 text-amber-600 border-amber-500/30" },
+};
+
+const InterviewResultBadge: React.FC<{ value: unknown }> = ({ value }) => {
+  const status = value as string;
+  const meta = INTERVIEW_RESULT_META[status];
+  if (!meta) return <span className="text-xs text-muted-foreground">-</span>;
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${meta.className}`}>
+      {meta.label}
+    </span>
+  );
+};
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -170,8 +190,13 @@ const columns: ColumnDef[] = [
   { key: "contact", label: "Contact", hideOnMobile: true },
   { key: "email", label: "Email", hideOnMobile: true },
   { key: "experience", label: "Experience", hideOnMobile: true },
+  { key: "interviewStatus", label: "Interview Result", sortable: false },
   { key: "isActive", label: "Status" },
 ];
+
+const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
+  interviewStatus: (value) => <InterviewResultBadge value={value} />,
+};
 
 const exportColumns: ExportColumn[] = [
   { header: "Candidate ID", accessor: "candidateCode" },
@@ -183,6 +208,7 @@ const exportColumns: ExportColumn[] = [
   { header: "Expected Salary", accessor: "expectedSalary" },
   { header: "Current Salary", accessor: "currentSalary" },
   { header: "Notice Period", accessor: "noticePeriod" },
+  { header: "Interview Result", accessor: "interviewStatus" },
   { header: "Remarks", accessor: "remarks" },
   { header: "Status", accessor: "isActive" },
 ];
@@ -236,6 +262,7 @@ const CandidateMaster: React.FC = () => {
           canDelete={rights.canDelete}
           fields={fields}
           columns={columns}
+          columnRenderers={columnRenderers}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
           exportConfig={{
@@ -255,6 +282,7 @@ const CandidateMaster: React.FC = () => {
               { key: "expectedSalary", label: "Expected Salary" },
               { key: "currentSalary", label: "Current Salary" },
               { key: "noticePeriod", label: "Notice Period" },
+              { key: "interviewStatus", label: "Interview Result" },
               { key: "remarks", label: "Remarks" },
               { key: "isActive", label: "Status" },
             ],
