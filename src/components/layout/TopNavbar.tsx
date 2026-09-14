@@ -15,6 +15,7 @@ import {
   Settings,
   LayoutGrid,
   Receipt,
+  UserSquare,
   Truck,
   Users,
   HardHat,
@@ -306,6 +307,16 @@ const maintenanceSetupItems = [
     path: "/masters/electricity-tariff",
     color: "text-emerald-500",
     pageKey: "electricity-tariff-master",
+  },
+];
+
+const hrPayrollSetupItems = [
+  {
+    icon: UserSquare,
+    label: "Employee Master",
+    path: "/hr-payroll/employees",
+    color: "text-violet-500",
+    pageKey: "employee-master",
   },
 ];
 
@@ -1130,6 +1141,13 @@ export const TopNavbar = () => {
         items: filterSetupItems(maintenanceSetupItems),
         label: "Maintenance",
         colorStyle: makeColorStyle("maintenance"),
+        available: true,
+      };
+    if (activeModule === "hr-payroll")
+      return {
+        items: filterSetupItems(hrPayrollSetupItems),
+        label: "HR and Payroll",
+        colorStyle: makeColorStyle("hr-payroll"),
         available: true,
       };
     return {
