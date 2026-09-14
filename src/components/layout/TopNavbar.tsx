@@ -313,13 +313,6 @@ const maintenanceSetupItems = [
 const hrPayrollSetupItems = [
   {
     icon: UserSquare,
-    label: "Employee Master",
-    path: "/hr-payroll/employees",
-    color: "text-green-500",
-    pageKey: "employee-master",
-  },
-  {
-    icon: UserSquare,
     label: "Designation Master",
     path: "/hr-payroll/setup/designation-master",
     color: "text-green-500",
