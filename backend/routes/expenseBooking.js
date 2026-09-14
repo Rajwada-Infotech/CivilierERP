@@ -1020,17 +1020,27 @@ async function ebHasDirectItemsData(pool) {
   return _ebHasDirectItemsData;
 }
 
-// Classifies one Expense Head as "Direct Expense" or "Indirect Expense" for
-// the Expense Register report's per-filter columns — reuses the same rule
-// financialStatements.js's classifyExpenseBucketName() applies for the P&L
-// (a bucket name matching "direct expense" or "project"/"construction" is
-// Direct; everything else, tax included, folds into Indirect there too).
-// Walks the AccountGroup ancestor chain via a recursive CTE to the nearest
-// ancestor that's a direct child of the EXPENSES root, then classifies that
-// bucket's own name — same two-step ("find the Schedule-III bucket, then
-// classify its name") approach, just scoped to one head instead of the
-// whole chart of accounts, since only the currently-filtered head's type
-// is ever needed here.
+// Classifies one Expense Head as "Direct Expense", "Indirect Expense", or
+// "Work in Progress" for the Expense Register report's per-filter columns —
+// reuses the same rule financialStatements.js's classifyExpenseBucketName()
+// applies for the P&L (a bucket name matching "direct expense" or
+// "project"/"construction" is Direct; everything else, tax included, folds
+// into Indirect there too). Walks the AccountGroup ancestor chain to the
+// nearest ancestor that's a direct child of the EXPENSES root, then
+// classifies that bucket's own name — same two-step ("find the Schedule-III
+// bucket, then classify its name") approach, just scoped to one head instead
+// of the whole chart of accounts, since only the currently-filtered head's
+// type is ever needed here.
+//
+// A real invoice can be booked straight against a Work-in-Progress head —
+// job-costing construction cost into the CURRENT ASSETS balance-sheet asset
+// (see financialStatements.js's RE_WIP) rather than a true P&L expense
+// head — so WIP is checked first, anywhere in the ancestor chain, same
+// "classify by name regardless of nesting" precedent. This must come before
+// the EXPENSES-bucket walk below: a WIP head has no ancestor under EXPENSES
+// at all, so that walk finds nothing and used to silently fall through to a
+// default of "Indirect Expense" — wrongly showing WIP spend as an Indirect
+// Expense in the register instead of what it actually is.
 async function classifyExpenseHeadType(pool, headId) {
   const result = await pool.request().input("HeadId", sql.Int, headId).query(`
     ;WITH grp AS (
@@ -1043,13 +1053,22 @@ async function classifyExpenseHeadType(pool, headId) {
       JOIN grp ON ag.AGId = grp.ParentGroupId
       WHERE grp.lvl < 20
     )
-    SELECT TOP 1 g.Name AS BucketName
-    FROM grp g
-    JOIN dbo.AccountGroup rootGrp ON rootGrp.AGId = g.ParentGroupId
-    WHERE rootGrp.Name = 'EXPENSES' AND rootGrp.ParentGroupId IS NULL
-    ORDER BY g.lvl
+    SELECT AGId, Name, ParentGroupId FROM grp
   `);
-  const bucketName = (result.recordset[0]?.BucketName || "").toLowerCase();
+  const chain = result.recordset;
+  if (chain.length === 0) return null;
+
+  if (chain.some((g) => /work.?in.?progress/i.test(g.Name || ""))) return "Work in Progress";
+
+  const byId = new Map(chain.map((g) => [g.AGId, g]));
+  const bucket = chain.find((g) => {
+    const parent = g.ParentGroupId != null ? byId.get(g.ParentGroupId) : null;
+    return parent && parent.Name === "EXPENSES" && parent.ParentGroupId == null;
+  });
+  // Not actually under EXPENSES at all (e.g. some other balance-sheet head
+  // booked against directly) — not an expense type to mislabel either way.
+  if (!bucket) return null;
+  const bucketName = (bucket.Name || "").toLowerCase();
   const isDirect = /\bdirect expense/.test(bucketName) || /project|construction/.test(bucketName);
   return isDirect ? "Direct Expense" : "Indirect Expense";
 }
