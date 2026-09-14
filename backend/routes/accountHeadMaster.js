@@ -51,6 +51,21 @@ async function getSundryCreditorsGroupId(pool) {
   return _sundryCreditorsGroupId;
 }
 
+// SUNDRY DEBTORS (Code='SDS') — the default for a new Customer/Applicant
+// (LHeadType='A', CustomerMaster.tsx) when no group is explicitly chosen.
+// Briefly defaulted to Sundry Creditors instead when the Account Group
+// field's lock was first opened; reverted — customers are Sundry Debtors
+// (see migration 423, which also moved every existing Customer Master
+// head back). The field itself stays a normal editable picker either way;
+// this only covers the "nothing sent" case.
+let _sundryDebtorsGroupId;
+async function getSundryDebtorsGroupId(pool) {
+  if (_sundryDebtorsGroupId !== undefined) return _sundryDebtorsGroupId;
+  const r = await pool.request().query("SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SDS'");
+  _sundryDebtorsGroupId = r.recordset[0]?.AGId ?? null;
+  return _sundryDebtorsGroupId;
+}
+
 // Matches backend/routes/users.js's SALT_ROUNDS exactly — reusing the same
 // bcrypt library and cost factor per the "no new encryption mechanism" spec,
 // not introducing a second constant that could silently drift out of sync.
@@ -442,14 +457,13 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     ) {
       effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
     } else if (LHeadType === "A" && !LBelongsTo) {
-      // Customers/Applicants (CustomerMaster.tsx) used to always be
-      // force-assigned SUNDRY DEBTORS here, the same never-trust-the-client
-      // treatment as the Creditors block above. That lock is now open —
-      // CustomerMaster.tsx's Account Group field is a normal editable
-      // picker (defaulting to Sundry Creditors) and whatever the client
-      // actually sends is respected; this only fills in a default when the
-      // client sends nothing at all.
-      effectiveLBelongsTo = await getSundryCreditorsGroupId(pool);
+      // Customers/Applicants (CustomerMaster.tsx) default to SUNDRY
+      // DEBTORS — briefly defaulted to Sundry Creditors instead when the
+      // Account Group field's lock was first opened, then reverted (see
+      // migration 423). The field itself stays a normal editable picker
+      // (whatever the client actually sends is respected); this only fills
+      // in a default when the client sends nothing at all.
+      effectiveLBelongsTo = await getSundryDebtorsGroupId(pool);
     }
 
     // Both need to be resolved before the insert (email generation queries
