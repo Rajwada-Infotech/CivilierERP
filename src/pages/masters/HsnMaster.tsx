@@ -295,31 +295,19 @@ const HsnMaster: React.FC = () => {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        await addHsn(toPayload(event.record));
-        toast.success("HSN saved!");
-        await queryClient.invalidateQueries({ queryKey: ["hsn"] });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
+      await addHsn(toPayload(event.record));
+      toast.success("HSN saved!");
+      await queryClient.invalidateQueries({ queryKey: ["hsn"] });
     }
     if (event.action === "update") {
-      try {
-        await updateHsn(event.id, toPayload(event.record));
-        toast.success("HSN updated!");
-        await queryClient.invalidateQueries({ queryKey: ["hsn"] });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateHsn(event.id, toPayload(event.record));
+      toast.success("HSN updated!");
+      await queryClient.invalidateQueries({ queryKey: ["hsn"] });
     }
     if (event.action === "delete") {
-      try {
-        await deleteHsn(event.id);
-        toast.success("HSN deleted!");
-        await queryClient.invalidateQueries({ queryKey: ["hsn"] });
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
-      }
+      await deleteHsn(event.id);
+      toast.success("HSN deleted!");
+      await queryClient.invalidateQueries({ queryKey: ["hsn"] });
     }
   };
 

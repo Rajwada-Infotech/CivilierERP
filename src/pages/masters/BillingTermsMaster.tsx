@@ -375,42 +375,38 @@ const BillingTermsMaster: React.FC = () => {
   };
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const record = event.record as Record<string, unknown>;
-        const calcType = String(record.CalculationType ?? "Before GST");
-        await addBillingTerm({
-          Name: String(record.Name ?? ""),
-          Description: String(record.Description ?? ""),
-          CalculationType: calcType,
-          DeductionType: String(record.DeductionType ?? "Addition"),
-          IsActive:
-            record.IsActive !== undefined ? Boolean(record.IsActive) : true,
-        });
-        toast.success("Billing term added!");
-        await refetch();
-      } else if (event.action === "update") {
-        const record = event.record as Record<string, unknown>;
-        const calcType = String(record["CalculationType"] ?? "Before GST");
-        await updateBillingTerm(Number(event.id), {
-          Name: String(record["Name"] ?? ""),
-          Description: String(record["Description"] ?? ""),
-          CalculationType: calcType,
-          DeductionType: String(record["DeductionType"] ?? "Addition"),
-          IsActive:
-            record["IsActive"] !== undefined
-              ? Boolean(record["IsActive"])
-              : true,
-        });
-        toast.success("Billing term updated!");
-        await refetch();
-      } else if (event.action === "delete") {
-        await deleteBillingTerm(Number(event.id));
-        toast.success("Billing term deleted!");
-        await refetch();
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Something went wrong");
+    if (event.action === "add") {
+      const record = event.record as Record<string, unknown>;
+      const calcType = String(record.CalculationType ?? "Before GST");
+      await addBillingTerm({
+        Name: String(record.Name ?? ""),
+        Description: String(record.Description ?? ""),
+        CalculationType: calcType,
+        DeductionType: String(record.DeductionType ?? "Addition"),
+        IsActive:
+          record.IsActive !== undefined ? Boolean(record.IsActive) : true,
+      });
+      toast.success("Billing term added!");
+      await refetch();
+    } else if (event.action === "update") {
+      const record = event.record as Record<string, unknown>;
+      const calcType = String(record["CalculationType"] ?? "Before GST");
+      await updateBillingTerm(Number(event.id), {
+        Name: String(record["Name"] ?? ""),
+        Description: String(record["Description"] ?? ""),
+        CalculationType: calcType,
+        DeductionType: String(record["DeductionType"] ?? "Addition"),
+        IsActive:
+          record["IsActive"] !== undefined
+            ? Boolean(record["IsActive"])
+            : true,
+      });
+      toast.success("Billing term updated!");
+      await refetch();
+    } else if (event.action === "delete") {
+      await deleteBillingTerm(Number(event.id));
+      toast.success("Billing term deleted!");
+      await refetch();
     }
   };
 

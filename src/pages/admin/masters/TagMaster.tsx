@@ -72,36 +72,32 @@ const TagMaster: React.FC = () => {
   });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    try {
-      if (event.action === "add") {
-        const res = await fetchWithAuth(API, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to add tag");
-        toast.success("Tag added!");
-      }
-      if (event.action === "update") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(toPayload(event.record)),
-        });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to update tag");
-        toast.success("Tag updated!");
-      }
-      if (event.action === "delete") {
-        const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
-        if (!res.ok) throw new Error((await res.json()).error || "Failed to delete tag");
-        toast.success("Tag deleted!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["tag-master"] });
-      // The task drawer's tag picker reads from this same active-tags list.
-      await queryClient.invalidateQueries({ queryKey: ["tag-master-active"] });
-    } catch (err: any) {
-      toast.error(err.message || "Operation failed");
+    if (event.action === "add") {
+      const res = await fetchWithAuth(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to add tag");
+      toast.success("Tag added!");
     }
+    if (event.action === "update") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(toPayload(event.record)),
+      });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to update tag");
+      toast.success("Tag updated!");
+    }
+    if (event.action === "delete") {
+      const res = await fetchWithAuth(`${API}/${event.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error((await res.json()).error || "Failed to delete tag");
+      toast.success("Tag deleted!");
+    }
+    await queryClient.invalidateQueries({ queryKey: ["tag-master"] });
+    // The task drawer's tag picker reads from this same active-tags list.
+    await queryClient.invalidateQueries({ queryKey: ["tag-master-active"] });
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading tags...</div>;
