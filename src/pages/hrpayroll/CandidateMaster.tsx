@@ -21,17 +21,6 @@ import {
   type CandidateRow,
 } from "@/api/candidateMasterApi";
 
-const INTERVIEW_STATUSES = [
-  "Applied",
-  "Shortlisted",
-  "Interview Scheduled",
-  "Selected",
-  "Rejected",
-  "On Hold",
-  "Offered",
-  "Joined",
-];
-
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -171,7 +160,6 @@ const fields: FieldDef[] = [
   { name: "currentSalary", label: "Current Salary", type: "number" },
   { name: "noticePeriod", label: "Notice Period", type: "text", placeholder: "e.g. 30 days / Immediate" },
   { name: "resume", label: "Resume", type: "custom", fullWidth: true, render: (p) => <ResumeField value={p.value} onChange={p.onChange} /> },
-  { name: "interviewStatus", label: "Interview Status", type: "select", options: INTERVIEW_STATUSES },
   { name: "remarks", label: "Remarks", type: "textarea", fullWidth: true },
   { name: "isActive", label: "Status", type: "toggle", defaultValue: true },
 ];
@@ -182,7 +170,6 @@ const columns: ColumnDef[] = [
   { key: "contact", label: "Contact", hideOnMobile: true },
   { key: "email", label: "Email", hideOnMobile: true },
   { key: "experience", label: "Experience", hideOnMobile: true },
-  { key: "interviewStatus", label: "Interview Status" },
   { key: "isActive", label: "Status" },
 ];
 
@@ -196,7 +183,6 @@ const exportColumns: ExportColumn[] = [
   { header: "Expected Salary", accessor: "expectedSalary" },
   { header: "Current Salary", accessor: "currentSalary" },
   { header: "Notice Period", accessor: "noticePeriod" },
-  { header: "Interview Status", accessor: "interviewStatus" },
   { header: "Remarks", accessor: "remarks" },
   { header: "Status", accessor: "isActive" },
 ];
@@ -269,7 +255,6 @@ const CandidateMaster: React.FC = () => {
               { key: "expectedSalary", label: "Expected Salary" },
               { key: "currentSalary", label: "Current Salary" },
               { key: "noticePeriod", label: "Notice Period" },
-              { key: "interviewStatus", label: "Interview Status" },
               { key: "remarks", label: "Remarks" },
               { key: "isActive", label: "Status" },
             ],
