@@ -1,0 +1,41 @@
+-- =============================================================================
+-- Hotfix Record: materialRequests.js — GET /pending-summary SQL fix
+-- =============================================================================
+-- Date:     2026-07-26
+-- File:     backend/routes/materialRequests.js
+-- Endpoint: GET /api/material-requests/pending-summary
+--
+-- Problem:
+--   Invalid SQL Server syntax — SUM() wrapping a correlated subquery that
+--   itself contained SUM() is not permitted.
+--   Error: "Cannot perform an aggregate function on an expression containing
+--          an aggregate or a subquery."
+--
+-- Fix applied in application code (not a DB change):
+--   Replaced the nested aggregate subquery with a LEFT JOIN to a
+--   pre-aggregated derived table:
+--
+--   BEFORE (broken):
+--     SUM(ISNULL(
+--       (SELECT SUM(poi.Quantity)
+--        FROM dbo.PurchaseOrderItems poi
+--        JOIN dbo.PurchaseOrders po ON ...
+--        WHERE poi.MRItemId = mri.MRItemId),
+--       0))
+--
+--   AFTER (working):
+--     ISNULL(SUM(ord.OrderedQty), 0)
+--     ...
+--     LEFT JOIN (
+--       SELECT poi.MRItemId, SUM(poi.Quantity) AS OrderedQty
+--       FROM dbo.PurchaseOrderItems poi
+--       JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
+--       WHERE ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
+--         AND poi.MRItemId IS NOT NULL
+--       GROUP BY poi.MRItemId
+--     ) ord ON ord.MRItemId = mri.MRItemId
+--
+-- Backup kept as: backend/routes/materialRequests.js.bak
+-- This is a documentation-only SQL file; the fix lives in the .js route file.
+-- =============================================================================
+PRINT 'Hotfix materialRequests-pending-summary: documented. Fix is in backend/routes/materialRequests.js.';

@@ -1,0 +1,50 @@
+{
+  "expo": {
+    "name": "CivilierERP Admin",
+    "slug": "mobile-admin",
+    "scheme": "civiliererpadmin",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rajwadainfotech.civiliererpadmin",
+      "infoPlist": {
+        "NSCameraUsageDescription": "CivilierERP Admin uses the camera to attach photos to records.",
+        "NSPhotoLibraryUsageDescription": "CivilierERP Admin needs access to your photo library to attach existing photos to records."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.rajwadainfotech.civiliererpadmin"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "77756cc3-b2bc-479c-bcdc-56555bdf3509"
+      }
+    },
+    "owner": "grenxnja"
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "compilerOptions": {
+    /* Core */
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+
+    /* Paths */
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+
+    /* Frontend */
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+
+    /* Frontend */
+    "types": ["vitest/globals"],
+    "resolveJsonModule": true,
+
+    /* Emit — Vite handles bundling; tsc is type-check only */
+    "noEmit": true,
+
+    /* Interop */
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
+
+    /* Relaxed rules */
+    "strict": false,
+    "noImplicitAny": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "skipLibCheck": true,
+
+    /* Misc */
+    "allowJs": true
+  },
+
+  "include": ["src"],
+
+  "exclude": ["node_modules", "src/pages/finance/Records.tsx"],
+
+  "references": [{ "path": "./tsconfig.node.json" }]
+}

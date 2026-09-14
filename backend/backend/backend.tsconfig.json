@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+
+    "types": ["node"],
+    "lib": ["ES2022"],
+
+    "resolveJsonModule": true,
+    "noEmit": true,
+
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+
+    "strict": false,
+    "noImplicitAny": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "skipLibCheck": true,
+
+    "allowJs": true
+  },
+
+  "include": ["**/*.ts", "utils/loadRoutes.js"],
+
+  "exclude": ["node_modules", "dist"]
+}

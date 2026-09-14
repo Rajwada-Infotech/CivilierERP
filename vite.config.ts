@@ -11,14 +11,14 @@ function silentProxyError(err: NodeJS.ErrnoException) {
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   server: {
-    host: "::",
-    port: 8080,
+    host: "0.0.0.0",
+    port: 4000,
     hmr: {
       overlay: false,
     },
     proxy: {
       "/api": {
-        target: "http://localhost:5000",
+        target: "http://localhost:5001",
         changeOrigin: true,
         secure: false,
         ws: true,
@@ -33,7 +33,7 @@ export default defineConfig(({ mode }) => ({
         },
       },
       "/socket.io": {
-        target: "http://localhost:5000",
+        target: "http://localhost:5001",
         changeOrigin: true,
         ws: true,
         secure: false,

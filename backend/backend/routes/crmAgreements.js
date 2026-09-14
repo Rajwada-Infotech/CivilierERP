@@ -1,0 +1,2481 @@
+const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
+const multer = require("multer");
+const router = express.Router();
+const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
+const apiRateLimit = require("../middleware/apiRateLimit");
+const { requirePageRight } = require("../middleware/requirePageRight");
+const { actorId, requireUserEmail } = require("../services/saAccess");
+const { getNextDocNumber } = require("../services/docNumber");
+const { logCrmAudit } = require("../services/crmAudit");
+const { emitNotification } = require("../services/notify");
+const { validateAgreementPreparationPrerequisites, maybeAutoCreateLegalMilestone, proposeAgreementDate, acceptAgreementDate, finalizeAgreementDate, resetAgreementDateNegotiation, syncLegalMilestoneStep, syncLegalMilestoneFromDocument, maybeUnlockBrokerageOnAgreementExecuted } = require("../services/crmWorkflowGuards");
+const { logCommunication } = require("../services/crmCommunicationLog");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
+const { applyPagination } = require("../services/crmListPagination");
+// Senior approval is gated to admin/super_admin/dba via this shared engine —
+// same mechanism BOQ/Purchase Orders/etc. use — instead of any editor being
+// able to self-approve on this page.
+const { transition: approvalTransition } = require("../services/approvalService");
+
+// Explicit agreement workflow state machine — matches the Status values the
+// handover workflow guard (crmHandover.js) already checks for.
+const AGREEMENT_TRANSITIONS = {
+  Draft:      [CrmStatus.DRAFT, CrmStatus.EXECUTED, CrmStatus.CANCELLED],
+  Executed:   [CrmStatus.EXECUTED, CrmStatus.REGISTERED, CrmStatus.CANCELLED],
+  Registered: [CrmStatus.REGISTERED],
+  Cancelled:  [CrmStatus.CANCELLED],
+};
+
+router.use(authMiddleware);
+router.use(apiRateLimit);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 10 },
+  fileFilter: (_req, file, cb) => {
+    const ALLOWED = [
+      "application/pdf", "image/jpeg", "image/png", "image/webp",
+      "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/plain",
+    ];
+    if (ALLOWED.includes(file.mimetype)) return cb(null, true);
+    cb(new Error("File type not allowed"));
+  },
+});
+
+const AGR_SELECT = `
+  SELECT
+    ag.Id, ag.AgreementNo, ag.BookingId, ag.AgreementDate,
+    ag.LegalName, ag.LegalAddress, ag.PanNo, ag.AadhaarNo, ag.VersionNo,
+    ag.Status, ag.Notes, ag.CreatedAt, ag.UpdatedAt,
+    ag.SeniorApprovalStatus, ag.SeniorApprovedAt, ag.SeniorApprovalRemarks,
+    ag.CustomerApprovalStatus, ag.CustomerApprovedAt,
+    ag.RecheckCount, ag.LastRecheckRemarks,
+    ag.ProposedDate, ag.ProposedDateStatus, ag.SentToCustomerAt, ag.DateApprovalStatus,
+    ag.AfsRegistrationNo, ag.AfsRegistrationDate,
+    ag.AfsStampDuty, ag.AfsRegistrationFee,
+    ag.LegalExecutiveId, le.name AS LegalExecutiveName,
+    b.BookingNo,
+    COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+    COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+    b.TotalValue, b.GrandTotal, b.TotalGstAmount,
+    b.UnitGstAmount, b.ParkingTotal, b.ParkingGstAmount, b.ExtraChargesTotal, b.ExtraWorkGstAmount,
+    b.Status AS BookingStatus, b.IsActive AS BookingIsActive,
+    a.ApplicantName, a.Mobile, a.Email,
+    cu.name AS CreatedByName,
+    pu.Email AS PortalEmail, pu.IsActive AS PortalActive, pu.MustChangePassword AS PortalMustChangePassword,
+    -- AFS Query Payment figures — used to pre-fill the mark-registered dialog so
+    -- staff don't re-type the same government figure they already entered and
+    -- customer-confirmed on the AFS QP record. ConfirmedAmount wins when set
+    -- (it's what the customer actually paid), falling back to StampDuty /
+    -- RegistrationFee (the estimate that was sent to the customer). NULL when
+    -- no AFS QP record exists for this booking yet (pre-Sales-Deed stage).
+    (SELECT TOP 1 StampDuty        FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpStampDuty,
+    (SELECT TOP 1 RegistrationFee  FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpRegistrationFee,
+    (SELECT TOP 1 ConfirmedAmount  FROM dbo.CrmAfsQueryPayment WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsQpConfirmedAmount,
+    -- AFS Registry status — the Sub-Registrar Visit 1 tracker must be
+    -- Completed before mark-registered will succeed (see the matching gate
+    -- in PUT /:id/mark-registered). Surfaced so the frontend can show/hide
+    -- the "Mark Registered" action instead of only failing after the click.
+    (SELECT TOP 1 Status FROM dbo.CrmAfsRegistry WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsRegistryStatus
+  FROM dbo.CrmAgreement ag
+  JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
+  JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.Users cu     ON cu.id = ag.CreatedBy
+  LEFT JOIN dbo.Users le     ON le.id = ag.LegalExecutiveId
+  LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = a.CustomerId
+`;
+
+// Shared lock check — nothing here previously checked whether the Booking
+// behind an Agreement was still live. A Booking can be cancelled after its
+// Agreement already exists (independently, from the Bookings module), and
+// until now the Agreement page had zero visibility into that: it would keep
+// showing Edit/Send/Mark Executed/etc. as normal, active actions on a
+// contract for a sale that no longer exists. Mirrors the same
+// IsActive/Status NOT IN ('Cancelled','Rejected') definition used
+// everywhere else in the codebase (see unitMaster.js). Only /:id/cancel is
+// deliberately exempt — closing out the agreement itself must stay possible.
+async function getAgreementBookingLockReason(pool, agreementId) {
+  const result = await pool.request().input("id", sql.Int, agreementId).query(`
+    SELECT b.Status AS BookingStatus, b.IsActive AS BookingIsActive
+    FROM dbo.CrmAgreement ag
+    JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+    WHERE ag.Id = @id
+  `);
+  if (!result.recordset.length) return null;
+  const row = result.recordset[0];
+  if (row.BookingIsActive === false || [CrmStatus.CANCELLED, CrmStatus.REJECTED].includes(row.BookingStatus)) {
+    return `the underlying booking is ${row.BookingStatus || "inactive"}`;
+  }
+  return null;
+}
+
+// A separate check from the booking lock above — this one guards the
+// agreement's own lifecycle rather than its booking. Once Executed or
+// Registered, the document set is part of what was actually signed off;
+// attaching/requesting/uploading new documents against it afterward would
+// let the "as executed" record keep changing after the fact with nobody
+// told. Used by the three document routes below and by crmPortal.js's own
+// customer-facing upload route.
+async function agreementExecutedLockReason(pool, agreementId) {
+  const result = await pool.request().input("id", sql.Int, agreementId)
+    .query("SELECT Status FROM dbo.CrmAgreement WHERE Id = @id");
+  if (!result.recordset.length) return null;
+  const status = result.recordset[0].Status;
+  if ([CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(status)) {
+    return `this agreement is already ${status}`;
+  }
+  return null;
+}
+
+// "Agreement Followup" step — % of this agreement's mandatory document
+// TYPES that actually have a file attached. Deliberately computed live on
+// every call (never stored) so it can never go stale through a reject/
+// resend/recheck cycle — the moment a document's file changes, the next
+// read reflects it automatically. Zero mandatory documents requested yet
+// means 0%, not a vacuous 100% — staff must actually request/attach the
+// real paperwork before this can complete; there being nothing to check
+// yet doesn't count as "checked."
+async function agreementFollowupProgress(pool, agreementId) {
+  const result = await pool.request().input("id", sql.Int, agreementId).query(`
+    SELECT COUNT(*) AS Required, SUM(CASE WHEN FileBase64 IS NOT NULL THEN 1 ELSE 0 END) AS Uploaded
+    FROM dbo.CrmAgreementDocument WHERE AgreementId = @id AND IsMandatory = 1
+  `);
+  const row = result.recordset[0] || { Required: 0, Uploaded: 0 };
+  const required = Number(row.Required) || 0;
+  const uploaded = Number(row.Uploaded) || 0;
+  const percent = required > 0 ? Math.round((uploaded / required) * 100) : 0;
+  return { required, uploaded, percent };
+}
+
+// GET / — all agreements
+router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = [];
+    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("ag.Status = @st"); }
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR ag.AgreementNo LIKE @search OR b.BookingNo LIKE @search)");
+    }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const SELECT_WITH_BLOCK = `${AGR_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY ag.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY ag.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("st2", sql.NVarChar(30), status || null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmAgreement ag
+          JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE (@st2 IS NULL OR ag.Status = @st2)
+            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR ag.AgreementNo LIKE @search2 OR b.BookingNo LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+  } catch (e) {
+    console.error("[crm-agreements] GET error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /eligible-bookings — bookings that may legitimately have a NEW
+// agreement created for them right now. Registered ahead of GET /:id so
+// "eligible-bookings" is never swallowed by the :id param route.
+//
+// Mirrors validateAgreementPreparationPrerequisites() exactly (same function,
+// not a re-implementation) so this list can never drift out of sync with
+// the real gate POST / already enforces. In the normal flow an agreement
+// auto-creates the moment every prerequisite lands (see
+// maybeAutoCreateAgreement in crmWorkflowGuards.js, wired from
+// crmWelcomeCalls.js and crmCustomerBankDetails.js) — so this list is
+// usually short: bookings that are Approved with no Agreement yet, most of
+// which are still missing a prerequisite. That's intentional; the "New
+// Agreement" dialog is a manual/admin path, not the primary one.
+router.get("/eligible-bookings", requirePageRight("crm-agreements", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const candidates = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, a.ApplicantName,
+             cust.CustomerName AS LegalName,
+             cust.PanNo, cust.AadhaarNo,
+             NULLIF(LTRIM(RTRIM(CONCAT_WS(', ',
+               NULLIF(LTRIM(RTRIM(cust.Address)), ''),
+               NULLIF(LTRIM(RTRIM(cust.City)), ''),
+               NULLIF(LTRIM(RTRIM(cust.State)), ''),
+               NULLIF(LTRIM(RTRIM(cust.Pincode)), '')
+             ))), '') AS LegalAddress
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.CrmCustomer cust ON cust.Id = a.CustomerId
+      WHERE b.Status = '${CrmStatus.APPROVED}' AND b.IsActive = 1
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id)
+      ORDER BY b.BookingNo
+    `);
+
+    const eligible = [];
+    for (const c of candidates.recordset) {
+      const prereq = await validateAgreementPreparationPrerequisites(pool, c.Id);
+      if (prereq.ok) eligible.push({
+        Id: c.Id, BookingNo: c.BookingNo, ApplicantName: c.ApplicantName,
+        LegalName: c.LegalName || c.ApplicantName || "",
+        PanNo: c.PanNo || "", AadhaarNo: c.AadhaarNo || "",
+        LegalAddress: c.LegalAddress || "",
+      });
+    }
+    res.json(eligible);
+  } catch (e) {
+    console.error("[crm-agreements] GET /eligible-bookings error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// Shared builder for the agreement-detail response — the exact
+// { agreement, documents, financialSummary } shape returned by both
+// GET /:id (by agreement id) and GET /booking/:bookingId (by booking id,
+// added for the merged Agreement workspace so a tab can load from a
+// bookingId without scanning the paginated list). Returns null when no
+// agreement matches.
+async function buildAgreementDetail(pool, agreementId) {
+  const id = parseInt(agreementId, 10);
+  if (!Number.isFinite(id)) return null;
+  const [agRes, docRes, milRes, oaRes, mrRes] = await Promise.all([
+    pool.request().input("id", sql.Int, id).query(`${AGR_SELECT} WHERE ag.Id = @id`),
+    pool.request().input("id", sql.Int, id).query(
+      `SELECT d.Id, d.AgreementId, d.DocumentType, d.DocumentUrl, d.FileName, d.IssuedBy, d.Status, d.Remarks,
+              d.UploadedAt, d.CreatedBy, d.CreatedAt, d.VersionNo, d.FileSize, d.MimeType, d.UploadedByType,
+              d.RequestedBy, d.RequestedAt, d.Label, d.IsMandatory,
+              CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS FilePath,
+              cu.name AS CreatedByName
+       FROM dbo.CrmAgreementDocument d LEFT JOIN dbo.Users cu ON cu.id = d.CreatedBy WHERE d.AgreementId = @id ORDER BY d.CreatedAt`),
+    pool.request().input("id", sql.Int, id).query(
+      `SELECT ISNULL(SUM(AmountDue),0) AS TotalDue, ISNULL(SUM(AmountPaid),0) AS TotalPaid
+       FROM dbo.CrmPaymentMilestone WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
+    pool.request().input("id", sql.Int, id).query(
+      `SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) AS AvailableBalance
+       FROM dbo.CrmOnAccountPayment WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id)`),
+    pool.request().input("id", sql.Int, id).query(
+      `SELECT ISNULL(SUM(Amount),0) AS MRTotal FROM dbo.CrmMoneyReceipt
+       WHERE BookingId = (SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id) AND Status IN ('${CrmStatus.PENDING}','${CrmStatus.APPROVED}')`),
+  ]);
+  if (!agRes.recordset[0]) return null;
+  const mil = milRes.recordset[0] || {};
+  const cleared = Number(mil.TotalPaid || 0);
+  const mrReceived = Number(mrRes.recordset[0]?.MRTotal || 0);
+  return {
+    agreement: agRes.recordset[0],
+    documents: docRes.recordset,
+    financialSummary: {
+      cleared,
+      totalDue: Number(mil.TotalDue || 0),
+      approvedOnAccount: Number(oaRes.recordset[0]?.AvailableBalance || 0),
+      mrOnAccount: Math.max(0, mrReceived - cleared),
+    },
+  };
+}
+
+// GET /booking/:bookingId — the agreement (1:1 with a booking, enforced by a
+// UNIQUE constraint on CrmAgreement.BookingId) resolved from its booking.
+// Registered BEFORE GET /:id so "booking" is never parsed as an id. Returns
+// null (200) when the booking has no agreement yet — the merged workspace's
+// tabs render a "start agreement" state in that case.
+router.get("/booking/:bookingId", requirePageRight("crm-agreements", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bid = parseInt(req.params.bookingId, 10);
+    if (!Number.isFinite(bid)) return res.status(400).json({ error: "Invalid bookingId" });
+    const idRow = await pool.request().input("bid", sql.Int, bid)
+      .query("SELECT Id FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    if (!idRow.recordset[0]) return res.json(null);
+    const detail = await buildAgreementDetail(pool, idRow.recordset[0].Id);
+    res.json(detail);
+  } catch (e) {
+    console.error("[crm-agreements] GET /booking/:bookingId error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /:id — agreement with documents
+router.get("/:id", requirePageRight("crm-agreements", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const detail = await buildAgreementDetail(pool, req.params.id);
+    if (!detail) return res.status(404).json({ error: "Agreement not found" });
+    res.json(detail);
+  } catch (e) {
+    console.error("[crm-agreements] GET /:id error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /:id/revisions — prior versions of the agreement's legal content,
+// newest first. Each row is what was superseded, with the reason.
+router.get("/:id/revisions", requirePageRight("crm-agreements", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await pool.request().input("id", sql.Int, id).query(`
+      SELECT r.*, cu.name AS CreatedByName
+      FROM dbo.CrmAgreementRevision r
+      LEFT JOIN dbo.Users cu ON cu.id = r.CreatedBy
+      WHERE r.AgreementId = @id
+      ORDER BY r.VersionNo DESC, r.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-agreements] GET /:id/revisions error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// POST / — create agreement for a booking (one per booking, enforced by UNIQUE on BookingId)
+router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId, 10);
+
+    const bookingRow = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Status, IsActive FROM dbo.CrmBooking WHERE Id = @bid");
+    if (!bookingRow.recordset.length) return res.status(404).json({ error: "Booking not found" });
+    const bkg = bookingRow.recordset[0];
+    if (bkg.IsActive === false || [CrmStatus.CANCELLED, CrmStatus.REJECTED].includes(bkg.Status)) {
+      return res.status(400).json({ error: `Cannot create an agreement — this booking is ${bkg.Status || "inactive"}.` });
+    }
+
+    const prereq = await validateAgreementPreparationPrerequisites(pool, bookingId);
+    if (!prereq.ok) {
+      return res.status(400).json({
+        error: "Agreement preparation prerequisites are incomplete",
+        details: prereq.errors,
+      });
+    }
+
+    // Latest NON-NULL PreferredAgreementDate, not just the latest call row —
+    // a follow-up call logged after the one that actually captured this date
+    // (e.g. a callback just confirming something else) leaves its own
+    // PreferredAgreementDate blank, and "latest row" alone would silently
+    // lose the real value the customer already gave. Whichever call last
+    // SET a date wins, regardless of which call happened most recently overall.
+    const wc = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT TOP 1 PreferredAgreementDate FROM dbo.CrmWelcomeCall
+      WHERE BookingId = @bid AND PreferredAgreementDate IS NOT NULL
+      ORDER BY CreatedAt DESC
+    `);
+    const preferredDate = wc.recordset[0]?.PreferredAgreementDate || null;
+
+    // System-assigned unique agreement number
+    const agNo = await getNextDocNumber(pool, "AGR", "AGR");
+
+    // Status always starts Draft — it is never accepted from the request body,
+    // here or in PUT below. It only ever advances via /:id/mark-executed,
+    // /:id/mark-registered, /:id/cancel — each gated on the real workflow
+    // step (approvals, dates) actually having happened, not a free choice.
+    //
+    // AgreementDate is likewise never accepted here — per the workflow's
+    // "SET IT WITH BOTH END'S AVAILABILITY" requirement, it can only ever be
+    // set by finalizeAgreementDate() once a super_admin approves it (via
+    // PUT /:id/date/approve), which itself only becomes possible once one
+    // side accepts the other's proposed date (PUT /:id/propose-date +
+    // /:id/date/accept, or POST /agreement/propose-date + /agreement/respond
+    // on the portal side). A field that let staff type a date directly here
+    // would silently bypass that mandate.
+    // The Agreement row, its optional initial date-history entry, and its
+    // mandatory SaleAgreement document placeholder are one creation event —
+    // wrapped so a failure partway through can't leave an Agreement with no
+    // mandatory-document row (which would then never gate execution) or a
+    // ProposedDateStatus pointing at a date-history entry that was never
+    // actually written.
+    const tx0 = pool.transaction();
+    await tx0.begin();
+    let agreementId;
+    try {
+      const result = await tx0.request()
+        .input("agno",  sql.NVarChar(50),  agNo)
+        .input("bid",   sql.Int,           parseInt(b.BookingId))
+        .input("lname", sql.NVarChar(300), b.LegalName     || null)
+        .input("laddr", sql.NVarChar(sql.MAX), b.LegalAddress  || null)
+        .input("pan",   sql.NVarChar(20),  b.PanNo         || null)
+        .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
+        .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("leg",   sql.Int,           b.LegalExecutiveId ? parseInt(b.LegalExecutiveId) : null)
+        .input("pd",    sql.Date,          preferredDate)
+        .input("cb",    sql.Int,           actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreement
+            (AgreementNo, BookingId, LegalName, LegalAddress, PanNo, AadhaarNo, Status, Notes, LegalExecutiveId, ProposedDate, ProposedDateStatus, CreatedBy, CreatedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@agno, @bid, @lname, @laddr, @pan, @aadh, 'Draft', @note, @leg, @pd, CASE WHEN @pd IS NOT NULL THEN 'PendingCustomerReview' ELSE NULL END, @cb, SYSDATETIME())
+        `);
+      agreementId = result.recordset[0].Id;
+
+      if (preferredDate) {
+        await tx0.request()
+          .input("agid", sql.Int, agreementId)
+          .input("pd",   sql.Date, preferredDate)
+          .input("cb",   sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+            VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
+          `);
+      }
+
+      // Same standing SaleAgreement request maybeAutoCreateAgreement() seeds
+      // for the normal (auto-created) path — this manual "New Agreement"
+      // dialog is the fallback path (e.g. no unit preselected on the
+      // Application), and must guarantee the same baseline: every agreement,
+      // however it was created, always has the real legal paperwork tracked
+      // as a mandatory document from day one.
+      await tx0.request()
+        .input("agid", sql.Int, agreementId)
+        .input("cb", sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementDocument
+            (AgreementId, DocumentType, Label, IsMandatory, Status, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+          VALUES (@agid, 'SaleAgreement', 'Sale Agreement (Legal Paperwork)', 1, 'Requested', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
+        `);
+
+      await tx0.commit();
+    } catch (txErr) {
+      try { await tx0.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    // Same auto-start maybeAutoCreateAgreement() does for the normal path —
+    // this manual dialog must not leave the booking without a Legal
+    // Milestone tracker just because the agreement didn't come from the
+    // auto-create trigger.
+    try {
+      await maybeAutoCreateLegalMilestone(pool, bookingId, actorId(req));
+    } catch (e) {
+      console.error("[crm-agreements] legal milestone auto-start failed:", e.message);
+    }
+
+    // Portal is provisioned at booking confirmation (crmBookingStageService.js)
+    // — no duplicate call needed here. The idempotent ensurePortalUser() would
+    // no-op anyway, but removing it keeps this path clean and avoids an extra
+    // DB round-trip on every manual agreement creation.
+
+    // "A legal person will arrange/prepare the papers works" — if assigned
+    // at creation time, they're notified immediately rather than having to
+    // discover the assignment by browsing the list.
+    if (b.LegalExecutiveId) {
+      await emitNotification(pool, parseInt(b.LegalExecutiveId), "crm_agreement_legal_assigned",
+        "Agreement Assigned For Preparation",
+        `${agNo} assigned to you for legal preparation.`,
+        agreementId, "crm_agreement");
+    }
+
+    res.status(201).json({ success: true, id: agreementId, AgreementNo: agNo });
+  } catch (e) {
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
+      return res.status(409).json({ error: "An agreement already exists for this booking" });
+    console.error("[crm-agreements] POST error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /:id/submit — Rejected -> Pending. Lets staff resubmit a senior-rejected
+// agreement for another approval pass (no role restriction — this is not
+// an approval action).
+router.put("/:id/submit", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const pool = getPool();
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot resubmit — ${lockReason}. Cancel the agreement instead.` });
+    const result = await approvalTransition("crm-agreements", id, CrmStatus.PENDING, userEmail, req.user?.role);
+    await pool.request()
+      .input("id", sql.Int, id)
+      .query(`
+        UPDATE dbo.CrmAgreement SET
+          SeniorApprovedBy = NULL,
+          SeniorApprovedAt = NULL,
+          SeniorApprovalRemarks = NULL,
+          SentToCustomerAt = NULL,
+          CustomerApprovalStatus = '${CrmStatus.PENDING}',
+          CustomerApprovedAt = NULL,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-agreements] submit error:", e.message);
+    res.status(e.status || 400).json({ error: e.message });
+  }
+});
+
+// PUT /:id/approve — senior approval. Admin/super_admin/dba only, enforced
+// inside approvalTransition(). Only reachable from the Admin Approval Inbox
+// now — there is no self-approve button on the agreement page anymore.
+router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const pool0 = getPool();
+    const lockReason0 = await getAgreementBookingLockReason(pool0, id);
+    if (lockReason0) return res.status(409).json({ error: `Cannot approve — ${lockReason0}. Cancel the agreement instead.` });
+    // Same mandate mark-executed already enforces, moved earlier: a Legal
+    // Executive must be on record before senior approval, not just before
+    // execution. The stepper (CrmAgreement.tsx: agreementStepStates) already
+    // displays "Legal Exec. Assigned" as the step before "Senior Approval" —
+    // this makes that order real instead of just a label, closing the gap
+    // where senior-approve -> send -> customer-approve -> date-agree could
+    // all complete with nobody assigned, and the stepper would show a "done"
+    // step sitting after a still-"current" one.
+    const legalCheck0 = await pool0.request().input("id", sql.Int, id)
+      .query("SELECT LegalExecutiveId FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!legalCheck0.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    if (!legalCheck0.recordset[0].LegalExecutiveId) {
+      return res.status(400).json({ error: "A Legal Executive must be assigned before this agreement can receive senior approval — use PUT /:id/assign-legal" });
+    }
+    // Agreement Followup gate — all mandatory documents must be uploaded
+    // (100% have a file attached) before senior approval. Verification happens
+    // after approval; this gate only checks that files exist.
+    const followup0 = await agreementFollowupProgress(pool0, id);
+    if (followup0.required === 0) {
+      return res.status(400).json({ error: "No mandatory agreement documents have been requested/attached yet — add the required paperwork before this can receive senior approval" });
+    }
+    if (followup0.percent < 100) {
+      return res.status(400).json({ error: `Agreement Followup is only ${followup0.percent}% complete (${followup0.uploaded}/${followup0.required} mandatory documents uploaded) — all required paperwork must be attached before senior approval` });
+    }
+    // The Admin Approval Inbox's Approve/Reject buttons render through the
+    // shared ApprovalActions component (src/components/ApprovalActions.tsx),
+    // which posts { note: ... } — not { Remarks: ... }, which is what every
+    // other approval-gated module (BOQ, Journal Voucher, Inter-Company
+    // Transfer) already reads. This route was the one outlier still reading
+    // the wrong field name, so any remarks staff typed on approve/reject
+    // were silently discarded — worse once reject's remarks became
+    // mandatory below, since that field-name mismatch would then hard-block
+    // every real reject even when staff DID type a reason.
+    const remarks = req.body?.note || null;
+    // approvalTransition owns its own transaction/locking on `pool` and must
+    // run and commit before we open ours below — nesting two separate mssql
+    // Transactions over the same row on the same pool deadlocks rather than
+    // composes (same established pattern as crmCancellations.js/approve and
+    // crmSalesDeed.js/approve).
+    const result = await approvalTransition("crm-agreements", id, CrmStatus.APPROVED, userEmail, req.user?.role, remarks, actorId(req));
+
+    let sentToCustomerNow = false;
+    let notifyRow = null;
+    if (result.newStatus === CrmStatus.APPROVED) {
+      const pool = getPool();
+
+      // ── BEGIN ATOMIC SECTION ───────────────────────────────────────────
+      // Senior-approval fields, the legal-milestone sync, and (when a
+      // document already exists) the auto-send-to-customer fields + its own
+      // log entry all have to land together — a failure partway through
+      // previously could leave an agreement marked senior-approved with the
+      // legal milestone still un-synced, or "sent to customer" without the
+      // matching audit-log row, neither of which self-heals.
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request()
+          .input("id", sql.Int, id)
+          .input("aid", sql.Int, actorId(req))
+          .input("rem", sql.NVarChar(sql.MAX), remarks)
+          .query(`
+            UPDATE dbo.CrmAgreement SET
+              SeniorApprovedBy = @aid,
+              SeniorApprovedAt = SYSDATETIME(),
+              SeniorApprovalRemarks = @rem,
+              UpdatedAt = SYSDATETIME()
+            WHERE Id = @id
+          `);
+
+        const agBooking = await tx.request().input("id", sql.Int, id)
+          .query("SELECT BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+        const bookingIdForSync = agBooking.recordset[0]?.BookingId;
+        if (bookingIdForSync) {
+          await syncLegalMilestoneStep(tx, bookingIdForSync, "InternalApproval", actorId(req));
+        }
+
+        // Auto-flow: "SENIOR APPROVAL -> SHOW AGREEMENT TO THE CUSTOMER" is
+        // meant to happen the instant senior approval lands, not wait on
+        // staff remembering a separate "Send to Customer Portal" click. Only
+        // gated on at least one document already being attached — there's
+        // nothing to show the customer otherwise, and staff can still use the
+        // manual send button once they've uploaded one.
+        const docCount = await tx.request().input("id", sql.Int, id)
+          .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmAgreementDocument WHERE AgreementId = @id");
+        if (docCount.recordset[0].Cnt > 0) {
+          const already = await tx.request().input("id", sql.Int, id)
+            .query("SELECT SentToCustomerAt FROM dbo.CrmAgreement WHERE Id = @id");
+          if (!already.recordset[0].SentToCustomerAt) {
+            await tx.request().input("id", sql.Int, id).query(`
+              UPDATE dbo.CrmAgreement SET
+                SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = '${CrmStatus.PENDING}', CustomerApprovedAt = NULL
+              WHERE Id = @id
+            `);
+            await tx.request().input("agid", sql.Int, id).query(`
+              INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, ActorType, CreatedAt)
+              VALUES (@agid, 'SendToCustomer', 'System', SYSDATETIME())
+            `);
+            await syncLegalMilestoneStep(tx, bookingIdForSync, "DocShared", actorId(req));
+            sentToCustomerNow = true;
+          }
+        }
+
+        // Only log the audit entry once ALL approval levels are satisfied —
+        // partial multi-level approvals should not appear as "SeniorApprove" in the trail.
+        await logApprovalHistory(id, "SeniorApprove", remarks, actorId(req), tx);
+
+        await tx.commit();
+      } catch (err) {
+        await tx.rollback().catch(() => {});
+        throw err;
+      }
+
+      // Side effects only, run after commit — never allowed to undo the
+      // approval that already landed above.
+      if (sentToCustomerNow) {
+        try {
+          const info = await pool.request().input("id", sql.Int, id).query(`
+            SELECT ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
+            FROM dbo.CrmAgreement ag
+            JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+            JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+            WHERE ag.Id = @id
+          `);
+          notifyRow = info.recordset[0];
+          if (notifyRow?.AssignedTo) {
+            await emitNotification(pool, notifyRow.AssignedTo, "crm_agreement_sent_to_customer",
+              "Agreement Sent to Customer",
+              `${notifyRow.AgreementNo} (${notifyRow.BookingNo}) is now visible to ${notifyRow.ApplicantName} in their portal, awaiting their approval.`,
+              id, "crm_agreement");
+          }
+          await logCommunication(pool, {
+            bookingId: notifyRow?.BookingId, direction: "Outbound",
+            subject: `Agreement ${notifyRow?.AgreementNo} sent to customer`,
+            summary: "Agreement shared with the customer via portal, awaiting their approval.",
+            createdBy: actorId(req),
+          });
+        } catch (sideErr) { console.error("[crm-agreements] approve send-to-customer side effects failed:", sideErr.message); }
+      }
+    }
+    // Forward the full transition() result (not just `status`) — when this
+    // is one level of several (see migration 169's 2-level workflow),
+    // newStatus/level/totalLevels are what ApprovalActions.tsx reads to show
+    // "Level 1 of 2 approved" instead of misleadingly saying fully approved.
+    res.json({ success: true, status: result.newStatus, ...result });
+  } catch (e) {
+    console.error("[crm-agreements] approve error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// PUT /:id/reject — senior rejection. Admin/super_admin/dba only.
+router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    // Same field-name fix as /approve above — the shared ApprovalActions
+    // component posts { note: ... }.
+    const remarks = req.body?.note?.trim() || null;
+    if (!remarks) return res.status(400).json({ error: "Remarks are required when rejecting an agreement" });
+    const pool = getPool();
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot reject — ${lockReason}. Cancel the agreement instead.` });
+
+    // Snapshot before the transition touches anything — same content, no
+    // VersionNo bump, but tagged with why it bounced back. Mirrors the
+    // Recheck-branch fix in crmPortal.js's POST /agreement/respond.
+    const oldRow = (await pool.request().input("id", sql.Int, id)
+      .query("SELECT VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes FROM dbo.CrmAgreement WHERE Id = @id")).recordset[0];
+
+    // approvalTransition owns its own transaction/locking on `pool` and must
+    // run and commit before we open ours below (same established pattern as
+    // /approve above and crmCancellations.js/crmSalesDeed.js's equivalents).
+    const result = await approvalTransition("crm-agreements", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks);
+    // Check if customer had already approved before resetting — log it so the
+    // reset is traceable and not a silent discard.
+    const priorCustomer = (await pool.request().input("id", sql.Int, id)
+      .query("SELECT CustomerApprovalStatus, CustomerApprovedAt FROM dbo.CrmAgreement WHERE Id = @id")).recordset[0];
+    const customerHadApproved = priorCustomer?.CustomerApprovalStatus === CrmStatus.APPROVED;
+
+    // ── BEGIN ATOMIC SECTION ─────────────────────────────────────────────
+    // The status reset, the customer-approval-voided log (when applicable),
+    // the revision snapshot, and the rejection log entry all have to land
+    // together — a mid-sequence failure previously could leave an agreement
+    // reset to Rejected with no revision snapshot of what was rejected, or
+    // with a customer's prior approval silently voided with no audit trail
+    // of why.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("rem", sql.NVarChar(sql.MAX), remarks)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            SeniorApprovedBy = NULL,
+            SeniorApprovedAt = NULL,
+            SeniorApprovalRemarks = @rem,
+            SentToCustomerAt = NULL,
+            CustomerApprovalStatus = '${CrmStatus.PENDING}',
+            CustomerApprovedAt = NULL,
+            UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      if (customerHadApproved) {
+        await tx.request().input("agid", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), remarks).query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, Remarks, ActorType, CreatedAt)
+          VALUES (@agid, 'CustomerApprovalVoided', @rem, 'System', SYSDATETIME())
+        `);
+      }
+
+      if (oldRow) {
+        await tx.request()
+          .input("agid", sql.Int, id)
+          .input("ver",  sql.Int, oldRow.VersionNo)
+          .input("adt",  sql.Date, oldRow.AgreementDate)
+          .input("lname",sql.NVarChar(300), oldRow.LegalName)
+          .input("laddr",sql.NVarChar(sql.MAX), oldRow.LegalAddress)
+          .input("pan",  sql.NVarChar(20), oldRow.PanNo)
+          .input("aadh", sql.NVarChar(20), oldRow.AadhaarNo)
+          .input("note", sql.NVarChar(sql.MAX), oldRow.Notes)
+          .input("reason", sql.NVarChar(500), `Senior rejection${remarks ? `: ${remarks}` : ""}`)
+          .input("cb",   sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmAgreementRevision
+              (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+            VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, @cb, SYSDATETIME())
+          `);
+      }
+
+      await logApprovalHistory(id, "SeniorReject", remarks, actorId(req), tx);
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback().catch(() => {});
+      throw err;
+    }
+
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-agreements] reject error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// PUT /:id/date/approve — the second, independent approval gate: confirms
+// the agreement date once both sides have proposed a matching one
+// (DateApprovalStatus='Pending', set by acceptAgreementDate()).
+// Restricted to super_admin only via approvalService's
+// MODULE_APPROVER_ROLE_OVERRIDES + the seeded LevelsData — same
+// "hardcoded for now, reassignable later with zero code change" pattern
+// used for Senior Approval.
+router.put("/:id/date/approve", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const pool0 = getPool();
+    const lockReason0 = await getAgreementBookingLockReason(pool0, id);
+    if (lockReason0) return res.status(409).json({ error: `Cannot approve a date — ${lockReason0}. Cancel the agreement instead.` });
+    // Same field-name fix as Senior Approval above — this route is also
+    // reached through the shared ApprovalActions component (module
+    // "crm-agreement-date" in ApprovalInbox.tsx), which posts { note: ... }.
+    const remarks = req.body?.note || null;
+    const result = await approvalTransition("crm-agreement-date", id, CrmStatus.APPROVED, userEmail, req.user?.role, remarks, actorId(req));
+    if (result.newStatus === CrmStatus.APPROVED) {
+      const pool = getPool();
+      const confirmedDate = await finalizeAgreementDate(pool, id);
+
+      const info = await pool.request().input("id", sql.Int, id).query(`
+        SELECT ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
+        FROM dbo.CrmAgreement ag
+        JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE ag.Id = @id
+      `);
+      const row = info.recordset[0];
+      if (row?.AssignedTo) {
+        await emitNotification(pool, row.AssignedTo, "crm_agreement_date_approved",
+          "Agreement Date Approved",
+          `${row.AgreementNo} (${row.BookingNo}) is now dated ${String(confirmedDate).slice(0, 10)} — ready to mark executed once documents are verified.`,
+          id, "crm_agreement");
+      }
+      await logCommunication(pool, {
+        bookingId: row?.BookingId, direction: "Outbound",
+        subject: `Agreement date confirmed — ${String(confirmedDate).slice(0, 10)}`,
+        summary: `${row?.AgreementNo}: both sides agreed and a super admin approved ${String(confirmedDate).slice(0, 10)} as the agreement date.`,
+        createdBy: actorId(req),
+      });
+    }
+    res.json({ success: true, status: result.newStatus, ...result });
+  } catch (e) {
+    console.error("[crm-agreements] date/approve error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// PUT /:id/date/reject — the proposed date is not acceptable. Both
+// proposals are cleared so staff and customer start the date negotiation
+// over, rather than leaving a rejected date sitting on the record.
+router.put("/:id/date/reject", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    // Same field-name fix as above.
+    const remarks = req.body?.note || null;
+    const pool = getPool();
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot reject a date — ${lockReason}. Cancel the agreement instead.` });
+    // approvalTransition owns its own internal transaction/locking and must
+    // run on the plain pool (same established pattern as elsewhere in this
+    // file) — but the reset + approval-log write that follow it are wrapped
+    // together so a failure between them can't leave the negotiation reset
+    // with no trace of the rejection in the approval log.
+    const result = await approvalTransition("crm-agreement-date", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks);
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await resetAgreementDateNegotiation(tx, id);
+      await tx.request()
+        .input("agid", sql.Int, id)
+        .input("rem", sql.NVarChar(sql.MAX), remarks)
+        .input("aid", sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, Remarks, ActorType, ActorId, CreatedAt)
+          VALUES (@agid, 'AgreementDateRejected', @rem, 'Staff', @aid, SYSDATETIME())
+        `);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    const info = await pool.request().input("id", sql.Int, id).query(`
+      SELECT ag.AgreementNo, ag.BookingId, b.AssignedTo, b.BookingNo FROM dbo.CrmAgreement ag JOIN dbo.CrmBooking b ON b.Id = ag.BookingId WHERE ag.Id = @id
+    `);
+    const row = info.recordset[0];
+    if (row?.AssignedTo) {
+      await emitNotification(pool, row.AssignedTo, "crm_agreement_date_rejected",
+        "Agreement Date Rejected",
+        `The proposed date for ${row.AgreementNo} (${row.BookingNo}) was rejected${remarks ? `: ${remarks}` : ""}. Propose a new date to restart.`,
+        id, "crm_agreement");
+    }
+    await logCommunication(pool, {
+      bookingId: row?.BookingId, direction: "Outbound",
+      subject: `Agreement date proposal rejected`,
+      summary: `${row?.AgreementNo}: proposed date was not approved${remarks ? ` — ${remarks}` : ""}.`,
+      createdBy: actorId(req),
+    });
+
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    console.error("[crm-agreements] date/reject error:", e.message);
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// CRM-specific friendly approval history (SendToCustomer/CustomerApprove/
+// CustomerRecheck live here too) — separate from, and in addition to, the
+// generic ApprovalAuditLog the engine above writes for security purposes.
+// `dbConn` lets a caller pass an in-flight transaction (tx.request() has the
+// same shape as pool.request() in mssql) so this write commits atomically
+// with whatever else that transaction is doing.
+async function logApprovalHistory(agreementId, action, remarks, actorIdVal, dbConn = null) {
+  const pool = dbConn || getPool();
+  await pool.request()
+    .input("agid", sql.Int, agreementId)
+    .input("act",  sql.NVarChar(30), action)
+    .input("rem",  sql.NVarChar(sql.MAX), remarks || null)
+    .input("aid",  sql.Int, actorIdVal)
+    .query(`
+      INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, Remarks, ActorType, ActorId, CreatedAt)
+      VALUES (@agid, @act, @rem, 'Staff', @aid, SYSDATETIME())
+    `);
+}
+
+// PUT /:id/send-to-customer — publish the agreement to the customer portal
+// for their approval; requires senior approval first.
+router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const { proposedDate } = req.body;
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot send to customer — ${lockReason}. Cancel the agreement instead.` });
+
+    const ag = await pool.request().input("id", sql.Int, id).query(`
+      SELECT
+        ag.SeniorApprovalStatus,
+        ag.BookingId,
+        (SELECT COUNT(*) FROM dbo.CrmAgreementDocument d WHERE d.AgreementId = ag.Id) AS DocumentCount
+      FROM dbo.CrmAgreement ag
+      WHERE ag.Id = @id
+    `);
+    if (!ag.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    if (ag.recordset[0].SeniorApprovalStatus !== CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "Agreement must receive senior approval before it can be sent to the customer" });
+    }
+    if (!ag.recordset[0].DocumentCount) {
+      return res.status(400).json({ error: "Upload at least one agreement document before sending it to the customer portal" });
+    }
+
+    // Up to 5 writes describing one event (send-to-customer, optionally
+    // carrying a fresh proposed date) — wrapped so a failure partway through
+    // can't leave the Agreement marked SentToCustomer with no approval-log
+    // entry, or a ProposedDate set with no matching history row.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      // Preserve the prior proposed date (if any) in history before it's
+      // overwritten — nothing about the negotiation is ever lost. If
+      // proposedDate is omitted, leave whatever's currently on ProposedDate/
+      // ProposedDateStatus alone (e.g. resending after recheck without
+      // changing the date already on the table).
+      if (proposedDate) {
+        await tx.request()
+          .input("agid", sql.Int, id)
+          .input("pd",   sql.Date, proposedDate)
+          .input("cb",   sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmAgreementDateHistory (AgreementId, ProposedBy, ProposedDate, CreatedBy, CreatedAt)
+            VALUES (@agid, 'Company', @pd, @cb, SYSDATETIME())
+          `);
+        await tx.request()
+          .input("id", sql.Int, id)
+          .input("pd", sql.Date, proposedDate)
+          .query(`
+            UPDATE dbo.CrmAgreement SET
+              ProposedDate = @pd, ProposedDateStatus = '${CrmStatus.PENDING_CUSTOMER_REVIEW}'
+            WHERE Id = @id
+          `);
+      }
+
+      await tx.request()
+        .input("id",  sql.Int, id)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            SentToCustomerAt = SYSDATETIME(),
+            CustomerApprovalStatus = '${CrmStatus.PENDING}',
+            CustomerApprovedAt = NULL
+          WHERE Id = @id
+        `);
+
+      await tx.request()
+        .input("agid", sql.Int, id)
+        .input("aid",  sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog (AgreementId, Action, ActorType, ActorId, CreatedAt)
+          VALUES (@agid, 'SendToCustomer', 'Staff', @aid, SYSDATETIME())
+        `);
+      await syncLegalMilestoneStep(tx, ag.recordset[0].BookingId, "DocShared", actorId(req));
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] PUT /:id/send-to-customer error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /:id/propose-date — set/update the company's proposed agreement date
+// on an already-sent agreement, without re-triggering the send itself (now
+// that sending happens automatically on senior approval, this is the only
+// remaining way for staff to propose or renegotiate a date).
+router.put("/:id/propose-date", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const { proposedDate } = req.body;
+    if (!proposedDate) return res.status(400).json({ error: "proposedDate is required" });
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot propose a date — ${lockReason}. Cancel the agreement instead.` });
+
+    const ag = await pool.request().input("id", sql.Int, id).query(`
+      SELECT ag.SentToCustomerAt, ag.AgreementNo, ag.BookingId
+      FROM dbo.CrmAgreement ag WHERE ag.Id = @id
+    `);
+    if (!ag.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const agRow = ag.recordset[0];
+    if (!agRow.SentToCustomerAt) return res.status(400).json({ error: "Agreement hasn't been sent to the customer yet" });
+
+    await proposeAgreementDate(pool, id, "Company", proposedDate, actorId(req));
+
+    await logCommunication(pool, {
+      bookingId: agRow.BookingId, direction: "Outbound",
+      subject: `Proposed agreement date — ${proposedDate}`,
+      summary: `${agRow.AgreementNo}: we proposed ${proposedDate}.`,
+      createdBy: actorId(req),
+    });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] PUT /:id/propose-date error:", e.message);
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/date/accept — company accepts the customer's currently-proposed
+// date as-is (no need to re-propose the identical date). Moves the
+// negotiation to 'Matched' and opens the super_admin sign-off gate, exactly
+// like a same-date match did under the old two-column design.
+router.put("/:id/date/accept", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot accept a date — ${lockReason}. Cancel the agreement instead.` });
+
+    const ag = await pool.request().input("id", sql.Int, id).query(`
+      SELECT ag.AgreementNo, ag.BookingId, ag.ProposedDate FROM dbo.CrmAgreement ag WHERE ag.Id = @id
+    `);
+    if (!ag.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const agRow = ag.recordset[0];
+
+    await acceptAgreementDate(pool, id, "Company");
+
+    await logCommunication(pool, {
+      bookingId: agRow.BookingId, direction: "Outbound",
+      subject: "Agreement date accepted — sent for approval",
+      summary: `${agRow.AgreementNo}: we accepted the customer's proposed date ${String(agRow.ProposedDate).slice(0, 10)}, sent for super admin sign-off.`,
+      createdBy: actorId(req),
+    });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] PUT /:id/date/accept error:", e.message);
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// GET /:id/date-history — every proposed execution date, company and
+// customer side, in order — nothing here is ever overwritten in place.
+router.get("/:id/date-history", requirePageRight("crm-agreements", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await pool.request().input("agid", sql.Int, id).query(`
+      SELECT h.*, u.name AS CreatedByName
+      FROM dbo.CrmAgreementDateHistory h
+      LEFT JOIN dbo.Users u ON u.id = h.CreatedBy
+      WHERE h.AgreementId = @agid
+      ORDER BY h.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-agreements] GET /:id/date-history error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /:id — update agreement
+// Generic PUT never accepts Status — it is auto-derived, never freely chosen.
+// Status only ever advances via /:id/mark-executed, /:id/mark-registered,
+// /:id/cancel below, each gated on the real workflow step having happened.
+router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+
+    const old = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, LegalExecutiveId, AgreementNo, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!old.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const oldRow = old.recordset[0];
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot edit — ${lockReason}. Cancel the agreement instead.` });
+    // Once an agreement is Executed or Registered, its legal content is the
+    // record of what the customer actually approved and signed — it must
+    // never silently drift after the fact. Previously this had no gate
+    // beyond the booking-lock check above, so LegalName/PAN/Aadhaar could
+    // still be edited (with a real VersionNo bump + revision row) on an
+    // already-executed contract with nobody notified.
+    if ([CrmStatus.EXECUTED, CrmStatus.REGISTERED].includes(oldRow.Status)) {
+      return res.status(409).json({ error: `Cannot edit — this agreement is already ${oldRow.Status}. Its legal content is locked.` });
+    }
+
+    // AgreementDate is deliberately NOT accepted here — see the note on
+    // POST / above. Edit Details can correct legal identity fields, but the
+    // agreement date can only ever come from both sides' proposals matching.
+    const touchesLegalContent = b.LegalName != null
+      || b.LegalAddress != null || b.PanNo != null || b.AadhaarNo != null;
+
+    const newLegalExecutiveId = b.LegalExecutiveId !== undefined
+      ? (b.LegalExecutiveId ? parseInt(b.LegalExecutiveId) : null)
+      : oldRow.LegalExecutiveId;
+
+    // The pre-edit Revision snapshot and the actual VersionNo bump on the
+    // Agreement row must land together — wrapped so a failure between them
+    // can't leave a Revision row referencing a VersionNo that was never
+    // actually superseded (or the reverse: a bumped VersionNo with no
+    // snapshot of what the prior version looked like).
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (touchesLegalContent) {
+        await tx.request()
+          .input("agid", sql.Int, id)
+          .input("ver",  sql.Int, oldRow.VersionNo)
+          .input("adt",  sql.Date, oldRow.AgreementDate)
+          .input("lname",sql.NVarChar(300), oldRow.LegalName)
+          .input("laddr",sql.NVarChar(sql.MAX), oldRow.LegalAddress)
+          .input("pan",  sql.NVarChar(20), oldRow.PanNo)
+          .input("aadh", sql.NVarChar(20), oldRow.AadhaarNo)
+          .input("note", sql.NVarChar(sql.MAX), oldRow.Notes)
+          .input("reason", sql.NVarChar(200), b.RevisionReason || "Staff correction")
+          .input("cb",   sql.Int, actor)
+          .query(`
+            INSERT INTO dbo.CrmAgreementRevision
+              (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+            VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, @cb, SYSDATETIME())
+          `);
+      }
+
+      await tx.request()
+        .input("id",    sql.Int,           id)
+        .input("lname", sql.NVarChar(300), b.LegalName     || null)
+        .input("laddr", sql.NVarChar(sql.MAX), b.LegalAddress  || null)
+        .input("pan",   sql.NVarChar(20),  b.PanNo         || null)
+        .input("aadh",  sql.NVarChar(20),  b.AadhaarNo     || null)
+        .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("bump",  sql.Int,           touchesLegalContent ? 1 : 0)
+        .input("leg",   sql.Int,           newLegalExecutiveId)
+        .input("ub",    sql.Int,           actor)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            LegalName = ISNULL(@lname, LegalName),
+            LegalAddress = ISNULL(@laddr, LegalAddress),
+            PanNo = ISNULL(@pan, PanNo),
+            AadhaarNo = ISNULL(@aadh, AadhaarNo),
+            Notes = @note, VersionNo = VersionNo + @bump,
+            LegalExecutiveId = @leg,
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+
+      if (newLegalExecutiveId && newLegalExecutiveId !== oldRow.LegalExecutiveId) {
+        await syncLegalMilestoneStep(tx, oldRow.BookingId, "LegalReview", actor);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    // Notify the legal executive the moment they're assigned/reassigned —
+    // same as at creation time — so the handoff to "the legal person" is
+    // never just a silent database field nobody checks.
+    if (newLegalExecutiveId && newLegalExecutiveId !== oldRow.LegalExecutiveId) {
+      await emitNotification(pool, newLegalExecutiveId, "crm_agreement_legal_assigned",
+        "Agreement Assigned For Preparation",
+        `${oldRow.AgreementNo} assigned to you for legal preparation.`,
+        id, "crm_agreement");
+    }
+
+    res.json({ success: true, versionBumped: touchesLegalContent });
+  } catch (e) {
+    console.error("[crm-agreements] PUT error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /:id/assign-legal — assign or reassign the Legal Executive responsible
+// for preparing this agreement's paperwork. Split out from the generic
+// PUT /:id on purpose: that route bundles the change into "Edit Details"
+// (locked-by-default, meant for correcting legal identity fields, bumps
+// VersionNo and asks for a revision reason) — none of which applies to
+// "who is handling this," so assignment was previously reachable only by
+// going through an edit flow meant for something else entirely. This never
+// touches VersionNo or CrmAgreementRevision.
+router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+    const newId = req.body?.LegalExecutiveId ? parseInt(req.body.LegalExecutiveId) : null;
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot reassign — ${lockReason}. Cancel the agreement instead.` });
+
+    const old = await pool.request().input("id", sql.Int, id)
+      .query("SELECT LegalExecutiveId, AgreementNo, Status, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!old.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const oldRow = old.recordset[0];
+    if ([CrmStatus.REGISTERED, CrmStatus.CANCELLED].includes(oldRow.Status)) {
+      return res.status(400).json({ error: `Cannot reassign a legal executive on an agreement that is already ${oldRow.Status}` });
+    }
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).input("leg", sql.Int, newId).input("ub", sql.Int, actor)
+        .query("UPDATE dbo.CrmAgreement SET LegalExecutiveId = @leg, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+
+      await logCrmAudit(tx, "Agreement", id, actor, [
+        { field: "LegalExecutiveId", oldVal: oldRow.LegalExecutiveId ? String(oldRow.LegalExecutiveId) : null, newVal: newId ? String(newId) : null },
+      ]);
+
+      if (newId && newId !== oldRow.LegalExecutiveId) {
+        await syncLegalMilestoneStep(tx, oldRow.BookingId, "LegalReview", actor);
+      }
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    if (newId && newId !== oldRow.LegalExecutiveId) {
+      await emitNotification(pool, newId, "crm_agreement_legal_assigned",
+        "Agreement Assigned For Preparation",
+        `${oldRow.AgreementNo} assigned to you for legal preparation.`,
+        id, "crm_agreement");
+    }
+
+    res.json({ success: true, LegalExecutiveId: newId });
+  } catch (e) {
+    console.error("[crm-agreements] PUT /:id/assign-legal error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /:id/mark-executed — Draft -> Executed. Gated on the real-world facts
+// that make an agreement "executed": both senior and customer approvals
+// already granted, and a genuine AgreementDate already on record. That date
+// can only have gotten there via acceptAgreementDate() + finalizeAgreementDate()
+// — one side accepting the other's proposed date, then a super_admin
+// sign-off — never typed in here, so execution itself is proof the "both
+// ends agreed on a date" mandate was actually satisfied.
+router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+
+    const cur = await pool.request().input("id", sql.Int, id).query(`
+      SELECT BookingId, Status, AgreementDate, SeniorApprovalStatus, CustomerApprovalStatus, LegalExecutiveId
+      FROM dbo.CrmAgreement WHERE Id = @id
+    `);
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const row = cur.recordset[0];
+
+    if (row.Status !== CrmStatus.DRAFT) {
+      return res.status(400).json({ error: `Cannot mark-executed from status '${row.Status}'` });
+    }
+    if (row.SeniorApprovalStatus !== CrmStatus.APPROVED || row.CustomerApprovalStatus !== CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "Both senior and customer approval must be Approved before execution" });
+    }
+    if (!row.AgreementDate) {
+      return res.status(400).json({ error: "Both sides must agree on an agreement date first — propose a date and wait for the customer's matching response before marking executed" });
+    }
+    // A legally executed contract must have a named responsible party on
+    // record — the Legal Executive field previously had no consequence at
+    // all for staying Unassigned all the way through execution, which is a
+    // real accountability gap for real paperwork, not a cosmetic one.
+    if (!row.LegalExecutiveId) {
+      return res.status(400).json({ error: "A Legal Executive must be assigned before this agreement can be marked executed — use PUT /:id/assign-legal" });
+    }
+    const unverified = await pool.request().input("id", sql.Int, id).query(`
+      SELECT DocumentType, Label, Status FROM dbo.CrmAgreementDocument
+      WHERE AgreementId = @id AND IsMandatory = 1 AND Status <> 'Verified'
+    `);
+    if (unverified.recordset.length) {
+      const names = unverified.recordset.map(d => d.Label || d.DocumentType).join(", ");
+      return res.status(400).json({ error: `Cannot mark executed — mandatory document(s) not yet verified: ${names}` });
+    }
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot mark executed — ${lockReason}. Cancel the agreement instead.` });
+
+    // ── BEGIN ATOMIC SECTION ─────────────────────────────────────────────
+    // The status flip, the audit entry, the legal-milestone sync, and the
+    // brokerage-tranche unlock all have to land together. Of everything in
+    // this file, a partial failure here is the highest-stakes: the
+    // brokerage unlock is real money — a broker's tranche staying silently
+    // locked because this step died right after the Agreement flipped to
+    // Executed is not a self-healing gap, it's a stuck payment nobody would
+    // know to go looking for.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",  sql.Int, id)
+        .input("ub",  sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            Status = '${CrmStatus.EXECUTED}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+
+      await logCrmAudit(tx, "Agreement", id, actor, [
+        { field: "Status", oldVal: CrmStatus.DRAFT, newVal: CrmStatus.EXECUTED },
+      ]);
+
+      await syncLegalMilestoneStep(tx, row.BookingId, "FinalExecution", actor);
+      // Releases any brokerage tranche waiting on Agreement Executed — TwoPart's
+      // second half, or AgreementOnly's single tranche. No-op for OneTime
+      // bookings or ones with no broker.
+      await maybeUnlockBrokerageOnAgreementExecuted(tx, row.BookingId);
+
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback().catch(() => {});
+      throw err;
+    }
+
+    res.json({ success: true, status: CrmStatus.EXECUTED });
+  } catch (e) {
+    console.error("[crm-agreements] mark-executed error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /:id/mark-registered — Executed -> Registered.
+// The AFS is physically registered at the Sub-Registrar Office before the
+// Sale Deed exists at all. The caller must supply the Doc No and date they
+// receive from the Sub-Registrar as proof of the real-world event —
+// AfsRegistrationNo is required, AfsRegistrationDate is required.
+// There is no dependency on CrmSalesDeed here; that is a separate document
+// registered much later at a separate Sub-Registrar visit.
+router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { AfsRegistrationNo, AfsRegistrationDate, AfsStampDuty, AfsRegistrationFee } = req.body || {};
+
+    if (!AfsRegistrationNo || !String(AfsRegistrationNo).trim()) {
+      return res.status(400).json({ error: "AFS Registration No. is required — enter the Doc No received from the Sub-Registrar" });
+    }
+    if (!AfsRegistrationDate) {
+      return res.status(400).json({ error: "AFS Registration Date is required — enter the date of Sub-Registrar registration" });
+    }
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    if (cur.recordset[0].Status !== CrmStatus.EXECUTED) {
+      return res.status(400).json({ error: `Cannot mark-registered from status '${cur.recordset[0].Status}'` });
+    }
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: `Cannot mark registered — ${lockReason}. Cancel the agreement instead.` });
+
+    // The physical Sub-Registrar visit must actually have happened before
+    // staff can record its outcome here — mirrors the identical pattern on
+    // the Sale Deed side (RegistrationNo can't be set until CrmRegistry is
+    // Completed; see crmSalesDeed.js PUT /:id). Without this, staff could
+    // type in an AFS Registration No/Date without the AFS Registry tracker
+    // (crmAfsRegistry.js) ever having been marked Completed — a real
+    // integrity gap the two Visit-1/Visit-2 flows should enforce identically.
+    const afsReg = await pool.request().input("bid", sql.Int, cur.recordset[0].BookingId)
+      .query("SELECT TOP 1 Status FROM dbo.CrmAfsRegistry WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+    if (!afsReg.recordset.length || afsReg.recordset[0].Status !== "Completed") {
+      return res.status(400).json({ error: "AFS Registry must be marked Completed (the Sub-Registrar visit tracker) before the Agreement can be marked Registered" });
+    }
+
+    const regNo = String(AfsRegistrationNo).trim();
+    const regDate = AfsRegistrationDate;
+    const afsStamp = AfsStampDuty != null && AfsStampDuty !== "" ? parseFloat(AfsStampDuty) : null;
+    const afsRegFee = AfsRegistrationFee != null && AfsRegistrationFee !== "" ? parseFloat(AfsRegistrationFee) : null;
+
+    const auditFields = [
+      { field: "Status",              oldVal: CrmStatus.EXECUTED, newVal: CrmStatus.REGISTERED },
+      { field: "AfsRegistrationNo",   oldVal: null,               newVal: regNo },
+      { field: "AfsRegistrationDate", oldVal: null,               newVal: regDate },
+    ];
+    if (afsStamp != null)  auditFields.push({ field: "AfsStampDuty",       oldVal: null, newVal: afsStamp });
+    if (afsRegFee != null) auditFields.push({ field: "AfsRegistrationFee", oldVal: null, newVal: afsRegFee });
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",       sql.Int,           id)
+        .input("ub",       sql.Int,           actor)
+        .input("regNo",    sql.NVarChar(100), regNo)
+        .input("regDt",    sql.Date,          regDate)
+        .input("afsStamp", sql.Decimal(18,2), afsStamp)
+        .input("afsRegFee",sql.Decimal(18,2), afsRegFee)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            Status              = '${CrmStatus.REGISTERED}',
+            AfsRegistrationNo   = @regNo,
+            AfsRegistrationDate = @regDt,
+            AfsStampDuty        = @afsStamp,
+            AfsRegistrationFee  = @afsRegFee,
+            UpdatedBy           = @ub,
+            UpdatedAt           = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      await logCrmAudit(tx, "Agreement", id, actor, auditFields);
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback().catch(() => {});
+      throw err;
+    }
+
+    res.json({ success: true, status: CrmStatus.REGISTERED });
+  } catch (e) {
+    console.error("[crm-agreements] mark-registered error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /:id/cancel — Draft/Executed -> Cancelled. Business action (matches
+// crmCancellations.js / crmNoc.js pattern), not admin-approval-gated — a
+// forward-only terminal transition, blocked once already Registered.
+router.put("/:id/cancel", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const allowed = AGREEMENT_TRANSITIONS[cur.recordset[0].Status] || [];
+    if (!allowed.includes("Cancelled")) {
+      return res.status(400).json({ error: `Cannot cancel an agreement in status '${cur.recordset[0].Status}'` });
+    }
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("ub", sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmAgreement SET Status = '${CrmStatus.CANCELLED}', UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+
+      await logCrmAudit(tx, "Agreement", id, actor, [
+        { field: "Status", oldVal: cur.recordset[0].Status, newVal: CrmStatus.CANCELLED },
+      ]);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true, status: CrmStatus.CANCELLED });
+  } catch (e) {
+    console.error("[crm-agreements] cancel error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// POST /:id/documents — add a document to an agreement. Re-uploading the
+// same DocumentType (e.g. a corrected SaleAgreement PDF) never overwrites
+// the prior row — it inserts a new one with the next VersionNo for that
+// type, so every prior document stays reachable via GET /:id.
+router.post("/:id/documents", requirePageRight("crm-documents", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    const agreementId = parseInt(req.params.id);
+    const DOC_TYPES = ["SaleAgreement","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
+    if (!DOC_TYPES.includes(b.DocumentType))
+      return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
+
+    const lockReason = await getAgreementBookingLockReason(pool, agreementId);
+    if (lockReason) return res.status(409).json({ error: `Cannot attach a document — ${lockReason}.` });
+    const execLockReason = await agreementExecutedLockReason(pool, agreementId);
+    if (execLockReason) return res.status(409).json({ error: `Cannot attach a document — ${execLockReason}.` });
+
+    const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), b.DocumentType)
+      .query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
+    const nextVersion = ver.recordset[0].N;
+
+    // The document INSERT and the legal-milestone sync it can trigger are
+    // wrapped together so a failure in the sync step can't report a 500 back
+    // to the client for a document that, from the DB's perspective, was
+    // already successfully attached — which would otherwise invite a retry
+    // that silently creates a duplicate version.
+    const tx = pool.transaction();
+    await tx.begin();
+    let docId, nextVersionOut;
+    try {
+      const inserted = await tx.request()
+        .input("agid",  sql.Int,            agreementId)
+        .input("dtype", sql.NVarChar(100),  b.DocumentType)
+        .input("url",   sql.NVarChar(2000), b.DocumentUrl  || null)
+        .input("fname", sql.NVarChar(300),  b.FileName     || null)
+        .input("iby",   sql.NVarChar(200),  b.IssuedBy     || null)
+        .input("st",    sql.NVarChar(30),   b.Status || "Uploaded")
+        .input("rem",   sql.NVarChar(sql.MAX), b.Remarks   || null)
+        .input("uat",   sql.DateTime2(3),   b.UploadedAt   || null)
+        .input("ver",   sql.Int,            nextVersion)
+        .input("cb",    sql.Int,            actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmAgreementDocument
+            (AgreementId, DocumentType, DocumentUrl, FileName, IssuedBy, Status, Remarks, UploadedAt, VersionNo, CreatedBy, CreatedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@agid, @dtype, @url, @fname, @iby, @st, @rem, ISNULL(@uat, SYSDATETIME()), @ver, @cb, SYSDATETIME())
+        `);
+      docId = inserted.recordset[0].Id;
+      nextVersionOut = nextVersion;
+      await syncLegalMilestoneFromDocument(tx, docId, actorId(req));
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+    res.status(201).json({ success: true, version: nextVersionOut });
+  } catch (e) {
+    console.error("[crm-agreements] POST documents error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// POST /:id/documents/request — ask the customer for a document via their
+// portal, without a file yet. Shows up there as an open request; the
+// customer's upload (crmPortal.js POST /agreement/documents/:docId/upload)
+// fills in the file and flips Status to 'Submitted' for staff review.
+router.post("/:id/documents/request", requirePageRight("crm-documents", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    const agreementId = parseInt(req.params.id);
+    const DOC_TYPES = ["SaleAgreement","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
+    if (!DOC_TYPES.includes(b.DocumentType))
+      return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
+
+    const lockReason = await getAgreementBookingLockReason(pool, agreementId);
+    if (lockReason) return res.status(409).json({ error: `Cannot request a document — ${lockReason}.` });
+    const execLockReason = await agreementExecutedLockReason(pool, agreementId);
+    if (execLockReason) return res.status(409).json({ error: `Cannot request a document — ${execLockReason}.` });
+
+    // An already-open request for this exact document type (Status still
+    // 'Requested' — asked for, nothing uploaded yet) must be reused, not
+    // duplicated. Previously this always inserted a fresh, ever-incrementing
+    // VersionNo row regardless of whether an unfulfilled request already
+    // existed, so clicking "Request from Customer" twice for the same type
+    // (e.g. re-confirming a request, or a staff double-click) silently
+    // spawned a second "field" for the same document — inflating the
+    // Agreement Followup denominator and showing the same document type
+    // twice in the list. Re-requesting the SAME open slot just refreshes it
+    // in place. A genuinely new version is still created when the prior
+    // attempt was Rejected or Verified — those are real, resolved outcomes,
+    // not an open request sitting untouched.
+    const openReq = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), b.DocumentType)
+      .query("SELECT TOP 1 Id FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype AND Status = 'Requested' ORDER BY VersionNo DESC");
+    if (openReq.recordset.length) {
+      const existingId = openReq.recordset[0].Id;
+      await pool.request()
+        .input("id", sql.Int, existingId)
+        .input("label", sql.NVarChar(200), b.Label || null)
+        .input("mand", sql.Bit, !!b.IsMandatory)
+        .input("rb", sql.Int, actorId(req))
+        .query(`
+          UPDATE dbo.CrmAgreementDocument SET
+            Label = ISNULL(@label, Label), IsMandatory = @mand, RequestedBy = @rb, RequestedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      return res.status(200).json({ success: true, id: existingId, reused: true });
+    }
+
+    const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), b.DocumentType)
+      .query("SELECT ISNULL(MAX(VersionNo), 0) + 1 AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
+    const nextVersion = ver.recordset[0].N;
+
+    const result = await pool.request()
+      .input("agid",  sql.Int, agreementId)
+      .input("dtype", sql.NVarChar(100), b.DocumentType)
+      .input("label", sql.NVarChar(200), b.Label || null)
+      .input("mand",  sql.Bit, !!b.IsMandatory)
+      .input("ver",   sql.Int, nextVersion)
+      .input("rb",    sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmAgreementDocument
+          (AgreementId, DocumentType, Label, IsMandatory, Status, UploadedByType, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@agid, @dtype, @label, @mand, 'Requested', 'Customer', @rb, SYSDATETIME(), @ver, @rb, SYSDATETIME())
+      `);
+    res.status(201).json({ success: true, id: result.recordset[0].Id });
+  } catch (e) {
+    console.error("[crm-agreements] POST documents/request error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// POST /:id/documents/upload — actual multi-file upload (up to 10 files in
+// one request). One row per file, all sharing the same DocumentType, each
+// versioned sequentially so a re-upload never overwrites a prior file.
+router.post("/:id/documents/upload", requirePageRight("crm-documents", "create"), (req, res) => {
+  upload.array("files", 10)(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    try {
+      const pool = getPool();
+      const agreementId = parseInt(req.params.id);
+      const docType = req.body?.DocumentType;
+      const DOC_TYPES = ["SaleAgreement","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
+      if (!DOC_TYPES.includes(docType)) return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
+      if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
+      for (const file of req.files) {
+        const sigErr = verifyFileMatchesDeclaredType(file);
+        if (sigErr) return res.status(400).json({ error: `${file.originalname}: ${sigErr}` });
+      }
+
+      const lockReason = await getAgreementBookingLockReason(pool, agreementId);
+      if (lockReason) {
+        return res.status(409).json({ error: `Cannot upload a document — ${lockReason}.` });
+      }
+      const execLockReason = await agreementExecutedLockReason(pool, agreementId);
+      if (execLockReason) {
+        return res.status(409).json({ error: `Cannot upload a document — ${execLockReason}.` });
+      }
+
+      const ver = await pool.request().input("agid", sql.Int, agreementId).input("dtype", sql.NVarChar(100), docType)
+        .query("SELECT ISNULL(MAX(VersionNo), 0) AS N FROM dbo.CrmAgreementDocument WHERE AgreementId = @agid AND DocumentType = @dtype");
+      let nextVersion = ver.recordset[0].N;
+
+      const tx = pool.transaction();
+      await tx.begin();
+      const inserted = [];
+      try {
+        for (const file of req.files) {
+          nextVersion += 1;
+          const result = await tx.request()
+            .input("agid",  sql.Int, agreementId)
+            .input("dtype", sql.NVarChar(100), docType)
+            .input("fname", sql.NVarChar(300), file.originalname)
+            .input("fb64",  sql.NVarChar(sql.MAX), file.buffer.toString("base64"))
+            .input("fs",    sql.BigInt, file.size)
+            .input("mt",    sql.NVarChar(150), file.mimetype)
+            .input("iby",   sql.NVarChar(200), req.body?.IssuedBy || null)
+            .input("rem",   sql.NVarChar(sql.MAX), req.body?.Remarks || null)
+            .input("ver",   sql.Int, nextVersion)
+            .input("cb",    sql.Int, actorId(req))
+            .query(`
+              INSERT INTO dbo.CrmAgreementDocument
+                (AgreementId, DocumentType, FileName, FileBase64, FileSize, MimeType, IssuedBy, Status, Remarks, UploadedAt, VersionNo, CreatedBy, CreatedAt)
+              OUTPUT INSERTED.Id
+              VALUES (@agid, @dtype, @fname, @fb64, @fs, @mt, @iby, 'Uploaded', @rem, SYSDATETIME(), @ver, @cb, SYSDATETIME())
+            `);
+          inserted.push(result.recordset[0].Id);
+        }
+        if (inserted.length) await syncLegalMilestoneFromDocument(tx, inserted[inserted.length - 1], actorId(req));
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
+      }
+      res.status(201).json({ success: true, ids: inserted, count: inserted.length });
+    } catch (e) {
+      console.error("[crm-agreements] upload documents error:", e.message);
+      res.status(500).json({ error: "An internal error occurred. Please try again later." });
+    }
+  });
+});
+
+// POST /:id/documents/:docId/attach — attach a file to an EXISTING
+// Requested/Rejected row in place (the Legal Executive fulfilling a
+// mandatory placeholder like SaleAgreement). Distinct from
+// /:id/documents/upload above, which always inserts a brand-new row —
+// using that for a mandatory placeholder left the original Requested row
+// permanently empty, so Agreement Followup % could never reach 100%. This
+// mirrors the customer-portal fulfillment route (crmPortal.js) on the
+// staff side.
+router.post("/:id/documents/:docId/attach", requirePageRight("crm-documents", "create"), (req, res) => {
+  upload.single("file")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    const sigErr = verifyFileMatchesDeclaredType(req.file);
+    if (sigErr) return res.status(400).json({ error: sigErr });
+    try {
+      const pool = getPool();
+      const agreementId = parseInt(req.params.id);
+      const docId = parseInt(req.params.docId);
+
+      const cur = await pool.request()
+        .input("id", sql.Int, docId).input("agid", sql.Int, agreementId)
+        .query("SELECT Id, Status FROM dbo.CrmAgreementDocument WHERE Id = @id AND AgreementId = @agid");
+      if (!cur.recordset.length) return res.status(404).json({ error: "Document not found for this agreement" });
+      if (!["Requested", CrmStatus.REJECTED].includes(cur.recordset[0].Status)) {
+        return res.status(400).json({ error: "This document already has a file — use Add Document to upload a corrected version instead" });
+      }
+
+      const lockReason = await getAgreementBookingLockReason(pool, agreementId);
+      if (lockReason) return res.status(409).json({ error: `Cannot upload a document — ${lockReason}.` });
+      const execLockReason = await agreementExecutedLockReason(pool, agreementId);
+      if (execLockReason) return res.status(409).json({ error: `Cannot upload a document — ${execLockReason}.` });
+
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request()
+          .input("id", sql.Int, docId)
+          .input("fname", sql.NVarChar(300), req.file.originalname)
+          .input("fb64", sql.NVarChar(sql.MAX), req.file.buffer.toString("base64"))
+          .input("fs", sql.BigInt, req.file.size)
+          .input("mt", sql.NVarChar(150), req.file.mimetype)
+          .input("cb", sql.Int, actorId(req))
+          .query(`
+            UPDATE dbo.CrmAgreementDocument SET
+              FileName = @fname, FileBase64 = @fb64, FileSize = @fs, MimeType = @mt,
+              Status = 'Uploaded', Remarks = NULL, UploadedAt = SYSDATETIME(), UploadedByType = 'Staff', CreatedBy = ISNULL(CreatedBy, @cb)
+            WHERE Id = @id
+          `);
+        await syncLegalMilestoneFromDocument(tx, docId, actorId(req));
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
+      }
+
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[crm-agreements] attach document error:", e.message);
+      res.status(500).json({ error: "An internal error occurred. Please try again later." });
+    }
+  });
+});
+
+// GET /documents/all — cross-agreement document register, for the dedicated
+// "Agreement Papers" document-center view (crm-documents permission scope,
+// distinct from crm-agreements: a documents clerk can be granted this
+// without full agreement CRUD rights). Every other /documents endpoint in
+// this file is scoped to a single agreement; this is the one place staff
+// can see requested/submitted/verified/rejected documents across every
+// agreement in one register, without opening each agreement individually.
+router.get("/documents/all", requirePageRight("crm-documents", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status, documentType } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = [];
+    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("d.Status = @st"); }
+    if (documentType) { req0.input("dt", sql.NVarChar(100), documentType); conds.push("d.DocumentType = @dt"); }
+    // Not paginated — the register's status-count badges and per-agreement
+    // grouping are computed client-side from the full set (see
+    // CrmAgreementPapers.tsx), same reasoning as CrmDemands/CrmCommunication.
+    // Company/Project/Block narrows the set server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    // Includes the agreement-level lifecycle fields (senior/customer approval,
+    // send/date state) and the Legal Executive assignment — not just the
+    // document's own status — so the cross-agreement register can show real
+    // step-by-step progress and flag an unassigned legal preparer per
+    // agreement, instead of only ever showing document rows in isolation.
+    const result = await req0.query(`
+      SELECT
+        d.Id, d.AgreementId, d.DocumentType, d.Label, d.IsMandatory, d.UploadedByType,
+        d.FileName, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS FilePath,
+        d.FileSize, d.MimeType, d.Status, d.Remarks, d.VersionNo,
+        d.RequestedAt, d.UploadedAt, d.CreatedAt,
+        ag.AgreementNo, ag.Status AS AgreementStatus,
+        ag.SeniorApprovalStatus, ag.SentToCustomerAt, ag.CustomerApprovalStatus, ag.AgreementDate,
+        ag.LegalExecutiveId, le.name AS LegalExecutiveName,
+        b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
+      FROM dbo.CrmAgreementDocument d
+      JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+      JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      LEFT JOIN dbo.Users le ON le.id = ag.LegalExecutiveId
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+      ${where}
+      ORDER BY d.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-agreements] GET documents/all error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /documents/file/:docId — stream a document's file for inline preview/download
+router.get("/documents/file/:docId", requirePageRight("crm-documents", "view"), async (req, res) => {
+  try {
+    const id = parseInt(req.params.docId);
+    const result = await getPool().request().input("id", sql.Int, id)
+      .query("SELECT FileName, FileBase64, MimeType FROM dbo.CrmAgreementDocument WHERE Id = @id");
+    if (!result.recordset.length || !result.recordset[0].FileBase64) return res.status(404).json({ error: "File not found" });
+    const doc = result.recordset[0];
+
+    res.setHeader("Content-Type", doc.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${doc.FileName || "document"}"`);
+    res.send(Buffer.from(doc.FileBase64, "base64"));
+  } catch (e) {
+    console.error("[crm-agreements] file GET error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /:id/documents/:docId — review metadata only (Status/Remarks). The
+// file itself can never be replaced in place — a corrected file always goes
+// through POST /:id/documents as a new version instead ("nothing should be
+// overwritten").
+router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    const agreementId = parseInt(req.params.id);
+    const docId = parseInt(req.params.docId);
+    const actor = actorId(req);
+
+    const lockReason = await getAgreementBookingLockReason(pool, agreementId);
+    if (lockReason) return res.status(409).json({ error: `Cannot review a document — ${lockReason}.` });
+
+    // The :id in the URL was previously dead — any docId updated regardless
+    // of which agreement it actually belonged to. Scope the lookup by both,
+    // so a stale/wrong docId 404s instead of silently touching the wrong
+    // agreement's document.
+    const cur = await pool.request()
+      .input("id", sql.Int, docId).input("agid", sql.Int, agreementId)
+      .query("SELECT Status, FileBase64 FROM dbo.CrmAgreementDocument WHERE Id = @id AND AgreementId = @agid");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Document not found for this agreement" });
+    const oldRow = cur.recordset[0];
+
+    if (b.Status === "Verified" && !oldRow.FileBase64) {
+      return res.status(400).json({ error: "Cannot verify a document that hasn't been uploaded yet" });
+    }
+    // Same rule PUT /documents/bulk-review already enforces — a legal
+    // document can't be silently rejected with no reason on record. This
+    // single-document route was the one path that didn't have this check,
+    // which meant a plain status-dropdown flip could reject a real
+    // contractual document with zero explanation and nothing useful in the
+    // audit trail beyond "Status: Uploaded -> Rejected".
+    if (b.Status === CrmStatus.REJECTED && !String(b.Remarks || "").trim()) {
+      return res.status(400).json({ error: "Remarks are required to reject a document" });
+    }
+    // Split, not a blanket freeze: Verified is still allowed post-execution
+    // (doesn't change legal content, needs no customer action). Rejected is
+    // blocked — it puts the document back in the customer's court to
+    // re-upload, but the customer-facing upload route is itself frozen at
+    // Executed/Registered (crmPortal.js), so a post-execution reject would
+    // leave the document permanently stuck Rejected with no way back.
+    if (b.Status === CrmStatus.REJECTED) {
+      const execLockReason = await agreementExecutedLockReason(pool, agreementId);
+      if (execLockReason) return res.status(409).json({ error: `Cannot reject — ${execLockReason}. The document can no longer be re-uploaded, so rejecting it now would leave it permanently stuck.` });
+    }
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id",  sql.Int,          docId)
+        .input("st",  sql.NVarChar(30), b.Status || null)
+        .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
+        .query(`
+          UPDATE dbo.CrmAgreementDocument SET
+            Status = ISNULL(@st, Status), Remarks = @rem
+          WHERE Id = @id
+        `);
+
+      if (b.Status && b.Status !== oldRow.Status) {
+        await logCrmAudit(tx, "AgreementDocument", docId, actor, [
+          { field: "Status", oldVal: oldRow.Status, newVal: b.Status },
+        ]);
+        await syncLegalMilestoneFromDocument(tx, docId, actor);
+      }
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] PUT document error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// ─── Staff Proxy Actions ────────────────────────────────────────────────────
+// These endpoints let CRM staff perform portal-side customer actions on behalf
+// of a customer who doesn't use (or won't log into) the customer portal.
+// Every proxy action is permanently stamped with ProxyMethod (how the customer
+// communicated) and the acting staff member — the audit trail is identical to
+// a real portal action, just with ActorType = 'StaffProxy' instead of 'Customer'.
+//
+// Supported proxy actions:
+//   PUT /:id/proxy-customer-approve     — record customer approval (Phone/InPerson/Email/etc.)
+//   PUT /:id/proxy-date-accept          — record customer acceptance of a company-proposed date
+//   POST /:id/documents/:docId/proxy-attach — upload a document on behalf of the customer
+
+const PROXY_METHODS = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
+
+// PUT /:id/proxy-customer-approve — CRM staff records that the customer
+// approved this agreement off-portal (by phone, in-person, etc.).
+// Mirrors exactly what the customer's own portal approve endpoint does,
+// but stamps the action as StaffProxy so the audit trail is unambiguous.
+router.put("/:id/proxy-customer-approve", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) {
+      return res.status(400).json({ error: "ProxyRemarks is required — describe how the customer communicated their approval (e.g. verbal confirmation in office, WhatsApp message)." });
+    }
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: lockReason });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, SentToCustomerAt, CustomerApprovalStatus, BookingId, AgreementNo FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = cur.recordset[0];
+
+    if (!a.SentToCustomerAt) {
+      return res.status(400).json({ error: "Agreement must be sent to the customer first before their approval can be recorded." });
+    }
+    if (a.CustomerApprovalStatus === CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "Customer has already approved this agreement." });
+    }
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor)
+      .query("SELECT name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("ub", sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmAgreement SET
+            CustomerApprovalStatus = '${CrmStatus.APPROVED}',
+            CustomerApprovedAt = SYSDATETIME(),
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+
+      await tx.request()
+        .input("agid",   sql.Int,           id)
+        .input("actor",  sql.Int,           actor)
+        .input("aname",  sql.NVarChar(200), actorName)
+        .input("method", sql.NVarChar(30),  ProxyMethod)
+        .input("rem",    sql.NVarChar(sql.MAX), ProxyRemarks.trim())
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog
+            (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+          VALUES (@agid, 'CustomerApprove', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+        `);
+
+      if (a.BookingId) {
+        await syncLegalMilestoneStep(tx, a.BookingId, "MutualAgreement", actor);
+      }
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-customer-approve error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /:id/proxy-date-accept — CRM staff records that the customer accepted
+// the company's proposed agreement date off-portal.
+// Only valid when ProposedDateStatus = 'PendingCustomerReview' (company proposed,
+// customer's turn to respond) — any other state is a logic error.
+router.put("/:id/proxy-date-accept", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) {
+      return res.status(400).json({ error: "ProxyRemarks is required — describe how the customer communicated their acceptance." });
+    }
+
+    const lockReason = await getAgreementBookingLockReason(pool, id);
+    if (lockReason) return res.status(409).json({ error: lockReason });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT ProposedDate, ProposedDateStatus, CustomerApprovalStatus, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = cur.recordset[0];
+
+    if (a.CustomerApprovalStatus !== CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "Customer must approve the agreement content before a date can be accepted." });
+    }
+    if (a.ProposedDateStatus !== "PendingCustomerReview") {
+      return res.status(400).json({
+        error: `Cannot proxy-accept date — ProposedDateStatus is '${a.ProposedDateStatus || "none"}'. A company-proposed date must be awaiting the customer's response.`,
+      });
+    }
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor)
+      .query("SELECT name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+
+    // Treat this as if the customer called acceptAgreementDate — same DB
+    // mutations, same DateApprovalStatus transition, just logged differently.
+    // acceptAgreementDate itself does 2 writes; wrapped together with the
+    // proxy approval-log entry so a failure between them can't leave the
+    // date negotiation Matched with no record of who accepted it or how.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await acceptAgreementDate(tx, id, actor);
+
+      await tx.request()
+        .input("agid",   sql.Int,           id)
+        .input("actor",  sql.Int,           actor)
+        .input("aname",  sql.NVarChar(200), actorName)
+        .input("method", sql.NVarChar(30),  ProxyMethod)
+        .input("rem",    sql.NVarChar(sql.MAX), ProxyRemarks.trim())
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog
+            (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+          VALUES (@agid, 'DateAccept', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-date-accept error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /:id/proxy-customer-recheck — CRM staff records that the customer
+// requested a recheck (flagged an issue) without using the portal.
+// Mirrors portal POST /agreement/respond with decision="Recheck".
+router.put("/:id/proxy-customer-recheck", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) {
+      return res.status(400).json({ error: "ProxyRemarks (what the customer's concern is) are required for a recheck" });
+    }
+
+    const agRes = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, SentToCustomerAt, CustomerApprovalStatus, BookingId, AgreementNo, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!agRes.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = agRes.recordset[0];
+    if (!a.SentToCustomerAt) return res.status(400).json({ error: "Agreement has not been sent to the customer yet" });
+    if (a.CustomerApprovalStatus === CrmStatus.APPROVED) return res.status(400).json({ error: "Agreement has already been approved — cannot record a recheck" });
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor).query("SELECT TOP 1 name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+    const remarksTrimmed = ProxyRemarks.trim();
+
+    // Status flip + Revision snapshot + approval-log entry describe one
+    // event — wrapped so a failure partway through can't leave the
+    // RecheckRequested status set with no Revision snapshot of what was
+    // being rechecked, or no log entry explaining who recorded it and how.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), remarksTrimmed).query(`
+        UPDATE dbo.CrmAgreement SET
+          CustomerApprovalStatus = 'RecheckRequested',
+          RecheckCount = RecheckCount + 1,
+          CustomerApprovedAt = NULL,
+          LastRecheckRemarks = @rem
+        WHERE Id = @id
+      `);
+
+      await tx.request()
+        .input("agid",  sql.Int, id)
+        .input("ver",   sql.Int, a.VersionNo)
+        .input("adt",   sql.Date, a.AgreementDate)
+        .input("lname", sql.NVarChar(300), a.LegalName)
+        .input("laddr", sql.NVarChar(sql.MAX), a.LegalAddress)
+        .input("pan",   sql.NVarChar(20), a.PanNo)
+        .input("aadh",  sql.NVarChar(20), a.AadhaarNo)
+        .input("note",  sql.NVarChar(sql.MAX), a.Notes)
+        .input("reason",sql.NVarChar(500), `Customer recheck requested via ${ProxyMethod}: ${remarksTrimmed}`)
+        .query(`
+          INSERT INTO dbo.CrmAgreementRevision
+            (AgreementId, VersionNo, AgreementDate, LegalName, LegalAddress, PanNo, AadhaarNo, Notes, Reason, CreatedBy, CreatedAt)
+          VALUES (@agid, @ver, @adt, @lname, @laddr, @pan, @aadh, @note, @reason, NULL, SYSDATETIME())
+        `);
+
+      await tx.request()
+        .input("agid",  sql.Int, id)
+        .input("actor", sql.Int, actor)
+        .input("aname", sql.NVarChar(200), actorName)
+        .input("method",sql.NVarChar(30), ProxyMethod)
+        .input("rem",   sql.NVarChar(sql.MAX), remarksTrimmed)
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog
+            (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+          VALUES (@agid, 'CustomerRecheck', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-customer-recheck error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /:id/proxy-propose-date — CRM staff records a date the customer proposed
+// (via phone, in-person, WhatsApp, etc.) without using the portal.
+// Mirrors portal POST /agreement/propose-date.
+// Gate: CustomerApprovalStatus must be 'Approved' and it must be the customer's
+// turn to propose (ProposedDateStatus is null/matched, i.e. not PendingCustomerReview).
+router.put("/:id/proxy-propose-date", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const actor = actorId(req);
+    const { ProxyMethod, ProxyRemarks, ProposedDate } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks are required" });
+    if (!ProposedDate) return res.status(400).json({ error: "ProposedDate is required (YYYY-MM-DD)" });
+
+    const agRes = await pool.request().input("id", sql.Int, id)
+      .query("SELECT CustomerApprovalStatus, ProposedDateStatus, BookingId FROM dbo.CrmAgreement WHERE Id = @id");
+    if (!agRes.recordset.length) return res.status(404).json({ error: "Agreement not found" });
+    const a = agRes.recordset[0];
+    if (a.CustomerApprovalStatus !== CrmStatus.APPROVED) {
+      return res.status(400).json({ error: "Customer must have approved the agreement content before proposing a date" });
+    }
+    if (a.ProposedDateStatus === "PendingCompanyReview") {
+      return res.status(400).json({ error: "A customer-proposed date is already pending company review" });
+    }
+
+    const actorRow = await pool.request().input("uid", sql.Int, actor).query("SELECT TOP 1 name FROM dbo.Users WHERE id = @uid");
+    const actorName = actorRow.recordset[0]?.name || "Staff";
+
+    // proposeAgreementDate itself does 2 writes; wrapped together with the
+    // proxy approval-log entry so a failure between them can't leave the
+    // negotiation state changed with no record of who proposed it or how.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await proposeAgreementDate(tx, id, "Customer", ProposedDate, null);
+
+      await tx.request()
+        .input("agid",  sql.Int, id)
+        .input("actor", sql.Int, actor)
+        .input("aname", sql.NVarChar(200), actorName)
+        .input("method",sql.NVarChar(30), ProxyMethod)
+        .input("rem",   sql.NVarChar(sql.MAX), `Customer proposed date ${ProposedDate} via ${ProxyMethod}: ${ProxyRemarks.trim()}`)
+        .query(`
+          INSERT INTO dbo.CrmAgreementApprovalLog
+            (AgreementId, Action, ActorType, ActorId, ActorName, Remarks, ProxyMethod, ProxyCreatedBy, CreatedAt)
+          VALUES (@agid, 'CustomerProposeDate', 'StaffProxy', @actor, @aname, @rem, @method, @actor, SYSDATETIME())
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] proxy-propose-date error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// POST /:id/documents/:docId/proxy-attach — upload a document on behalf of a
+// customer who handed it in physically, emailed it, or sent it via WhatsApp.
+// The file is stored identically to a customer-uploaded file, but the audit
+// trail records ActorType = 'StaffProxy' + ProxyMethod so it's clear who
+// actually submitted the physical copy.
+router.post("/:id/documents/:docId/proxy-attach",
+  requirePageRight("crm-agreements", "edit"),
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const agreementId = parseInt(req.params.id);
+      const docId       = parseInt(req.params.docId);
+      const actor       = actorId(req);
+      const { ProxyMethod, ProxyRemarks } = req.body;
+
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      const sigErr = verifyFileMatchesDeclaredType(req.file);
+      if (sigErr) return res.status(400).json({ error: sigErr });
+      if (!ProxyMethod || !PROXY_METHODS.includes(ProxyMethod)) {
+        return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS.join(", ")}` });
+      }
+
+      const doc = await pool.request().input("id", sql.Int, docId)
+        .query("SELECT AgreementId, Status FROM dbo.CrmAgreementDocument WHERE Id = @id");
+      if (!doc.recordset.length || doc.recordset[0].AgreementId !== agreementId) {
+        return res.status(404).json({ error: "Document not found on this agreement" });
+      }
+
+      const fileBase64 = req.file.buffer.toString("base64");
+      const proxyNote  = ProxyRemarks?.trim()
+        ? `[Submitted on behalf of customer via ${ProxyMethod}] ${ProxyRemarks.trim()}`
+        : `[Submitted on behalf of customer via ${ProxyMethod}]`;
+
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request()
+          .input("id",     sql.Int,              docId)
+          .input("b64",    sql.NVarChar(sql.MAX), fileBase64)
+          .input("fname",  sql.NVarChar(300),     req.file.originalname)
+          .input("fsize",  sql.BigInt,            req.file.size)
+          .input("mime",   sql.NVarChar(150),     req.file.mimetype)
+          .input("rem",    sql.NVarChar(sql.MAX), proxyNote)
+          .input("ub",     sql.Int,              actor)
+          .query(`
+            UPDATE dbo.CrmAgreementDocument SET
+              FileBase64 = @b64, FileName = @fname, FileSize = @fsize, MimeType = @mime,
+              Status = 'Uploaded', Remarks = @rem, UploadedAt = SYSDATETIME(),
+              UploadedByType = 'StaffProxy'
+            WHERE Id = @id
+          `);
+
+        await syncLegalMilestoneFromDocument(tx, docId, actor);
+
+        await logCrmAudit(tx, "CrmAgreementDocument", docId, actor, [
+          { field: "Status", oldVal: "Requested", newVal: "Uploaded" },
+          { field: "ProxyMethod", oldVal: null, newVal: `${ProxyMethod}${ProxyRemarks ? " — " + ProxyRemarks.trim() : ""}` },
+        ]);
+
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
+      }
+
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[crm-agreements] proxy-attach error:", e.message);
+      res.status(500).json({ error: "An internal error occurred. Please try again later." });
+    }
+  }
+);
+
+// PUT /:id/portal/deactivate, PUT /:id/portal/reactivate — flip the
+// customer's portal account IsActive flag. Was previously a display-only
+// column (AGR_SELECT already surfaces PortalActive above) with no route
+// anywhere that ever wrote to it — staff had visibility into portal status
+// but no way to act on it. Reached from this file (not crmPortal.js, which
+// is exclusively the customer-facing surface, gated by portal JWTs, not
+// staff sessions) since this is where portal status is already shown to
+// staff. Only meaningful together with the crmPortal.js gate that now
+// re-checks IsActive on every request — before that fix, flipping this had
+// no real effect until the customer's existing 7-day token happened to
+// expire on its own.
+async function setPortalActive(pool, agreementId, isActive) {
+  const row = await pool.request().input("id", sql.Int, agreementId).query(`
+    SELECT a.Id AS ApplicationId, pu.Id AS PortalUserId
+    FROM dbo.CrmAgreement ag
+    JOIN dbo.CrmBooking b ON b.Id = ag.BookingId
+    JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+    LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = a.CustomerId
+    WHERE ag.Id = @id
+  `);
+  if (!row.recordset.length) return { error: "Agreement not found", status: 404 };
+  if (!row.recordset[0].PortalUserId) return { error: "No portal account exists for this customer yet", status: 404 };
+  await pool.request().input("id", sql.Int, row.recordset[0].PortalUserId).input("act", sql.Bit, isActive ? 1 : 0)
+    .query("UPDATE dbo.CrmCustomerPortalUser SET IsActive = @act WHERE Id = @id");
+  return { ok: true };
+}
+
+// GET /documents/:docId/audit — review history for a single document, read
+// from dbo.CrmAuditLog (EntityType='AgreementDocument'). Lets a reviewer see
+// who touched a document and when (prior status flips, remarks changes)
+// instead of only ever seeing its current state — matters most on documents
+// that bounced through Rejected -> re-uploaded -> Submitted more than once.
+router.get("/documents/:docId/audit", requirePageRight("crm-documents", "view"), async (req, res) => {
+  try {
+    const docId = parseInt(req.params.docId);
+    const result = await getPool().request().input("id", sql.Int, docId).query(`
+      SELECT al.Id, al.Field, al.OldValue, al.NewValue, al.ChangedAt, al.ChangedBy, u.name AS ChangedByName
+      FROM dbo.CrmAuditLog al
+      LEFT JOIN dbo.Users u ON u.id = al.ChangedBy
+      WHERE al.EntityType = 'AgreementDocument' AND al.EntityId = @id
+      ORDER BY al.ChangedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-agreements] GET documents/:docId/audit error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /documents/bulk-review — review several documents from across
+// different agreements in one call, for the cross-agreement Agreement
+// Papers register. Each document is validated independently (its own
+// booking-lock check, its own "can't verify without a file" check) so one
+// bad row in a batch doesn't block the rest; the response reports exactly
+// which ids succeeded and which were skipped and why, instead of an
+// all-or-nothing failure that would leave staff guessing which of 20
+// selected rows actually went through.
+router.put("/documents/bulk-review", requirePageRight("crm-documents", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const actor = actorId(req);
+    const { docIds, status, remarks } = req.body || {};
+    if (!Array.isArray(docIds) || !docIds.length) return res.status(400).json({ error: "docIds is required" });
+    if (!["Verified", CrmStatus.REJECTED].includes(status)) return res.status(400).json({ error: "status must be Verified or Rejected" });
+    if (status === CrmStatus.REJECTED && !String(remarks || "").trim()) return res.status(400).json({ error: "Remarks are required to reject" });
+
+    const results = { succeeded: [], skipped: [] };
+    for (const rawId of docIds) {
+      const docId = parseInt(rawId);
+      try {
+        const cur = await pool.request().input("id", sql.Int, docId).query(`
+          SELECT d.Status, d.AgreementId, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
+          FROM dbo.CrmAgreementDocument d WHERE d.Id = @id
+        `);
+        if (!cur.recordset.length) { results.skipped.push({ docId, reason: "Document not found" }); continue; }
+        const row = cur.recordset[0];
+
+        const lockReason = await getAgreementBookingLockReason(pool, row.AgreementId);
+        if (lockReason) { results.skipped.push({ docId, reason: `Booking ${lockReason}` }); continue; }
+        if (status === "Verified" && !row.HasFile) { results.skipped.push({ docId, reason: "Not uploaded yet" }); continue; }
+        // Same split as the single-document route: Rejected is blocked
+        // post-execution (the customer's upload route is frozen too, so a
+        // reject here would leave the document permanently stuck), Verified
+        // stays allowed since it doesn't touch legal content.
+        if (status === CrmStatus.REJECTED) {
+          const execLockReason = await agreementExecutedLockReason(pool, row.AgreementId);
+          if (execLockReason) { results.skipped.push({ docId, reason: execLockReason }); continue; }
+        }
+
+        // Each row's own UPDATE + audit log + milestone sync is wrapped —
+        // independent of the other docIds in this batch (that per-row
+        // independence is the whole point of this endpoint, see comment
+        // above) but atomic within itself, so one row's review can't half-
+        // apply if the audit/milestone step fails after the status flip.
+        const rowTx = pool.transaction();
+        await rowTx.begin();
+        try {
+          await rowTx.request().input("id", sql.Int, docId).input("st", sql.NVarChar(30), status).input("rem", sql.NVarChar(sql.MAX), remarks || null)
+            .query("UPDATE dbo.CrmAgreementDocument SET Status = @st, Remarks = @rem WHERE Id = @id");
+
+          if (status !== row.Status) {
+            await logCrmAudit(rowTx, "AgreementDocument", docId, actor, [{ field: "Status", oldVal: row.Status, newVal: status }]);
+            await syncLegalMilestoneFromDocument(rowTx, docId, actor);
+          }
+          await rowTx.commit();
+        } catch (rowTxErr) {
+          try { await rowTx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+          throw rowTxErr;
+        }
+        results.succeeded.push(docId);
+      } catch (innerErr) {
+        results.skipped.push({ docId, reason: innerErr.message });
+      }
+    }
+    res.json(results);
+  } catch (e) {
+    console.error("[crm-agreements] PUT documents/bulk-review error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+router.put("/:id/portal/deactivate", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await setPortalActive(pool, id, false);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    await logCrmAudit(pool, "Agreement", id, actorId(req), [
+      { field: "PortalAccess", oldVal: CrmStatus.ACTIVE, newVal: "Deactivated" },
+    ]);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] portal deactivate error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+router.put("/:id/portal/reactivate", requirePageRight("crm-agreements", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const result = await setPortalActive(pool, id, true);
+    if (result.error) return res.status(result.status).json({ error: result.error });
+    await logCrmAudit(pool, "Agreement", id, actorId(req), [
+      { field: "PortalAccess", oldVal: "Deactivated", newVal: CrmStatus.ACTIVE },
+    ]);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-agreements] portal reactivate error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+module.exports = router;
+// Reused by crmPortal.js's own document-upload route (POST
+// /agreement/documents/:docId/upload) — the customer-facing upload path was
+// missing this exact check, unlike every staff-side document route here.
+module.exports.getAgreementBookingLockReason = getAgreementBookingLockReason;
+module.exports.agreementExecutedLockReason = agreementExecutedLockReason;

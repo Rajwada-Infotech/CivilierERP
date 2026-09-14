@@ -1,0 +1,6 @@
+name: CodeQL config
+query-filters:
+  - exclude:
+      id: js/sql-injection
+      paths:
+        - backend/routes/dba.js

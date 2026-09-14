@@ -1,0 +1,2584 @@
+const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
+const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
+const { requirePageRight } = require("../middleware/requirePageRight");
+const { validateBody } = require("../middleware/validateRequest");
+const { crmSalesDeedCreateSchema } = require("../validation/crmSalesDeedSchemas");
+const { crmRegistryCreateSchema } = require("../validation/crmRegistrySchemas");
+const { actorId, requireUserEmail } = require("../services/saAccess");
+const { getNextDocNumber } = require("../services/docNumber");
+const { logCommunication } = require("../services/crmCommunicationLog");
+const { requireActiveBooking, requireApprovedBooking, checkLoanProcessingCleared, maybeAutoCreateLegalMilestone, getProjectSaleGate } = require("../services/crmWorkflowGuards");
+const { logCrmAudit } = require("../services/crmAudit");
+const { transition: approvalTransition, recordGLPosting, canPerformCrmGatedAction } = require("../services/approvalService");
+const { emitNotification } = require("../services/notify");
+const { postCrmSalesDeedStatutoryToGL } = require("../services/crmLedger");
+const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
+const { applyPagination } = require("../services/crmListPagination");
+const multer = require('multer');
+
+router.use(authMiddleware);
+router.use(apiRateLimit);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 10 },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = [
+      'application/pdf', 'image/jpeg', 'image/png', 'image/webp',
+      'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/plain'
+    ];
+    if (allowedTypes.includes(file.mimetype)) cb(null, true);
+    else cb(new Error(`File type ${file.mimetype} not supported`), false);
+  }
+});
+const uploadQP = multer({ storage: multer.memoryStorage(), limits: { fileSize: 4 * 1024 * 1024 } });
+
+const DEED_SELECT = `
+  SELECT d.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+         b.TotalValue AS BookingValue, b.Status AS BookingStatus, a.ApplicantName, a.Mobile,
+         le.name AS LegalExecutiveName
+  FROM dbo.CrmSalesDeed d
+  JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.Users le ON le.id = d.LegalExecutiveId
+`;
+
+function deriveDeedStatus({ bookingStatus, registrationNo, executedBy, deedDate, registrationDeadline }) {
+  const today = new Date(new Date().toDateString());
+  if (bookingStatus === CrmStatus.CANCELLED) return CrmStatus.CANCELLED;
+  if (registrationNo) return CrmStatus.REGISTERED;
+  if (executedBy && registrationDeadline && new Date(registrationDeadline) < today) return "Overdue";
+  if (executedBy) return CrmStatus.EXECUTED;
+  if (deedDate && new Date(deedDate) < today) return "Overdue";
+  return CrmStatus.DRAFT;
+}
+
+async function deedDocumentProgress(pool, deedId) {
+  const result = await pool.request().input('id', sql.Int, deedId).query(`
+    SELECT COUNT(*) AS Required, SUM(CASE WHEN FileBase64 IS NOT NULL THEN 1 ELSE 0 END) AS Uploaded
+    FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @id AND IsMandatory = 1
+  `);
+  const row = result.recordset[0] || { Required: 0, Uploaded: 0 };
+  const required = Number(row.Required) || 0;
+  const uploaded = Number(row.Uploaded) || 0;
+  const percent = required > 0 ? Math.round((uploaded / required) * 100) : 0;
+  return { required, uploaded, percent };
+}
+
+// Stricter than deedDocumentProgress() above — that one gates Senior Approval
+// on documents merely being UPLOADED (mirrors Agreement's own senior-approval
+// gate). This one gates actual Execution: every mandatory document must have
+// been reviewed and marked Verified by staff, not just present. A file
+// sitting unreviewed is not the same fact as someone having actually checked
+// it against the original.
+async function deedMandatoryDocsVerified(pool, deedId) {
+  const result = await pool.request().input('id', sql.Int, deedId).query(`
+    SELECT COUNT(*) AS Required, SUM(CASE WHEN Status = 'Verified' THEN 1 ELSE 0 END) AS Verified
+    FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @id AND IsMandatory = 1
+  `);
+  const row = result.recordset[0] || { Required: 0, Verified: 0 };
+  const required = Number(row.Required) || 0;
+  const verified = Number(row.Verified) || 0;
+  return { required, verified, allVerified: required > 0 && verified === required };
+}
+
+// The three-stage approval chain (Senior → Customer → Director) this module
+// already builds correctly, but until now nothing actually required it
+// before a deed could be marked Executed via PUT /:id below — the chain ran
+// in parallel with reality, not as a gate on it. This is the single
+// precondition function Execution must pass; mirrors the combined check in
+// crmAgreements.js's PUT /:id/mark-executed.
+async function assertDeedReadyForExecution(pool, deedId) {
+  const row = await pool.request().input('id', sql.Int, deedId).query(`
+    SELECT SeniorApprovalStatus, CustomerApprovalStatus, DirectorApprovalStatus FROM dbo.CrmSalesDeed WHERE Id = @id
+  `);
+  if (!row.recordset.length) return "Sale deed not found";
+  const d = row.recordset[0];
+  const missing = [];
+  if (d.SeniorApprovalStatus !== 'Approved') missing.push(`Senior Approval (currently ${d.SeniorApprovalStatus || 'not requested'})`);
+  if (d.CustomerApprovalStatus !== 'Approved') missing.push(`Customer Approval (currently ${d.CustomerApprovalStatus || 'not sent'})`);
+  if (d.DirectorApprovalStatus !== 'Approved') missing.push(`Director Approval (currently ${d.DirectorApprovalStatus || 'not requested'})`);
+  if (missing.length) return `Cannot record execution — still pending: ${missing.join(', ')}`;
+
+  const docs = await deedMandatoryDocsVerified(pool, deedId);
+  if (!docs.allVerified) {
+    return docs.required === 0
+      ? "Cannot record execution — no mandatory documents have been requested yet"
+      : `Cannot record execution — ${docs.verified}/${docs.required} mandatory documents verified (all must be reviewed and Verified, not just uploaded)`;
+  }
+  return null;
+}
+
+// `dbConn` lets a caller pass an in-flight transaction (tx.request() has the
+// same shape as pool.request() in mssql) so this write commits atomically
+// with whatever else that transaction is doing, instead of on its own
+// separate connection.
+async function logDeedApprovalHistory(deedId, action, remarks, actorIdVal, actorType = 'Staff', dbConn = null) {
+  const pool = dbConn || getPool();
+  await pool.request()
+    .input('did', sql.Int, deedId)
+    .input('act', sql.NVarChar(40), action)
+    .input('rem', sql.NVarChar(sql.MAX), remarks || null)
+    .input('atype', sql.NVarChar(20), actorType)
+    .input('aid', sql.Int, actorIdVal)
+    .query(`INSERT INTO dbo.CrmSalesDeedApprovalLog (SalesDeedId, Action, Remarks, ActorType, ActorId, CreatedAt)
+            VALUES (@did, @act, @rem, @atype, @aid, SYSDATETIME())`);
+}
+
+async function getDeedBookingLockReason(pool, deedId) {
+  const result = await pool.request().input('id', sql.Int, deedId).query(`
+    SELECT b.Status AS BookingStatus, b.IsActive AS BookingIsActive
+    FROM dbo.CrmSalesDeed d
+    JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+    WHERE d.Id = @id
+  `);
+  if (!result.recordset.length) return null;
+  const row = result.recordset[0];
+  if (row.BookingIsActive === false || ['Cancelled', 'Rejected'].includes(row.BookingStatus)) {
+    return `the underlying booking is ${row.BookingStatus || 'inactive'}`;
+  }
+  if (row.BookingStatus !== 'Approved') {
+    return `the underlying booking is not yet Approved (current status: ${row.BookingStatus})`;
+  }
+  return null;
+}
+
+// 1. GET /eligible-bookings
+router.get("/eligible-bookings", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
+             ag.Status AS AgreementStatus, ag.AgreementNo,
+             proj.entity_type AS ProjectType, proj.status AS ProjectStatus, hov.Status AS HandoverStatus
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
+      OUTER APPLY (
+        SELECT TOP 1 Status, AgreementNo
+        FROM dbo.CrmAgreement WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+      ) ag
+      OUTER APPLY (
+        SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+      ) hov
+      WHERE b.IsActive = 1
+        AND b.Status NOT IN ('Cancelled', 'Rejected')
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmSalesDeed WHERE BookingId = b.Id)
+        AND ag.Status = 'Registered'
+        AND (b.ProjectId IS NULL OR proj.entity_type IS NULL
+             OR proj.entity_type <> 'UnderConstruction'
+             OR proj.status = 'Completed'
+             OR hov.Status = 'Completed')
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-sales-deed] eligible-bookings error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 2. GET /
+router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = [];
+    // Company/Project/Block narrow the SQL scan itself. Status, however, is
+    // derived in JS below (deriveDeedStatus depends on today's date and
+    // several columns together, not one stored column) — it stays a
+    // post-fetch filter, same as before, just now applied to an
+    // already-scoped set rather than the entire table.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR d.DeedNo LIKE @search OR b.BookingNo LIKE @search)");
+    }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const result = await req0.query(`${DEED_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where} ORDER BY d.CreatedAt DESC`);
+    let rows = result.recordset.map((r) => ({
+      ...r,
+      Status: deriveDeedStatus({
+        bookingStatus: r.BookingStatus, registrationNo: r.RegistrationNo,
+        executedBy: r.ExecutedBy, deedDate: r.DeedDate,
+        registrationDeadline: r.RegistrationDeadline,
+      }),
+    }));
+    if (status) rows = rows.filter((r) => r.Status === status);
+
+    if (!req.query.page) return res.json(rows);
+
+    // Status is JS-derived, so true SQL-side OFFSET/FETCH isn't possible
+    // here without replicating deriveDeedStatus in T-SQL — paginate the
+    // already company/project/block-scoped, already status-filtered array
+    // in memory instead. Still a real scalability win: the SQL scan itself
+    // is bounded to one company/project/block, not the whole portfolio.
+    const { page, pageSize } = applyPagination(req);
+    const total = rows.length;
+    const start = (page - 1) * pageSize;
+    res.json({ rows: rows.slice(start, start + pageSize), total, page, pageSize });
+  } catch (e) {
+    console.error("[crm-sales-deed] GET error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 3. GET /booking/:bookingId/context
+router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId);
+
+    const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
+             b.Status AS BookingStatus, b.FinancingType, a.ApplicantName, a.Mobile,
+             ISNULL(b.GrandTotal, b.TotalValue) AS GrandTotal
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      WHERE b.Id = @bid
+    `);
+    if (!booking.recordset.length) return res.status(404).json({ error: "Booking not found" });
+
+    const agreement = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id, AgreementNo, Status, AfsStampDuty, AfsRegistrationFee FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+
+    const loanDetail = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT BankName, LoanAccountNo, LoanAmount, SanctionStatus FROM dbo.CrmLoanDetail WHERE BookingId = @bid");
+
+    const loanBlockReason = await checkLoanProcessingCleared(pool, bookingId);
+
+    const existingDeed = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id, DeedNo FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
+
+    const queryPayment = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id AS QPId, QPNo, Status AS QPStatus, ConfirmedAmount FROM dbo.CrmQueryPayment WHERE BookingId = @bid");
+
+    const registry = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id AS RegistryId, RegNo, Status AS RegistryStatus, ScheduledDate FROM dbo.CrmRegistry WHERE BookingId = @bid");
+
+    const gate = await getProjectSaleGate(pool, bookingId);
+
+    const handover = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+
+    const qp = queryPayment.recordset[0] || null;
+    const reg = registry.recordset[0] || null;
+    res.json({
+      booking: booking.recordset[0],
+      agreement: agreement.recordset[0] || null,
+      loanDetail: loanDetail.recordset[0] || null,
+      loanBlockReason,
+      existingDeed: existingDeed.recordset[0] || null,
+      registryStatus: reg?.RegistryStatus || null,
+      registryNo: reg?.RegNo || null,
+      registryScheduledDate: reg?.ScheduledDate || null,
+      queryPaymentStatus: qp?.QPStatus || null,
+      queryPaymentNo: qp?.QPNo || null,
+      queryPaymentConfirmedAmount: qp?.ConfirmedAmount || null,
+      handoverStatus: handover.recordset[0]?.Status || null,
+      projectType: gate.projectType,
+      projectStatus: gate.projectStatus,
+      requiresHandoverBeforeDeed: gate.requiresHandoverBeforeDeed,
+    });
+  } catch (e) {
+    console.error("[crm-sales-deed] context error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// ── Registry sub-resource ───────────────────────────────────────────────────
+// Registry tracks the ACT of registering the deed at the Sub-Registrar
+// Office — appointment, attendance, the registration particulars once it
+// actually happens, supporting documents (receipt/challan, stamped copy),
+// and a full audit trail. Physically merged into this router (moved from
+// the former crmRegistry.js / GET,POST,PUT /api/crm/registry/*) so Sale Deed
+// and Registry are one API surface backing one page — every route body,
+// SQL query, transaction and permission/approval gate below is unchanged
+// from crmRegistry.js, only the mount path moved (now /registry/* under
+// /api/crm/sales-deed instead of its own /api/crm/registry router). The
+// underlying CrmRegistry table, its FKs, GL postings and the "crm-registry"
+// page-right/approval-gate keys are untouched so the other backend modules
+// that read them (crmBookings, crmMutation, crmLegalMilestones,
+// crmAgreements, crmAfsRegistry, crmDashboard, crmPortal) keep working as-is.
+const REG_SELECT = `
+  SELECT r.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
+         sd.DeedNo, sd.DeedValue, sd.StampDuty AS DeedStampDuty, sd.RegistrationFee AS DeedRegistrationFee,
+         qp.QPNo, qp.ConfirmedAmount AS QPConfirmedAmount, qp.Status AS QPStatus
+  FROM dbo.CrmRegistry r
+  JOIN dbo.CrmBooking b ON b.Id = r.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = r.SalesDeedId
+  OUTER APPLY (SELECT TOP 1 QPNo, ConfirmedAmount, Status FROM dbo.CrmQueryPayment WHERE BookingId = r.BookingId ORDER BY CreatedAt DESC) qp
+`;
+
+const REG_MANDATORY_DOC_TEMPLATE = [
+  { type: "ExecutedDeed",     label: "Original Executed Sale Deed" },
+  { type: "IdentityProofs",   label: "Identity Proofs — Buyer & Seller (PAN/Aadhaar)" },
+  { type: "RegistrationReceipt", label: "Registration Receipt / Challan" },
+];
+
+async function logRegistryHistory(registryId, action, remarks, actorIdVal, actorType = 'Staff', executor = null) {
+  const pool = executor || getPool();
+  await pool.request()
+    .input('rid', sql.Int, registryId)
+    .input('act', sql.NVarChar(40), action)
+    .input('rem', sql.NVarChar(sql.MAX), remarks || null)
+    .input('atype', sql.NVarChar(20), actorType)
+    .input('aid', sql.Int, actorIdVal)
+    .query(`INSERT INTO dbo.CrmRegistryLog (RegistryId, Action, Remarks, ActorType, ActorId, CreatedAt)
+            VALUES (@rid, @act, @rem, @atype, @aid, SYSDATETIME())`);
+}
+
+router.get("/registry", requirePageRight("crm-registry", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const where = [];
+    if (status) { req0.input("st", sql.NVarChar(20), status); where.push("r.Status = @st"); }
+    if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      where.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
+    }
+    const whereClause = where.length ? "WHERE " + where.join(" AND ") : "";
+    const SELECT_WITH_BLOCK = `${REG_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${whereClause} ORDER BY r.CreatedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${whereClause} ORDER BY r.CreatedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("st2", sql.NVarChar(20), status || null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmRegistry r
+          JOIN dbo.CrmBooking b ON b.Id = r.BookingId
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE (@st2 IS NULL OR r.Status = @st2)
+            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+  } catch (e) {
+    console.error("[crm-sales-deed/registry] GET error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+router.get("/registry/booking/:bookingId", requirePageRight("crm-registry", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId, 10);
+    const result = await pool.request().input("bid", sql.Int, bookingId)
+      .query(`${REG_SELECT} WHERE r.BookingId = @bid`);
+    res.json(result.recordset[0] || null);
+  } catch (e) {
+    console.error("[crm-sales-deed/registry] GET /booking/:id error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /registry/eligible-bookings — bookings whose Query Payment is Confirmed
+// and don't have a Registry tracker yet.
+router.get("/registry/eligible-bookings", requirePageRight("crm-registry", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
+             qp.QPNo, sd.DeedNo
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      JOIN dbo.CrmQueryPayment qp ON qp.BookingId = b.Id AND qp.Status = 'Confirmed'
+      LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
+      WHERE b.Status <> 'Cancelled'
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmRegistry WHERE BookingId = b.Id)
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-sales-deed/registry] eligible-bookings error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /registry/:id — full detail: the tracker row, its documents and its history.
+router.get("/registry/:id", requirePageRight("crm-registry", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const [regRes, docRes, logRes] = await Promise.all([
+      pool.request().input('id', sql.Int, id).query(`${REG_SELECT} WHERE r.Id = @id`),
+      pool.request().input('id', sql.Int, id).query(`
+        SELECT Id, DocumentType, Label, IsMandatory, Status, FileName, MimeType, FileSize,
+               UploadedAt, UploadedByType, Remarks, CreatedAt,
+               CASE WHEN FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
+        FROM dbo.CrmRegistryDocument WHERE RegistryId = @id ORDER BY CreatedAt
+      `),
+      pool.request().input('id', sql.Int, id).query(`
+        SELECT l.*, u.name AS ActorName
+        FROM dbo.CrmRegistryLog l
+        LEFT JOIN dbo.Users u ON u.id = l.ActorId
+        WHERE l.RegistryId = @id ORDER BY l.CreatedAt DESC
+      `),
+    ]);
+    if (!regRes.recordset[0]) return res.status(404).json({ error: "Registry not found" });
+    res.json({ registry: regRes.recordset[0], documents: docRes.recordset, history: logRes.recordset });
+  } catch (e) {
+    console.error("[crm-sales-deed/registry] GET /:id error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// POST /registry — start Registry tracking for a booking. Gated on Query
+// Payment being Confirmed — the customer must have actually paid the
+// government before the deed can go to the Sub-Registrar Office.
+router.post("/registry", requirePageRight("crm-registry", "create"), validateBody(crmRegistryCreateSchema), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId, 10);
+
+    const activeErr = await requireActiveBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const qp = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id, Status FROM dbo.CrmQueryPayment WHERE BookingId = @bid");
+    if (!qp.recordset.length || qp.recordset[0].Status !== "Confirmed") {
+      return res.status(400).json({ error: "Registry requires Query Payment to be Confirmed first — the customer must have paid the government before the deed can be registered" });
+    }
+
+    const deed = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id FROM dbo.CrmSalesDeed WHERE BookingId = @bid");
+    const salesDeedId = deed.recordset[0]?.Id || null;
+
+    // The Sale Deed almost certainly already has its own executed copy on
+    // file (verified, during the Sale Deed workflow) — Registry re-asking
+    // staff to upload the exact same PDF a second time is duplicate work.
+    // Pull it across directly when it exists, verified, so Registry starts
+    // with real synced data instead of another blank request.
+    let syncedExecutedDeed = null;
+    if (salesDeedId) {
+      const src = await pool.request().input("sdid", sql.Int, salesDeedId).query(`
+        SELECT TOP 1 FileName, MimeType, FileSize, FileBase64
+        FROM dbo.CrmSalesDeedDocument
+        WHERE SalesDeedId = @sdid AND DocumentType = 'ExecutedDeed' AND Status = 'Verified' AND FileBase64 IS NOT NULL
+        ORDER BY UpdatedAt DESC
+      `);
+      syncedExecutedDeed = src.recordset[0] || null;
+    }
+
+    const regNo = await getNextDocNumber(pool, "REG", "REG");
+    const result = await pool.request()
+      .input("no",   sql.NVarChar(30), regNo)
+      .input("bid",  sql.Int, bookingId)
+      .input("sdid", sql.Int, deed.recordset[0]?.Id || null)
+      .input("cb",   sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmRegistry (RegNo, BookingId, SalesDeedId, Status, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @sdid, 'Pending', @cb, SYSDATETIME())
+      `);
+    const registryId = result.recordset[0].Id;
+
+    // Seed the full realistic mandatory-document checklist up front. ExecutedDeed
+    // is inserted pre-filled and pre-verified when it was already synced above.
+    for (const doc of REG_MANDATORY_DOC_TEMPLATE) {
+      const synced = doc.type === 'ExecutedDeed' ? syncedExecutedDeed : null;
+      await pool.request()
+        .input('rid', sql.Int, registryId)
+        .input('dt', sql.NVarChar(50), doc.type)
+        .input('lbl', sql.NVarChar(255), doc.label)
+        .input('cb', sql.Int, actorId(req))
+        .input('st', sql.NVarChar(30), synced ? 'Verified' : 'Requested')
+        .input('fn', sql.NVarChar(255), synced?.FileName || null)
+        .input('mt', sql.NVarChar(100), synced?.MimeType || null)
+        .input('fs', sql.Int, synced?.FileSize || null)
+        .input('b64', sql.NVarChar(sql.MAX), synced?.FileBase64 || null)
+        .input('rem', sql.NVarChar(sql.MAX), synced ? 'Synced automatically from the Sale Deed\'s verified executed copy.' : null)
+        .query(`
+          INSERT INTO dbo.CrmRegistryDocument
+            (RegistryId, DocumentType, Label, IsMandatory, Status, FileName, MimeType, FileSize, FileBase64,
+             UploadedByType, UploadedAt, RequestedBy, RequestedAt, Remarks, CreatedBy, CreatedAt)
+          VALUES (@rid, @dt, @lbl, 1, @st, @fn, @mt, @fs, @b64,
+             CASE WHEN @b64 IS NOT NULL THEN 'System' ELSE NULL END, CASE WHEN @b64 IS NOT NULL THEN SYSDATETIME() ELSE NULL END,
+             @cb, SYSDATETIME(), @rem, @cb, SYSDATETIME())
+        `);
+    }
+
+    await logRegistryHistory(registryId, 'Started', syncedExecutedDeed ? 'Executed Deed copy synced automatically from the Sale Deed.' : null, actorId(req));
+
+    res.status(201).json({ success: true, id: registryId, RegNo: regNo });
+  } catch (e) {
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
+      return res.status(409).json({ error: "Registry tracking already started for this booking" });
+    console.error("[crm-sales-deed/registry] POST error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /registry/:id/schedule — record (or set for the first time) the
+// appointment date at the Sub-Registrar Office.
+router.put("/registry/:id/schedule", requirePageRight("crm-registry", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const b = req.body;
+    if (!b.ScheduledDate) return res.status(400).json({ error: "ScheduledDate is required" });
+
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmRegistry WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Registry not found" });
+    if (["Completed", "Cancelled"].includes(cur.recordset[0].Status)) return res.status(400).json({ error: `Cannot schedule — registry is already ${cur.recordset[0].Status}` });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    if (!b.AppointmentOffice?.trim()) return res.status(400).json({ error: "The Sub-Registrar Office is required to schedule an appointment" });
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("dt", sql.Date, b.ScheduledDate)
+      .input("tm", sql.NVarChar(20), b.AppointmentTime || null)
+      .input("off", sql.NVarChar(255), b.AppointmentOffice.trim())
+      .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
+      .input("ub", sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmRegistry SET Status = 'Scheduled', ScheduledDate = @dt, AppointmentTime = @tm,
+          AppointmentOffice = @off, Remarks = ISNULL(@rem, Remarks),
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    await logRegistryHistory(id, 'Scheduled', b.Remarks || `Appointment set for ${b.ScheduledDate}${b.AppointmentTime ? ` at ${b.AppointmentTime}` : ''} — ${b.AppointmentOffice.trim()}`, actorId(req));
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed/registry] PUT /:id/schedule error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /registry/:id/reschedule
+router.put("/registry/:id/reschedule", requirePageRight("crm-registry", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const b = req.body;
+    if (!b.ScheduledDate) return res.status(400).json({ error: "New ScheduledDate is required" });
+    if (!b.Reason?.trim()) return res.status(400).json({ error: "A reason for rescheduling is required" });
+
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status, ScheduledDate FROM dbo.CrmRegistry WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Registry not found" });
+    if (cur.recordset[0].Status !== "Scheduled") return res.status(400).json({ error: "Only a Scheduled appointment can be rescheduled" });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const oldDate = cur.recordset[0].ScheduledDate ? String(cur.recordset[0].ScheduledDate).slice(0, 10) : "unscheduled";
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("dt", sql.Date, b.ScheduledDate)
+      .input("tm", sql.NVarChar(20), b.AppointmentTime || null)
+      .input("off", sql.NVarChar(255), b.AppointmentOffice || null)
+      .input("ub", sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmRegistry SET ScheduledDate = @dt, AppointmentTime = ISNULL(@tm, AppointmentTime),
+          AppointmentOffice = ISNULL(@off, AppointmentOffice), RescheduleCount = RescheduleCount + 1,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    await logRegistryHistory(id, 'Rescheduled', `${b.Reason.trim()} (moved from ${oldDate} to ${b.ScheduledDate})`, actorId(req));
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed/registry] PUT /:id/reschedule error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /registry/:id/complete — the deed has actually been registered at the
+// office. Captures the real registration particulars here and mirrors
+// RegistrationNo/BookNo/PartNo/SubRegistrarOffice/RegistrationDate onto
+// CrmSalesDeed, which is what unlocks the Sale Deed's own "Registered" step.
+router.put("/registry/:id/complete", requirePageRight("crm-registry", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const b = req.body;
+    if (!b.RegistrationNo?.trim()) return res.status(400).json({ error: "Registration No. is required" });
+    if (!b.BuyerAttended || !b.SellerAttended) {
+      return res.status(400).json({ error: "Both buyer and seller/builder representative attendance must be confirmed before completing" });
+    }
+    if (!b.WitnessNames?.trim()) return res.status(400).json({ error: "Witness names are required — the Registration Act requires two identifying witnesses" });
+
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, SalesDeedId, Status FROM dbo.CrmRegistry WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Registry not found" });
+    if (cur.recordset[0].Status === "Completed") return res.status(400).json({ error: "Already completed" });
+    if (cur.recordset[0].Status !== "Scheduled") {
+      return res.status(400).json({ error: "Registry must be Scheduled (appointment date recorded) before it can be marked Completed" });
+    }
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    if (!(await canPerformCrmGatedAction("crm-registry-complete", actorId(req), req.user?.role)))
+      return res.status(403).json({ error: "You are not authorised to complete a registry — requires Legal Head or CRM Administrator" });
+
+    const docs = await pool.request().input("id", sql.Int, id).query(`
+      SELECT COUNT(*) AS Required, SUM(CASE WHEN Status = 'Verified' THEN 1 ELSE 0 END) AS Verified
+      FROM dbo.CrmRegistryDocument WHERE RegistryId = @id AND IsMandatory = 1
+    `);
+    const { Required, Verified } = docs.recordset[0];
+    if (Number(Required) > 0 && Number(Verified) < Number(Required)) {
+      return res.status(400).json({ error: `${Verified || 0}/${Required} mandatory documents verified — the registration receipt must be uploaded and verified before completing` });
+    }
+
+    const completedDate = b.CompletedDate || new Date().toISOString().slice(0, 10);
+    const regDate = b.RegistrationDate || completedDate;
+
+    // Terminal, one-way transition that also mirrors onto CrmSalesDeed and
+    // writes history + communication log — wrapped so a failure partway
+    // through can never leave the Registry Completed while the linked Sale
+    // Deed still shows unregistered, or vice versa.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("dt", sql.Date, completedDate)
+        .input("regno", sql.NVarChar(100), b.RegistrationNo.trim())
+        .input("bookno", sql.NVarChar(100), b.BookNo || null)
+        .input("partno", sql.NVarChar(100), b.PartNo || null)
+        .input("sro", sql.NVarChar(255), b.SubRegistrarOffice || null)
+        .input("regdt", sql.Date, regDate)
+        .input("wit", sql.NVarChar(500), b.WitnessNames.trim())
+        .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
+        .input("ub", sql.Int, actorId(req))
+        .query(`
+          UPDATE dbo.CrmRegistry SET
+            Status = 'Completed', CompletedDate = @dt,
+            RegistrationNo = @regno, BookNo = @bookno, PartNo = @partno,
+            SubRegistrarOffice = @sro, RegistrationDate = @regdt,
+            WitnessNames = @wit, BuyerAttended = 1, SellerAttended = 1,
+            Remarks = ISNULL(@rem, Remarks), UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+
+      if (cur.recordset[0].SalesDeedId) {
+        await tx.request()
+          .input("id", sql.Int, cur.recordset[0].SalesDeedId)
+          .input("regno", sql.NVarChar(100), b.RegistrationNo.trim())
+          .input("bookno", sql.NVarChar(100), b.BookNo || null)
+          .input("partno", sql.NVarChar(100), b.PartNo || null)
+          .input("sro", sql.NVarChar(255), b.SubRegistrarOffice || null)
+          .input("regdt", sql.Date, regDate)
+          .query(`
+            UPDATE dbo.CrmSalesDeed SET
+              RegistrationNo = ISNULL(RegistrationNo, @regno),
+              BookNo = ISNULL(BookNo, @bookno),
+              PartNo = ISNULL(PartNo, @partno),
+              SubRegistrarOffice = ISNULL(SubRegistrarOffice, @sro),
+              RegistrationDate = ISNULL(RegistrationDate, @regdt),
+              Status = 'Registered'
+            WHERE Id = @id
+          `).catch((e) => console.error("[crm-sales-deed/registry] sales-deed mirror failed:", e.message));
+      }
+
+      await logRegistryHistory(id, 'Completed', `Reg No. ${b.RegistrationNo.trim()}${b.SubRegistrarOffice ? ` at ${b.SubRegistrarOffice}` : ''}`, actorId(req), 'Staff', tx);
+
+      await logCommunication(tx, {
+        bookingId: cur.recordset[0].BookingId, direction: "Outbound",
+        subject: "Deed registered at Sub-Registrar Office",
+        summary: `Registry completed — Reg No. ${b.RegistrationNo.trim()}.`,
+        createdBy: actorId(req),
+      });
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed/registry] PUT /:id/complete error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /registry/:id/cancel
+router.put("/registry/:id/cancel", requirePageRight("crm-registry", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const reason = req.body?.Reason;
+    if (!reason?.trim()) return res.status(400).json({ error: "A reason is required to cancel" });
+
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRegistry WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Registry not found" });
+    if (["Completed", "Cancelled"].includes(cur.recordset[0].Status)) {
+      return res.status(400).json({ error: `Cannot cancel a registry that is already ${cur.recordset[0].Status}` });
+    }
+    if (!(await canPerformCrmGatedAction("crm-registry-cancel", actorId(req), req.user?.role)))
+      return res.status(403).json({ error: "You are not authorised to cancel a registry" });
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("rea", sql.NVarChar(sql.MAX), reason.trim())
+        .input("ub", sql.Int, actorId(req))
+        .query(`
+          UPDATE dbo.CrmRegistry SET Status = 'Cancelled', CancelledReason = @rea, CancelledAt = SYSDATETIME(),
+            CancelledBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      await logRegistryHistory(id, 'Cancelled', reason.trim(), actorId(req), 'Staff', tx);
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed/registry] PUT /:id/cancel error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// POST /registry/:id/documents/upload
+router.post("/registry/:id/documents/upload", requirePageRight("crm-registry", "edit"), upload.array('files'), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const { DocumentType = 'Other', Label, IsMandatory = 0, Remarks } = req.body;
+
+    const reg = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRegistry WHERE Id = @id");
+    if (!reg.recordset.length) return res.status(404).json({ error: "Registry not found" });
+    if (["Completed", "Cancelled"].includes(reg.recordset[0].Status)) {
+      return res.status(400).json({ error: "Cannot modify documents for a completed or cancelled registry" });
+    }
+
+    for (const file of req.files || []) {
+      const sigErr = verifyFileMatchesDeclaredType(file);
+      if (sigErr) return res.status(400).json({ error: `${file.originalname}: ${sigErr}` });
+    }
+
+    for (const file of req.files || []) {
+      const b64 = file.buffer.toString('base64');
+      const reqCheck = await pool.request()
+        .input("rid", sql.Int, id)
+        .input("dt", sql.NVarChar(50), DocumentType)
+        .query("SELECT TOP 1 Id FROM dbo.CrmRegistryDocument WHERE RegistryId = @rid AND DocumentType = @dt AND Status = 'Requested' AND IsMandatory = 1 ORDER BY CreatedAt ASC");
+
+      if (reqCheck.recordset.length > 0) {
+        await pool.request()
+          .input("docid", sql.Int, reqCheck.recordset[0].Id)
+          .input("b64", sql.NVarChar(sql.MAX), b64)
+          .input("fn", sql.NVarChar(255), file.originalname)
+          .input("mt", sql.NVarChar(100), file.mimetype)
+          .input("fs", sql.Int, file.size)
+          .input("rem", sql.NVarChar(sql.MAX), Remarks || null)
+          .input("ub", sql.Int, actorId(req))
+          .query(`
+            UPDATE dbo.CrmRegistryDocument SET
+              FileBase64 = @b64, FileName = @fn, MimeType = @mt, FileSize = @fs,
+              Status = 'Uploaded', UploadedByType = 'Staff', UploadedAt = SYSDATETIME(),
+              Remarks = ISNULL(@rem, Remarks), UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+            WHERE Id = @docid
+          `);
+      } else {
+        await pool.request()
+          .input("rid", sql.Int, id)
+          .input("dt", sql.NVarChar(50), DocumentType)
+          .input("lbl", sql.NVarChar(255), Label || file.originalname)
+          .input("ism", sql.Bit, parseInt(IsMandatory, 10) || 0)
+          .input("fn", sql.NVarChar(255), file.originalname)
+          .input("mt", sql.NVarChar(100), file.mimetype)
+          .input("fs", sql.Int, file.size)
+          .input("b64", sql.NVarChar(sql.MAX), b64)
+          .input("rem", sql.NVarChar(sql.MAX), Remarks || null)
+          .input("cb", sql.Int, actorId(req))
+          .query(`
+            INSERT INTO dbo.CrmRegistryDocument
+              (RegistryId, DocumentType, Label, IsMandatory, Status, FileName, MimeType, FileSize, FileBase64,
+               UploadedByType, UploadedAt, Remarks, CreatedBy, CreatedAt)
+            VALUES (@rid, @dt, @lbl, @ism, 'Uploaded', @fn, @mt, @fs, @b64,
+               'Staff', SYSDATETIME(), @rem, @cb, SYSDATETIME())
+          `);
+      }
+    }
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed/registry] documents/upload error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// POST /registry/:id/documents/request
+router.post("/registry/:id/documents/request", requirePageRight("crm-registry", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const { DocumentType, Label, IsMandatory = true } = req.body;
+    if (!DocumentType?.trim()) return res.status(400).json({ error: "DocumentType is required" });
+
+    const reg = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRegistry WHERE Id = @id");
+    if (!reg.recordset.length) return res.status(404).json({ error: "Registry not found" });
+    if (["Completed", "Cancelled"].includes(reg.recordset[0].Status)) {
+      return res.status(400).json({ error: "Cannot request documents for a completed or cancelled registry" });
+    }
+
+    const dup = await pool.request().input("rid", sql.Int, id).input("dt", sql.NVarChar(50), DocumentType.trim())
+      .query("SELECT TOP 1 Id FROM dbo.CrmRegistryDocument WHERE RegistryId = @rid AND DocumentType = @dt AND Status IN ('Requested', 'Uploaded')");
+    if (dup.recordset.length) return res.status(409).json({ error: `A ${DocumentType} request is already open` });
+
+    await pool.request()
+      .input('rid', sql.Int, id)
+      .input('dt', sql.NVarChar(50), DocumentType.trim())
+      .input('lbl', sql.NVarChar(255), Label?.trim() || DocumentType.trim())
+      .input('ism', sql.Bit, IsMandatory ? 1 : 0)
+      .input('cb', sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmRegistryDocument (RegistryId, DocumentType, Label, IsMandatory, Status, RequestedBy, RequestedAt, CreatedBy, CreatedAt)
+        VALUES (@rid, @dt, @lbl, @ism, 'Requested', @cb, SYSDATETIME(), @cb, SYSDATETIME())
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /registry/:id/documents/:docId — review a document (Verify/Reject).
+router.put("/registry/:id/documents/:docId", requirePageRight("crm-registry", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const docId = parseInt(req.params.docId, 10);
+    const { Status, Remarks } = req.body;
+
+    if (Status !== undefined && !["Verified", "Rejected"].includes(Status)) {
+      return res.status(400).json({ error: "Status must be Verified or Rejected" });
+    }
+    if (Status === "Rejected" && !Remarks?.trim()) {
+      return res.status(400).json({ error: "Remarks are required when rejecting a document" });
+    }
+
+    await pool.request()
+      .input("docid", sql.Int, docId)
+      .input("st", sql.NVarChar(30), Status)
+      .input("rem", sql.NVarChar(sql.MAX), Remarks)
+      .input("ub", sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmRegistryDocument SET Status = ISNULL(@st, Status), Remarks = ISNULL(@rem, Remarks), UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @docid
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /registry/documents/file/:docId
+router.get("/registry/documents/file/:docId", requirePageRight("crm-registry", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const doc = await pool.request().input("docid", sql.Int, parseInt(req.params.docId, 10)).query(`
+      SELECT FileName, MimeType, FileBase64 FROM dbo.CrmRegistryDocument WHERE Id = @docid
+    `);
+    if (!doc.recordset.length || !doc.recordset[0].FileBase64) return res.status(404).send("File not found");
+    const row = doc.recordset[0];
+    const buffer = Buffer.from(row.FileBase64, 'base64');
+    res.setHeader('Content-Type', row.MimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${row.FileName || 'document'}"`);
+    res.send(buffer);
+  } catch (e) {
+    res.status(500).send(e.message);
+  }
+});
+// ── End Registry sub-resource ───────────────────────────────────────────────
+
+// ── Query Payment sub-resource ──────────────────────────────────────────────
+// Query Payment tracks whether the stamp duty / registration fee amount has
+// been communicated to the customer and, later, whether they've actually
+// paid it to the government — a prerequisite for Registry above. Physically
+// merged into this router (moved from the former crmQueryPayment.js /
+// /api/crm/query-payment/*), mounted at /query-payment/*. Route bodies are
+// unchanged from crmQueryPayment.js — only the mount path moved — so the
+// "crm-query-payment" page-right/approval-gate keys and the CrmQueryPayment
+// table (read by crmBookings, crmPortal, crmLegalMilestones, approvalService)
+// stay untouched.
+const MAX_QP_FILE_BYTES = 4 * 1024 * 1024;
+
+// Files arrive as base64 in the JSON body (not multipart) for /info and
+// /confirm — decoded here back into the exact bytes the client staged.
+function decodeBase64QPFile(f, label) {
+  if (!f || !f.base64 || !f.fileName) throw new Error(`${label}: fileName and base64 are required`);
+  const buffer = Buffer.from(f.base64, "base64");
+  if (!buffer.length) throw new Error(`${label}: file is empty`);
+  if (buffer.length > MAX_QP_FILE_BYTES) throw new Error(`${label}: ${f.fileName} is too large (max ${(MAX_QP_FILE_BYTES / 1024 / 1024).toFixed(0)}MB)`);
+  const mimeType = f.mimeType || "application/octet-stream";
+  const sigErr = verifyFileMatchesDeclaredType({ buffer, mimetype: mimeType });
+  if (sigErr) throw new Error(`${label}: ${sigErr}`);
+  return { fileName: f.fileName, mimeType, buffer };
+}
+
+// Amount is never stored on this table — it's read live from the Sales
+// Deed's own StampDuty + RegistrationFee fields, which stay the single
+// source of truth for what the deed actually costs to register.
+const QP_SELECT = `
+  SELECT qp.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
+         sd.DeedNo, sd.StampDuty, sd.RegistrationFee, sd.StampDutyCredit,
+         ISNULL(sd.StampDuty, 0) + ISNULL(sd.RegistrationFee, 0) AS GrossAmount,
+         ISNULL(sd.StampDuty, 0) + ISNULL(sd.RegistrationFee, 0) - ISNULL(sd.StampDutyCredit, 0) AS RequiredAmount
+  FROM dbo.CrmQueryPayment qp
+  JOIN dbo.CrmBooking b ON b.Id = qp.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.CrmSalesDeed sd ON sd.Id = qp.SalesDeedId
+`;
+
+router.get("/query-payment", requirePageRight("crm-query-payment", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const where = [];
+    if (status) { req0.input("st", sql.NVarChar(20), status); where.push("qp.Status = @st"); }
+    if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("um.BlockId = @blockId"); }
+    const result = await req0.query(`${QP_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY qp.CreatedAt DESC`);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-sales-deed/query-payment] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/query-payment/booking/:bookingId", requirePageRight("crm-query-payment", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId, 10);
+    const result = await pool.request().input("bid", sql.Int, bookingId)
+      .query(`${QP_SELECT} WHERE qp.BookingId = @bid`);
+    res.json(result.recordset[0] || null);
+  } catch (e) {
+    console.error("[crm-sales-deed/query-payment] GET /booking/:id error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /query-payment/eligible-bookings — MUST be registered before
+// GET /query-payment/:id (Express matches in registration order).
+router.get("/query-payment/eligible-bookings", requirePageRight("crm-query-payment", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName,
+             sd.DeedNo, sd.Id AS SalesDeedId
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      JOIN dbo.CrmSalesDeed sd ON sd.BookingId = b.Id AND sd.DirectorApprovalStatus = 'Approved'
+      WHERE b.Status <> 'Cancelled'
+        AND NOT EXISTS (SELECT 1 FROM dbo.CrmQueryPayment WHERE BookingId = b.Id)
+      ORDER BY b.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-sales-deed/query-payment] eligible-bookings error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/query-payment/:id", requirePageRight("crm-query-payment", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const result = await pool.request().input("id", sql.Int, id).query(`${QP_SELECT} WHERE qp.Id = @id`);
+    if (!result.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
+
+    const attachments = await pool.request().input("id", sql.Int, id).query(`
+      SELECT AttachmentId, DocType, FileName, MimeType, FileSize, UploadedBy, UploadedAt
+      FROM dbo.CrmQueryPaymentAttachments WHERE QueryPaymentId = @id ORDER BY UploadedAt DESC
+    `);
+    res.json({ ...result.recordset[0], attachments: attachments.recordset });
+  } catch (e) {
+    console.error("[crm-sales-deed/query-payment] GET /:id error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /query-payment — start tracking. Gated on a Sales Deed existing and
+// Director Approved (that's where the finalised amount comes from).
+router.post("/query-payment", requirePageRight("crm-query-payment", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId, 10);
+
+    const activeErr = await requireApprovedBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const deed = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id, DirectorApprovalStatus, StampDuty, RegistrationFee FROM dbo.CrmSalesDeed WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+    if (!deed.recordset.length) {
+      return res.status(400).json({ error: "Query Payment requires a Sales Deed to exist for this booking first (that's where the stamp duty / registration fee comes from)" });
+    }
+    if (deed.recordset[0].DirectorApprovalStatus !== "Approved") {
+      return res.status(400).json({ error: "Query Payment can only be started after the Sales Deed is Director Approved — the stamp duty amount must be finalised before communicating it to the customer" });
+    }
+    const stamp = Number(deed.recordset[0].StampDuty) || 0;
+    const regFee = Number(deed.recordset[0].RegistrationFee) || 0;
+    if (stamp + regFee <= 0) {
+      return res.status(400).json({ error: "This Sales Deed has no Stamp Duty or Registration Fee amount recorded — enter it on the Sale Deed before starting Query Payment tracking." });
+    }
+
+    const qpNo = await getNextDocNumber(pool, "QP", "QP");
+    const result = await pool.request()
+      .input("no",   sql.NVarChar(30), qpNo)
+      .input("bid",  sql.Int, bookingId)
+      .input("sdid", sql.Int, deed.recordset[0].Id)
+      .input("cb",   sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmQueryPayment (QPNo, BookingId, SalesDeedId, Status, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @sdid, 'Pending', @cb, SYSDATETIME())
+      `);
+    res.status(201).json({ success: true, id: result.recordset[0].Id, QPNo: qpNo });
+  } catch (e) {
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
+      return res.status(409).json({ error: "Query Payment tracking already started for this booking" });
+    console.error("[crm-sales-deed/query-payment] POST error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /query-payment/:id — update Remarks while Status is still Pending.
+router.put("/query-payment/:id", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const b = req.body;
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId, Status FROM dbo.CrmQueryPayment WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
+    const row = cur.recordset[0];
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    if (row.Status !== CrmStatus.PENDING) {
+      return res.status(400).json({ error: "Remarks can no longer be edited once the paperwork has been sent to the customer" });
+    }
+    await pool.request()
+      .input("id",  sql.Int,               id)
+      .input("rem", sql.NVarChar(sql.MAX),  b.Remarks !== undefined ? (b.Remarks || null) : null)
+      .input("ub",  sql.Int,               actorId(req))
+      .query(`
+        UPDATE dbo.CrmQueryPayment SET
+          Remarks   = ISNULL(@rem, Remarks),
+          UpdatedBy = @ub,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed/query-payment] PUT /:id error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /query-payment/:id/info — upload paperwork for the customer, flip
+// Status -> InfoSent.
+router.post("/query-payment/:id/info", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId, Status FROM dbo.CrmQueryPayment WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
+    const row = cur.recordset[0];
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const rawFiles = Array.isArray(req.body.files) ? req.body.files : [];
+    if (!rawFiles.length) return res.status(400).json({ error: "At least one file is required" });
+    let files;
+    try {
+      files = rawFiles.map((f, i) => decodeBase64QPFile(f, `File ${i + 1}`));
+    } catch (decodeErr) {
+      return res.status(400).json({ error: decodeErr.message });
+    }
+
+    const actor = actorId(req);
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      for (const file of files) {
+        await tx.request()
+          .input("qpid", sql.Int, id)
+          .input("dtype", sql.NVarChar(20), "Info")
+          .input("fname", sql.NVarChar(255), file.fileName)
+          .input("mtype", sql.NVarChar(100), file.mimeType)
+          .input("fsize", sql.Int, file.buffer.length)
+          .input("fdata", sql.VarBinary(sql.MAX), file.buffer)
+          .input("ub", sql.Int, actor)
+          .query(`
+            INSERT INTO dbo.CrmQueryPaymentAttachments (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
+            VALUES (@qpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+          `);
+      }
+
+      if (row.Status === CrmStatus.PENDING) {
+        await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actor).query(`
+          UPDATE dbo.CrmQueryPayment SET Status = 'InfoSent', InfoSentAt = SYSDATETIME(), InfoSentBy = @ub, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      }
+
+      await logCommunication(tx, {
+        bookingId: row.BookingId, direction: "Outbound",
+        subject: "Stamp duty / registration payment details sent to customer",
+        summary: "Required government payment amount and paperwork shared with the customer via portal.",
+        createdBy: actor,
+      });
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true, count: files.length });
+  } catch (e) {
+    console.error("[crm-sales-deed/query-payment] POST /:id/info error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /query-payment/:id/confirm — staff confirms the customer has paid.
+router.post("/query-payment/:id/confirm", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const b = req.body;
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT BookingId, Status FROM dbo.CrmQueryPayment WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
+    const row = cur.recordset[0];
+    if (row.Status === "Confirmed") return res.status(400).json({ error: "Already confirmed" });
+    if (row.Status !== "InfoSent") {
+      return res.status(400).json({ error: "Payment details must be sent to the customer (InfoSent) before confirming — the customer must know what they paid and why" });
+    }
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    if (!(await canPerformCrmGatedAction("crm-query-payment-confirm", actorId(req), req.user?.role)))
+      return res.status(403).json({ error: "You are not authorised to confirm query payment — requires Legal Head or CRM Administrator" });
+
+    let proof = null;
+    if (b.proof) {
+      try {
+        proof = decodeBase64QPFile(b.proof, "Proof");
+      } catch (decodeErr) {
+        return res.status(400).json({ error: decodeErr.message });
+      }
+    }
+
+    const actor = actorId(req);
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (proof) {
+        await tx.request()
+          .input("qpid", sql.Int, id)
+          .input("dtype", sql.NVarChar(20), "Proof")
+          .input("fname", sql.NVarChar(255), proof.fileName)
+          .input("mtype", sql.NVarChar(100), proof.mimeType)
+          .input("fsize", sql.Int, proof.buffer.length)
+          .input("fdata", sql.VarBinary(sql.MAX), proof.buffer)
+          .input("ub", sql.Int, actor)
+          .query(`
+            INSERT INTO dbo.CrmQueryPaymentAttachments (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy)
+            VALUES (@qpid, @dtype, @fname, @mtype, @fsize, @fdata, @ub)
+          `);
+      }
+
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("amt", sql.Decimal(18,2), b.ConfirmedAmount != null ? parseFloat(b.ConfirmedAmount) : null)
+        .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
+        .input("ub", sql.Int, actor)
+        .query(`
+          UPDATE dbo.CrmQueryPayment SET
+            Status = 'Confirmed', ConfirmedAt = SYSDATETIME(), ConfirmedBy = @ub,
+            ConfirmedAmount = @amt, Remarks = ISNULL(@rem, Remarks),
+            UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+
+      await logCommunication(tx, {
+        bookingId: row.BookingId, direction: "Inbound",
+        subject: "Government payment confirmed",
+        summary: "Staff confirmed the customer has remitted stamp duty / registration fee to the Sub-Registrar Office.",
+        createdBy: actor,
+      });
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-sales-deed/query-payment] POST /:id/confirm error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Staff proxy: upload proof on behalf of a non-portal customer ────────────
+const PROXY_METHODS_QP = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
+
+router.post("/query-payment/:id/proxy-proof",
+  requirePageRight("crm-query-payment", "edit"),
+  uploadQP.single("file"),
+  async (req, res) => {
+    try {
+      const pool  = getPool();
+      const id    = parseInt(req.params.id);
+      const actor = actorId(req);
+      const { ProxyMethod, ProxyRemarks } = req.body;
+
+      if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+      const sigErr = verifyFileMatchesDeclaredType(req.file);
+      if (sigErr) return res.status(400).json({ error: sigErr });
+      if (!ProxyMethod || !PROXY_METHODS_QP.includes(ProxyMethod)) {
+        return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_QP.join(", ")}` });
+      }
+      if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks are required" });
+
+      const cur = await pool.request().input("id", sql.Int, id)
+        .query("SELECT Status, QPNo, BookingId FROM dbo.CrmQueryPayment WHERE Id = @id");
+      if (!cur.recordset.length) return res.status(404).json({ error: "Query payment not found" });
+      const qp = cur.recordset[0];
+      if (qp.Status === "Confirmed") return res.status(400).json({ error: "Payment already confirmed" });
+
+      const proxyNote = `[Proof submitted on behalf of customer via ${ProxyMethod}] ${ProxyRemarks.trim()}`;
+
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request()
+          .input("id",    sql.Int,           id)
+          .input("dtype", sql.NVarChar(20),  "Proof")
+          .input("fname", sql.NVarChar(255), req.file.originalname)
+          .input("mime",  sql.NVarChar(100), req.file.mimetype)
+          .input("fsize", sql.Int,           req.file.size)
+          .input("fdata", sql.VarBinary(sql.MAX), req.file.buffer)
+          .input("ub",    sql.Int,           actor)
+          .query(`
+            INSERT INTO dbo.CrmQueryPaymentAttachments
+              (QueryPaymentId, DocType, FileName, MimeType, FileSize, FileData, UploadedBy, UploadedAt)
+            VALUES (@id, @dtype, @fname, @mime, @fsize, @fdata, @ub, SYSDATETIME())
+          `);
+
+        await logCommunication(tx, {
+          bookingId: qp.BookingId, direction: "Inbound",
+          subject: `Payment proof uploaded for ${qp.QPNo} (via ${ProxyMethod})`,
+          summary: proxyNote,
+        });
+
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
+      }
+
+      res.json({ success: true });
+    } catch (e) {
+      console.error("[crm-sales-deed/query-payment] proxy-proof error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  }
+);
+
+router.get("/query-payment/attachment/:attachId", requirePageRight("crm-query-payment", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const attachId = parseInt(req.params.attachId, 10);
+    const result = await pool.request().input("id", sql.Int, attachId)
+      .query("SELECT FileName, MimeType, FileData FROM dbo.CrmQueryPaymentAttachments WHERE AttachmentId = @id");
+    const attachment = result.recordset[0];
+    if (!attachment) return res.status(404).json({ error: "Attachment not found" });
+    res.setHeader("Content-Type", attachment.MimeType || "application/octet-stream");
+    res.setHeader("Content-Disposition", `inline; filename="${encodeURIComponent(attachment.FileName)}"`);
+    res.send(attachment.FileData);
+  } catch (e) {
+    console.error("[crm-sales-deed/query-payment] GET attachment error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+// ── End Query Payment sub-resource ──────────────────────────────────────────
+
+// 4. GET /:id
+router.get("/:id", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const [deedRes, docRes, logRes] = await Promise.all([
+      pool.request().input('id', sql.Int, id).query(`${DEED_SELECT} WHERE d.Id = @id`),
+      pool.request().input('id', sql.Int, id).query(`
+        SELECT Id, DocumentType, Label, IsMandatory, Status, FileName, MimeType,
+               FileSize, UploadedAt, UploadedByType, Remarks, VersionNo, CreatedAt,
+               CASE WHEN FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile
+        FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @id ORDER BY CreatedAt
+      `),
+      pool.request().input('id', sql.Int, id).query(`
+        SELECT l.*, u.name AS ActorName
+        FROM dbo.CrmSalesDeedApprovalLog l
+        LEFT JOIN dbo.Users u ON u.id = l.ActorId
+        WHERE l.SalesDeedId = @id ORDER BY l.CreatedAt DESC
+      `),
+    ]);
+    if (!deedRes.recordset[0]) return res.status(404).json({ error: 'Sale deed not found' });
+    const deed = {
+      ...deedRes.recordset[0],
+      Status: deriveDeedStatus({
+        bookingStatus: deedRes.recordset[0].BookingStatus,
+        registrationNo: deedRes.recordset[0].RegistrationNo,
+        executedBy: deedRes.recordset[0].ExecutedBy,
+        deedDate: deedRes.recordset[0].DeedDate,
+        registrationDeadline: deedRes.recordset[0].RegistrationDeadline,
+      })
+    };
+    res.json({ deed, documents: docRes.recordset, approvalLog: logRes.recordset });
+  } catch (e) {
+    console.error("[crm-sales-deed] GET /:id error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 5. GET /:id/revisions
+router.get("/:id/revisions", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("id", sql.Int, parseInt(req.params.id, 10))
+      .query(`SELECT * FROM dbo.CrmSalesDeedRevision WHERE SalesDeedId = @id ORDER BY VersionNo DESC`);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 6. PUT /:id/assign-legal
+router.put("/:id/assign-legal", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const { LegalExecutiveId } = req.body;
+    const lock = await getDeedBookingLockReason(pool, id);
+    if (lock) return res.status(400).json({ error: `Cannot assign legal executive because ${lock}` });
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("leid", sql.Int, LegalExecutiveId || null)
+      .input("ub", sql.Int, actorId(req))
+      .query(`UPDATE dbo.CrmSalesDeed SET LegalExecutiveId = @leid, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 7. PUT /:id/submit
+router.put("/:id/submit", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const lock = await getDeedBookingLockReason(pool, id);
+    if (lock) return res.status(400).json({ error: `Cannot submit deed because ${lock}` });
+    
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT SeniorApprovalStatus FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Deed not found" });
+    // NULL is the real starting state for every deed (never initialized at
+    // creation, matching Agreement's own SeniorApprovalStatus) — this used
+    // to only accept 'Rejected', which meant a brand new deed could never
+    // enter the Senior Approval queue in the first place; only a deed that
+    // had already been rejected once could ever be (re-)submitted.
+    if (!['Rejected', null].includes(cur.recordset[0].SeniorApprovalStatus)) {
+      return res.status(400).json({ error: `Cannot submit — current status is ${cur.recordset[0].SeniorApprovalStatus}` });
+    }
+    
+    await pool.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
+      UPDATE dbo.CrmSalesDeed SET SeniorApprovalStatus = 'Pending', UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id
+    `);
+    await logDeedApprovalHistory(id, 'Submitted', null, actorId(req), 'Staff');
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 8. PUT /:id/approve (Senior Approval)
+router.put("/:id/approve", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const deedRow = await pool.request().input('id', sql.Int, id).query(`
+      SELECT d.*, b.AssignedTo, b.BookingNo, a.ApplicantName
+      FROM dbo.CrmSalesDeed d
+      JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE d.Id = @id
+    `);
+    if (!deedRow.recordset.length) return res.status(404).json({ error: "Sale deed not found" });
+    const deed = deedRow.recordset[0];
+
+    const lock = await getDeedBookingLockReason(pool, id);
+    if (lock) return res.status(400).json({ error: `Cannot approve deed because ${lock}` });
+
+    if (!deed.LegalExecutiveId) return res.status(400).json({ error: "A Legal Executive must be assigned before approval" });
+    
+    const prog = await deedDocumentProgress(pool, id);
+    if (prog.required === 0) return res.status(400).json({ error: "No mandatory documents requested yet" });
+    if (prog.percent < 100) return res.status(400).json({ error: `${prog.percent}% complete — all mandatory docs must be uploaded before approval` });
+
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    // approvalTransition owns its own transaction/locking on `pool` — it
+    // must run and commit before we open ours below (nesting two separate
+    // mssql Transactions over the same row on the same pool deadlocks
+    // rather than composes; this ordering mirrors the identical, already-
+    // established pattern in crmCancellations.js's /approve).
+    const transitionResult = await approvalTransition("crm-sales-deed-senior", id, 'Approved', userEmail, req.user?.role, req.body?.Remarks, actorId(req));
+
+    // ── BEGIN ATOMIC SECTION ─────────────────────────────────────────────
+    // The status flip and both approval-log entries land together — a
+    // failure between them previously could leave a deed marked Approved
+    // and sent to the customer with no matching audit trail entry.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).input("rem", sql.NVarChar(sql.MAX), req.body?.Remarks || null).query(`
+        UPDATE dbo.CrmSalesDeed SET
+          SeniorApprovalStatus = 'Approved', SeniorApprovedBy = @ub, SeniorApprovedAt = SYSDATETIME(), SeniorApprovalRemarks = @rem,
+          SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = 'Pending', CustomerApprovedAt = NULL,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+      await logDeedApprovalHistory(id, 'SeniorApprove', req.body?.Remarks, actorId(req), 'Staff', tx);
+      await logDeedApprovalHistory(id, 'SendToCustomer', 'Auto-sent to customer upon senior approval', actorId(req), 'System', tx);
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback().catch(() => {});
+      throw err;
+    }
+
+    // Side effects only — never allowed to undo the approval that already
+    // committed above, so failures here are logged, not thrown.
+    try {
+      await logCommunication(pool, {
+        bookingId: deed.BookingId, direction: 'Outbound',
+        subject: `Sales deed ${deed.DeedNo} approved and sent to customer`,
+        summary: `Senior approval complete. Sales deed sent to customer for review.`,
+        createdBy: actorId(req),
+      });
+    } catch (commErr) { console.error("[crm-sales-deed] approve logCommunication failed:", commErr.message); }
+
+    if (deed.AssignedTo) {
+      try {
+        await emitNotification(pool, deed.AssignedTo, 'crm_sales_deed_senior_approved',
+          'Sales Deed Senior Approved',
+          `${deed.DeedNo} (${deed.BookingNo}) is senior-approved and sent to customer.`,
+          id, 'crm_sales_deed');
+      } catch (notifErr) { console.error("[crm-sales-deed] approve emitNotification failed:", notifErr.message); }
+    }
+
+    res.json({ success: true, status: transitionResult.newStatus });
+  } catch (e) {
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// 9. PUT /:id/reject (Senior Rejection)
+router.put("/:id/reject", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const remarks = req.body?.Remarks;
+    if (!remarks?.trim()) return res.status(400).json({ error: "Rejection remarks are required" });
+
+    const lock = await getDeedBookingLockReason(pool, id);
+    if (lock) return res.status(400).json({ error: `Cannot reject deed because ${lock}` });
+
+    const deedRow = await pool.request().input('id', sql.Int, id).query(`SELECT * FROM dbo.CrmSalesDeed WHERE Id = @id`);
+    if (!deedRow.recordset.length) return res.status(404).json({ error: "Deed not found" });
+    const deed = deedRow.recordset[0];
+
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    // approvalTransition owns its own transaction/locking on `pool` and must
+    // run before we open ours below — see the identical note in /:id/approve.
+    const transitionResult = await approvalTransition("crm-sales-deed-senior", id, 'Rejected', userEmail, req.user?.role, remarks, actorId(req));
+
+    // ── BEGIN ATOMIC SECTION ─────────────────────────────────────────────
+    // The revision snapshot, the status flip, and the mandatory-document
+    // reset must land together. This session already found and fixed one
+    // real way this exact "Rejected but documents still Verified" state
+    // could occur (crmMutation.js's query-reset WHERE clause silently
+    // excluding NULL-Remarks rows) — this transaction closes the *other*
+    // way it could happen: a plain mid-sequence failure, which previously
+    // had zero protection here at all.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request()
+        .input("did", sql.Int, id)
+        .input("vn", sql.Int, deed.VersionNo)
+        .input("dv", sql.Decimal(18,2), deed.DeedValue)
+        .input("sd", sql.Decimal(18,2), deed.StampDuty)
+        .input("rf", sql.Decimal(18,2), deed.RegistrationFee)
+        .input("sdc", sql.Decimal(18,2), deed.StampDutyCredit)
+        .input("sro", sql.NVarChar(255), deed.SubRegistrarOffice)
+        .input("notes", sql.NVarChar(sql.MAX), deed.Notes)
+        .input("rea", sql.NVarChar(sql.MAX), remarks)
+        .input("cb", sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmSalesDeedRevision (SalesDeedId, VersionNo, DeedValue, StampDuty, RegistrationFee, StampDutyCredit, SubRegistrarOffice, Notes, Reason, CreatedBy, CreatedAt)
+          VALUES (@did, @vn, @dv, @sd, @rf, @sdc, @sro, @notes, @rea, @cb, SYSDATETIME())
+        `);
+
+      await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).input("rem", sql.NVarChar(sql.MAX), remarks).query(`
+        UPDATE dbo.CrmSalesDeed SET
+          SeniorApprovalStatus = 'Rejected', SeniorApprovalRemarks = @rem,
+          SentToCustomerAt = NULL, CustomerApprovalStatus = 'Pending', CustomerApprovedAt = NULL,
+          VersionNo = VersionNo + 1,
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+      // A rejection must actually send the deed back to the legal preparer to
+      // reprepare and reupload — not just flip a status flag while every
+      // mandatory document sits there still marked Verified/Uploaded, which
+      // would let staff resubmit unchanged work and loop forever without ever
+      // fixing what the senior flagged. Reset every mandatory document back to
+      // Requested (clearing the file) so the same Attach-File control the
+      // Documents tab already shows for a fresh request reappears here too,
+      // and Senior Approval's own document-progress gate naturally blocks
+      // resubmission until they're genuinely reworked.
+      await tx.request().input("id", sql.Int, id).input("ub", sql.Int, actorId(req)).query(`
+        UPDATE dbo.CrmSalesDeedDocument SET
+          Status = 'Requested', FileBase64 = NULL, FileName = NULL, MimeType = NULL, FileSize = NULL,
+          UploadedByType = NULL, UploadedAt = NULL, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE SalesDeedId = @id AND IsMandatory = 1
+      `);
+
+      await logDeedApprovalHistory(id, 'SeniorReject', remarks, actorId(req), 'Staff', tx);
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback().catch(() => {});
+      throw err;
+    }
+
+    res.json({ success: true, status: transitionResult.newStatus });
+  } catch (e) {
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// 10. PUT /:id/send-to-customer
+router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const deed = await pool.request().input("id", sql.Int, id).query(`
+      SELECT d.Id, d.Status, d.SeniorApprovalStatus, ag.Status AS AgreementStatus, d.BookingId
+      FROM dbo.CrmSalesDeed d
+      LEFT JOIN dbo.CrmAgreement ag ON ag.Id = d.AgreementId
+      WHERE d.Id = @id
+    `);
+    if (!deed.recordset.length) return res.status(404).json({ error: "Sale deed not found" });
+    const row = deed.recordset[0];
+    
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+    
+    if (row.SeniorApprovalStatus !== 'Approved') {
+      return res.status(400).json({ error: 'Deed must receive senior approval before it can be sent to the customer' });
+    }
+    if (!["Executed", "Registered"].includes(row.AgreementStatus)) {
+      return res.status(400).json({ error: "Agreement must be at least Executed before sending the sales deed to the customer" });
+    }
+    if (row.Status === CrmStatus.REGISTERED) {
+      return res.status(400).json({ error: "Registered sales deed cannot be resent for customer approval" });
+    }
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("ub", sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmSalesDeed SET
+          SentToCustomerAt = SYSDATETIME(),
+          CustomerApprovalStatus = '${CrmStatus.PENDING}',
+          CustomerApprovedAt = NULL,
+          CustomerRecheckRemarks = NULL,
+          UpdatedBy = @ub,
+          UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 11. PUT /:id/director/approve
+router.put("/:id/director/approve", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool0 = getPool();
+    const deedBooking = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId, CustomerApprovalStatus, SeniorApprovalStatus FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!deedBooking.recordset.length) return res.status(404).json({ error: "Sale deed not found" });
+    const row = deedBooking.recordset[0];
+    const activeErr0 = await requireApprovedBooking(pool0, row.BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
+    if (row.SeniorApprovalStatus !== 'Approved') {
+      return res.status(400).json({ error: "Senior approval must be obtained before director approval" });
+    }
+    if (row.CustomerApprovalStatus !== CrmStatus.APPROVED) {
+      return res.status(400).json({ error: `Customer must approve the sales deed before director approval (current status: ${row.CustomerApprovalStatus || "not sent"})` });
+    }
+
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const remarks = req.body?.Remarks || null;
+    // approvalTransition owns its own internal transaction/locking and runs
+    // on the plain pool first (same established pattern as elsewhere) — the
+    // director-approval field UPDATE and its comm-log entry that follow are
+    // wrapped together so a failure between them can't leave the approval
+    // recorded with no trace of it in the Communication Log.
+    const result = await approvalTransition("crm-sales-deed-director", id, CrmStatus.APPROVED, userEmail, req.user?.role, remarks, actorId(req));
+    if (result.newStatus === CrmStatus.APPROVED) {
+      const pool = getPool();
+      const info = await pool.request().input("id", sql.Int, id).query(`
+        SELECT d.DeedNo, d.BookingId, b.AssignedTo, b.BookingNo, a.ApplicantName
+        FROM dbo.CrmSalesDeed d
+        JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+        JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+        WHERE d.Id = @id
+      `);
+      const infoRow = info.recordset[0];
+
+      const tx = pool.transaction();
+      await tx.begin();
+      try {
+        await tx.request()
+          .input("id", sql.Int, id)
+          .input("ab", sql.Int, actorId(req))
+          .input("rem", sql.NVarChar(sql.MAX), remarks)
+          .query(`
+            UPDATE dbo.CrmSalesDeed SET
+              DirectorApprovedBy = @ab, DirectorApprovedAt = SYSDATETIME(), DirectorApprovalRemarks = @rem
+            WHERE Id = @id
+          `);
+
+        await logCommunication(tx, {
+          bookingId: infoRow?.BookingId, direction: "Outbound",
+          subject: `Sales deed ${infoRow?.DeedNo} director-approved`,
+          summary: "Director approval complete — handover can now proceed.",
+          createdBy: actorId(req),
+        });
+        await tx.commit();
+      } catch (txErr) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+        throw txErr;
+      }
+
+      if (infoRow?.AssignedTo) {
+        await emitNotification(pool, infoRow.AssignedTo, "crm_sales_deed_director_approved",
+          "Sales Deed Director-Approved",
+          `${infoRow.DeedNo} (${infoRow.BookingNo}) has been director-approved — handover can now be scheduled.`,
+          id, "crm_sales_deed");
+      }
+    }
+    res.json({ success: true, status: result.newStatus, ...result });
+  } catch (e) {
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// 12. PUT /:id/director/reject
+router.put("/:id/director/reject", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const pool0 = getPool();
+    const deedBooking = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!deedBooking.recordset.length) return res.status(404).json({ error: "Sale deed not found" });
+    const activeErr0 = await requireApprovedBooking(pool0, deedBooking.recordset[0].BookingId);
+    if (activeErr0) return res.status(400).json({ error: activeErr0 });
+
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+    const remarks = req.body?.Remarks || null;
+    const result = await approvalTransition("crm-sales-deed-director", id, CrmStatus.REJECTED, userEmail, req.user?.role, remarks);
+    const pool = getPool();
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("rem", sql.NVarChar(sql.MAX), remarks)
+      .query("UPDATE dbo.CrmSalesDeed SET DirectorApprovalRemarks = @rem WHERE Id = @id");
+    res.json({ success: true, status: result.newStatus });
+  } catch (e) {
+    res.status(e.status || (e.message.includes("not authorized") ? 403 : 400)).json({ error: e.message });
+  }
+});
+
+// 13. PUT /:id
+router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    const id = parseInt(req.params.id);
+
+    const cur = await pool.request().input("id", sql.Int, id).query(`
+      SELECT d.RegistrationNo, d.ExecutedBy, d.DeedDate, d.RegistrationDeadline, d.BookingId, d.DeedNo, d.SentToCustomerAt,
+             d.DocCollectionDone, d.DeedDraftingDone, d.InternalApprovalDone, d.DirectorApprovalStatus,
+             b.Status AS BookingStatus
+      FROM dbo.CrmSalesDeed d JOIN dbo.CrmBooking b ON b.Id = d.BookingId
+      WHERE d.Id = @id
+    `);
+    if (!cur.recordset.length) return res.status(404).json({ error: "Sale deed not found" });
+    const row = cur.recordset[0];
+
+    const activeErr = await requireApprovedBooking(pool, row.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const CORE_FIELDS = ["DeedValue", "StampDuty", "RegistrationFee", "StampDutyCredit", "SubRegistrarOffice", "DeedDate"];
+    const editingCoreFields = CORE_FIELDS.some((k) => b[k] !== undefined);
+    if (editingCoreFields && row.SentToCustomerAt) {
+      return res.status(400).json({ error: "Deed Value, Stamp Duty, Registration Fee, Stamp Duty Credit, Sub-Registrar Office and Deed Date can no longer be edited once the deed has been sent to the customer for approval." });
+    }
+
+    // Execution is the deed's own signing event — the Senior → Customer →
+    // Director approval chain exists specifically to clear it for that, so
+    // it can't be reachable by just typing a name into ExecutedBy. Only
+    // checked the first time it's set (row.ExecutedBy was empty) — an
+    // already-Executed deed's ExecutedBy can still be corrected via ISNULL
+    // below without re-litigating approvals that already happened.
+    if (b.ExecutedBy && !row.ExecutedBy) {
+      const execErr = await assertDeedReadyForExecution(pool, id);
+      if (execErr) return res.status(400).json({ error: execErr });
+    }
+
+    if (b.RegistrationNo && !row.RegistrationNo) {
+      const registry = await pool.request().input("bid", sql.Int, row.BookingId)
+        .query("SELECT Status FROM dbo.CrmRegistry WHERE BookingId = @bid");
+      if (!registry.recordset.length || registry.recordset[0].Status !== "Completed") {
+        return res.status(400).json({ error: "Registration number can't be recorded until Registry is marked Completed (Query Payment must be Confirmed first)" });
+      }
+      if (row.DirectorApprovalStatus !== CrmStatus.APPROVED) {
+        return res.status(400).json({ error: "Director must approve the sales deed before the registration number can be recorded" });
+      }
+    }
+
+    const newRegDeadline = b.RegistrationDeadline !== undefined ? (b.RegistrationDeadline || null) : row.RegistrationDeadline;
+    const newStatus = deriveDeedStatus({
+      bookingStatus: row.BookingStatus,
+      registrationNo: b.RegistrationNo || row.RegistrationNo,
+      executedBy: b.ExecutedBy || row.ExecutedBy,
+      deedDate: b.DeedDate || row.DeedDate,
+      registrationDeadline: newRegDeadline,
+    });
+
+    // The main field update and the conditional "just executed → notify
+    // customer" update below both touch this same row and must land
+    // together: a failure between them previously could leave a deed
+    // marked Executed with SentToCustomerAt still NULL, silently stranding
+    // it — Customer Approval would never trigger and nothing would ever
+    // surface that gap to staff.
+    const tx = pool.transaction();
+    await tx.begin();
+    let sentToCustomerNow = false;
+    try {
+      await tx.request()
+      .input("id",    sql.Int,  id)
+      .input("regno", sql.NVarChar(100), b.RegistrationNo || null)
+      .input("bookno",sql.NVarChar(100), b.BookNo || null)
+      .input("partno",sql.NVarChar(100), b.PartNo || null)
+      .input("regdt", sql.Date, b.RegistrationDate || null)
+      .input("posdt", sql.Date, b.PossessionDate || null)
+      .input("regdl", sql.Date, b.RegistrationDeadline !== undefined ? (b.RegistrationDeadline || null) : row.RegistrationDeadline)
+      .input("exby",  sql.NVarChar(200), b.ExecutedBy || null)
+      .input("st",    sql.NVarChar(30), newStatus)
+      .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
+      .input("dval",    sql.Decimal(18,2), b.DeedValue != null && b.DeedValue !== "" ? parseFloat(b.DeedValue) : null)
+      .input("stamp",   sql.Decimal(18,2), b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
+      .input("regfee",  sql.Decimal(18,2), b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
+      .input("credit",  sql.Decimal(18,2), b.StampDutyCredit != null && b.StampDutyCredit !== "" ? parseFloat(b.StampDutyCredit) : null)
+      .input("sro",     sql.NVarChar(255), b.SubRegistrarOffice || null)
+      .input("ddt",     sql.Date, b.DeedDate || null)
+      .input("dcdone",  sql.Bit, b.DocCollectionDone !== undefined ? (b.DocCollectionDone ? 1 : 0) : null)
+      .input("dcdate",  sql.Date, b.DocCollectionDate !== undefined ? (b.DocCollectionDate || null) : null)
+      .input("dcnotes", sql.NVarChar(sql.MAX), b.DocCollectionNotes !== undefined ? (b.DocCollectionNotes || null) : null)
+      .input("dddone",  sql.Bit, b.DeedDraftingDone !== undefined ? (b.DeedDraftingDone ? 1 : 0) : null)
+      .input("dddate",  sql.Date, b.DeedDraftingDate !== undefined ? (b.DeedDraftingDate || null) : null)
+      .input("ddnotes", sql.NVarChar(sql.MAX), b.DeedDraftingNotes !== undefined ? (b.DeedDraftingNotes || null) : null)
+      .input("iadone",  sql.Bit, b.InternalApprovalDone !== undefined ? (b.InternalApprovalDone ? 1 : 0) : null)
+      .input("iadate",  sql.Date, b.InternalApprovalDate !== undefined ? (b.InternalApprovalDate || null) : null)
+      .input("ianotes", sql.NVarChar(sql.MAX), b.InternalApprovalNotes !== undefined ? (b.InternalApprovalNotes || null) : null)
+      .input("idx2dt",  sql.Date, b.Index2ReceivedDate !== undefined ? (b.Index2ReceivedDate || null) : null)
+      .input("ub",      sql.Int,  actorId(req))
+      .query(`
+        UPDATE dbo.CrmSalesDeed SET
+          RegistrationNo = ISNULL(@regno, RegistrationNo), BookNo = ISNULL(@bookno, BookNo),
+          PartNo = ISNULL(@partno, PartNo), RegistrationDate = ISNULL(@regdt, RegistrationDate),
+          PossessionDate = ISNULL(@posdt, PossessionDate), ExecutedBy = ISNULL(@exby, ExecutedBy),
+          RegistrationDeadline = @regdl,
+          DeedValue = ISNULL(@dval, DeedValue), StampDuty = ISNULL(@stamp, StampDuty),
+          RegistrationFee = ISNULL(@regfee, RegistrationFee),
+          StampDutyCredit = ISNULL(@credit, StampDutyCredit),
+          SubRegistrarOffice = ISNULL(@sro, SubRegistrarOffice),
+          DeedDate = ISNULL(@ddt, DeedDate),
+          DocCollectionDone  = CASE WHEN @dcdone  IS NOT NULL THEN @dcdone  ELSE DocCollectionDone  END,
+          DocCollectionDate  = CASE WHEN @dcdone  IS NOT NULL THEN @dcdate  ELSE DocCollectionDate  END,
+          DocCollectionNotes = CASE WHEN @dcdone  IS NOT NULL THEN @dcnotes ELSE DocCollectionNotes END,
+          DeedDraftingDone   = CASE WHEN @dddone  IS NOT NULL THEN @dddone  ELSE DeedDraftingDone   END,
+          DeedDraftingDate   = CASE WHEN @dddone  IS NOT NULL THEN @dddate  ELSE DeedDraftingDate   END,
+          DeedDraftingNotes  = CASE WHEN @dddone  IS NOT NULL THEN @ddnotes ELSE DeedDraftingNotes  END,
+          InternalApprovalDone  = CASE WHEN @iadone IS NOT NULL THEN @iadone  ELSE InternalApprovalDone  END,
+          InternalApprovalDate  = CASE WHEN @iadone IS NOT NULL THEN @iadate  ELSE InternalApprovalDate  END,
+          InternalApprovalNotes = CASE WHEN @iadone IS NOT NULL THEN @ianotes ELSE InternalApprovalNotes END,
+          Index2ReceivedDate = CASE WHEN @idx2dt IS NOT NULL THEN @idx2dt ELSE Index2ReceivedDate END,
+          Status = @st, Notes = @note, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    const executedByJustSet = !row.ExecutedBy && b.ExecutedBy;
+    if (executedByJustSet) {
+      const sent = await tx.request().input("id", sql.Int, id).query("SELECT SentToCustomerAt FROM dbo.CrmSalesDeed WHERE Id = @id");
+      if (!sent.recordset[0].SentToCustomerAt) {
+        await tx.request().input("id", sql.Int, id).query(`
+          UPDATE dbo.CrmSalesDeed SET SentToCustomerAt = SYSDATETIME(), CustomerApprovalStatus = '${CrmStatus.PENDING}', CustomerApprovedAt = NULL
+          WHERE Id = @id
+        `);
+        sentToCustomerNow = true;
+      }
+    }
+
+      await tx.commit();
+    } catch (err) {
+      await tx.rollback().catch(() => {});
+      throw err;
+    }
+
+    // Side effects only, run after commit — never allowed to undo the field
+    // update that already landed above.
+    if (sentToCustomerNow) {
+      try {
+        await logCommunication(pool, {
+          bookingId: row.BookingId, direction: "Outbound",
+          subject: `Sales deed ${row.DeedNo} sent to customer`,
+          summary: "Sales deed executed and shared with the customer via portal, awaiting their approval.",
+          createdBy: actorId(req),
+        });
+      } catch (commErr) { console.error("[crm-sales-deed] executed logCommunication failed:", commErr.message); }
+    }
+
+    if (newStatus === CrmStatus.REGISTERED && !row.RegistrationNo) {
+      try {
+        const outcome = await postCrmSalesDeedStatutoryToGL(pool, id, req.user?.name || req.user?.email || "system");
+        await recordGLPosting("crm-sales-deed", id, outcome, req.user?.name || req.user?.email || "system");
+      } catch (glErr) {
+        console.error("[crm-sales-deed] GL posting failed:", glErr.message);
+        await recordGLPosting("crm-sales-deed", id, { failed: true, reason: glErr.message }, req.user?.name || req.user?.email || "system");
+      }
+    }
+
+    res.json({ success: true, status: newStatus });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 14. POST /:id/documents/upload
+router.post("/:id/documents/upload", requirePageRight("crm-sales-deed", "edit"), upload.array('files'), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const { DocumentType = 'Other', Label, IsMandatory = 0, Remarks } = req.body;
+    const lock = await getDeedBookingLockReason(pool, id);
+    if (lock) return res.status(400).json({ error: `Cannot upload documents because ${lock}` });
+
+    const deed = await pool.request().input("id", sql.Int, id).query("SELECT VersionNo, RegistrationNo, Status FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!deed.recordset.length) return res.status(404).json({ error: "Deed not found" });
+    if (['Registered', 'Cancelled'].includes(deed.recordset[0].Status)) {
+      return res.status(400).json({ error: "Cannot modify documents for registered or cancelled deeds" });
+    }
+
+    const vn = deed.recordset[0].VersionNo || 1;
+
+    // Validate every file's actual bytes before writing any of them — a
+    // signature failure on file 3 of 5 must not leave files 1-2 already
+    // committed while the request as a whole reports an error.
+    for (const file of req.files) {
+      const sigErr = verifyFileMatchesDeclaredType(file);
+      if (sigErr) return res.status(400).json({ error: `${file.originalname}: ${sigErr}` });
+    }
+
+    // Same all-or-nothing concern the pre-validation loop above already
+    // documents for signature failures — but that only covers application-
+    // level validation, not a genuine DB error mid-loop, which would still
+    // leave earlier files in this batch committed with no rollback. Wrapped
+    // so a failure on any file rolls the whole upload back.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      for (const file of req.files) {
+        const b64 = file.buffer.toString('base64');
+        const reqCheck = await tx.request()
+          .input("did", sql.Int, id)
+          .input("dt", sql.NVarChar(50), DocumentType)
+          .query("SELECT TOP 1 Id FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @did AND DocumentType = @dt AND Status = 'Requested' AND IsMandatory = 1 ORDER BY CreatedAt ASC");
+
+        // Fulfilling any pending mandatory request for this DocumentType, not
+        // just a hardcoded 'DeedDraft' — the old check meant a mandatory
+        // request for e.g. NOC or PowerOfAttorney (or a second DeedDraft
+        // request after rejection) could never actually be fulfilled by this
+        // endpoint; it would silently create an unrelated non-mandatory row
+        // instead, permanently orphaning the real requirement.
+        if (reqCheck.recordset.length > 0) {
+          const reqDocId = reqCheck.recordset[0].Id;
+          await tx.request()
+            .input("docid", sql.Int, reqDocId)
+            .input("b64", sql.NVarChar(sql.MAX), b64)
+            .input("fn", sql.NVarChar(255), file.originalname)
+            .input("mt", sql.NVarChar(100), file.mimetype)
+            .input("fs", sql.Int, file.size)
+            .input("rem", sql.NVarChar(sql.MAX), Remarks || null)
+            .input("ub", sql.Int, actorId(req))
+            .query(`
+              UPDATE dbo.CrmSalesDeedDocument SET
+                FileBase64 = @b64, FileName = @fn, MimeType = @mt, FileSize = @fs,
+                Status = 'Uploaded', UploadedByType = 'Staff', UploadedAt = SYSDATETIME(),
+                Remarks = ISNULL(@rem, Remarks), UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+              WHERE Id = @docid
+            `);
+        } else {
+          await tx.request()
+            .input("did", sql.Int, id)
+            .input("dt", sql.NVarChar(50), DocumentType)
+            .input("lbl", sql.NVarChar(255), Label || file.originalname)
+            .input("ism", sql.Bit, parseInt(IsMandatory, 10) || 0)
+            .input("fn", sql.NVarChar(255), file.originalname)
+            .input("mt", sql.NVarChar(100), file.mimetype)
+            .input("fs", sql.Int, file.size)
+            .input("b64", sql.NVarChar(sql.MAX), b64)
+            .input("rem", sql.NVarChar(sql.MAX), Remarks || null)
+            .input("vn", sql.Int, vn)
+            .input("cb", sql.Int, actorId(req))
+            .query(`
+              INSERT INTO dbo.CrmSalesDeedDocument
+                (SalesDeedId, DocumentType, Label, IsMandatory, Status, FileName, MimeType, FileSize, FileBase64,
+                 UploadedByType, UploadedAt, Remarks, VersionNo, CreatedBy, CreatedAt)
+              VALUES (@did, @dt, @lbl, @ism, 'Uploaded', @fn, @mt, @fs, @b64,
+                 'Staff', SYSDATETIME(), @rem, @vn, @cb, SYSDATETIME())
+            `);
+        }
+      }
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 14b. POST /:id/documents/request
+// Creates a mandatory (or, if explicitly false, optional) document
+// requirement dynamically — the one thing this module was missing. Until
+// now the ONLY mandatory document a deed could ever have was the single
+// 'DeedDraft' row auto-seeded at creation (see POST / below); if that row
+// was ever consumed some other way, or a second/different mandatory
+// document became necessary (a rejection needing a fresh copy, a NOC, a
+// Power of Attorney), there was no way to ask for one — Senior Approval
+// would permanently report "no mandatory documents requested yet" with no
+// recovery path in the UI. Mirrors Agreement's own document-request flow.
+router.post("/:id/documents/request", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const { DocumentType, Label, IsMandatory = true } = req.body;
+    if (!DocumentType?.trim()) return res.status(400).json({ error: "DocumentType is required" });
+
+    const lock = await getDeedBookingLockReason(pool, id);
+    if (lock) return res.status(400).json({ error: `Cannot request documents because ${lock}` });
+
+    const deed = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!deed.recordset.length) return res.status(404).json({ error: "Deed not found" });
+    if (['Registered', 'Cancelled'].includes(deed.recordset[0].Status)) {
+      return res.status(400).json({ error: "Cannot request documents for a registered or cancelled deed" });
+    }
+
+    const dup = await pool.request().input("did", sql.Int, id).input("dt", sql.NVarChar(50), DocumentType.trim())
+      .query("SELECT TOP 1 Id FROM dbo.CrmSalesDeedDocument WHERE SalesDeedId = @did AND DocumentType = @dt AND Status IN ('Requested', 'Uploaded')");
+    if (dup.recordset.length) return res.status(409).json({ error: `A ${DocumentType} request is already open for this deed` });
+
+    await pool.request()
+      .input('did', sql.Int, id)
+      .input('dt', sql.NVarChar(50), DocumentType.trim())
+      .input('lbl', sql.NVarChar(255), Label?.trim() || DocumentType.trim())
+      .input('ism', sql.Bit, IsMandatory ? 1 : 0)
+      .input('cb', sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmSalesDeedDocument (SalesDeedId, DocumentType, Label, IsMandatory, Status, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+        VALUES (@did, @dt, @lbl, @ism, 'Requested', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 15. POST /:id/documents/:docId/attach
+router.post("/:id/documents/:docId/attach", requirePageRight("crm-sales-deed", "edit"), upload.single('file'), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const docId = parseInt(req.params.docId, 10);
+    const lock = await getDeedBookingLockReason(pool, id);
+    if (lock) return res.status(400).json({ error: `Cannot attach file because ${lock}` });
+
+    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+    const sigErr = verifyFileMatchesDeclaredType(req.file);
+    if (sigErr) return res.status(400).json({ error: sigErr });
+
+    const doc = await pool.request().input("docid", sql.Int, docId).input("did", sql.Int, id).query("SELECT Status FROM dbo.CrmSalesDeedDocument WHERE Id = @docid AND SalesDeedId = @did");
+    if (!doc.recordset.length) return res.status(404).json({ error: "Document not found" });
+
+    const b64 = req.file.buffer.toString('base64');
+    await pool.request()
+      .input("docid", sql.Int, docId)
+      .input("fn", sql.NVarChar(255), req.file.originalname)
+      .input("mt", sql.NVarChar(100), req.file.mimetype)
+      .input("fs", sql.Int, req.file.size)
+      .input("b64", sql.NVarChar(sql.MAX), b64)
+      .input("ub", sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmSalesDeedDocument SET
+          FileBase64 = @b64, FileName = @fn, MimeType = @mt, FileSize = @fs,
+          Status = 'Uploaded', UploadedByType = 'Staff', UploadedAt = SYSDATETIME(),
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @docid
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 16. GET /documents/file/:docId
+// Route-audit finding: this had no permission gate at all beyond the
+// blanket router.use(authMiddleware) — any authenticated user anywhere in
+// the app, regardless of role or module rights, could iterate docId and
+// download any Sale Deed document, unlike every sibling GET route in this
+// file. Requires the same "view" right the rest of the module already does.
+router.get("/documents/file/:docId", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const doc = await pool.request().input("docid", sql.Int, parseInt(req.params.docId, 10)).query(`
+      SELECT FileName, MimeType, FileBase64 FROM dbo.CrmSalesDeedDocument WHERE Id = @docid
+    `);
+    if (!doc.recordset.length || !doc.recordset[0].FileBase64) return res.status(404).send("File not found");
+    const row = doc.recordset[0];
+    const buffer = Buffer.from(row.FileBase64, 'base64');
+    res.setHeader('Content-Type', row.MimeType || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${row.FileName || 'document'}"`);
+    res.send(buffer);
+  } catch (e) {
+    res.status(500).send(e.message);
+  }
+});
+
+// 17. PUT /:id/documents/:docId
+// Review a document — the one action that turns "a file exists" into "staff
+// actually checked it", which Execution now genuinely depends on
+// (assertDeedReadyForExecution above). Validated the same way Agreement's
+// equivalent review endpoint is: only a real reviewed state is accepted,
+// rejecting requires saying why, and a deed already Executed/Registered
+// can't have its documents silently re-reviewed after the fact.
+router.put("/:id/documents/:docId", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const docId = parseInt(req.params.docId, 10);
+    const { Status, Remarks } = req.body;
+
+    if (Status !== undefined && !["Verified", "Rejected"].includes(Status)) {
+      return res.status(400).json({ error: "Status must be Verified or Rejected" });
+    }
+    if (Status === "Rejected" && !Remarks?.trim()) {
+      return res.status(400).json({ error: "Remarks are required when rejecting a document" });
+    }
+
+    const deed = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!deed.recordset.length) return res.status(404).json({ error: "Deed not found" });
+    if (Status !== undefined && ["Executed", "Registered"].includes(deed.recordset[0].Status)) {
+      return res.status(400).json({ error: "Documents can no longer be reviewed once the deed has been Executed" });
+    }
+
+    await pool.request()
+      .input("docid", sql.Int, docId)
+      .input("st", sql.NVarChar(30), Status)
+      .input("rem", sql.NVarChar(sql.MAX), Remarks)
+      .input("ub", sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmSalesDeedDocument SET Status = ISNULL(@st, Status), Remarks = ISNULL(@rem, Remarks), UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @docid
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 18. DELETE /:id/documents/:docId
+router.delete("/:id/documents/:docId", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const docId = parseInt(req.params.docId, 10);
+    
+    const deed = await pool.request().input("id", sql.Int, id).query("SELECT SeniorApprovalStatus FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!deed.recordset.length) return res.status(404).json({ error: "Deed not found" });
+    if (deed.recordset[0].SeniorApprovalStatus === 'Approved') {
+      return res.status(400).json({ error: "Cannot delete documents after senior approval" });
+    }
+
+    const doc = await pool.request().input("docid", sql.Int, docId).query("SELECT IsMandatory, Status FROM dbo.CrmSalesDeedDocument WHERE Id = @docid");
+    if (!doc.recordset.length) return res.status(404).json({ error: "Document not found" });
+    
+    if (doc.recordset[0].IsMandatory && doc.recordset[0].Status === 'Requested') {
+      return res.status(400).json({ error: "Cannot delete a mandatory document request" });
+    }
+    if (doc.recordset[0].IsMandatory) {
+      await pool.request().input("docid", sql.Int, docId).input("ub", sql.Int, actorId(req)).query(`
+        UPDATE dbo.CrmSalesDeedDocument SET FileBase64 = NULL, FileName = NULL, MimeType = NULL, FileSize = NULL,
+        Status = 'Requested', UploadedByType = NULL, UploadedAt = NULL, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @docid
+      `);
+    } else {
+      await pool.request().input("docid", sql.Int, docId).query("DELETE FROM dbo.CrmSalesDeedDocument WHERE Id = @docid");
+    }
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 19. POST /
+router.post("/", requirePageRight("crm-sales-deed", "create"), validateBody(crmSalesDeedCreateSchema), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId, 10);
+
+    const activeErr = await requireApprovedBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const agreement = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT TOP 1 Id, Status
+      FROM dbo.CrmAgreement
+      WHERE BookingId = @bid
+      ORDER BY CreatedAt DESC
+    `);
+    if (!agreement.recordset.length || agreement.recordset[0].Status !== CrmStatus.REGISTERED) {
+      return res.status(400).json({ error: "Sale Deed requires the Agreement for Sale to be Registered first" });
+    }
+
+    const loanErr = await checkLoanProcessingCleared(pool, bookingId);
+    if (loanErr) return res.status(400).json({ error: loanErr });
+
+    const gate = await getProjectSaleGate(pool, bookingId);
+    if (gate.requiresHandoverBeforeDeed) {
+      const handover = await pool.request().input("bid", sql.Int, bookingId)
+        .query("SELECT TOP 1 Status FROM dbo.CrmHandover WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+      if (!handover.recordset.length || handover.recordset[0].Status !== "Completed") {
+        return res.status(400).json({ error: "For under-construction properties, physical possession (Handover) must be completed before the Sale Deed is prepared" });
+      }
+    }
+
+    const deedNo = await getNextDocNumber(pool, "DEED", "DEED");
+
+    // The Deed row and its mandatory DeedDraft document placeholder are one
+    // creation event — wrapped so a failure between them can't leave a deed
+    // with no mandatory-document row, which would then never gate execution
+    // (see PUT /:id's own execution-readiness check).
+    const tx = pool.transaction();
+    await tx.begin();
+    let deedId;
+    try {
+      const result = await tx.request()
+        .input("no",      sql.NVarChar(30),      deedNo)
+        .input("bid",     sql.Int,               bookingId)
+        .input("agid",    sql.Int,               b.AgreementId ? parseInt(b.AgreementId) : (agreement.recordset[0]?.Id || null))
+        .input("val",     sql.Decimal(18,2),     b.DeedValue != null && b.DeedValue !== "" ? parseFloat(b.DeedValue) : null)
+        .input("stamp",   sql.Decimal(18,2),     b.StampDuty != null && b.StampDuty !== "" ? parseFloat(b.StampDuty) : null)
+        .input("regfee",  sql.Decimal(18,2),     b.RegistrationFee != null && b.RegistrationFee !== "" ? parseFloat(b.RegistrationFee) : null)
+        .input("credit",  sql.Decimal(18,2),     b.StampDutyCredit != null && b.StampDutyCredit !== "" ? parseFloat(b.StampDutyCredit) : null)
+        .input("sro",     sql.NVarChar(255),     b.SubRegistrarOffice || null)
+        .input("dt",      sql.Date,              b.DeedDate || null)
+        .input("regdl",   sql.Date,              b.RegistrationDeadline || null)
+        // ExecutedBy is never accepted here — it's the deed's actual signing
+        // event, which the Senior → Customer → Director approval chain exists
+        // specifically to clear first (see assertDeedReadyForExecution above).
+        // Accepting it at creation would let a deed reach "Executed" the
+        // instant it's created, before any approval — the exact bypass this
+        // whole gate exists to close. It can only ever be set afterward,
+        // through the gated PUT /:id path.
+        .input("exby",    sql.NVarChar(200),     null)
+        .input("wit",     sql.NVarChar(500),     b.WitnessNames || null)
+        .input("note",    sql.NVarChar(sql.MAX), b.Notes || null)
+        .input("cb",      sql.Int,               actorId(req))
+        .input("st",      sql.NVarChar(30),      deriveDeedStatus({ bookingStatus: null, registrationNo: null, executedBy: null, deedDate: b.DeedDate || null, registrationDeadline: b.RegistrationDeadline || null }))
+        .query(`
+          INSERT INTO dbo.CrmSalesDeed
+            (DeedNo, BookingId, AgreementId, DeedValue, StampDuty, RegistrationFee, StampDutyCredit, SubRegistrarOffice, DeedDate, RegistrationDeadline, ExecutedBy, WitnessNames, Status, Notes, CreatedBy, CreatedAt)
+          OUTPUT INSERTED.Id
+          VALUES (@no, @bid, @agid, @val, @stamp, @regfee, @credit, @sro, @dt, @regdl, @exby, @wit, @st, @note, @cb, SYSDATETIME())
+        `);
+
+      deedId = result.recordset[0].Id;
+
+      await tx.request()
+        .input('did', sql.Int, deedId)
+        .input('cb', sql.Int, actorId(req))
+        .query(`
+          INSERT INTO dbo.CrmSalesDeedDocument
+            (SalesDeedId, DocumentType, Label, IsMandatory, Status, RequestedBy, RequestedAt, VersionNo, CreatedBy, CreatedAt)
+          VALUES (@did, 'DeedDraft', 'Sale Deed Draft (Physical Legal Document)', 1, 'Requested', @cb, SYSDATETIME(), 1, @cb, SYSDATETIME())
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    try {
+      await maybeAutoCreateLegalMilestone(pool, bookingId, actorId(req));
+    } catch (e) {
+      console.error("[crm-sales-deed] legal milestone auto-start failed:", e.message);
+    }
+
+    res.status(201).json({ success: true, id: deedId, DeedNo: deedNo });
+  } catch (e) {
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
+      return res.status(409).json({ error: "A sale deed already exists for this booking" });
+    console.error("[crm-sales-deed] POST error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 20. PUT /:id/proxy-customer-approve
+const PROXY_METHODS_SD = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
+router.put("/:id/proxy-customer-approve", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS_SD.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_SD.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks are required" });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT CustomerApprovalStatus, SentToCustomerAt, DeedNo, BookingId FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Sales deed not found" });
+    const row = cur.recordset[0];
+    if (!row.SentToCustomerAt) return res.status(400).json({ error: "Sales deed has not been sent to the customer yet" });
+    if (row.CustomerApprovalStatus === CrmStatus.APPROVED) return res.status(400).json({ error: "Sales deed already approved" });
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).query(`
+        UPDATE dbo.CrmSalesDeed SET
+          CustomerApprovalStatus = '${CrmStatus.APPROVED}',
+          CustomerApprovedAt = SYSDATETIME(),
+          CustomerRecheckRemarks = NULL,
+          DirectorApprovalStatus = '${CrmStatus.PENDING}'
+        WHERE Id = @id
+      `);
+
+      await logCommunication(tx, {
+        bookingId: row.BookingId, direction: "Inbound",
+        subject: `Customer approved sales deed ${row.DeedNo} (via ${ProxyMethod})`,
+        summary: `Staff recorded customer approval on their behalf via ${ProxyMethod}. ${ProxyRemarks.trim()}`,
+      });
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 21. PUT /:id/proxy-customer-recheck
+router.put("/:id/proxy-customer-recheck", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool  = getPool();
+    const id    = parseInt(req.params.id);
+    const { ProxyMethod, ProxyRemarks } = req.body;
+
+    if (!ProxyMethod || !PROXY_METHODS_SD.includes(ProxyMethod)) {
+      return res.status(400).json({ error: `ProxyMethod is required. Must be one of: ${PROXY_METHODS_SD.join(", ")}` });
+    }
+    if (!ProxyRemarks?.trim()) return res.status(400).json({ error: "ProxyRemarks (customer's concern) are required for a recheck" });
+
+    const cur = await pool.request().input("id", sql.Int, id)
+      .query("SELECT CustomerApprovalStatus, SentToCustomerAt, DeedNo, BookingId FROM dbo.CrmSalesDeed WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Sales deed not found" });
+    const row = cur.recordset[0];
+    if (!row.SentToCustomerAt) return res.status(400).json({ error: "Sales deed has not been sent to the customer yet" });
+    if (row.CustomerApprovalStatus === CrmStatus.APPROVED) return res.status(400).json({ error: "Sales deed already approved — cannot record a recheck" });
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).input("rem", sql.NVarChar(sql.MAX), ProxyRemarks.trim()).query(`
+        UPDATE dbo.CrmSalesDeed SET
+          CustomerApprovalStatus = 'RecheckRequested',
+          CustomerApprovedAt = NULL,
+          CustomerRecheckRemarks = @rem
+        WHERE Id = @id
+      `);
+
+      await logCommunication(tx, {
+        bookingId: row.BookingId, direction: "Inbound",
+        subject: `Customer requested recheck on sales deed ${row.DeedNo} (via ${ProxyMethod})`,
+        summary: `Staff recorded customer recheck request via ${ProxyMethod}. Concern: ${ProxyRemarks.trim()}`,
+      });
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[unexpected error]", e);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// 22. PUT /:id/cancel
+router.put("/:id/cancel", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+
+    const cur = await pool.request().input("id", sql.Int, id).query(`SELECT Status, BookingId FROM dbo.CrmSalesDeed WHERE Id = @id`);
+    if (!cur.recordset.length) return res.status(404).json({ error: "Deed not found" });
+
+    const currentStatus = cur.recordset[0].Status;
+    if (['Registered', 'Cancelled'].includes(currentStatus)) {
+      return res.status(400).json({ error: `Cannot cancel a deed in status '${currentStatus}'` });
+    }
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("ub", sql.Int, actorId(req))
+      .query(`UPDATE dbo.CrmSalesDeed SET Status = 'Cancelled', UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id`);
+
+    logDeedApprovalHistory(id, 'Cancelled', 'Sale deed cancelled by staff', actorId(req), 'Staff').catch(e => console.error("Error logging cancellation:", e));
+
+    res.json({ success: true, status: 'Cancelled' });
+  } catch (e) {
+    console.error("[crm-sales-deed] cancel error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /documents/all — cross-deed document register (mirrors crmAgreements.js GET /documents/all).
+// Shows every CrmSalesDeedDocument across all deeds so a documents clerk can work from one
+// register instead of opening each deed individually. Filterable by Status and DocumentType.
+router.get("/documents/all", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status, documentType } = req.query;
+    const req0 = pool.request();
+    const conds = [];
+    if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("d.Status = @st"); }
+    if (documentType) { req0.input("dt", sql.NVarChar(100), documentType); conds.push("d.DocumentType = @dt"); }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const result = await req0.query(`
+      SELECT
+        d.Id, d.SalesDeedId, d.DocumentType, d.Label, d.IsMandatory,
+        d.FileName, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile,
+        d.FileSize, d.MimeType, d.Status, d.Remarks, d.CreatedAt,
+        sd.DeedNo, sd.Status AS DeedStatus,
+        sd.SeniorApprovalStatus, sd.CustomerApprovalStatus, sd.DirectorApprovalStatus,
+        sd.LegalExecutiveId, le.name AS LegalExecutiveName,
+        b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName
+      FROM dbo.CrmSalesDeedDocument d
+      JOIN dbo.CrmSalesDeed sd ON sd.Id = d.SalesDeedId
+      JOIN dbo.CrmBooking b ON b.Id = sd.BookingId
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+      LEFT JOIN dbo.Users le ON le.id = sd.LegalExecutiveId
+      ${where}
+      ORDER BY d.CreatedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-sales-deed] GET documents/all error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// GET /documents/:docId/audit — review history for a single deed document
+// (mirrors crmAgreements.js GET /documents/:docId/audit).
+router.get("/documents/:docId/audit", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
+  try {
+    const docId = parseInt(req.params.docId, 10);
+    const result = await getPool().request().input("id", sql.Int, docId).query(`
+      SELECT al.Id, al.Field, al.OldValue, al.NewValue, al.ChangedAt, al.ChangedBy, u.name AS ChangedByName
+      FROM dbo.CrmAuditLog al
+      LEFT JOIN dbo.Users u ON u.id = al.ChangedBy
+      WHERE al.EntityType = 'SalesDeedDocument' AND al.EntityId = @id
+      ORDER BY al.ChangedAt DESC
+    `);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-sales-deed] GET documents/:docId/audit error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// PUT /documents/bulk-review — review multiple documents from across different deeds
+// in one call (mirrors crmAgreements.js PUT /documents/bulk-review). Each document is
+// validated independently so one bad row never blocks the rest; the response reports
+// exactly which ids succeeded and which were skipped and why.
+router.put("/documents/bulk-review", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const actor = actorId(req);
+    const { docIds, status, remarks } = req.body || {};
+    if (!Array.isArray(docIds) || !docIds.length) return res.status(400).json({ error: "docIds is required" });
+    if (!["Verified", "Rejected"].includes(status)) return res.status(400).json({ error: "status must be Verified or Rejected" });
+    if (status === "Rejected" && !String(remarks || "").trim()) return res.status(400).json({ error: "Remarks are required to reject" });
+
+    const results = { succeeded: [], skipped: [] };
+    for (const rawId of docIds) {
+      const docId = parseInt(rawId, 10);
+      try {
+        const cur = await pool.request().input("id", sql.Int, docId).query(`
+          SELECT d.Status, d.SalesDeedId, CASE WHEN d.FileBase64 IS NOT NULL THEN 1 ELSE 0 END AS HasFile,
+                 sd.Status AS DeedStatus
+          FROM dbo.CrmSalesDeedDocument d
+          JOIN dbo.CrmSalesDeed sd ON sd.Id = d.SalesDeedId
+          WHERE d.Id = @id
+        `);
+        if (!cur.recordset.length) { results.skipped.push({ docId, reason: "Document not found" }); continue; }
+        const row = cur.recordset[0];
+
+        const lock = await getDeedBookingLockReason(pool, row.SalesDeedId);
+        if (lock) { results.skipped.push({ docId, reason: `Booking ${lock}` }); continue; }
+        if (status === "Verified" && !row.HasFile) { results.skipped.push({ docId, reason: "Not uploaded yet" }); continue; }
+        if (status === "Rejected" && ["Executed", "Registered"].includes(row.DeedStatus)) {
+          results.skipped.push({ docId, reason: "Cannot reject documents on an Executed/Registered deed" }); continue;
+        }
+
+        // Same per-row atomicity fix as crmAgreements.js's identical
+        // endpoint: independent across docIds (that's the endpoint's whole
+        // point), but the UPDATE + audit log within one row are wrapped so
+        // one row's review can't half-apply.
+        const rowTx = pool.transaction();
+        await rowTx.begin();
+        try {
+          await rowTx.request()
+            .input("id", sql.Int, docId)
+            .input("st", sql.NVarChar(30), status)
+            .input("rem", sql.NVarChar(sql.MAX), remarks || null)
+            .input("ub", sql.Int, actor)
+            .query("UPDATE dbo.CrmSalesDeedDocument SET Status = @st, Remarks = ISNULL(@rem, Remarks), UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+
+          if (status !== row.Status) {
+            await logCrmAudit(rowTx, "SalesDeedDocument", docId, actor, [{ field: "Status", oldVal: row.Status, newVal: status }]);
+          }
+          await rowTx.commit();
+        } catch (rowTxErr) {
+          try { await rowTx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+          throw rowTxErr;
+        }
+        results.succeeded.push(docId);
+      } catch (innerErr) {
+        results.skipped.push({ docId, reason: innerErr.message });
+      }
+    }
+    res.json(results);
+  } catch (e) {
+    console.error("[crm-sales-deed] PUT documents/bulk-review error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+module.exports = router;

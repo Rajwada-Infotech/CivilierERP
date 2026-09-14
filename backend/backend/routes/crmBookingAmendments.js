@@ -1,0 +1,257 @@
+// Approval queue for Unit/Parking/Extra-Charge changes requested after a
+// booking's Agreement has documents under verification (see
+// isLegalWorkStarted() in crmWorkflowGuards.js, and the gate wired into
+// crmExtraCharges.js / crmParking.js). Approving here actually applies the
+// queued change by replaying it through the exact same apply* functions the
+// direct (pre-legal) path uses — never duplicated logic.
+const express = require("express");
+const { CrmStatus } = require("../constants/crmStatuses");
+const router = express.Router();
+const apiRateLimit = require("../middleware/apiRateLimit");
+const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
+const { requirePageRight } = require("../middleware/requirePageRight");
+const { actorId } = require("../services/saAccess");
+const { canApproveBookingAmendment } = require("../services/approvalService");
+const { emitNotification } = require("../services/notify");
+const extraChargesRouter = require("./crmExtraCharges");
+const parkingRouter = require("./crmParking");
+const coApplicantRouter = require("./crmCoApplicant");
+const { applyPagination } = require("../services/crmListPagination");
+
+router.use(authMiddleware);
+router.use(apiRateLimit);
+
+const LIST_SELECT = `
+  SELECT r.*,
+         b.BookingNo,
+         COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName,
+         COALESCE(bn.UnitNo,      b.UnitNo)      AS UnitNo,
+         a.ApplicantName,
+         reqBy.name AS RequestedByName, revBy.name AS ReviewedByName
+  FROM dbo.CrmBookingAmendmentRequest r
+  JOIN dbo.CrmBooking b ON b.Id = r.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.Users reqBy ON reqBy.id = r.RequestedBy
+  LEFT JOIN dbo.Users revBy ON revBy.id = r.ReviewedBy
+`;
+
+// GET / — every amendment request, optionally filtered by ?status=Pending.
+// Powers the approver-facing review list.
+router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status, search } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const conds = [];
+    if (status) { req0.input("st", sql.NVarChar(20), status); conds.push("r.Status = @st"); }
+    if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (search) {
+      req0.input("search", sql.NVarChar(200), `%${search}%`);
+      conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
+    }
+    const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
+    const SELECT_WITH_BLOCK = `${LIST_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+
+    if (!req.query.page) {
+      const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY r.RequestedAt DESC`);
+      return res.json(result.recordset);
+    }
+
+    const { page, pageSize, offset } = applyPagination(req);
+    req0.input("offset", sql.Int, offset);
+    req0.input("pageSize", sql.Int, pageSize);
+    const [result, countResult] = await Promise.all([
+      req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY r.RequestedAt DESC OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
+      pool.request()
+        .input("st2", sql.NVarChar(20), status || null)
+        .input("companyId2", sql.Int, companyId)
+        .input("projectId2", sql.Int, projectId)
+        .input("blockId2", sql.Int, blockId)
+        .input("search2", sql.NVarChar(200), search ? `%${search}%` : null)
+        .query(`
+          SELECT COUNT(*) AS total
+          FROM dbo.CrmBookingAmendmentRequest r
+          JOIN dbo.CrmBooking b ON b.Id = r.BookingId
+          JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE (@st2 IS NULL OR r.Status = @st2)
+            AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
+            AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
+            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2))
+        `),
+    ]);
+    res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
+  } catch (e) {
+    console.error("[crm-booking-amendments] GET / error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /booking/:bookingId — pending requests for one booking, for the
+// pending-badge shown on the Booking Detail page's Extra Charges/Parking
+// sections.
+router.get("/booking/:bookingId", requirePageRight("crm-bookings", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId);
+    const result = await pool.request().input("bid", sql.Int, bookingId)
+      .query(`${LIST_SELECT} WHERE r.BookingId = @bid AND r.Status = '${CrmStatus.PENDING}' ORDER BY r.RequestedAt DESC`);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-booking-amendments] GET /booking error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/approve — apply the queued change for real, then notify the
+// Agreement's assigned legal executive (if any) that a booking's financial
+// details changed after documents were already under verification, so they
+// know to check whether anything needs re-issuing. Admin/super_admin/
+// marketing_head only, same approver set crm-bookings itself uses.
+router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  if (!(await canApproveBookingAmendment(req.user?.id, req.user?.role)))
+    return res.status(403).json({ error: "You are not authorised to approve booking amendments" });
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const notes = req.body?.Notes || null;
+
+    const row = await pool.request().input("id", sql.Int, id)
+      .query("SELECT * FROM dbo.CrmBookingAmendmentRequest WHERE Id = @id");
+    if (!row.recordset.length) return res.status(404).json({ error: "Amendment request not found" });
+    const reqRow = row.recordset[0];
+    if (reqRow.Status !== CrmStatus.PENDING) return res.status(400).json({ error: `This request is already ${reqRow.Status}` });
+
+    const proposedChange = JSON.parse(reqRow.ProposedChange || "{}");
+    const actor = actorId(req);
+    let applyResult;
+
+    // The apply* call and the request's own status flip to Approved must
+    // succeed or fail together — without a transaction, a failure between
+    // them (e.g. the UPDATE below hitting a dropped connection) leaves the
+    // change already applied (extra charge added, parking allotted, co-
+    // applicant edited) but the request still sitting Pending, open to
+    // being approved a second time and double-applying it.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      if (reqRow.ChangeType === "ExtraCharge") {
+        if (reqRow.Action === "Add") applyResult = await extraChargesRouter.applyAddExtraCharge(tx, reqRow.BookingId, proposedChange, actor);
+        else if (reqRow.Action === "Edit") applyResult = await extraChargesRouter.applyEditExtraCharge(tx, reqRow.TargetId, proposedChange, actor);
+        else if (reqRow.Action === "Release") applyResult = await extraChargesRouter.applyReleaseExtraCharge(tx, reqRow.TargetId);
+        // Unrecognized Action on a known ChangeType — reject rather than fall
+        // through to marking this Approved with nothing actually applied.
+        // (Guards against bad/legacy data or a future Action value added on
+        // the request-creation side — crmExtraCharges.js/crmParking.js —
+        // without a matching branch here.)
+        else { await tx.rollback(); return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType ExtraCharge` }); }
+      } else if (reqRow.ChangeType === "ParkingAllotment") {
+        if (reqRow.Action === "Add") applyResult = await parkingRouter.applyAddParking(tx, reqRow.BookingId, proposedChange, actor);
+        else if (reqRow.Action === "Edit") applyResult = await parkingRouter.applyEditParking(tx, reqRow.TargetId, proposedChange);
+        // force=true: admin has approved this post-Agreement change; bypasses
+        // the "already paid" guard and returns a creditAmount if applicable.
+        else if (reqRow.Action === "Release") applyResult = await parkingRouter.applyReleaseParking(tx, reqRow.TargetId, actor, reqRow.Reason, true);
+        else { await tx.rollback(); return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType ParkingAllotment` }); }
+      } else if (reqRow.ChangeType === "CoApplicant") {
+        if (reqRow.Action === "Add") applyResult = await coApplicantRouter.applyAddCoApplicant(tx, reqRow.BookingId, proposedChange, actor);
+        else if (reqRow.Action === "Edit") applyResult = await coApplicantRouter.applyEditCoApplicant(tx, reqRow.TargetId, proposedChange, actor);
+        else if (reqRow.Action === "Remove") applyResult = await coApplicantRouter.applyRemoveCoApplicant(tx, reqRow.TargetId);
+        else { await tx.rollback(); return res.status(400).json({ error: `Unknown Action "${reqRow.Action}" for ChangeType CoApplicant` }); }
+      } else {
+        await tx.rollback();
+        return res.status(400).json({ error: `Unknown ChangeType: ${reqRow.ChangeType}` });
+      }
+
+      await tx.request()
+        .input("id", sql.Int, id)
+        .input("rb", sql.Int, actor)
+        .input("notes", sql.NVarChar(500), notes)
+        .query(`
+          UPDATE dbo.CrmBookingAmendmentRequest SET
+            Status = '${CrmStatus.APPROVED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(), ReviewNotes = @notes
+          WHERE Id = @id
+        `);
+
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
+
+    // Legal visibility — this booking's financial details just changed
+    // after its Agreement documents were already under verification.
+    const agreement = await pool.request().input("bid", sql.Int, reqRow.BookingId)
+      .query("SELECT Id, AgreementNo, LegalExecutiveId FROM dbo.CrmAgreement WHERE BookingId = @bid");
+    if (agreement.recordset.length && agreement.recordset[0].LegalExecutiveId) {
+      const ag = agreement.recordset[0];
+      await emitNotification(pool, ag.LegalExecutiveId, "crm_booking_amendment_approved",
+        "Booking Details Changed — Recheck Documents",
+        `${ag.AgreementNo}: a ${reqRow.ChangeType} ${reqRow.Action.toLowerCase()} was approved after documents were already under verification (reason: ${reqRow.Reason}). Please check whether anything needs re-issuing.`,
+        ag.Id, "crm_agreement");
+    }
+
+    // If releasing parking on a fully-paid booking generated a credit,
+    // notify the approver so the accounts team can process the refund.
+    if (applyResult?.creditAmount) {
+      await emitNotification(pool, actor, "crm_booking_amendment_credit",
+        "Refund Required — Parking Released Post-Payment",
+        applyResult.creditNote,
+        reqRow.BookingId, "crm_booking");
+    }
+
+    res.json({ success: true, ...applyResult });
+  } catch (e) {
+    console.error("[crm-booking-amendments] approve error:", e.message);
+    res.status(e.status || 500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/reject — close the request without applying anything.
+router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, res) => {
+  if (!(await canApproveBookingAmendment(req.user?.id, req.user?.role)))
+    return res.status(403).json({ error: "You are not authorised to reject booking amendments" });
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    const notes = req.body?.Notes || null;
+
+    const row = await pool.request().input("id", sql.Int, id)
+      .query("SELECT Status, RequestedBy FROM dbo.CrmBookingAmendmentRequest WHERE Id = @id");
+    if (!row.recordset.length) return res.status(404).json({ error: "Amendment request not found" });
+    if (row.recordset[0].Status !== CrmStatus.PENDING) return res.status(400).json({ error: `This request is already ${row.recordset[0].Status}` });
+
+    await pool.request()
+      .input("id", sql.Int, id)
+      .input("rb", sql.Int, actorId(req))
+      .input("notes", sql.NVarChar(500), notes)
+      .query(`
+        UPDATE dbo.CrmBookingAmendmentRequest SET
+          Status = '${CrmStatus.REJECTED}', ReviewedBy = @rb, ReviewedAt = SYSDATETIME(), ReviewNotes = @notes
+        WHERE Id = @id
+      `);
+    // Single write — reject applies nothing, so there's no compound-write
+    // atomicity risk here the way approve above has.
+
+    if (row.recordset[0].RequestedBy) {
+      await emitNotification(pool, row.recordset[0].RequestedBy, "crm_booking_amendment_rejected",
+        "Amendment Request Rejected",
+        notes ? `Your requested change was rejected: ${notes}` : "Your requested change was rejected.",
+        id, "crm_booking_amendment");
+    }
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-booking-amendments] reject error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+module.exports = router;

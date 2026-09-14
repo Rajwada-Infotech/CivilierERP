@@ -1,0 +1,3024 @@
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FinanceShell } from "@/components/finance/FinanceShell";
+import { useFinYear } from "@/contexts/FinYearContext";
+import { useTds } from "@/contexts/TdsContext";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  SelectGroup,
+  SelectLabel,
+} from "@/components/ui/select";
+import {
+  Plus,
+  Trash2,
+  ArrowLeft,
+  Receipt,
+  CalendarDays,
+  FileText,
+  CreditCard,
+  Loader2,
+  User,
+  Eye,
+  Package,
+  Save,
+  Check,
+  RotateCcw,
+  Download,
+  Upload,
+  Building2,
+  FolderKanban,
+  SlidersHorizontal,
+  ShoppingCart,
+  AlertTriangle,
+} from "lucide-react";
+import { toast } from "sonner";
+import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
+import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
+import { ExportMenu } from "@/components/ExportMenu";
+import { ApprovalActions } from "@/components/ApprovalActions";
+import { Field } from "./ExpenseBooking/FormPrimitives";
+import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
+import { EmiSection } from "./ExpenseBooking/EmiSection";
+import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
+import { RecordCard } from "./ExpenseBooking/RecordCard";
+import { ExpenseBookingPreviewModal } from "./ExpenseBookingPreviewModal";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import {
+  blankForm,
+  calculateTdsPreview,
+  computeBreakdown,
+  computeGrnNetWithTerms,
+  dbToRecord,
+  fmt,
+  generateEmiSchedule,
+  recordToDb,
+} from "./ExpenseBooking/helpers";
+import type {
+  BookingStatus,
+  ExpenseRecord,
+  PageView,
+} from "./ExpenseBooking/types";
+import { usePageRights } from "@/hooks/usePageRights";
+
+
+import { API, apiFetch } from "./ExpenseBooking/apiFetch";
+import {
+  PAGE_SIZE,
+  INVOICE_TEMPLATE_COLUMNS,
+  selectTriggerCls,
+} from "./ExpenseBooking/constants";
+import {
+  DateField,
+  SectionHeader,
+  LinkedDocBadge,
+} from "./ExpenseBooking/PickerPrimitives";
+import { AmountGstSection } from "./ExpenseBooking/AmountGstSection";
+import { GRNItemsSummary } from "./ExpenseBooking/GRNItemsSummary";
+import { computeGrnBd } from "./ExpenseBooking/computeGrnBd";
+import { DeleteBlockedDialog } from "./ExpenseBooking/DeleteBlockedDialog";
+import type { DeleteBlockInfo } from "./ExpenseBooking/DeleteBlockedDialog";
+import { ExpenseBookingStatCards } from "./ExpenseBooking/ExpenseBookingStatCards";
+import { BookingListToolbar } from "./ExpenseBooking/BookingListToolbar";
+import { BookingPagination } from "./ExpenseBooking/BookingPagination";
+import { DocSelectorPanel } from "./ExpenseBooking/DocSelectorPanel";
+import { StatusBadge } from "@/components/StatusBadge";
+import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
+import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
+import { aggregateGRNsForInvoice } from "./ExpenseBooking/invoiceLinking";
+import { DirectItemsTable } from "./ExpenseBooking/DirectItemsTable";
+import { ExpenseHeadAllocationEditor } from "./ExpenseBooking/ExpenseHeadAllocationEditor";
+import type {
+  CompanyOption,
+  ProjectOption,
+  GSTConfig,
+  POItem,
+  WOItem,
+  WorkDoneItem,
+  TodItem,
+  SourceKind,
+  GRNItemLine,
+  SelectedDoc,
+  GRNItem,
+  BillingTermOption,
+  CostCenterOption,
+  DocSelectorProps,
+} from "./ExpenseBooking/types";
+
+// Same effective-net logic the visible table uses (GRN-linked rows recompute
+// from grnTotalAmount + billing terms; everything else falls back to
+// computeBreakdown on the stored basicAmount) — kept in sync so the export
+// never shows a different number than what's on screen.
+// GST-inclusive net, before TDS — computeEffectiveNet() below is what the
+// list/export actually display, net of TDS too.
+function computeGrossNet(rec: any): number {
+  if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
+    const terms =
+      rec.billingTerms && rec.billingTerms.length > 0
+        ? rec.billingTerms
+        : rec.discount
+          ? [rec.discount]
+          : [];
+    return computeGrnNetWithTerms(rec.grnTotalAmount, terms, rec.basicAmount);
+  }
+  const rbd = computeBreakdown(
+    rec.basicAmount,
+    rec.cgstRate,
+    rec.sgstRate,
+    rec.billingTerms && rec.billingTerms.length > 0 ? rec.billingTerms : rec.discount,
+    rec.igstRate ?? 0,
+  );
+  return rec.netAmount ?? rbd.netAmount;
+}
+
+// What the supplier is actually owed in cash — gross net minus TDS withheld
+// at the invoice. Same "TDS is deducted once, everything downstream reads
+// that figure" principle already applied on the Payment page; this is the
+// list/export view's own copy of it.
+function computeEffectiveNet(rec: any): number {
+  const gross = computeGrossNet(rec);
+  const tds = rec.tdsAmount ?? 0;
+  return Math.max(0, gross - tds);
+}
+
+// Mirrors the visible table's column order exactly (Booking Ref → Vendor →
+// Company/Project → Basic Amt → GST → Net Amt → Doc → Status) so the
+// exported file reads the same as the page it came from.
+const INVOICE_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Booking Ref", accessor: (r: any) => r.bookingReference || "—" },
+  { header: "Booking Date", accessor: (r: any) => r.bookingDate || "—" },
+  { header: "Vendor", accessor: (r: any) => r.supplier || "—" },
+  { header: "Company", accessor: (r: any) => r.companyName || "—" },
+  { header: "Project", accessor: (r: any) => r.projectName || "—" },
+  { header: "Expense Head", accessor: (r: any) => r.expenseHeadName || "—" },
+  { header: "Basic Amt", accessor: (r: any) => (r.status === "Draft" ? "—" : `Rs. ${fmt(r.basicAmount)}`) },
+  { header: "GST %", accessor: (r: any) => (r.status === "Draft" ? "—" : (r.igstRate ?? 0) > 0 ? `${r.igstRate}%` : `${(r.cgstRate ?? 0) + (r.sgstRate ?? 0)}%`) },
+  { header: "Net Amt", accessor: (r: any) => `Rs. ${fmt(computeEffectiveNet(r))}` },
+  { header: "Doc No", accessor: (r: any) => r.sourceDocNo || r.linkedPODocNo || r.bookingReference || "—" },
+  { header: "Status", accessor: (r: any) => r.status || "—" },
+];
+
+export default function MaterialExpenseBooking() {
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  // Scoped to this component instance (not module-level) so a different
+  // user logging in within the same tab never sees a stale cache left
+  // behind by whoever used this page before them.
+  const mastersCacheRef = useRef<{
+    po: POItem[] | null;
+    wo: WOItem[] | null;
+    woPO: POItem[] | null;
+    tod: TodItem[] | null;
+    grn: GRNItem[] | null;
+    workDone: WorkDoneItem[] | null;
+    allPO: POItem[] | null;
+  }>({ po: null, wo: null, woPO: null, tod: null, grn: null, workDone: null, allPO: null });
+  const _mastersCache = mastersCacheRef.current;
+  const [importing, setImporting] = useState(false);
+  const rights = usePageRights("expense-booking");
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { finYears } = useFinYear();
+  const { tdsRecords } = useTds();
+  const activeFinYears = finYears
+    .filter((fy) => fy.status === "Active")
+    .sort((a, b) => b.year.localeCompare(a.year));
+
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
+  const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
+  const [poList, setPoList] = useState<POItem[]>([]);
+  const [workDoneList, setWorkDoneList] = useState<WorkDoneItem[]>([]);
+  const [woPOList, setWoPOList] = useState<POItem[]>([]);
+  const [todList, setTodList] = useState<TodItem[]>([]);
+  const [grnList, setGrnList] = useState<GRNItem[]>([]);
+  const [loadingPO, setLoadingPO] = useState(false);
+  const [loadingWorkDone, setLoadingWorkDone] = useState(false);
+  const [loadingWOPO, setLoadingWOPO] = useState(false);
+  const [loadingTOD, setLoadingTOD] = useState(false);
+  const [loadingGRN, setLoadingGRN] = useState(false);
+  // "Filter by PO" dropdown beside Supplier — a standalone PO picker (ALL
+  // POs, not just the Service-eligible ones the "PO" tab itself offers)
+  // whose only job is to narrow the existing DocSelectorPanel's GRN tab
+  // down to that PO's own GRNs, instead of building a separate GRN picker.
+  const [allPOList, setAllPOList] = useState<POItem[]>([]);
+  const [loadingAllPOs, setLoadingAllPOs] = useState(false);
+  const [filterPOId, setFilterPOId] = useState<number | null>(null);
+  const [selectedDoc, setSelectedDoc] = useState<SelectedDoc | null>(null);
+  const [grnItemsLoading, setGrnItemsLoading] = useState(false);
+  const [gstBreakdown, setGstBreakdown] = useState<{
+    items: GRNItemLine[];
+    totals: {
+      totalBase: number;
+      totalCGST: number;
+      totalSGST: number;
+      totalGST: number;
+      totalInclGST: number;
+    };
+  } | null>(null);
+  const [selectedTod, setSelectedTod] = useState<TodItem | null>(null);
+  const [records, setRecords] = useState<ExpenseRecord[]>([]);
+  const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
+  const [bookedSourceIds, setBookedSourceIds] = useState<
+    { ESourceType: string; ESourceId: number; Eid: number }[]
+  >([]);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const [, setTotalBookedAmount] = useState(0);
+  const [view, setView] = useState<PageView>("list");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useDraftForm<Omit<ExpenseRecord, "id">>(
+    "material-expense-booking",
+    blankForm(),
+    { skip: editingId !== null },
+  );
+  const [gstEnabled, setGstEnabled] = useState(false);
+  const [gstMode, setGstMode] = useState<"cgst_sgst" | "igst">("cgst_sgst");
+
+  // Only reopen on an actual browser reload, not a plain in-app navigation
+  // (e.g. clicking "Invoice" in the sidebar remounts this component too;
+  // without this check, an old leftover draft would hijack that link into
+  // always opening the form instead of the list).
+  useEffect(() => {
+    if (!wasPageReloaded()) return;
+    if (form.bookingName || form.supplier || form.invoiceReference || form.basicAmount) {
+      setView("form");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const filteredProjectOptions = useMemo(() => {
+    if (!form.companyId) return projectOptions;
+    return projectOptions.filter(
+      (p) => Number(p.company_id) === Number(form.companyId),
+    );
+  }, [projectOptions, form.companyId]);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteBlockInfo, setDeleteBlockInfo] =
+    useState<DeleteBlockInfo | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const saveInFlight = useRef(false);
+  const [statusFilter, setStatusFilter] = useState<string>("All");
+  // List-view filters — Fin Year + Document Date range. Applied server-side
+  // (see fetchRecords below) since the list is paginated, unlike
+  // statusFilter which only ever narrows the current page.
+  const [finYearFilter, setFinYearFilter] = useState("");
+  const [dateFromFilter, setDateFromFilter] = useState("");
+  const [dateToFilter, setDateToFilter] = useState("");
+  // Same filter set as the Finance > Payment page — Company, Project, Doc
+  // No, Vendor — all applied server-side alongside Fin Year/date above.
+  const [companyFilter, setCompanyFilter] = useState("");
+  const [projectFilter, setProjectFilter] = useState("");
+  const [docNoFilter, setDocNoFilter] = useState("");
+  // The input itself stays bound to docNoFilter (immediate, so typing feels
+  // responsive), but the actual server fetch only fires off this debounced
+  // copy — otherwise every single keystroke re-queried the list and yanked
+  // focus out from under the next character typed.
+  const [debouncedDocNoFilter, setDebouncedDocNoFilter] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedDocNoFilter(docNoFilter), 400);
+    return () => clearTimeout(t);
+  }, [docNoFilter]);
+  const [vendorFilter, setVendorFilter] = useState("");
+  // Same scoping as filteredProjectOptions above, but for the list-view
+  // filter panel (independent of the create/edit form's own company field).
+  const filterProjectOptions = useMemo(() => {
+    if (!companyFilter) return projectOptions;
+    return projectOptions.filter(
+      (p) => Number(p.company_id) === Number(companyFilter),
+    );
+  }, [projectOptions, companyFilter]);
+  const [approvalTrail, setApprovalTrail] =
+    useState<ExpenseRecord["approvalTrail"]>(undefined);
+  const [liveEmiSchedule, setLiveEmiSchedule] = useState<
+    import("./ExpenseBooking/types").EmiScheduleRow[] | null
+  >(null);
+  const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
+    null,
+  );
+  const openPreview = useCallback((rec: ExpenseRecord | null) => {
+    setPreviewRecord(rec);
+    if (!rec?.id) return;
+    // Re-fetch fresh data so totalPaid/billStatus reflect latest payment state
+    apiFetch(`${API}/${rec.id}`)
+      .then((row: any) => setPreviewRecord(dbToRecord(row)))
+      .catch(() => {/* non-fatal — stale data still shown */});
+  }, []);
+  const [suppliers, setSuppliers] = useState<{ id: number; label: string }[]>(
+    [],
+  );
+  const [supplierHeads, setSupplierHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
+  const [contractorHeads, setContractorHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
+  const [brokerHeads, setBrokerHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
+  const [customerHeads, setCustomerHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
+  const [partnerHeads, setPartnerHeads] = useState<
+    { id: number; label: string; paymentTerms: string | null }[]
+  >([]);
+  // "Vendor" spans every party type a booking can actually be billed
+  // against — Supplier, Contractor, and Customer/Applicant (LHeadType
+  // S/C/A) — not just supplierHeads alone.
+  const vendorOptions = useMemo(
+    () => [...supplierHeads, ...contractorHeads, ...customerHeads],
+    [supplierHeads, contractorHeads, customerHeads],
+  );
+  // Payable Party picker below — the Select's own value has to be each
+  // head's unique id, not its display name. Two different real parties can
+  // share the exact same name (e.g. two people both named "Raja Biswas",
+  // one a Contractor and one a Broker) — keying by name gave Radix's Select
+  // two DOM nodes registered under the identical value, and it rendered
+  // BOTH matching labels concatenated in the trigger ("Raja BiswasRaja
+  // Biswas"). Derived here (not separate state) from supplierLHeadId, the
+  // one field that's already guaranteed unique.
+  const supplierSelectValue = useMemo(() => {
+    const id = form.supplierLHeadId;
+    if (id == null) return "";
+    if (supplierHeads.some((s) => s.id === id)) return `s:${id}`;
+    if (contractorHeads.some((c) => c.id === id)) return `c:${id}`;
+    if (brokerHeads.some((b) => b.id === id)) return `b:${id}`;
+    if (customerHeads.some((cu) => cu.id === id)) return `a:${id}`;
+    if (partnerHeads.some((p) => p.id === id)) return `p:${id}`;
+    return "";
+  }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads]);
+  const [, setBillingTerms] = useState<BillingTermOption[]>([]);
+  const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
+  const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
+  // TDS eligibility — live-checked against the resolved supplier as the
+  // form is filled (direct/TOD bookings only; see the field's gating
+  // condition below for why). Purely informational until save, where the
+  // backend re-validates everything server-side regardless.
+  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number } | null>(null);
+
+  const isEditing = editingId !== null;
+
+  const handleCompanyFilterChange = (val: string) => {
+    setCompanyFilter(val);
+    if (projectFilter && val) {
+      const stillValid = projectOptions.some(
+        (p) => p.label === projectFilter && Number(p.company_id) === Number(val),
+      );
+      if (!stillValid) setProjectFilter("");
+    }
+  };
+
+  const fetchRecords = useCallback(async (p = 1) => {
+    try {
+      setLoading(true);
+      const qs = new URLSearchParams({ page: String(p), limit: String(PAGE_SIZE) });
+      if (finYearFilter) qs.set("finYear", finYearFilter);
+      if (dateFromFilter) qs.set("from", dateFromFilter);
+      if (dateToFilter) qs.set("to", dateToFilter);
+      if (companyFilter) qs.set("companyId", companyFilter);
+      if (projectFilter) qs.set("projectName", projectFilter);
+      if (debouncedDocNoFilter) qs.set("docNo", debouncedDocNoFilter);
+      if (vendorFilter) qs.set("supplierId", vendorFilter);
+      const data = await apiFetch(`${API}?${qs.toString()}`);
+      setRecords((data.data ?? []).map(dbToRecord));
+      setTotalPages(data.totalPages ?? 1);
+      setTotalRecords(data.total ?? 0);
+      setStatusCounts(data.statusCounts ?? {});
+      setTotalBookedAmount(data.totalBookedAmount ?? 0);
+      setPage(p);
+    } catch (err: any) {
+      toast.error("Failed to load bookings: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, debouncedDocNoFilter, vendorFilter]);
+
+  // Export must cover every matching record, not just whatever page happens
+  // to be on screen — the list endpoint caps `limit` at 100 server-side, so
+  // this pages through everything (honoring all the server-side filters,
+  // same as the table) and then applies the client-only statusFilter on top.
+  const fetchAllRecordsForExport = useCallback(async () => {
+    const pageLimit = 100;
+    let all: ExpenseRecord[] = [];
+    let p = 1;
+    let totalPages = 1;
+    const qs = new URLSearchParams({ limit: String(pageLimit) });
+    if (finYearFilter) qs.set("finYear", finYearFilter);
+    if (dateFromFilter) qs.set("from", dateFromFilter);
+    if (dateToFilter) qs.set("to", dateToFilter);
+    if (companyFilter) qs.set("companyId", companyFilter);
+    if (projectFilter) qs.set("projectName", projectFilter);
+    if (docNoFilter) qs.set("docNo", docNoFilter);
+    if (vendorFilter) qs.set("supplierId", vendorFilter);
+    do {
+      qs.set("page", String(p));
+      const data = await apiFetch(`${API}?${qs.toString()}`);
+      all = all.concat((data.data ?? []).map(dbToRecord));
+      totalPages = data.totalPages ?? 1;
+      p += 1;
+    } while (p <= totalPages);
+
+    return all.filter((r) => {
+      if (statusFilter && statusFilter !== "All" && r.status !== statusFilter) return false;
+      return true;
+    }) as unknown as Record<string, unknown>[];
+  }, [statusFilter, finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, docNoFilter, vendorFilter]);
+
+  // Deep-link support — Linked Documents panels and Trial Balance's ledger
+  // drill-down navigate here as /material/expense-booking?view=<Eid> to open
+  // this exact Invoice/booking. View-only users get the read-only preview
+  // instead of the editable form — openEditForm had no permission check at
+  // all here, letting a deep link bypass rights.canEdit entirely.
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    if (rights.canEdit) {
+      openEditForm({ id: viewId } as unknown as ExpenseRecord);
+    } else {
+      openPreview({ id: viewId } as unknown as ExpenseRecord);
+    }
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const fetchBookedSources = useCallback(async () => {
+    try {
+      const data = await apiFetch(`${API}/source-ids`);
+      setBookedSourceIds(Array.isArray(data) ? data : []);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Something went wrong");
+      // non-fatal — pickers will show everything if this fails
+    }
+  }, []);
+
+  const fetchMasters = () => {
+    const load = <T,>(
+      key: keyof typeof _mastersCache,
+      url: string,
+      setter: (v: T[]) => void,
+      setLd: (v: boolean) => void,
+      transform?: (r: any) => T[],
+    ) => {
+      if (_mastersCache[key]) {
+        setter(_mastersCache[key] as T[]);
+        return;
+      }
+      setLd(true);
+      apiFetch(url)
+        .then((r) => {
+          const list: T[] = transform
+            ? transform(r)
+            : Array.isArray(r)
+              ? r
+              : (r.data ?? []);
+          (_mastersCache as any)[key] = list;
+          setter(list);
+        })
+        .catch((err) => {
+          toast.error(
+            err instanceof Error ? err.message : "Something went wrong",
+          );
+        })
+        .finally(() => setLd(false));
+    };
+
+    _mastersCache.po = null;
+    _mastersCache.woPO = null;
+    // Only Service-type POs are eligible for a direct (no-GRN) invoice —
+    // goods always have to be received via a GRN first. Filtering happens
+    // server-side (see backend/services/invoiceLinking.js).
+    load("po", "/api/purchase-orders/service-eligible", setPoList, setLoadingPO);
+    _mastersCache.allPO = null;
+    load("allPO", "/api/purchase-orders?limit=500", setAllPOList, setLoadingAllPOs);
+    _mastersCache.workDone = null;
+    setLoadingWorkDone(true);
+    apiFetch("/api/engineering/work-done?status=Approved&limit=500")
+      .then((r: any) => {
+        const all: WorkDoneItem[] = Array.isArray(r) ? r : (r.data ?? []);
+        const list = all.filter(
+          (wd) => (wd.Status ?? "").toLowerCase() === "approved",
+        );
+        _mastersCache.workDone = list;
+        setWorkDoneList(list);
+      })
+      .catch((err: any) => {
+        console.error("Work Done fetch failed:", err?.message);
+        toast.error(
+          "Could not load Work Done list: " + (err?.message ?? "Unknown error"),
+        );
+      })
+      .finally(() => setLoadingWorkDone(false));
+    load<POItem>(
+      "woPO",
+      "/api/purchase-orders?limit=500",
+      setWoPOList,
+      setLoadingWOPO,
+      (r) => {
+        const all: POItem[] = Array.isArray(r) ? r : (r.data ?? []);
+        return all.filter(
+          (p) =>
+            p.SourceWOId != null ||
+            p.SourceWDId != null ||
+            p.POType === "WO_PO",
+        );
+      },
+    );
+    // Other Expenses only ever books against the "Direct Expense Booking"
+    // (DINV) document type now — the legacy REQ/ExB-ISS/ExB-PAY/FA rows that
+    // used to show here were leftover general-purpose doc types, not
+    // actually meant for this picker.
+    load<TodItem>("tod", "/api/document-type", setTodList, setLoadingTOD, (r) =>
+      (Array.isArray(r) ? r : []).filter((t) => (t as any).Prefix === "DINV"),
+    );
+
+    _mastersCache.grn = null;
+    setLoadingGRN(true);
+    apiFetch("/api/grns?limit=500")
+      .then((r) => {
+        const list: GRNItem[] = Array.isArray(r) ? r : (r?.data ?? []);
+        _mastersCache.grn = list;
+        setGrnList(list);
+      })
+      .catch((err: any) => {
+        console.error("GRN list fetch failed:", err?.message);
+        toast.error(
+          "Could not load GRN list: " + (err?.message ?? "Unknown error"),
+        );
+      })
+      .finally(() => setLoadingGRN(false));
+  };
+
+  useEffect(() => {
+    if (!selectedTod || !selectedDoc || selectedDoc.kind !== "TOD") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const qs = form.financialYear
+          ? `?finYear=${encodeURIComponent(form.financialYear)}`
+          : "";
+        const data = await apiFetch(
+          `/api/document-type/${selectedTod.TypeOfDocId}/next-number${qs}`,
+        );
+        if (cancelled) return;
+        const docNo =
+          data.nextDocNo ??
+          (selectedTod.FullPrefix ?? selectedTod.Prefix) + "/001";
+        setSelectedDoc((prev) => (prev ? { ...prev, docNo } : prev));
+        setForm((prev) => ({ ...prev, bookingReference: docNo }));
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.financialYear, selectedTod]);
+
+  // Re-fetch page 1 whenever a list filter changes — skips the very first
+  // render since the mount effect right below already fetches once.
+  const skipFirstFilterFetch = useRef(true);
+  useEffect(() => {
+    if (skipFirstFilterFetch.current) {
+      skipFirstFilterFetch.current = false;
+      return;
+    }
+    fetchRecords(1);
+  }, [finYearFilter, dateFromFilter, dateToFilter, companyFilter, projectFilter, debouncedDocNoFilter, vendorFilter, fetchRecords]);
+
+  useEffect(() => {
+    fetchRecords(1);
+    fetchBookedSources();
+    apiFetch("/api/enterprises/options?business_type=C")
+      .then((list: CompanyOption[]) => setCompanyOptions(list ?? []))
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/enterprises/options?business_type=P")
+      .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/enterprises/options?business_type=S")
+      .then((list: { id: number; label: string }[]) => setSuppliers(list ?? []))
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    // Invoices/expense bookings can be Payable To a Vendor, Supplier, or
+    // Landlord (all stored as LHeadType 'S'/'V', Landlord distinguished only
+    // by LHeadCategory) — so no excludeCategory here, unlike PO/GRN.
+    apiFetch("/api/account-head?type=S,V")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        }));
+        setSupplierHeads(heads);
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/account-head?type=C")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        }));
+        setContractorHeads(heads);
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/account-head?type=BR")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        }));
+        setBrokerHeads(heads);
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/account-head?type=A")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        }));
+        setCustomerHeads(heads);
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    // Partners (LHeadType='P', Partner Master) — each Partner has TWO
+    // heads sharing one LHeadName (Capital + Current Account); this route
+    // already prefers ISNULL(DisplayName, LHeadName), which disambiguates
+    // them (e.g. "Rajesh Sharma (Current Account)").
+    apiFetch("/api/account-head?type=P")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+          paymentTerms: h.LHeadPaymentTerms ?? null,
+        }));
+        setPartnerHeads(heads);
+      })
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/billing-terms")
+      .then((list: BillingTermOption[]) =>
+        setBillingTerms(
+          (Array.isArray(list) ? list : []).filter((t) => t.IsActive !== false),
+        ),
+      )
+      .catch((err) => {
+        toast.error(
+          err instanceof Error ? err.message : "Something went wrong",
+        );
+      });
+    apiFetch("/api/cost-center/options")
+      .then((list: CostCenterOption[]) =>
+        setCostCenterOptions(Array.isArray(list) ? list : []),
+      )
+      .catch(() => {});
+    // Finance Setup's Payment Terms master (Description/Days) — mapped into
+    // the {Id, TermName, CreditDays} shape this file already expects so the
+    // existing supplier-auto-match/dropdown logic below needs no changes.
+    apiFetch("/api/payment-terms/options")
+      .then((list: any) =>
+        setPaymentTermOptions(
+          Array.isArray(list)
+            ? list.map((t: any) => ({ Id: t.id, TermName: t.label, CreditDays: t.days }))
+            : [],
+        ),
+      )
+      .catch(() => {});
+  }, [fetchRecords]);
+
+  const set = <K extends keyof Omit<ExpenseRecord, "id">>(
+    field: K,
+    value: Omit<ExpenseRecord, "id">[K],
+  ) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  // Due Date tracks Payment Term's Days from a base date, recomputed live
+  // any time either changes — not just at the moment a supplier/term is
+  // first picked. Single source of truth for dueDate so editing the invoice
+  // date after the fact keeps it correct in real time.
+  //
+  // Base date prefers Vendor Invoice Date (the supplier's own invoice date)
+  // but falls back to Booking Date when no vendor invoice date has been
+  // entered yet — otherwise picking a Payment Term before filling in the
+  // (optional) vendor invoice date silently did nothing.
+  useEffect(() => {
+    const baseDateStr = form.vendorInvoiceDate || form.bookingDate;
+    if (!form.paymentTermId || !baseDateStr) return;
+    const term = paymentTermOptions.find((t) => t.Id === form.paymentTermId);
+    if (!term || term.CreditDays == null) return;
+    const base = new Date(baseDateStr);
+    if (isNaN(base.getTime())) return;
+    base.setDate(base.getDate() + term.CreditDays);
+    const next = base.toISOString().split("T")[0];
+    setForm((prev) => (prev.dueDate === next ? prev : { ...prev, dueDate: next }));
+  }, [form.paymentTermId, form.vendorInvoiceDate, form.bookingDate, paymentTermOptions]);
+
+  const resolveCostCenterForProject = useCallback(
+    (projectId?: number | null) => {
+      if (!projectId) return "";
+      const match = costCenterOptions.find(
+        (cc) => cc.projectId != null && Number(cc.projectId) === Number(projectId),
+      );
+      return match ? `${match.code} - ${match.label}` : "";
+    },
+    [costCenterOptions],
+  );
+
+  const applyDoc = (doc: SelectedDoc) => {
+    setSelectedDoc(doc);
+
+    // Multi-GRN combined invoices already carry their full merged
+    // grnItems/amount (computed by aggregateGRNsForInvoice before this
+    // was called) — skip the single-GRN refetch below, which would
+    // otherwise overwrite the combined totals with just the primary GRN's.
+    // computeGrnBd() (the actual GRN price-breakdown math) reads gstBreakdown,
+    // not form.cgstRate/sgstRate, so build a synthetic breakdown from the
+    // merged items' own per-item GST amounts instead of resolveGstRates.
+    if (doc.kind === "GRN" && doc.linkedGrnIds && doc.linkedGrnIds.length > 1) {
+      const items = doc.grnItems ?? [];
+      const totalBase = items.reduce(
+        (s, i) => s + (Number(i.receivedQty) || 0) * (Number(i.rate) || 0),
+        0,
+      );
+      const totalGST = items.reduce(
+        (s, i) => s + (Number((i as any).gstAmount) || 0),
+        0,
+      );
+      setGstBreakdown({
+        items,
+        totals: {
+          totalBase,
+          totalCGST: totalGST / 2,
+          totalSGST: totalGST / 2,
+          totalGST,
+          totalInclGST: totalBase + totalGST,
+        },
+      } as any);
+
+      // The linked PO's own CostCenterId (fetched in applyMultiGRNDoc) is
+      // the authoritative source — only guess from the project when the PO
+      // itself has none set.
+      const mAutoCostCenter =
+        doc.costCenterLabel || resolveCostCenterForProject(doc.projectId);
+      setForm((prev) => {
+        const linkedSupplier = linkSupplierToInvoice(doc, {
+          supplier: prev.supplier,
+          supplierLHeadId: prev.supplierLHeadId ?? null,
+        });
+        return {
+          ...prev,
+          // GST rates — fetched from the linked PO's line items when
+          // available (applyMultiGRNDoc), else the merged GRN items'
+          // own rates. Stored on the booking so the list's CGST/SGST
+          // columns show something other than 0%.
+          cgstRate: doc.derivedCgstRate ?? prev.cgstRate,
+          sgstRate: doc.derivedSgstRate ?? prev.sgstRate,
+          igstRate: doc.derivedIgstRate ?? prev.igstRate,
+          bookingReference: doc.docNo,
+          bookingName: doc.nameLabel ?? prev.bookingName,
+          basicAmount: totalBase > 0 ? totalBase : (doc.amount ?? prev.basicAmount),
+          companyId: doc.companyId ?? prev.companyId,
+          projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
+          ...linkedSupplier,
+          costCenter: mAutoCostCenter || prev.costCenter,
+          paymentTermId: doc.paymentTermId ?? prev.paymentTermId,
+          materialCategory: "GRN",
+        };
+      });
+      return;
+    }
+
+    if (doc.kind === "GRN") {
+      setSelectedDoc({ ...doc, grnItems: [] });
+      setGstBreakdown(null);
+      setGrnItemsLoading(true);
+      apiFetch(`/api/grns/${doc.sourceId}`)
+        .then((r: any) => {
+          const items = parseGRNItemsFromRaw(r.GRNItems);
+          const rawDocNo: string = r.GRNNo || r.DocNo || doc.docNo;
+          const canonicalDocNo = rawDocNo
+            ? rawDocNo.startsWith("GRN-")
+              ? rawDocNo
+              : `GRN-${rawDocNo}`
+            : rawDocNo;
+          // Basic amount = sum of (receivedQty * rate) per item — qty × rate only, no GST
+          const qtyRateTotal =
+            Math.round(
+              items.reduce(
+                (s, i) =>
+                  s + (Number(i.receivedQty) || 0) * (Number(i.rate) || 0),
+                0,
+              ) * 100,
+            ) / 100;
+          const grnTotal =
+            Math.round((parseFloat(r.TotalAmount) || 0) * 100) / 100;
+          setSelectedDoc((prev) =>
+            prev && prev.kind === "GRN" && prev.sourceId === doc.sourceId
+              ? {
+                  ...prev,
+                  docNo: canonicalDocNo,
+                  grnItems: items,
+                  amount: grnTotal,
+                }
+              : prev,
+          );
+          if (items.length === 0)
+            toast.info("This GRN has no item lines recorded against it.");
+
+          // The linked PO's own CostCenterId/PaymentTermId are the
+          // authoritative source for a single-GRN pick too — this branch
+          // used to skip Cost Centre entirely (only applyMultiGRNDoc
+          // fetched it) and never touched Payment Term at all. Cost Centre
+          // falls back to a project-name match, same as the multi-GRN path;
+          // Payment Term has no fallback — left blank if the PO has none.
+          const applyCostCenterAndTerm = async () => {
+            let poCostCenterLabel: string | null = null;
+            let poPaymentTermId: number | null = null;
+            if (r.POID) {
+              try {
+                const po = await apiFetch(`/api/purchase-orders/${r.POID}`);
+                if (po?.CostCenterId) poCostCenterLabel = po.CostCenterName ?? null;
+                if (po?.PaymentTermId) poPaymentTermId = po.PaymentTermId;
+              } catch {
+                /* non-fatal: keep the project-match fallback */
+              }
+            }
+            setForm((prev) => ({
+              ...prev,
+              costCenter:
+                poCostCenterLabel ||
+                resolveCostCenterForProject(doc.projectId) ||
+                prev.costCenter,
+              paymentTermId: poPaymentTermId ?? prev.paymentTermId,
+            }));
+          };
+          applyCostCenterAndTerm();
+
+          // Fetch GST breakdown — back-calculates base/tax per item using Item_Master_Group HSN rates
+          return apiFetch(`/api/grns/${doc.sourceId}/gst-breakdown`)
+            .then((bd: any) => {
+              setGstBreakdown(bd);
+              // Basic amount is always qty × rate (no GST), regardless of breakdown
+              const basicAmt =
+                qtyRateTotal > 0 ? qtyRateTotal : grnTotal > 0 ? grnTotal : 0;
+              setForm((prev) => ({
+                ...prev,
+                bookingReference: canonicalDocNo,
+                basicAmount: basicAmt,
+              }));
+            })
+            .catch(() => {
+              const basicAmt =
+                qtyRateTotal > 0 ? qtyRateTotal : grnTotal > 0 ? grnTotal : 0;
+              setForm((prev) => ({
+                ...prev,
+                bookingReference: canonicalDocNo,
+                basicAmount: basicAmt,
+              }));
+            });
+        })
+        .catch((err: any) => {
+          toast.error(
+            "Could not load GRN items: " +
+              (err?.message ?? "Unknown error") +
+              ". Check that the /api/grns/:id endpoint is deployed.",
+          );
+        })
+        .finally(() => setGrnItemsLoading(false));
+    }
+
+    const { cgst, sgst, igst } = resolveGstRates(
+      doc,
+      form.cgstRate,
+      form.sgstRate,
+      form.igstRate ?? 0,
+    );
+    // The linked PO/WO_PO's own CostCenterId is authoritative — only
+    // guess one from the project when the doc itself has none set (e.g.
+    // TOD/direct bookings, which have no PO to inherit from).
+    const autoCostCenter =
+      doc.costCenterLabel || resolveCostCenterForProject(doc.projectId);
+    setForm((prev) => {
+      const linkedSupplier = linkSupplierToInvoice(doc, {
+        supplier: prev.supplier,
+        supplierLHeadId: prev.supplierLHeadId ?? null,
+      });
+      return {
+        ...prev,
+        bookingReference: doc.docNo,
+        // Other Expenses (TOD) bookings have no descriptive source document —
+        // name them by their supplier instead of the generic doc-type label.
+        // PO/WO/GRN-linked bookings keep using the source doc's own label.
+        bookingName:
+          doc.kind === "TOD"
+            ? linkedSupplier.supplier
+              ? `Payment for ${linkedSupplier.supplier}`
+              : prev.bookingName
+            : (doc.nameLabel ?? prev.bookingName),
+        basicAmount:
+          doc.kind === "GRN"
+            ? prev.basicAmount
+            : doc.kind === "PO" || doc.kind === "WO_PO"
+              ? (doc.subtotal ?? doc.amount ?? prev.basicAmount)
+              : (doc.amount ?? prev.basicAmount),
+        companyId: doc.companyId ?? prev.companyId,
+        projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
+        ...linkedSupplier,
+        costCenter: autoCostCenter || prev.costCenter,
+        // TOD/Other Expense bookings have no PO to inherit a term from —
+        // doc.paymentTermId is only ever set for PO/GRN-linked docs, so
+        // this keeps whatever the user already picked in the Payment Term
+        // dropdown instead of silently clearing it when switching sources.
+        paymentTermId: doc.paymentTermId ?? prev.paymentTermId,
+        materialCategory:
+          doc.kind === "PO"
+            ? "PO"
+            : doc.kind === "WORK_DONE"
+              ? "WORK_DONE"
+              : doc.kind === "WO_PO"
+                ? "WO_PO"
+                : doc.kind === "GRN"
+                  ? "GRN"
+                  : doc.docNo.split("/")[0],
+        cgstRate: cgst,
+        sgstRate: sgst,
+        igstRate: igst,
+        workDoneRef:
+          doc.kind === "WORK_DONE"
+            ? doc.docNo
+            : doc.kind === "WO_PO" && (doc as any).sourceWDDocNo
+              ? (doc as any).sourceWDDocNo
+              : undefined,
+      };
+    });
+  };
+
+  // ── Combine multiple GRNs (same PO) into one invoice — the second way to
+  // link GRNs, alongside picking one at a time. Uses grnList's already-
+  // loaded data (GRNItems/TotalAmount), no refetch needed.
+  const applyMultiGRNDoc = async (grns: GRNItem[]) => {
+    const agg = aggregateGRNsForInvoice(grns);
+    if (!agg.valid) {
+      toast.error(agg.error || "Can't combine these GRNs.");
+      return;
+    }
+    const ordered = [...grns].sort((a, b) => a.GRNID - b.GRNID);
+    const primary = ordered[0];
+
+    // GST rates for a combined invoice come from the linked PO's own line
+    // items (the authoritative HSN-driven rate) rather than back-derived
+    // from the GRNs' item totals — falls back to the GRN-derived rate
+    // (agg.cgstRate/sgstRate) if the PO can't be fetched.
+    let cgstRate = agg.cgstRate;
+    let sgstRate = agg.sgstRate;
+    let igstRate = 0;
+    let poCostCenterLabel: string | null = null;
+    let poPaymentTermId: number | null = null;
+    if (agg.poId) {
+      try {
+        const po = await apiFetch(`/api/purchase-orders/${agg.poId}`);
+        const {
+          cgstRate: poCgst,
+          sgstRate: poSgst,
+          igstRate: poIgst,
+        } = derivePOGst(po?.POItems ?? []);
+        if (poIgst > 0) {
+          cgstRate = 0;
+          sgstRate = 0;
+          igstRate = poIgst;
+        } else if (poCgst > 0 || poSgst > 0) {
+          cgstRate = poCgst;
+          sgstRate = poSgst;
+        }
+        if (po?.CostCenterId) poCostCenterLabel = po.CostCenterName ?? null;
+        if (po?.PaymentTermId) poPaymentTermId = po.PaymentTermId;
+      } catch (err) {
+        // Non-fatal: keep the GRN-derived fallback rate — but this used to
+        // fail silently, making a broken PO cost-centre fetch look like
+        // "the PO just has no cost centre" instead of a real error.
+        console.warn("Failed to fetch PO for cost centre/GST:", err);
+      }
+    }
+
+    applyDoc({
+      kind: "GRN",
+      docNo: agg.grnDocNos.join(" + "),
+      sourceId: agg.grnIds[0],
+      vendorLabel: agg.supplierLabel ?? primary.SupplierName,
+      status: "Approved",
+      date: primary.GRNDate,
+      nameLabel: agg.poNo ? `Combined GRNs — PO ${agg.poNo}` : "Combined GRNs",
+      grnItems: agg.items,
+      amount: agg.totalAmount,
+      subtotal: agg.basicAmount,
+      derivedCgstRate: cgstRate,
+      derivedSgstRate: sgstRate,
+      derivedIgstRate: igstRate,
+      costCenterLabel: poCostCenterLabel,
+      paymentTermId: poPaymentTermId,
+      projectId: primary.ProjectId,
+      companyId: primary.CompanyId,
+      gst:
+        typeof primary.ParentGST === "string"
+          ? (() => {
+              try {
+                return JSON.parse(primary.ParentGST!);
+              } catch {
+                return null;
+              }
+            })()
+          : (primary.ParentGST ?? null),
+      linkedGrnIds: agg.grnIds,
+      linkedGrnDocNos: agg.grnDocNos,
+    });
+    toast.success(
+      `Combined ${agg.grnIds.length} GRNs into one invoice — total ₹${agg.totalAmount.toLocaleString("en-IN")}`,
+    );
+  };
+
+  const clearDoc = () => {
+    setSelectedDoc(null);
+    setSelectedTod(null);
+    setGrnItemsLoading(false);
+    setGstBreakdown(null);
+    setForm((prev) => ({
+      ...prev,
+      bookingReference: "",
+      basicAmount: 0,
+      supplier: "",
+      supplierLHeadId: null,
+      // These are all set unconditionally from the selected doc in
+      // applyDoc (no "keep previous" fallback), so they're just as stale
+      // as bookingReference once the doc is cleared — bookingName was the
+      // visibly reported case, but cgst/sgst/igst and cost centre are the
+      // same bug: silently wrong GST/cost-centre data left over from the
+      // previous document if the user then saves as a manual entry.
+      bookingName: "",
+      cgstRate: 0,
+      sgstRate: 0,
+      igstRate: 0,
+      costCenter: "",
+      materialCategory: "",
+      workDoneRef: undefined,
+    }));
+  };
+
+  const resetForm = () => {
+    setEditingId(null);
+    setForm(blankForm());
+    setGstEnabled(false);
+    setGstMode("cgst_sgst");
+    setApprovalTrail(undefined);
+    setSelectedDoc(null);
+    setSelectedTod(null);
+    setLiveEmiSchedule(null);
+    setPreviewRecord(null);
+  };
+
+  const openNew = () => {
+    resetForm();
+    setForm({ ...blankForm(), financialYear: activeFinYears[0]?.year || "" });
+    _mastersCache.grn = null;
+    fetchMasters();
+    setView("form");
+  };
+
+  const openEditForm = async (rec: ExpenseRecord) => {
+    if (!rec.id) return;
+    setPreviewRecord(null);
+    _mastersCache.grn = null;
+    fetchMasters();
+    try {
+      const row = await apiFetch(`${API}/${rec.id}`);
+      const loaded = dbToRecord(row);
+      setForm(loaded);
+      // selectedDoc is normally only populated by picking a document in the
+      // panel above (applyDoc) — on edit-load nothing sets it, so isDirect/
+      // isGRN/isPOorWO all silently misclassify and every block gated on
+      // `selectedDoc?.kind === "TOD"` (the TDS field, Direct Items, Expense
+      // Head allocation) vanishes even for a plain Direct/TOD booking. Only
+      // reconstruct it for TOD here — GRN/PO/WORK_DONE edits don't drive any
+      // of those TOD-only blocks and aren't part of this fix.
+      setSelectedDoc(
+        loaded.eSourceType === "TOD"
+          ? { kind: "TOD", docNo: loaded.bookingReference || "", sourceId: loaded.eSourceId ?? 0 }
+          : null,
+      );
+      setEditingId(String(rec.id));
+      setView("form");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Failed to load booking for editing.",
+      );
+    }
+  };
+
+  const requestDelete = async (id: string) => {
+    try {
+      const result = await apiFetch(`${API}/${id}/can-delete`);
+      if (!result.deletable) {
+        if (result.reason === "brs_cleared") {
+          setDeleteBlockInfo({
+            reason: "brs_cleared",
+            clearedPayments: result.clearedPayments,
+          });
+          return;
+        }
+        if (result.reason === "has_payments") {
+          setDeleteBlockInfo({
+            reason: "has_payments",
+            linkedPayments: result.linkedPayments,
+          });
+          return;
+        }
+        // Debit note or generic block
+        setDeleteBlockInfo({ reason: "debit_note" });
+        toast.error(result.reason || "This booking cannot be deleted.");
+        return;
+      }
+      setDeleteId(id);
+    } catch (err: any) {
+      toast.error(
+        err.message || "Could not verify whether this booking can be deleted.",
+      );
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await apiFetch(`${API}/${id}`, { method: "DELETE" });
+      toast.success("Expense booking deleted.");
+      setDeleteId(null);
+      await fetchRecords(page);
+      fetchBookedSources();
+    } catch (err: any) {
+      setDeleteId(null);
+      toast.error(err.message || "Failed to delete booking.");
+    }
+  };
+
+  const cancelForm = () => {
+    setView("list");
+    resetForm();
+  };
+
+  const disableEmi = async () => {
+    if (!editingId) return;
+    try {
+      const result = await apiFetch(`${API}/${editingId}/emi-toggle`, {
+        method: "PUT",
+        body: JSON.stringify({ enabled: false, deleteUnpaid: true }),
+      });
+      const ref =
+        result?.lumpSum?.docNo ||
+        (result?.lumpSum ? `#${result.lumpSum.id}` : null);
+      if (ref) {
+        toast.success(
+          `EMI disabled. Remaining balance created as new booking ${ref}. This booking has been reset to Draft for re-approval.`,
+          { duration: 8000 },
+        );
+      } else {
+        toast.success(
+          "EMI disabled. Booking reset to Draft — please resubmit for approval.",
+          { duration: 6000 },
+        );
+      }
+      cancelForm();
+      await fetchRecords(page);
+      fetchBookedSources();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to disable EMI for this booking.");
+    }
+  };
+
+
+  const handleSave = async () => {
+    if (saveInFlight.current) return;
+
+    if (!form.bookingReference.trim()) {
+      toast.error("Please select a document (PO, WO, or Doc Type) first.");
+      return;
+    }
+    if (!form.bookingDate) {
+      toast.error("Booking date is required.");
+      return;
+    }
+    if (form.dueDate && form.bookingDate && form.dueDate < form.bookingDate) {
+      toast.error("Due date cannot be before the booking date.");
+      return;
+    }
+    if (!form.companyId) {
+      toast.error("Please select a company.");
+      return;
+    }
+    if (form.emi.enabled && !form.paymentType) {
+      toast.error("Payment type is required for EMI bookings.");
+      return;
+    }
+    if (
+      selectedDoc?.kind !== "GRN" &&
+      (!form.basicAmount || form.basicAmount <= 0)
+    ) {
+      toast.error("Basic amount is required and must be greater than 0.");
+      return;
+    }
+    // For GRN bookings: use the shared computeGrnBd() which handles active billing
+    // terms split by pre/post-GST, producing correct net with real GST amounts.
+    const bd =
+      selectedDoc?.kind === "GRN"
+        ? computeGrnBd(form.basicAmount, form.billingTerms, gstBreakdown)
+        : computeBreakdown(
+            form.basicAmount,
+            form.cgstRate,
+            form.sgstRate,
+            form.billingTerms && form.billingTerms.length > 0
+              ? form.billingTerms
+              : form.discount,
+            form.igstRate ?? 0,
+          );
+
+    // Expense Head allocations (direct/TOD bookings only) — at least one
+    // row is now mandatory (a DINV must always debit a real Expense Head,
+    // never fall back to the generic Purchase A/C, which is reserved for
+    // the PO/GRN flow — see the backend post-to-gl fallback branch) and
+    // rows must add up to the invoice's net amount, same check the backend
+    // re-runs, but catching it here avoids a round trip.
+    if (isDirectPartyMode) {
+      if ((form.expenseHeadAllocations?.length ?? 0) === 0) {
+        toast.error("At least one Expense Head is required for this invoice.");
+        return;
+      }
+      const allocSum = Math.round(
+        (form.expenseHeadAllocations ?? []).reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100,
+      ) / 100;
+      const target = Math.round(bd.netAmount * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        toast.error(
+          `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the invoice total (₹${target.toFixed(2)}).`,
+        );
+        return;
+      }
+      if ((form.expenseHeadAllocations ?? []).some((r) => !r.lHeadId)) {
+        toast.error("Every Expense Head row needs a ledger selected.");
+        return;
+      }
+    }
+
+    // Partial payment (EMI) — EMI is generated against the remaining balance
+    // after the up-front partial amount, not the full net payable.
+    const emiBaseAmountForSave =
+      form.paymentType === "partial"
+        ? Math.max(0, bd.netAmount - (form.partialAmount ?? 0))
+        : bd.netAmount;
+
+    let emiForSave = { ...form.emi };
+    if (
+      !isEditing &&
+      form.emi.enabled &&
+      form.emi.installmentCount > 0 &&
+      form.emi.startDate
+    ) {
+      const freshSchedule = generateEmiSchedule(
+        emiBaseAmountForSave,
+        form.emi.installmentCount,
+        form.emi.startDate,
+        form.bookingReference,
+      );
+      emiForSave = { ...form.emi, schedule: freshSchedule };
+    }
+
+    const body = {
+      ...recordToDb(
+        { ...form, emi: emiForSave },
+        bd.netAmount,
+        selectedDoc?.kind === "TOD" ? (selectedDoc.sourceId ?? null) : null,
+      ),
+      // A party picked straight from Payable Party with nothing linked
+      // never sets selectedDoc (see the Select's onValueChange above, which
+      // deliberately leaves it alone) — still a direct/"Other Expenses"
+      // booking as far as the backend's own ESourceType='TOD' convention
+      // goes (see openEditForm's reverse mapping on load).
+      ESourceType: selectedDoc?.kind ?? (isDirectPartyMode ? "TOD" : null),
+      ESourceId: selectedDoc?.sourceId ?? null,
+      // Present only when multiple GRNs (same PO) were combined into this
+      // one invoice — see ExpenseBooking/invoiceLinking.ts.
+      ...(selectedDoc?.linkedGrnIds && selectedDoc.linkedGrnIds.length > 1
+        ? { linkedGrnIds: selectedDoc.linkedGrnIds }
+        : {}),
+    };
+    saveInFlight.current = true;
+    setSaving(true);
+
+    try {
+      if (isEditing) {
+        if (!editingId) throw new Error("Missing booking id for update.");
+        await apiFetch(
+          `${API}/${editingId}`,
+          {
+            method: "PUT",
+            body: JSON.stringify(body),
+          },
+          30000,
+        );
+        toast.success("Expense booking updated.");
+        setSaved(true);
+        await fetchRecords(page);
+        fetchBookedSources();
+        setTimeout(() => {
+          setSaved(false);
+          cancelForm();
+        }, 1500);
+      } else {
+        const result = await apiFetch(
+          API,
+          {
+            method: "POST",
+            body: JSON.stringify(body),
+          },
+          30000,
+        );
+        toast.success(
+          `Expense booking created and sent for approval — Ref: ${result?.docNo || form.bookingReference}`,
+        );
+
+        setSaved(true);
+        await fetchRecords(page);
+        fetchBookedSources();
+        setTimeout(() => {
+          setSaved(false);
+          cancelForm();
+        }, 1500);
+      }
+    } catch (err: any) {
+      toast.error("Save failed: " + err.message);
+    } finally {
+      setSaving(false);
+      saveInFlight.current = false;
+    }
+  };
+
+  const isGRN = selectedDoc?.kind === "GRN";
+
+  const bd =
+    selectedDoc?.kind === "GRN"
+      ? computeGrnBd(form.basicAmount, form.billingTerms, gstBreakdown)
+      : computeBreakdown(
+          form.basicAmount,
+          form.cgstRate,
+          form.sgstRate,
+          form.billingTerms && form.billingTerms.length > 0
+            ? form.billingTerms
+            : form.discount,
+          form.igstRate ?? 0,
+        );
+
+  // Partial payment (EMI) — EMI is generated against the remaining balance
+  // after the up-front partial amount, not the full net payable.
+  const emiBaseAmount =
+    form.paymentType === "partial"
+      ? Math.max(0, bd.netAmount - (form.partialAmount ?? 0))
+      : bd.netAmount;
+
+  const filteredRecords = records.filter((r) => {
+    if (statusFilter && statusFilter !== "All" && r.status !== statusFilter)
+      return false;
+    return true;
+  });
+  const totalNet = records.reduce((sum, r) => {
+    if (r.status === "Draft") return sum;
+    // GRN-linked records: recompute from grnTotalAmount + billing terms with
+    // correct pre/post-GST split (avoids stale ENetAmount from DB).
+    if (r.eSourceType === "GRN" && r.grnTotalAmount != null) {
+      const terms =
+        r.billingTerms && r.billingTerms.length > 0
+          ? r.billingTerms
+          : r.discount
+            ? [r.discount]
+            : [];
+      return (
+        sum + computeGrnNetWithTerms(r.grnTotalAmount, terms, r.basicAmount)
+      );
+    }
+    const bd = computeBreakdown(
+      r.basicAmount,
+      r.cgstRate,
+      r.sgstRate,
+      r.billingTerms && r.billingTerms.length > 0 ? r.billingTerms : r.discount,
+      r.igstRate ?? 0,
+    );
+    return sum + bd.netAmount;
+  }, 0);
+  const approvedCount =
+    statusCounts["Approved"] ??
+    records.filter((r) => r.status === "Approved").length;
+  const pendingCount =
+    statusCounts["Pending"] ??
+    records.filter((r) => r.status === "Pending").length;
+  const emiCount = records.filter((r) => r.emi?.enabled).length;
+  const vendorLabel = selectedDoc?.vendorLabel
+    ? selectedDoc.kind === "WORK_DONE"
+      ? "Contractor"
+      : "Supplier / Vendor"
+    : "Payable To";
+  const isPOorWO =
+    selectedDoc?.kind === "PO" ||
+    selectedDoc?.kind === "WORK_DONE" ||
+    selectedDoc?.kind === "WO_PO";
+  /** True when the booking is a direct / Other-Expenses (TOD) entry with no linked source doc. */
+  const isDirect = !isGRN && !isPOorWO;
+  // True once a direct booking actually has a party picked — whether that
+  // came from a formal "Other Expenses" template pick first (selectedDoc
+  // already {kind:"TOD"}) or straight from the Payable Party field with no
+  // document selected at all (selectedDoc still null). Gates TDS, the
+  // Direct Items table, and Expense Head Allocation — using selectedDoc's
+  // kind alone here would leave all three permanently hidden for a party
+  // picked without ever going through the template list, since nothing else
+  // sets selectedDoc to "TOD" for that flow.
+  const isDirectPartyMode =
+    isDirect && (selectedDoc?.kind === "TOD" || (!selectedDoc && !!form.supplierLHeadId));
+
+  // Re-preview the booking reference when Year is changed on an EXISTING
+  // direct/TOD booking. The create-time effect below (keyed on selectedTod)
+  // only ever fires while picking a fresh "Other Expenses" template — it
+  // never runs on edit, because openEditForm has no template to restore
+  // (only the resulting docNo is stored, not which TypeOfDoc generated it).
+  // So editing FY 2025-2026 -> 2026-2027 silently kept the old year's
+  // number. Uses the record's own EDocTypeId (loaded via dbToRecord) instead
+  // of selectedTod. Skipped once Approved — a payment/on-account/debit-note
+  // reference may already point at the current bookingReference string, and
+  // renumbering would silently orphan it (nothing else in this app updates
+  // those references when EDocNo changes).
+  const editOriginalFinYearRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isEditing) editOriginalFinYearRef.current = form.financialYear;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingId]);
+  useEffect(() => {
+    if (!isEditing || !isDirectPartyMode || !form.docTypeId) return;
+    if (form.status === "Approved") return;
+    if (form.financialYear === editOriginalFinYearRef.current) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const qs = form.financialYear
+          ? `?finYear=${encodeURIComponent(form.financialYear)}`
+          : "";
+        const data = await apiFetch(`/api/document-type/${form.docTypeId}/next-number${qs}`);
+        if (cancelled || !data.nextDocNo) return;
+        setForm((prev) => ({ ...prev, bookingReference: data.nextDocNo }));
+        toast.info(`Booking reference updated to ${data.nextDocNo} for the new financial year`);
+      } catch (err) {
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : "Could not generate a booking reference for the new financial year",
+        );
+      }
+    })();
+    editOriginalFinYearRef.current = form.financialYear;
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.financialYear, isEditing, isDirectPartyMode, form.docTypeId, form.status]);
+
+  // TDS eligibility — live-checked as the direct/TOD form fills in. Scoped
+  // to direct bookings only: GRN/PO/WORK_DONE-sourced bookings don't carry
+  // a resolved supplier LHeadId client-side to check against (their
+  // supplier only exists as a display label until the source document is
+  // actually saved against) — the backend itself is source-type agnostic,
+  // this is purely a frontend UI gap for a later pass.
+  const tdsSupplierId = (form as any).supplierLHeadId as number | null | undefined;
+  useEffect(() => {
+    if (!isDirectPartyMode || !tdsSupplierId || !form.companyId) {
+      setTdsEligibility(null);
+      return;
+    }
+    let cancelled = false;
+    const qs = new URLSearchParams({
+      supplierId: String(tdsSupplierId),
+      companyId: String(form.companyId),
+      amount: String(form.basicAmount || 0),
+    });
+    if (form.bookingDate) qs.set("date", form.bookingDate);
+    apiFetch(`${API}/tds-eligibility?${qs.toString()}`)
+      .then((data: any) => {
+        if (!cancelled) setTdsEligibility(data);
+      })
+      .catch(() => {
+        if (!cancelled) setTdsEligibility(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDirectPartyMode, tdsSupplierId, form.companyId, form.basicAmount, form.bookingDate]);
+
+  // Keep form.tdsAmount live — it used to only be set once, inside the TDS
+  // <select>'s onChange, so editing the basic amount (or anything else that
+  // moves bd.netAmount) AFTER a TDS record was already picked left the
+  // shown TDS amount frozen at its old value instead of tracking the
+  // invoice in real time.
+  useEffect(() => {
+    if (!form.tdsId || form.tdsPercentage == null) return;
+    const recalculated = calculateTdsPreview(form.basicAmount, form.tdsPercentage);
+    if (recalculated !== form.tdsAmount) set("tdsAmount", recalculated);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.tdsId, form.tdsPercentage, form.basicAmount]);
+
+  const { bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds } =
+    useMemo(() => {
+      const editingIdNum = editingId ? parseInt(editingId, 10) : null;
+      const bookedPOIds = new Set<number>();
+      const bookedWorkDoneIds = new Set<number>();
+      const bookedWOPOIds = new Set<number>();
+      const bookedGRNIds = new Set<number>();
+
+      for (const r of bookedSourceIds) {
+        if (editingIdNum && r.Eid === editingIdNum) continue;
+        if (r.ESourceType === "PO") bookedPOIds.add(r.ESourceId);
+        if (r.ESourceType === "WORK_DONE") bookedWorkDoneIds.add(r.ESourceId);
+        if (r.ESourceType === "WO_PO") bookedWOPOIds.add(r.ESourceId);
+        if (r.ESourceType === "GRN") bookedGRNIds.add(r.ESourceId);
+      }
+      return { editingIdNum, bookedPOIds, bookedWorkDoneIds, bookedWOPOIds, bookedGRNIds };
+    }, [bookedSourceIds, editingId]);
+
+  const showDocSection = !!form.companyId;
+
+  // "Filter by PO" dropdown — all Approved/Received POs (goods + services),
+  // narrowed to match whatever company/project/finYear/supplier the user has
+  // already selected. Does NOT restrict to service-eligible only (that is
+  // the job of the "PO" tab inside DocSelectorPanel).
+  const filteredAllPOs = useMemo(() => {
+    const companyId   = form.companyId   ? Number(form.companyId)   : null;
+    const projectId   = form.projectSite ? Number(form.projectSite) : null;
+    // Derive year tokens from selected finYear label, e.g. "FY 2026-27" → ["26","27"]
+    const fyTokens    = form.financialYear
+      ? (form.financialYear.match(/\d{2,4}/g) || []).map((s: string) => s.slice(-2))
+      : null;
+
+    return allPOList.filter((po: any) => {
+      // Must be Approved or Received
+      if (po.Status !== "Approved" && po.Status !== "Received") return false;
+      // Company match
+      if (companyId && po.CompanyId && Number(po.CompanyId) !== companyId) return false;
+      // Project match
+      if (projectId && po.ProjectId && Number(po.ProjectId) !== projectId) return false;
+      // Financial year — match any year token against the PO's DocNo tokens
+      if (fyTokens?.length) {
+        const docTokens = ((po.DocNo || po.PurchaseOrderNo || "").match(/\d{2,4}/g) || []).map(
+          (s: string) => s.slice(-2)
+        );
+        if (!docTokens.some((t: string) => fyTokens.includes(t))) return false;
+      }
+      // Supplier — match by ID (supplierLHeadId ↔ po.SupplierID) so name
+      // string differences between the two data sources don't break the filter
+      const supplierHeadId = (form as any).supplierLHeadId
+        ? Number((form as any).supplierLHeadId)
+        : null;
+      if (supplierHeadId && po.SupplierID && Number(po.SupplierID) !== supplierHeadId) return false;
+      return true;
+    });
+  }, [allPOList, form.companyId, form.projectSite, form.financialYear, (form as any).supplierLHeadId]);
+
+  // Drop a stale PO filter selection once it no longer matches the current
+  // company/project/finYear filters, instead of silently continuing to
+  // filter the GRN tab by a PO the dropdown no longer shows as selected.
+  useEffect(() => {
+    if (filterPOId != null && !filteredAllPOs.some((po: any) => po.PurchaseOrderID === filterPOId)) {
+      setFilterPOId(null);
+    }
+  }, [filterPOId, filteredAllPOs]);
+
+  // ── Import/Export handlers ────────────────────────────────────────────────────
+  const handleDownloadTemplate = () => {
+    exportToCsv([], INVOICE_TEMPLATE_COLUMNS, "invoice-template");
+  };
+  const handleImportClick = () => { importFileInputRef.current?.click(); };
+  const handleImportFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = "";
+    setImporting(true);
+    try {
+      const text = await file.text();
+      const rows = parseCsv(text);
+      if (!rows.length) { toast.error("CSV is empty"); return; }
+      toast.info("CSV import is not available yet. Please add records manually for now.");
+      return;
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to parse CSV");
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  return (
+    <>
+      <Breadcrumbs items={["Dashboard", "Finance", "Invoice"]} />
+      <FinanceShell
+        title="Invoice"
+        subtitle="Book expenses against purchase orders, confirmed work done, or invoice documents"
+        icon={Receipt}
+        action={
+          view === "list" ? (
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <input ref={importFileInputRef} type="file" accept=".csv" onChange={handleImportFileChange} className="hidden" />
+              <ExportMenu
+                data={filteredRecords as unknown as Record<string, unknown>[]}
+                fetchData={fetchAllRecordsForExport}
+                columns={INVOICE_EXPORT_COLUMNS}
+                title="Invoice"
+                filename="invoice"
+                disabled={filteredRecords.length === 0 || !rights.canExport}
+              />
+              <button
+                onClick={handleDownloadTemplate}
+                title="Download a blank CSV template"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all"
+              >
+                <Download size={13} />
+                <span className="hidden sm:inline">Download Template</span>
+              </button>
+              <button
+                onClick={handleImportClick}
+                disabled={importing}
+                title="Import from CSV"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
+              </button>
+              {rights.canCreate && (
+                <Button
+                  onClick={openNew}
+                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 transition-all"
+                >
+                  <Plus size={13} /> New Invoice
+                </Button>
+              )}
+            </div>
+          ) : undefined
+        }
+      >
+        {/* Form View */}
+        {view === "form" && (
+          <Card className="border-border shadow-sm" onKeyDown={preventEnterSubmit}>
+            <div className="relative overflow-hidden flex items-center justify-between gap-3 px-5 sm:px-6 py-3.5 bg-indigo-500/[0.06] border-b border-indigo-500/20">
+              <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-indigo-500 to-transparent" />
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  type="button"
+                  onClick={cancelForm}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                >
+                  <ArrowLeft size={15} />
+                  <span className="hidden sm:inline">Back</span>
+                </button>
+                <span className="text-indigo-500/40">|</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-indigo-500/[0.18] border border-indigo-500/30 shrink-0">
+                    <Receipt size={12} className="text-indigo-400" />
+                  </div>
+                  <h2 className="text-sm font-heading font-bold text-foreground truncate">
+                    {isEditing ? "Edit Invoice" : "New Invoice"}
+                  </h2>
+                  {form.bookingReference && (
+                    <span className="hidden sm:inline font-mono text-xs bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20 px-2 py-0.5 rounded-md shrink-0">
+                      {form.bookingReference}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <CardContent className="pt-6 space-y-7 px-5 sm:px-6">
+              {/* ── 0. Booking Information ─────────────────────────────── */}
+              <div className="space-y-4">
+                <SectionHeader label="Booking Information" />
+
+                {/* ── Sub-section: Party & Project ── */}
+                <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-6 h-6 rounded-md bg-indigo-500/10 flex items-center justify-center shrink-0">
+                      <SlidersHorizontal size={12} className="text-indigo-500" />
+                    </div>
+                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">
+                      Party &amp; Project
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                    <div className="space-y-1.5">
+                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                        <Building2 size={11} className="shrink-0" />
+                        Company
+                        <span className="text-destructive">*</span>
+                      </p>
+                      <Select
+                        value={form.companyId ? String(form.companyId) : ""}
+                        onValueChange={(val) => {
+                          const nextCompanyId = val ? parseInt(val, 10) : null;
+                          // A project belongs to one company — switching
+                          // company to a different one leaves the previous
+                          // project selection pointing at the wrong company.
+                          if (nextCompanyId !== form.companyId) {
+                            setForm((prev) => ({
+                              ...prev,
+                              companyId: nextCompanyId,
+                              projectSite: "",
+                            }));
+                          } else {
+                            set("companyId", nextCompanyId);
+                          }
+                        }}
+                      >
+                        <SelectTrigger className={selectTriggerCls}>
+                          <SelectValue
+                            placeholder={
+                              companyOptions.length === 0
+                                ? "No companies found"
+                                : "All companies"
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {companyOptions.map((c) => (
+                            <SelectItem key={c.id} value={String(c.id)}>
+                              {c.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                        <FolderKanban size={11} className="shrink-0" />
+                        Project
+                      </p>
+                      <Select
+                        value={form.projectSite || ""}
+                        onValueChange={(val) => set("projectSite", val || "")}
+                      >
+                        <SelectTrigger className={selectTriggerCls}>
+                          <SelectValue
+                            placeholder={
+                              filteredProjectOptions.length === 0 &&
+                              !form.projectSite
+                                ? "No projects found"
+                                : "All projects"
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {form.projectSite &&
+                            !filteredProjectOptions.some(
+                              (p) => String(p.id) === form.projectSite,
+                            ) && (
+                              <SelectItem
+                                key="__current__"
+                                value={form.projectSite}
+                              >
+                                {projectOptions.find(
+                                  (p) => String(p.id) === form.projectSite,
+                                )?.label ||
+                                  form.projectName ||
+                                  form.projectSite}
+                              </SelectItem>
+                            )}
+                          {filteredProjectOptions.map((p) => (
+                            <SelectItem key={p.id} value={String(p.id)}>
+                              {p.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {selectedDoc?.projectId && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Pre-filled from linked order
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                        <CalendarDays size={11} className="shrink-0" />
+                        Year
+                      </p>
+                      <Select
+                        value={form.financialYear}
+                        onValueChange={(val) => set("financialYear", val)}
+                      >
+                        <SelectTrigger className={selectTriggerCls}>
+                          <SelectValue placeholder="All years" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {activeFinYears.map((fy) => (
+                            <SelectItem key={fy.id} value={fy.year}>
+                              {fy.year}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {selectedTod && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Changing year updates the booking reference number
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                        <User size={11} className="shrink-0" />
+                        {vendorLabel}
+                      </p>
+                      {selectedDoc?.vendorLabel ? (
+                        <div className="relative">
+                          <User size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground shrink-0" />
+                          <Input
+                            value={form.supplier}
+                            readOnly
+                            title={form.supplier}
+                            placeholder="Auto-filled from linked order"
+                            className="pl-8 pr-3 bg-muted/30 cursor-not-allowed truncate"
+                          />
+                        </div>
+                      ) : (
+                        <Select
+                          value={supplierSelectValue}
+                          onValueChange={(key) => {
+                            const [prefix, idStr] = key.split(":");
+                            const id = Number(idStr);
+                            const list =
+                              prefix === "s" ? supplierHeads
+                              : prefix === "c" ? contractorHeads
+                              : prefix === "a" ? customerHeads
+                              : prefix === "p" ? partnerHeads
+                              : brokerHeads;
+                            const head = list.find((h) => h.id === id);
+                            const name = head?.label ?? "";
+                            set("supplier", name);
+                            set("supplierLHeadId", head?.id ?? null);
+                            // Other Expenses (TOD) bookings have no source-doc
+                            // label to name themselves after — keep the
+                            // booking name in sync with the chosen supplier.
+                            // Deliberately NOT stamping selectedDoc here —
+                            // DocSelectorPanel treats any non-null selectedDoc
+                            // as "a document is already picked" and collapses
+                            // into its locked summary view, which would hide
+                            // the PO/GRN/Work Done picker for a party chosen
+                            // before any document. isDirectPartyMode below
+                            // covers this case for TDS/Direct Items/Expense
+                            // Head Allocation without touching this state.
+                            if (name && (selectedDoc?.kind === "TOD" || !selectedDoc)) {
+                              set("bookingName", `Payment for ${name}`);
+                            }
+                            if (!name) return;
+                            if (head?.paymentTerms) {
+                              const termStr = head.paymentTerms.trim().toLowerCase();
+                              const match = paymentTermOptions.find(
+                                (t) => t.TermName.trim().toLowerCase() === termStr,
+                              );
+                              // Due Date is derived by the live effect above
+                              // (Vendor Invoice Date + Days) — just set the term here.
+                              if (match) set("paymentTermId", match.Id);
+                            }
+                            if (!form.vendorInvoiceDate) {
+                              set("vendorInvoiceDate", new Date().toISOString().split("T")[0]);
+                            }
+                          }}
+                        >
+                          <SelectTrigger className={selectTriggerCls}>
+                            <SelectValue placeholder="Select Payable Party" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {supplierHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Suppliers</SelectLabel>
+                                {supplierHeads.map((s) => (
+                                  <SelectItem key={`s-${s.id}`} value={`s:${s.id}`}>{s.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {contractorHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Contractors</SelectLabel>
+                                {contractorHeads.map((c) => (
+                                  <SelectItem key={`c-${c.id}`} value={`c:${c.id}`}>{c.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {brokerHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Brokers</SelectLabel>
+                                {brokerHeads.map((b) => (
+                                  <SelectItem key={`b-${b.id}`} value={`b:${b.id}`}>{b.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {customerHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Customers</SelectLabel>
+                                {customerHeads.map((cu) => (
+                                  <SelectItem key={`a-${cu.id}`} value={`a:${cu.id}`}>{cu.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                            {partnerHeads.length > 0 && (
+                              <SelectGroup>
+                                <SelectLabel>Partners</SelectLabel>
+                                {partnerHeads.map((p) => (
+                                  <SelectItem key={`p-${p.id}`} value={`p:${p.id}`}>{p.label}</SelectItem>
+                                ))}
+                              </SelectGroup>
+                            )}
+                          </SelectContent>
+                        </Select>
+                      )}
+                      {selectedDoc?.vendorLabel && (
+                        <p className="text-[10px] text-muted-foreground">
+                          {`Auto-filled from ${selectedDoc.kind === "PO" ? "Purchase Order (supplier)" : selectedDoc.kind === "GRN" ? "GRN (supplier)" : "Work Done (contractor)"}`}
+                        </p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                        <ShoppingCart size={11} className="shrink-0" />
+                        Filter by PO
+                      </p>
+                      <Select
+                        value={filterPOId != null ? String(filterPOId) : "__none__"}
+                        onValueChange={(val) => {
+                          const id = val === "__none__" ? null : parseInt(val, 10);
+                          setFilterPOId(id);
+                          // Auto-fill company / project / finYear / supplier
+                          // from the selected PO when those fields are empty
+                          if (!id) return;
+                          const po = allPOList.find((p) => p.PurchaseOrderID === id);
+                          if (!po) return;
+                          setForm((prev) => {
+                            const updates: Partial<typeof prev> = {};
+                            // Company
+                            if (!prev.companyId && po.CompanyId) {
+                              updates.companyId = po.CompanyId;
+                              updates.projectSite = ""; // reset project when company changes
+                            }
+                            // Project — only set if company matches or wasn't set
+                            if (!prev.projectSite && po.ProjectId) {
+                              updates.projectSite = String(po.ProjectId);
+                            }
+                            // Financial year — derive from PO DocNo
+                            if (!prev.financialYear && po.DocNo) {
+                              const m = po.DocNo.match(/(\d{4})-(\d{2})/); // e.g. PO-2026-00014
+                              if (m) {
+                                const yr = parseInt(m[1], 10);
+                                // Indian FY: DocNo year = start year of FY
+                                const fyStr = `FY ${yr}-${String(yr + 1).slice(-2)}`;
+                                const found = activeFinYears.find((fy) =>
+                                  fy.year === fyStr || fy.year.includes(String(yr))
+                                );
+                                if (found) updates.financialYear = found.year;
+                              }
+                            }
+                            // Supplier — find by SupplierID (reliable) rather
+                            // than by name string (brittle across data sources)
+                            if (!prev.supplier && (po as any).SupplierID) {
+                              const head = supplierHeads.find(
+                                (s) => s.id === Number((po as any).SupplierID)
+                              );
+                              if (head) {
+                                updates.supplier = head.label;
+                                updates.supplierLHeadId = head.id;
+                              } else if (po.SupplierName) {
+                                // Fallback: set name so field isn't blank even
+                                // if supplierHeads hasn't loaded yet
+                                updates.supplier = po.SupplierName;
+                              }
+                            }
+                            return Object.keys(updates).length ? { ...prev, ...updates } : prev;
+                          });
+                        }}
+                      >
+                        <SelectTrigger className={selectTriggerCls}>
+                          <SelectValue placeholder={loadingAllPOs ? "Loading…" : "All POs"} />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">— All POs —</SelectItem>
+                          {filteredAllPOs.map((po: any) => (
+                            <SelectItem key={po.PurchaseOrderID} value={String(po.PurchaseOrderID)}>
+                              {po.DocNo || po.PurchaseOrderNo}
+                              {po.SupplierName ? ` — ${po.SupplierName}` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {filterPOId != null && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Showing this PO's GRNs in the GRN tab below
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>{/* end Party & Project */}
+
+              {/* ── 1. Document Selection ──────────────────────────────── */}
+              {showDocSection ? (
+                <>
+                  <div className="space-y-3">
+                    <SectionHeader label="Document Selection" />
+                    {isEditing ? (
+                      <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-border bg-muted/30 text-xs">
+                        <span className="text-muted-foreground shrink-0">Source Document</span>
+                        <span className="font-mono font-semibold text-foreground">
+                          {form.eSourceType && form.eSourceType !== "TOD"
+                            ? form.sourceDocNo || `${form.eSourceType}-${form.poId ?? ""}`
+                            : "Direct Entry"}
+                        </span>
+                        <span className="ml-auto text-[10px] text-muted-foreground italic">
+                          Locked — the source document can't be changed once a booking exists.
+                        </span>
+                      </div>
+                    ) : (
+                      <>
+                    <p className="text-[11px] text-muted-foreground -mt-1">
+                      Pick a Purchase Order, confirmed Work Done entry, or GRN
+                      to auto-fill booking details, or choose a document type
+                      from Other Expenses for standalone expense entries.
+                    </p>
+                    <DocSelectorPanel
+                      poList={poList}
+                      woPOList={woPOList}
+                      workDoneList={workDoneList}
+                      todList={todList}
+                      grnList={grnList}
+                      loadingPO={loadingPO}
+                      loadingWorkDone={loadingWorkDone}
+                      loadingWOPO={loadingWOPO}
+                      loadingTOD={loadingTOD}
+                      loadingGRN={loadingGRN}
+                      companyOptions={companyOptions}
+                      projectOptions={projectOptions}
+                      suppliers={suppliers}
+                      selected={selectedDoc}
+                      finYear={form.financialYear || undefined}
+                      filterCompanyId={form.companyId ?? null}
+                      filterProjectId={
+                        form.projectSite ? parseInt(form.projectSite) : null
+                      }
+                      filterFinYear={form.financialYear || null}
+                      filterSupplier={form.supplier || null}
+                      filterPOId={filterPOId}
+                      bookedPOIds={bookedPOIds}
+                      bookedWorkDoneIds={bookedWorkDoneIds}
+                      bookedWOPOIds={bookedWOPOIds}
+                      bookedGRNIds={bookedGRNIds}
+                      onSelect={applyDoc}
+                      onClear={clearDoc}
+                      onTodSelected={setSelectedTod}
+                      onSelectMultiGRN={applyMultiGRNDoc}
+                    />
+
+                    {/* Source chain banner */}
+                    {selectedDoc &&
+                      (selectedDoc.kind === "WORK_DONE" ||
+                        selectedDoc.kind === "WO_PO" ||
+                        selectedDoc.kind === "PO" ||
+                        selectedDoc.kind === "GRN") && (
+                        <div
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${selectedDoc.kind === "GRN" ? "border-teal-500/30 bg-teal-500/5 text-teal-600 dark:text-teal-400" : "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"}`}
+                        >
+                          <span className="shrink-0">←</span>
+                          <span className="font-mono font-semibold">
+                            {selectedDoc.docNo}
+                          </span>
+                          {selectedDoc.vendorLabel && (
+                            <>
+                              <span className="text-muted-foreground">|</span>
+                              <span className="text-foreground">
+                                {selectedDoc.vendorLabel}
+                              </span>
+                            </>
+                          )}
+                          {selectedDoc.amount != null &&
+                            selectedDoc.amount > 0 && (
+                              <>
+                                <span className="text-muted-foreground">|</span>
+                                <span className="text-foreground font-semibold">
+                                  ₹{selectedDoc.amount.toLocaleString("en-IN")}
+                                </span>
+                              </>
+                            )}
+                          <span
+                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"}`}
+                          >
+                            {selectedDoc.kind === "WORK_DONE"
+                              ? "Work Done"
+                              : selectedDoc.kind === "GRN"
+                                ? "GRN"
+                                : "Purchase Order"}
+                          </span>
+                        </div>
+                      )}
+                      </>
+                    )}
+
+                    <Field
+                      label="Booking Reference"
+                      required
+                      hint={
+                        selectedDoc
+                          ? `Auto-filled from the selected ${selectedDoc.kind === "PO" ? "Purchase Order" : selectedDoc.kind === "WORK_DONE" ? "Work Done" : selectedDoc.kind === "GRN" ? "GRN" : "document"}.`
+                          : "Will be populated once you select a document above."
+                      }
+                    >
+                      <Input
+                        value={form.bookingReference}
+                        readOnly
+                        placeholder="Auto-filled from selected document"
+                        className="font-mono bg-muted/30 cursor-not-allowed"
+                      />
+                    </Field>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Field
+                      label="Purpose of Expense Booking"
+                      hint={
+                        selectedDoc?.nameLabel
+                          ? "Auto-filled from selected document — editable"
+                          : undefined
+                      }
+                    >
+                      <Input
+                        value={form.bookingName}
+                        onChange={(e) => set("bookingName", e.target.value)}
+                        placeholder="e.g. Cement supply for Block A, Q1 contractor payment…"
+                      />
+                    </Field>
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-dashed border-border/60 text-xs text-muted-foreground">
+                  <FileText size={13} className="shrink-0 opacity-40" />
+                  Select a company above to see matching documents.
+                </div>
+              )}
+
+                {/* ── Sub-section: Dates & Payment ── */}
+                <div className="space-y-2">
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Dates &amp; Payment</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <Field label="Booking Date" required>
+                      <DateField value={form.bookingDate} onChange={(val) => set("bookingDate", val)} />
+                    </Field>
+                    <Field label="Payment Term">
+                      <select
+                        className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 transition"
+                        value={form.paymentTermId ?? ""}
+                        onChange={(e) => {
+                          // Due Date is derived by the live effect above
+                          // (Vendor Invoice Date + Days) the moment this changes.
+                          const termId = e.target.value ? parseInt(e.target.value, 10) : null;
+                          set("paymentTermId", termId);
+                        }}
+                      >
+                        <option value="">— Select Payment Term —</option>
+                        {paymentTermOptions.map((t) => (
+                          <option key={t.Id} value={t.Id}>
+                            {t.TermName}{t.CreditDays != null ? ` (${t.CreditDays} days)` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Due Date">
+                      <DateField
+                        value={form.dueDate}
+                        min={form.bookingDate || undefined}
+                        onChange={(val) => {
+                          if (form.bookingDate && val && val < form.bookingDate) {
+                            toast.error("Due date cannot be before the booking date.");
+                            return;
+                          }
+                          set("dueDate", val);
+                        }}
+                      />
+                    </Field>
+                  </div>
+                </div>
+
+                {/* ── Sub-section: Vendor Invoice ── */}
+                <div className="space-y-2">
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Vendor Invoice</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Field label="Vendor Invoice No">
+                      <Input value={form.vendorInvoiceNo ?? ""} onChange={(e) => set("vendorInvoiceNo", e.target.value)} placeholder="Supplier invoice number" />
+                    </Field>
+                    <Field label="Vendor Invoice Date">
+                      <DateField value={form.vendorInvoiceDate ?? ""} onChange={(val) => set("vendorInvoiceDate", val)} placeholder="Select invoice date..." />
+                    </Field>
+                  </div>
+                </div>
+
+                {/* ── Sub-section: Accounting ── */}
+                <div className="space-y-2">
+                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Accounting</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <Field
+                      label="Cost Center"
+                      className={
+                        isDirectPartyMode
+                          ? undefined
+                          : "sm:col-span-2"
+                      }
+                      hint={selectedDoc?.projectId ? "Auto-filled from the selected document's project when a matching cost center exists" : "Select a cost center for expense allocation"}
+                    >
+                      <Select value={form.costCenter || "__none__"} onValueChange={(val) => set("costCenter", val === "__none__" ? "" : val)}>
+                        <SelectTrigger className={selectTriggerCls}>
+                          <SelectValue placeholder="Select cost center..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">-- None --</SelectItem>
+                          {costCenterOptions.map((cc) => {
+                            const value = `${cc.code} - ${cc.label}`;
+                            return <SelectItem key={cc.id} value={value}>{value}</SelectItem>;
+                          })}
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                    {/* TDS — only shown once the resolved supplier is
+                        actually TDS-eligible (Supplier/Contractor Master's
+                        TDS Applicable flag). Never mandatory here — the
+                        ₹30k single-bill / ₹1L yearly-cumulative threshold is
+                        only enforced later, at payment time. */}
+                    {isDirectPartyMode && tdsEligibility?.tdsApplicable && (
+                      <Field
+                        label="TDS"
+                        className="sm:col-span-2"
+                        hint={
+                          tdsEligibility.thresholdMet
+                            ? "This supplier/contractor has crossed the TDS threshold — select the applicable TDS"
+                            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} booked this year so far) — optional`
+                        }
+                      >
+                        <div className="flex items-center gap-3">
+                          <select
+                            value={form.tdsId ?? ""}
+                            onChange={(e) => {
+                              const id = e.target.value ? Number(e.target.value) : null;
+                              const rec = tdsRecords.find((t) => Number(t.id) === id);
+                              set("tdsId", id);
+                              set("tdsPercentage", rec?.percentage ?? null);
+                              set("tdsAmount", rec ? calculateTdsPreview(form.basicAmount, rec.percentage) : 0);
+                            }}
+                            className="flex-1 appearance-none pl-3 pr-7 py-2.5 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                          >
+                            <option value="">-- No TDS --</option>
+                            {tdsRecords.filter((t) => t.status).map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name || t.nature} — {t.percentage}%
+                              </option>
+                            ))}
+                          </select>
+                          {form.tdsId && (
+                            <span className="text-xs text-muted-foreground whitespace-nowrap">
+                              TDS ₹{fmt(form.tdsAmount || 0)} · Net ₹{fmt(Math.max(0, bd.netAmount - (form.tdsAmount || 0)))}
+                            </span>
+                          )}
+                        </div>
+                      </Field>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── Direct (Other Expenses) Items ──────────────────────── */}
+              {isDirectPartyMode && (
+                <DirectItemsTable
+                  items={form.directItems ?? []}
+                  readOnly={
+                    form.status === "Approved" ||
+                    form.status === "Pending" ||
+                    form.status === "Booked"
+                  }
+                  onChange={(items) => {
+                    setForm((prev) => ({ ...prev, directItems: items }));
+                  }}
+                  onTotalChange={(total) => {
+                    setForm((prev) => ({ ...prev, basicAmount: total }));
+                  }}
+                />
+              )}
+
+              {/* ── 2. Amount & GST ────────────────────────────────────── */}
+              <AmountGstSection
+                selectedDoc={selectedDoc}
+                isGRN={isGRN}
+                isPOorWO={isPOorWO}
+                basicAmount={form.basicAmount}
+                cgstRate={form.cgstRate}
+                sgstRate={form.sgstRate}
+                igstRate={form.igstRate ?? 0}
+                gstEnabled={gstEnabled}
+                gstMode={gstMode}
+                billingTerms={form.billingTerms}
+                discount={form.discount}
+                bd={bd}
+                gstBreakdown={gstBreakdown}
+                onChangeBasicAmount={(v) => set("basicAmount", v)}
+                onChangeCgstRate={(v) => set("cgstRate", v)}
+                onChangeSgstRate={(v) => set("sgstRate", v)}
+                onChangeIgstRate={(v) => set("igstRate", v)}
+                onToggleGstEnabled={(enabled) => {
+                  setGstEnabled(enabled);
+                  if (!enabled) {
+                    set("cgstRate", 0);
+                    set("sgstRate", 0);
+                    set("igstRate", 0);
+                  }
+                }}
+                onChangeGstMode={(mode) => {
+                  setGstMode(mode);
+                  if (mode === "igst") {
+                    set("cgstRate", 0);
+                    set("sgstRate", 0);
+                  } else {
+                    set("igstRate", 0);
+                  }
+                }}
+                tdsAmount={form.tdsAmount || 0}
+              />
+
+              {/* ── GRN Items Summary ──────────────────────────────────── */}
+              {isGRN && (
+                <GRNItemsSummary
+                  grnItemsLoading={grnItemsLoading}
+                  grnItems={selectedDoc?.grnItems}
+                  gstBreakdown={gstBreakdown}
+                />
+              )}
+
+              {/* Expense Head allocation — placed here (right after Basic
+                  Amt / GST, before Billing Terms) so its target amount
+                  (bd.netAmount, already resolved from the fields directly
+                  above) is visible on screen the moment the user starts
+                  tagging rows, instead of living earlier in the form where
+                  editing the amount required scrolling down to Basic Amt,
+                  then back up to re-check the running allocation total.
+                  Only makes sense for Other Expenses (TOD) bookings —
+                  PO/GRN/WO-linked invoices already resolve GL posting from
+                  the linked document's own accounts. */}
+              {isDirectPartyMode && (
+                <div className="space-y-3">
+                  <SectionHeader label="Expense Head" />
+                  <Field
+                    label="Allocation"
+                    required
+                    hint={`At least one Expense Head is required — split this invoice's debit side across one or more ledger heads, must add up to the gross invoice amount (₹${fmt(bd.netAmount)})${(form.tdsAmount || 0) > 0 ? "; TDS is withheld separately and does not reduce this total" : ""}`}
+                  >
+                    <ExpenseHeadAllocationEditor
+                      rows={form.expenseHeadAllocations ?? []}
+                      onChange={(rows) => set("expenseHeadAllocations", rows)}
+                      targetAmount={bd.netAmount}
+                    />
+                  </Field>
+                </div>
+              )}
+
+              {/* ── 3. Billing Terms ──────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Billing Terms" />
+                <BillingAccordion
+                  basicAmount={form.basicAmount}
+                  cgstRate={form.cgstRate}
+                  sgstRate={form.sgstRate}
+                  discount={form.discount}
+                  billingTerms={form.billingTerms}
+                  onChange={(d) => set("discount", d)}
+                  onChangeBillingTerms={(terms) => set("billingTerms", terms)}
+                  grnNetAmount={
+                    isGRN
+                      ? (selectedDoc?.amount ?? form.grnTotalAmount ?? null)
+                      : null
+                  }
+                  gstBreakdown={
+                    isGRN && gstBreakdown ? (gstBreakdown as any) : null
+                  }
+                />
+              </div>
+
+              {/* ── 4. EMI Options ─────────────────────────────────────── */}
+              {!isGRN && (
+                <div className="space-y-3">
+                  <SectionHeader label="EMI / Installment Options" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Payment Type" required>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(
+                          [
+                            { value: "full", label: "Full payment" },
+                            { value: "partial", label: "Partial payment (EMI)" },
+                          ] as const
+                        ).map((opt) => {
+                          const active = (form.paymentType || "full") === opt.value;
+                          return (
+                            <button
+                              key={opt.value}
+                              type="button"
+                              onClick={() => {
+                                set("paymentType", opt.value);
+                                if (opt.value === "full") set("partialAmount", 0);
+                              }}
+                              className={`px-3 py-2.5 rounded-lg border text-sm font-medium text-center transition-colors ${
+                                active
+                                  ? "border-emerald-500 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                  : "border-border text-muted-foreground hover:border-emerald-500/40 hover:text-foreground"
+                              }`}
+                            >
+                              {opt.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </Field>
+                    {form.paymentType === "partial" && (
+                      <Field
+                        label="Partial Payment Amount (₹)"
+                        hint="Paid now — EMI is generated for the remaining balance"
+                      >
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+                            ₹
+                          </span>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={bd.netAmount}
+                            value={form.partialAmount || ""}
+                            onChange={(e) => {
+                              const val = Math.min(
+                                Math.max(parseFloat(e.target.value) || 0, 0),
+                                bd.netAmount,
+                              );
+                              set("partialAmount", val);
+                            }}
+                            className="pl-7 font-mono"
+                            placeholder="0.00"
+                          />
+                        </div>
+                      </Field>
+                    )}
+                  </div>
+                  {form.paymentType === "partial" &&
+                    (form.partialAmount ?? 0) > 0 && (
+                      <div className="flex items-center justify-between rounded-lg border border-amber-500/25 bg-amber-500/5 px-4 py-2.5 text-xs">
+                        <span className="text-muted-foreground">
+                          Remaining balance for EMI
+                        </span>
+                        <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
+                          ₹{fmt(emiBaseAmount)}
+                        </span>
+                      </div>
+                    )}
+                  <EmiSection
+                    emi={form.emi}
+                    netAmount={emiBaseAmount}
+                    baseDocNo={form.bookingReference}
+                    onChange={(emi) => set("emi", emi)}
+                    liveSchedule={isEditing ? liveEmiSchedule : null}
+                    onDisableEmi={isEditing ? disableEmi : undefined}
+                  />
+                </div>
+              )}
+
+              {/* ── 5. Approval Trail ──────────────────────────────────── */}
+              {isEditing && (
+                <div className="space-y-3">
+                  <SectionHeader label="Approval Workflow" />
+                  <ApprovalTrailPanel
+                    trail={approvalTrail}
+                    currentStatus={form.status}
+                  />
+                </div>
+              )}
+
+              {/* ── 6. Remarks ─────────────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Remarks" />
+                <textarea
+                  value={form.remarks}
+                  onChange={(e) => set("remarks", e.target.value)}
+                  placeholder="Optional notes or internal comments…"
+                  rows={3}
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/30 resize-none text-foreground placeholder:text-muted-foreground"
+                />
+              </div>
+
+              {/* Save row */}
+              {(() => {
+                const ebCanSave = !!(
+                  form.bookingReference.trim() &&
+                  form.bookingDate &&
+                  form.companyId &&
+                  (selectedDoc?.kind === "GRN" ||
+                    (form.basicAmount && form.basicAmount > 0))
+                );
+                const ebIsDirty = !!(
+                  form.companyId ||
+                  form.supplier ||
+                  form.invoiceReference ||
+                  form.basicAmount ||
+                  form.poId ||
+                  form.bookingReference.trim()
+                );
+                return (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
+                    <p className="text-[11px] text-muted-foreground hidden sm:block">
+                      {saved ? (
+                        <span className="text-emerald-500 font-medium">
+                          Saved!
+                        </span>
+                      ) : ebCanSave ? (
+                        <span className="text-emerald-500 font-medium">
+                          Ready to save
+                        </span>
+                      ) : (
+                        "Fill in the required fields to save"
+                      )}
+                    </p>
+                    <div className="flex items-center gap-2 sm:ml-auto">
+                      <button
+                        type="button"
+                        onClick={resetForm}
+                        disabled={saving || saved || !ebIsDirty}
+                        className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                      >
+                        <RotateCcw size={12} /> Reset
+                      </button>
+                      <button
+                        onClick={handleSave}
+                        disabled={saving || saved || !ebCanSave}
+                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                      >
+                        {saved ? (
+                          <Check size={14} />
+                        ) : saving ? (
+                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        ) : (
+                          <Save size={14} />
+                        )}
+                        {saved
+                          ? "Saved!"
+                          : saving
+                            ? "Saving…"
+                            : isEditing
+                              ? "Update Booking"
+                              : "Save Invoice"}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* List View */}
+        {view === "list" && (
+          <>
+            {!loading && records.length > 0 && (
+              <ExpenseBookingStatCards
+                totalNet={totalNet}
+                approvedCount={approvedCount}
+                pendingCount={pendingCount}
+                emiCount={emiCount}
+              />
+            )}
+            {loading && (
+              <div className="text-center py-16 text-muted-foreground text-sm">
+                <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                Loading bookings…
+              </div>
+            )}
+            {!loading && (
+              <>
+                <Card className="border-border shadow-sm">
+                  <CardHeader className="pb-3 border-b border-border">
+                    <BookingListToolbar
+                      totalRecords={totalRecords}
+                      statusFilter={statusFilter}
+                      onStatusFilterChange={setStatusFilter}
+                      finYearOptions={finYears.map((fy) => fy.year)}
+                      finYearFilter={finYearFilter}
+                      onFinYearFilterChange={setFinYearFilter}
+                      dateFrom={dateFromFilter}
+                      dateTo={dateToFilter}
+                      onDateFromChange={setDateFromFilter}
+                      onDateToChange={setDateToFilter}
+                      companyOptions={companyOptions}
+                      companyFilter={companyFilter}
+                      onCompanyFilterChange={handleCompanyFilterChange}
+                      projectOptions={filterProjectOptions}
+                      projectFilter={projectFilter}
+                      onProjectFilterChange={setProjectFilter}
+                      docNoFilter={docNoFilter}
+                      onDocNoFilterChange={setDocNoFilter}
+                      vendorOptions={vendorOptions}
+                      vendorFilter={vendorFilter}
+                      onVendorFilterChange={setVendorFilter}
+                    />
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    {/* Mobile cards */}
+                    <div className="flex flex-col gap-3 sm:hidden p-3">
+                      {filteredRecords.length === 0 && (
+                        <div className="text-center py-16 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
+                          {statusFilter !== "All"
+                            ? `No bookings with status "${statusFilter}". Try a different filter.`
+                            : `No bookings yet. Click 'New Invoice' to get started.`}
+                        </div>
+                      )}
+                      {filteredRecords.map((rec, index) => (
+                        <RecordCard
+                          key={
+                            rec.id
+                              ? `booking-card-${rec.id}`
+                              : `booking-card-${index}`
+                          }
+                          rec={rec}
+                          onEdit={() => openEditForm(rec)}
+                          onPreview={() => openPreview(rec)}
+                          onDelete={() => requestDelete(rec.id)}
+                          onApprovalSuccess={fetchRecords}
+                          canEdit={rights.canEdit}
+                          canDelete={rights.canDelete}
+                        />
+                      ))}
+                    </div>
+
+                    {/* Records table */}
+                    <div className="hidden sm:block">
+                      {/* Table still scrolls horizontally on narrow
+                          viewports — just without the visible scrollbar
+                          track taking up a row of its own. */}
+                      <div className="rounded-md [&>div]:[scrollbar-width:none] [&>div]:[-ms-overflow-style:none] [&>div::-webkit-scrollbar]:hidden">
+                        <Table>
+                          <TableHeader>
+                            <TableRow className="bg-muted/30">
+                              <TableHead className="text-xs font-heading w-[20%]">
+                                Booking Ref
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[16%]">
+                                Vendor
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[12%] hidden xl:table-cell">
+                                Company / Project
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[10%] text-right">
+                                Basic Amt
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[9%] text-right hidden md:table-cell">
+                                GST
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[12%] text-right">
+                                Net Amt
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[12%] hidden lg:table-cell">
+                                Doc
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[9%]">
+                                Status
+                              </TableHead>
+                              <TableHead className="text-xs font-heading w-[10%] text-right">
+                                Actions
+                              </TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {filteredRecords.map((rec, index) => {
+                              // For GRN-linked records, recompute from grnTotalAmount + billing terms
+                              // with correct pre/post-GST split (avoids stale ENetAmount from DB).
+                              // For all others, use computeBreakdown on stored basicAmount.
+                              // Net of TDS too — matches the export column and the Payment
+                              // page's own "Amount Payable (After TDS)" figure, instead of
+                              // showing the pre-TDS gross like this row used to.
+                              const effectiveNet = computeEffectiveNet(rec);
+                              return (
+                                <TableRow
+                                  key={
+                                    rec.id
+                                      ? `booking-row-${rec.id}`
+                                      : `booking-row-${index}`
+                                  }
+                                  className={`hover:bg-muted/30 transition-colors border-b border-border/50 last:border-0 cursor-pointer ${rec.status === "Draft" ? "opacity-70" : ""}`}
+                                  onClick={() => openPreview(rec)}
+                                >
+                                  <TableCell className="py-3">
+                                    {rec.status === "Draft" ? (
+                                      <p
+                                        className="text-[11px] font-semibold text-amber-500 dark:text-amber-400 leading-tight max-w-[180px] truncate"
+                                        title={rec.bookingReference || ""}
+                                      >
+                                        {rec.bookingReference || "—"}
+                                      </p>
+                                    ) : (
+                                      <p
+                                        className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight max-w-[160px] truncate"
+                                        title={rec.bookingReference || ""}
+                                      >
+                                        {rec.bookingReference || "—"}
+                                      </p>
+                                    )}
+                                    <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
+                                      {rec.bookingDate && (
+                                        <span>{rec.bookingDate}</span>
+                                      )}
+                                      {rec.docTypeName ? (
+                                        <span className="opacity-60">
+                                          · {rec.docTypeName}
+                                        </span>
+                                      ) : null}
+                                      {rec.emi?.enabled ? (
+                                        <span className="inline-flex items-center gap-0.5 text-[9px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
+                                          <CreditCard size={8} />
+                                          {rec.emi.installmentCount}x
+                                        </span>
+                                      ) : null}
+                                    </p>
+                                  </TableCell>
+                                  <TableCell className="text-xs max-w-[120px] py-3 text-foreground/80">
+                                    <p className="truncate">{rec.supplier || "—"}</p>
+                                    {rec.supplierGstRegistered !== undefined ? (
+                                      <span
+                                        className={`inline-flex items-center mt-1 text-[9px] font-heading font-semibold px-1.5 py-0.5 rounded-full border ${
+                                          rec.supplierGstRegistered
+                                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+                                            : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                                        }`}
+                                      >
+                                        {rec.supplierGstRegistered ? "GST Bill" : "Non GST Bill"}
+                                      </span>
+                                    ) : null}
+                                  </TableCell>
+                                  <TableCell className="hidden xl:table-cell py-3">
+                                    <p className="text-xs truncate max-w-[110px]">
+                                      {rec.companyName || "—"}
+                                    </p>
+                                    <p className="text-[10px] text-muted-foreground truncate max-w-[110px]">
+                                      {rec.projectName || "—"}
+                                    </p>
+                                  </TableCell>
+                                  <TableCell className="font-mono text-xs text-right text-muted-foreground py-3">
+                                    {rec.status === "Draft" ? (
+                                      <span className="text-muted-foreground/50">
+                                        —
+                                      </span>
+                                    ) : (
+                                      (() => {
+                                        // For GRN records, derive original base from grnTotalAmount
+                                        // since rec.basicAmount may be stale from old saves.
+                                        if (
+                                          rec.eSourceType === "GRN" &&
+                                          rec.grnTotalAmount != null
+                                        ) {
+                                          const gstRate =
+                                            (rec.igstRate ?? 0) > 0
+                                              ? rec.igstRate ?? 0
+                                              : (rec.cgstRate ?? 0) +
+                                                (rec.sgstRate ?? 0);
+                                          const base =
+                                            gstRate > 0
+                                              ? rec.grnTotalAmount /
+                                                (1 + gstRate / 100)
+                                              : rec.grnTotalAmount;
+                                          return `₹${fmt(Math.round(base * 100) / 100)}`;
+                                        }
+                                        return `₹${fmt(rec.basicAmount)}`;
+                                      })()
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="font-mono text-xs text-right text-foreground/70 py-3 hidden md:table-cell">
+                                    {rec.status === "Draft" ? (
+                                      "—"
+                                    ) : (rec.igstRate ?? 0) > 0 ? (
+                                      <span title="IGST (interstate)">
+                                        {rec.igstRate}%
+                                      </span>
+                                    ) : (
+                                      `${(rec.cgstRate ?? 0) + (rec.sgstRate ?? 0)}%`
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="font-mono text-xs font-semibold text-right py-3">
+                                    {rec.status === "Draft" ? (
+                                      <span className="text-amber-500 dark:text-amber-400">
+                                        ₹{fmt(effectiveNet)}
+                                      </span>
+                                    ) : (
+                                      `₹${fmt(effectiveNet)}`
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="hidden lg:table-cell py-3 min-w-[100px]">
+                                    <LinkedDocBadge
+                                      eSourceType={rec.eSourceType}
+                                      sourceDocNo={rec.sourceDocNo}
+                                      linkedPODocNo={rec.linkedPODocNo}
+                                      linkedGrnDocNos={rec.linkedGrnDocNos}
+                                    />
+                                  </TableCell>
+                                  <TableCell className="py-3">
+                                    {rec.status === "Draft" ? (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25">
+                                        <Package
+                                          size={10}
+                                          className="shrink-0"
+                                        />
+                                        Pending Items
+                                      </span>
+                                    ) : null}
+                                    <ApprovalStatusChain
+                                      table="ExpenseBooking"
+                                      recordId={rec.id}
+                                      fallback={<StatusBadge status={rec.status} className="text-[10px] px-2 py-0.5" />}
+                                    />
+                                  </TableCell>
+                                  <TableCell className="py-3" onClick={(e) => e.stopPropagation()}>
+                                    <div className="flex gap-1 items-center justify-end">
+                                      <ApprovalActions
+                                        status={rec.status}
+                                        recordId={rec.id}
+                                        endpoint="/api/expense-booking"
+                                        submitOnly
+                                        onSuccess={() => fetchRecords(page)}
+                                      />
+                                      <button
+                                        type="button"
+                                        className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                        onClick={() => openPreview(rec)}
+                                        title="Preview"
+                                      >
+                                        <Eye size={15} />
+                                      </button>
+                                      {rights.canDelete && (
+                                        <button
+                                          type="button"
+                                          className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                                          onClick={() => requestDelete(rec.id)}
+                                          title="Delete"
+                                        >
+                                          <Trash2 size={15} />
+                                        </button>
+                                      )}
+                                    </div>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                            {filteredRecords.length === 0 && (
+                              <TableRow>
+                                <TableCell
+                                  colSpan={9}
+                                  className="text-center py-14 text-muted-foreground text-sm"
+                                >
+                                  {statusFilter !== "All"
+                                    ? `No bookings with status "${statusFilter}". Try a different filter.`
+                                    : `No bookings yet. Click "New Invoice" to get started.`}
+                                </TableCell>
+                              </TableRow>
+                            )}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+
+                    {/* Pagination */}
+                    <BookingPagination
+                      page={page}
+                      totalPages={totalPages}
+                      totalRecords={totalRecords}
+                      onPageChange={fetchRecords}
+                    />
+                  </CardContent>
+                </Card>
+              </>
+            )}
+          </>
+        )}
+        <DeleteBlockedDialog
+          info={deleteBlockInfo}
+          onClose={() => setDeleteBlockInfo(null)}
+        />
+
+        {/* Delete Confirm */}
+        <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
+          <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Delete Booking</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to delete this expense booking? This
+                cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            {/* Doc numbers are never reused after a delete — the sequence
+                simply continues from its current max, so removing a
+                document permanently leaves a gap (e.g. deleting #6 and #7
+                out of #1-#10 means the next new invoice is #11, not #6). */}
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+              <span>
+                {(() => {
+                  const rec = records.find((r) => r.id === deleteId);
+                  const docNo = rec?.bookingReference;
+                  return docNo
+                    ? `${docNo}'s number will not be reused — it leaves a permanent gap in the document sequence.`
+                    : "This document's number will not be reused — it leaves a permanent gap in the document sequence.";
+                })()}
+              </span>
+            </div>
+            <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+              <Button variant="outline" onClick={() => setDeleteId(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => deleteId && handleDelete(deleteId)}
+              >
+                Delete
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Preview modal */}
+        <ExpenseBookingPreviewModal
+          previewRecord={previewRecord}
+          onClose={() => setPreviewRecord(null)}
+          onEdit={(record) => openEditForm(record)}
+          canEdit={rights.canEdit}
+        />
+
+        {/* Remaining GRN Items — auto-created silently on save */}
+      </FinanceShell>
+    </>
+  );
+}

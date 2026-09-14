@@ -1,0 +1,225 @@
+const express = require("express");
+const router = express.Router();
+const rateLimit = require("express-rate-limit");
+const { getPool, sql } = require("../db");
+const authMiddleware = require("../middleware/auth");
+const { requirePageRight } = require("../middleware/requirePageRight");
+const { actorId } = require("../services/saAccess");
+const { getNextDocNumber } = require("../services/docNumber");
+const { logCommunication } = require("../services/crmCommunicationLog");
+const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+
+router.use(authMiddleware);
+router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
+
+// AFS Registry tracks the act of registering the Agreement for Sale at the
+// Sub-Registrar Office (Visit 1). It mirrors CrmRegistry (Visit 2 / Sale
+// Deed), but is gated on AFS Query Payment being Confirmed instead.
+// The registration details (AfsRegistrationNo/Date/StampDuty/RegFee) are
+// still entered on the Agreement via crmAgreements mark-registered — this
+// table only tracks the workflow checkpoint.
+const AREG_SELECT = `
+  SELECT ar.*, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
+         ag.AgreementNo, ag.AfsRegistrationNo
+  FROM dbo.CrmAfsRegistry ar
+  JOIN dbo.CrmBooking b ON b.Id = ar.BookingId
+  JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
+  LEFT JOIN dbo.CrmAgreement ag ON ag.Id = ar.AgreementId
+`;
+
+router.get("/", requirePageRight("crm-afs-registry", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const { status } = req.query;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+    const blockId = req.query.blockId ? parseInt(req.query.blockId, 10) : null;
+    const req0 = pool.request();
+    const where = [];
+    if (status) { req0.input("st", sql.NVarChar(20), status); where.push("ar.Status = @st"); }
+    // Not paginated — status counts are computed client-side from the full
+    // set (see CrmAfsRegistry.tsx), same reasoning as CrmDemands.
+    // Company/Project/Block narrows the set server-side instead.
+    if (companyId) { req0.input("companyId", sql.Int, companyId); where.push("b.CompanyId = @companyId"); }
+    if (projectId) { req0.input("projectId", sql.Int, projectId); where.push("b.ProjectId = @projectId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); where.push("um.BlockId = @blockId"); }
+    const result = await req0.query(`${AREG_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId ${where.length ? "WHERE " + where.join(" AND ") : ""} ORDER BY ar.CreatedAt DESC`);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-afs-registry] GET error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /eligible-bookings — bookings that can have an AFS Registry started:
+//   - Active, not Cancelled/Rejected
+//   - AFS Query Payment Status = 'Confirmed'
+//   - No existing CrmAfsRegistry record
+// Single SQL pass for the "Start AFS Registry" dropdown; avoids N+1 and
+// client-side filtering against the full bookings list.
+router.get("/eligible-bookings", requirePageRight("crm-afs-registry", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const q = [
+      "SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName",
+      "FROM dbo.CrmBooking b",
+      "JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId",
+      "LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id",
+      "WHERE b.IsActive = 1",
+      "  AND b.Status NOT IN ('Cancelled', 'Rejected')",
+      "  AND NOT EXISTS (SELECT 1 FROM dbo.CrmAfsRegistry ar WHERE ar.BookingId = b.Id)",
+      "  AND EXISTS (SELECT 1 FROM dbo.CrmAfsQueryPayment aqp WHERE aqp.BookingId = b.Id AND aqp.Status = 'Confirmed')",
+      "ORDER BY b.BookingNo",
+    ].join(" ");
+    const result = await pool.request().query(q);
+    res.json(result.recordset);
+  } catch (e) {
+    console.error("[crm-afs-registry] GET /eligible-bookings error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/booking/:bookingId", requirePageRight("crm-afs-registry", "view"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const bookingId = parseInt(req.params.bookingId, 10);
+    if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "Invalid bookingId" });
+    const result = await pool.request().input("bid", sql.Int, bookingId)
+      .query(`${AREG_SELECT} WHERE ar.BookingId = @bid`);
+    res.json(result.recordset[0] || null);
+  } catch (e) {
+    console.error("[crm-afs-registry] GET /booking/:id error:", e.message);
+    res.status(500).json({ error: "An internal error occurred. Please try again later." });
+  }
+});
+
+// POST / — start AFS Registry for a booking.
+// Gated on AFS Query Payment being Confirmed — customer must have paid the
+// AFS stamp duty to the government before they attend the Sub-Registrar.
+router.post("/", requirePageRight("crm-afs-registry", "create"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const b = req.body;
+    if (!b.BookingId) return res.status(400).json({ error: "BookingId is required" });
+    const bookingId = parseInt(b.BookingId, 10);
+
+    const activeErr = await requireActiveBooking(pool, bookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    const aqp = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT Id, Status FROM dbo.CrmAfsQueryPayment WHERE BookingId = @bid");
+    if (!aqp.recordset.length || aqp.recordset[0].Status !== "Confirmed") {
+      return res.status(400).json({ error: "AFS Registry requires AFS Query Payment to be Confirmed first — the customer must have paid the AFS stamp duty before attending the Sub-Registrar Office" });
+    }
+
+    const agr = await pool.request().input("bid", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id FROM dbo.CrmAgreement WHERE BookingId = @bid ORDER BY CreatedAt DESC");
+
+    // Pre-check: guard against duplicate creation before consuming a doc-number
+    // sequence slot. UNIQUE(BookingId) exists (migration 371) but only fires at
+    // INSERT time — a concurrent double-submit would waste an AREG number and
+    // return an opaque error before our 409 catch could fire.
+    const existingReg = await pool.request().input("bid2", sql.Int, bookingId)
+      .query("SELECT TOP 1 Id, AfsRegNo FROM dbo.CrmAfsRegistry WHERE BookingId = @bid2");
+    if (existingReg.recordset.length) {
+      return res.status(409).json({
+        error: `AFS Registry tracking (${existingReg.recordset[0].AfsRegNo}) has already been started for this booking`,
+      });
+    }
+
+    const afsRegNo = await getNextDocNumber(pool, "AREG", "AREG");
+    const result = await pool.request()
+      .input("no",    sql.NVarChar(30), afsRegNo)
+      .input("bid",   sql.Int, bookingId)
+      .input("agrid", sql.Int, agr.recordset[0]?.Id || null)
+      .input("cb",    sql.Int, actorId(req))
+      .query(`
+        INSERT INTO dbo.CrmAfsRegistry (AfsRegNo, BookingId, AgreementId, Status, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @agrid, 'Pending', @cb, SYSDATETIME())
+      `);
+    res.status(201).json({ success: true, id: result.recordset[0].Id, AfsRegNo: afsRegNo });
+  } catch (e) {
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique"))
+      return res.status(409).json({ error: "AFS Registry tracking already started for this booking" });
+    console.error("[crm-afs-registry] POST error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/schedule — record the appointment date at the Sub-Registrar Office
+router.put("/:id/schedule", requirePageRight("crm-afs-registry", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const b = req.body;
+    if (!b.ScheduledDate) return res.status(400).json({ error: "ScheduledDate is required" });
+
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmAfsRegistry WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "AFS Registry not found" });
+    if (cur.recordset[0].Status === "Completed") return res.status(400).json({ error: "Already completed" });
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    await pool.request()
+      .input("id",  sql.Int, id)
+      .input("dt",  sql.Date, b.ScheduledDate)
+      .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
+      .input("ub",  sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmAfsRegistry SET Status = 'Scheduled', ScheduledDate = @dt, Remarks = ISNULL(@rem, Remarks),
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-afs-registry] PUT /:id/schedule error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /:id/complete — the AFS has been physically registered at the office.
+// After this, staff records the AfsRegistrationNo/Date on the Agreement via
+// crmAgreements.js PUT /:id/mark-registered.
+router.put("/:id/complete", requirePageRight("crm-afs-registry", "edit"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    const b = req.body;
+
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmAfsRegistry WHERE Id = @id");
+    if (!cur.recordset.length) return res.status(404).json({ error: "AFS Registry not found" });
+    if (cur.recordset[0].Status === "Completed") return res.status(400).json({ error: "Already completed" });
+    if (cur.recordset[0].Status !== "Scheduled") {
+      return res.status(400).json({ error: "AFS Registry must be Scheduled (appointment date recorded) before it can be marked Completed" });
+    }
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
+    await pool.request()
+      .input("id",  sql.Int, id)
+      .input("dt",  sql.Date, b.CompletedDate || new Date().toISOString().slice(0, 10))
+      .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
+      .input("ub",  sql.Int, actorId(req))
+      .query(`
+        UPDATE dbo.CrmAfsRegistry SET Status = 'Completed', CompletedDate = @dt, Remarks = ISNULL(@rem, Remarks),
+          UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+
+    await logCommunication(pool, {
+      bookingId: cur.recordset[0].BookingId, direction: "Outbound",
+      subject: "AFS registered at Sub-Registrar Office",
+      summary: "AFS Registry completed — the Agreement for Sale has been officially registered. Enter the AfsRegistrationNo on the Agreement record.",
+      createdBy: actorId(req),
+    });
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("[crm-afs-registry] PUT /:id/complete error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+module.exports = router;

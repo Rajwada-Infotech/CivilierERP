@@ -1,0 +1,5858 @@
+import React from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
+import { useSearchParams, useLocation } from "react-router-dom";
+import { usePageRights } from "@/hooks/usePageRights";
+import { useDraftForm, preventEnterSubmit, wasPageReloaded } from "@/hooks/useDraftForm";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { FinanceShell } from "@/components/finance/FinanceShell";
+import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useTds } from "@/contexts/TdsContext";
+import { Button } from "@/components/ui/button";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  getPayments,
+  getPaymentById,
+  addPayment,
+  updatePayment,
+  deletePayment,
+  getPaymentChain,
+} from "@/api/newPaymentApi";
+import type { PaymentChainResponse, PaymentChainItem, DisplayStatus } from "@/api/newPaymentApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { getOABalanceByRef, getOAAdjustmentsForInvoice, type OAInvoiceAdjustment } from "@/api/onAccountApi";
+import { getPaymentReasonOptions } from "@/api/paymentReasonApi";
+import { getCompanyById } from "@/api/enterpriseApi";
+import type { CompanyDetail } from "@/api/enterpriseApi";
+import { ExportMenu } from "@/components/ExportMenu";
+import { toast } from "sonner";
+import { formatINR } from "@/utils/formatCurrency";
+import { StatusBadge } from "@/components/StatusBadge";
+import { ApprovalActions } from "@/components/ApprovalActions";
+import {
+  Banknote,
+  CheckCircle2,
+  Clock,
+  ArrowLeft,
+  Plus,
+  RotateCcw,
+  Check,
+  Edit,
+  Trash2,
+  AlertCircle,
+  FileText,
+  ChevronDown,
+  Receipt,
+  Building2,
+  FolderKanban,
+  CalendarDays,
+  Landmark,
+  Wallet,
+  Link2,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  TrendingUp,
+  Truck,
+  Hash,
+  BookOpen,
+  CalendarClock,
+  AlertTriangle,
+  Search,
+  Eye,
+  Printer,
+  ArrowRight,
+  RefreshCw,
+  History,
+  Users,
+  Layers,
+  ListChecks,
+  IndianRupee,
+  MessageSquare,
+} from "lucide-react";
+import type { ExportColumn } from "@/lib/export";
+import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { computeGrnNetWithTerms } from "@/pages/material/ExpenseBooking/helpers";
+
+// ─── Extracted modules (types, constants, API helpers, sub-components) ────────
+import type {
+  DbPayment,
+  BankOption,
+  ExpenseOption,
+  PaymentRecord,
+  ChainSummary,
+  BookingFilters,
+  GRNRef,
+} from "./payment/types";
+import { PAYMENT_MODES } from "./payment/types";
+import { EXPORT_COLUMNS, MODE_STYLE } from "./payment/constants";
+import {
+  fetchBankOptions,
+  bankNameFromIfsc,
+  normaliseExpenseOptions,
+  fetchExpenseDetail,
+  fetchExpenseGRNs,
+  fetchPaymentSummary,
+  fetchWorkDoneById,
+  fetchCompanyOptions,
+  fetchProjectOptions,
+  fetchSupplierOptions,
+  fetchFinYearOptions,
+  fetchChequeLots,
+  PARTY_TYPE_LABELS,
+} from "./payment/api";
+import { blankForm, dbToRecord } from "./payment/formHelpers";
+import {
+  Field,
+  SectionHeader,
+  ReadOnlyField,
+  AutoFillBanner,
+  ModeBadge,
+} from "./payment/components/FormFields";
+import { FilterBar } from "./payment/components/FilterBar";
+import { ExpenseBookingPicker } from "./payment/components/ExpenseBookingPicker";
+import { PaymentGRNBadges } from "./payment/components/PaymentGRNBadges";
+import { ModeInfoBanner } from "./payment/components/ModeInfoBanner";
+import { ChequePanel } from "./payment/components/ChequePanel";
+import { DigitalRefPanel } from "./payment/components/DigitalRefPanel";
+import { CardPanel } from "./payment/components/CardPanel";
+import { ExpenseHeadAllocationEditor } from "@/pages/material/ExpenseBooking/ExpenseHeadAllocationEditor";
+import { getUndisbursedLoans, postLoanToGL, disburseLoan, type UndisbursedLoan } from "@/api/loanSanctionApi";
+import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
+import { previewOAAdjustment } from "@/api/onAccountAdjustment";
+import { getPayableJVLines, type PayableJVLine } from "@/api/journalVoucherApi";
+
+// Same helper ReceivedPayment.tsx uses to compare company names for the
+// bank-company scoping filter below — tolerant of casing/whitespace so
+// "ABC Test Company " and "abc test company" still match.
+const normalizeCompanyName = (value: string | null | undefined) =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+const Payment: React.FC = () => {
+  const rights = usePageRights("new-payment");
+  const { theme } = useTheme();
+  const { tdsRecords } = useTds();
+  const isDark = !isLightTheme(theme);
+  const queryClient = useQueryClient();
+  const location = useLocation();
+  const [page, setPage] = useState(1);
+  const [supplierFilter, setSupplierFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState(""); // stores numeric ID for display
+  const [companyNameFilter, setCompanyNameFilter] = useState(""); // stores label for backend
+  const [projectFilter, setProjectFilter] = useState("");
+  const [finYearFilter, setFinYearFilter] = useState("");
+  const [docNumberFilter, setDocNumberFilter] = useState("");
+  // Payment Date range (np.PDate) — was a single exact-match date filter,
+  // now a From/To range for a more useful list-view search.
+  const [dateFromFilter, setDateFromFilter] = useState("");
+  const [dateToFilter, setDateToFilter] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+  // Direct Expense Payment (migration 303) — a payment mode with no linked
+  // invoice/party, paid straight against one or more Expense Heads instead.
+  const [showExpenseHeadPayment, setShowExpenseHeadPayment] = useState(false);
+  // TDS (migration 304) — live-checked against the chosen Payee/Party for a
+  // direct (no invoice linked) payment. An invoice-linked payment always
+  // inherits its invoice's own snapshot server-side instead — no dropdown.
+  const [tdsEligibility, setTdsEligibility] = useState<{ tdsApplicable: boolean; thresholdMet: boolean; cumulativeAmount: number } | null>(null);
+  // Live preview of what an invoice-linked payment will inherit/enforce —
+  // calls the exact same resolver the save itself uses, so this can never
+  // disagree with what actually happens on save.
+  const [invoiceTdsPreview, setInvoiceTdsPreview] = useState<{
+    blocked: boolean; message?: string; eligible: boolean; thresholdMet: boolean;
+    tdsAmount: number; tdsNature?: string | null; tdsName?: string | null; tdsPercentage?: number | null;
+  } | null>(null);
+  const PAGE_SIZE = 20;
+
+  const [view, setView] = useState<"list" | "form">("list");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useDraftForm<Omit<PaymentRecord, "id">>(
+    "finance-payment",
+    blankForm(),
+    { skip: editingId !== null },
+  );
+  const [saving, setSaving] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+
+  // Re-issue (bounced cheque replacement) context
+  const [reissueCtx, setReissueCtx] = useState<{
+    replacesPaymentId: number;
+    replacesDocNo: string;
+    amount: number;
+    paymentName: string;
+    companyName: string;
+    expenseRef: string | null;
+    bounceReason: string | null;
+  } | null>(null);
+  const [bounceCharge, setBounceCharge] = useState<string>("");
+  const [viewingRec, setViewingRec] = useState<PaymentRecord | null>(null);
+  const [viewingCompanyDetail, setViewingCompanyDetail] =
+    useState<CompanyDetail | null>(null);
+  const [viewingChain, setViewingChain] = useState<ChainSummary | null>(null);
+  const [viewingGrnTotal, setViewingGrnTotal] = useState<number>(0);
+  const [viewingOaBalance, setViewingOaBalance] = useState<number>(0);
+  const [paymentChainData, setPaymentChainData] = useState<PaymentChainResponse | null>(null);
+  const [loadingChain, setLoadingChain] = useState(false);
+  const [detailTab, setDetailTab] = useState<"details" | "chain" | "posting">("details");
+  const [pmtPostingData, setPmtPostingData] = useState<any | null>(null);
+  const [pmtPostingLoading, setPmtPostingLoading] = useState(false);
+  const [pmtPosting, setPmtPosting] = useState(false);
+  const [pmtPostingError, setPmtPostingError] = useState<string | null>(null);
+  const [formChainData, setFormChainData] = useState<PaymentChainResponse | null>(null);
+  const [loadingFormChain, setLoadingFormChain] = useState(false);
+  // Known totalPaid injected by "Pay Remaining" — overrides stale opt.totalPaid from DB
+  const [formKnownTotalPaid, setFormKnownTotalPaid] = useState<number | null>(null);
+  // Same pattern, for TDS: set from the freshly-fetched invoice detail at
+  // selection time (handleExpenseSelect), so the Invoice Balance card and
+  // Payment Breakdown panel read a guaranteed-current value instead of
+  // expenseOptions.find(...).tdsAmount — that list is a react-query cache
+  // fetched once per page load and not necessarily current if the linked
+  // invoice's TDS changed since.
+  const [formKnownTdsAmount, setFormKnownTdsAmount] = useState<number | null>(null);
+  // Live remaining from payment-summary (excludes bounced) — used in partial payment panel
+  const [formLiveRemaining, setFormLiveRemaining] = useState<number | null>(null);
+  // On Account balance for the selected invoice's party
+  const [oaBalance, setOaBalance] = useState<number>(0);
+  // "Use on-account balance for this payment" checkbox — defaults to true
+  // (preserves the existing auto-apply-at-approval behavior); unchecking
+  // keeps the party's balance untouched (OASkipAutoApply on save).
+  const [useOnAccountBalance, setUseOnAccountBalance] = useState(true);
+  // Context injected from the On A/C Adjustment page
+  const [oaAdjustCtx, setOaAdjustCtx] = useState<{
+    partyId: number; partyName: string; partyTypeCode: string; availableBalance: number; sourceDocNo: string;
+    invoiceDocNo?: string | null; invoiceRemaining?: number | null;
+  } | null>(null);
+
+  // Open the detail modal and eagerly fetch the company logo
+  const openViewRec = async (rec: PaymentRecord) => {
+    setViewingRec(rec);
+    setViewingCompanyDetail(null);
+    setViewingChain(null);
+    setViewingGrnTotal(0);
+    setViewingOaBalance(0);
+    setPaymentChainData(null);
+    setDetailTab("details");
+    setPmtPostingData(null);
+    const matched = companyOptions.find(
+      (c) => c.label === rec.company || String(c.id) === rec.company,
+    );
+    if (matched) {
+      try {
+        const detail = await getCompanyById(Number(matched.id));
+        setViewingCompanyDetail(detail);
+      } catch {
+        /* logo not critical */
+      }
+    }
+    if (rec.expenseId) {
+      fetchPaymentSummary(rec.expenseId)
+        .then(setViewingChain)
+        .catch(() => {});
+      // Fetch GRN breakdown to get GST-inclusive total (bypasses stale ENetAmount in payment-summary)
+      fetchWithAuth(`/api/expense-booking/${rec.expenseId}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then(async (eb: any) => {
+          if (eb?.ESourceType === "GRN" && eb?.ESourceId) {
+            const br = await fetchWithAuth(`/api/grns/${eb.ESourceId}/gst-breakdown`);
+            if (br.ok) {
+              const bd = await br.json();
+              const total = bd?.totals?.totalInclGST ?? 0;
+              if (total > 0) setViewingGrnTotal(total);
+            }
+          }
+        })
+        .catch(() => {});
+    }
+    if (rec.expenseRef) {
+      setLoadingChain(true);
+      getPaymentChain(rec.expenseRef)
+        .then(setPaymentChainData)
+        .catch(() => {})
+        .finally(() => setLoadingChain(false));
+      getOABalanceByRef(rec.expenseRef)
+        .then((b) => setViewingOaBalance(b.balance ?? 0))
+        .catch(() => {});
+    }
+  };
+
+  // Reopen the form view if a draft was restored from localStorage — but
+  // only on an actual browser reload, not a plain in-app navigation (e.g.
+  // clicking "Payment" in the sidebar remounts this component too; without
+  // this check, an old leftover draft would hijack that link into always
+  // opening the form instead of the list).
+  useEffect(() => {
+    if (!wasPageReloaded()) return;
+    if (form.paymentName || form.paidTo || form.amount || form.notes) {
+      setView("form");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fetch payment posting data when posting tab opens
+  useEffect(() => {
+    if (detailTab !== "posting" || !viewingRec?.id) return;
+    setPmtPostingLoading(true);
+    setPmtPostingData(null);
+    const url = viewingRec.expenseRef
+      ? `/api/new-payment/chain-posting/${encodeURIComponent(viewingRec.expenseRef)}`
+      : `/api/new-payment/${viewingRec.id}/posting`;
+    fetchWithAuth(url)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setPmtPostingData(d ?? null))
+      .catch(() => setPmtPostingData(null))
+      .finally(() => setPmtPostingLoading(false));
+  }, [detailTab, viewingRec?.id, viewingRec?.expenseRef]);
+
+  // Auto-post as soon as posting data has loaded — no manual "Post to GL"
+  // click. Entries post one at a time (posting the next only after the
+  // current one resolves, via re-running whenever pmtPostingData changes)
+  // rather than all at once, since each hits the same doc-number lock.
+  useEffect(() => {
+    if (detailTab !== "posting" || pmtPostingLoading || pmtPosting) return;
+    const entries: any[] = pmtPostingData?.entries ?? [];
+    // Debit Notes (routes/debitNote.js) post themselves immediately on save
+    // — there's no /:id/post-to-gl for a debit note id, so this loop must
+    // never try to "auto-post" one the way it does payments/bounce charges.
+    const next = entries.find((e) => !e.isPosted && !e.isBounced && e.type !== "debit_note");
+    if (!next) return;
+    const url =
+      next.type === "bounce_charge"
+        ? `/api/new-payment/${next.pmtId}/post-bounce-charge-to-gl`
+        : `/api/new-payment/${next.pmtId}/post-to-gl`;
+    setPmtPosting(true);
+    setPmtPostingError(null);
+    fetchWithAuth(url, { method: "POST" })
+      .then(async (r) => {
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body?.error ?? "Posting failed");
+        setPmtPostingData((prev: any) => ({
+          ...prev,
+          entries: prev.entries.map((e: any) =>
+            e.pmtId === next.pmtId && e.type === next.type
+              ? { ...e, isPosted: true, jvNo: body.jvNo }
+              : e,
+          ),
+        }));
+      })
+      .catch((err: any) => setPmtPostingError(err.message ?? "Posting failed"))
+      .finally(() => setPmtPosting(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detailTab, pmtPostingLoading, pmtPostingData, pmtPosting]);
+
+  // Deep-link support — Trial Balance drill-down (Level 3) navigates here as
+  // /payments?view=<PPaymentID>, so this payment's receipt should open
+  // automatically in view mode, regardless of which page it's on.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    const id = parseInt(viewId, 10);
+    if (!Number.isFinite(id)) return;
+    getPaymentById(id)
+      .then((row) => {
+        if (row) openViewRec(dbToRecord(row));
+        else toast.error(`Payment #${id} not found`);
+      })
+      .catch(() => toast.error("Failed to load the linked payment"))
+      .finally(() => {
+        searchParams.delete("view");
+        setSearchParams(searchParams, { replace: true });
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Detect On A/C Adjustment context passed from OnAccountAdjustment page
+  useEffect(() => {
+    const oa = (location.state as any)?.oaAdjust;
+    if (!oa?.partyId) return;
+    setOaAdjustCtx(oa);
+    setOaBalance(oa.availableBalance ?? 0);
+    setView("form");
+    // Pre-fill the supplier/contractor name so the user doesn't have to type it
+    setForm((prev) => ({
+      ...prev,
+      paidTo: oa.partyName ?? prev.paidTo,
+    }));
+    window.history.replaceState({}, "", location.pathname);
+  }, []);
+
+  // Detect bounce re-issue context passed from BRS page
+  useEffect(() => {
+    const ri = (location.state as any)?.reissue;
+    if (!ri?.replacesPaymentId) return;
+    setReissueCtx(ri);
+    setBounceCharge("");
+    setView("form");
+    window.history.replaceState({}, "", location.pathname);
+
+    // Fetch the full original payment record to pre-fill all fields
+    fetchWithAuth(`/api/new-payment/${ri.replacesPaymentId}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data: any) => {
+        if (!data) return;
+        setForm((prev) => ({
+          ...prev,
+          paymentName: data.PPaymentName ?? ri.paymentName ?? prev.paymentName,
+          amount:      data.PAmount      != null ? parseFloat(data.PAmount) : (ri.amount ?? prev.amount),
+          expenseRef:  data.PExpenseRef  ?? ri.expenseRef  ?? prev.expenseRef,
+          company:     data.PCompanyName ?? data.PCompany  ?? ri.company    ?? prev.company,
+          project:     data.PProjectName ?? data.PProject  ?? ri.project    ?? prev.project,
+          projectSite: data.PProjectName ?? data.PProject  ?? ri.project    ?? prev.projectSite,
+          bankId:      data.PBankID      ?? ri.bankId      ?? prev.bankId,
+          paidTo:      data.PSupplierName ?? prev.paidTo,
+          supplierContact: data.PSupplierContact ?? prev.supplierContact,
+          docType:     data.PDocType     ?? prev.docType,
+        }));
+      })
+      .catch(() => {
+        // Fallback to the BRS-provided summary if the fetch fails
+        setForm((prev) => ({
+          ...prev,
+          paymentName: ri.paymentName ?? prev.paymentName,
+          amount:      ri.amount      ?? prev.amount,
+          expenseRef:  ri.expenseRef  ?? prev.expenseRef,
+          company:     ri.company     ?? prev.company,
+          project:     ri.project     ?? prev.project,
+          bankId:      ri.bankId      ?? prev.bankId,
+        }));
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
+  // Print/PDF payment voucher
+  const handlePrintPayment = (
+    rec: PaymentRecord,
+    companyDetail: CompanyDetail | null,
+    chain: ChainSummary | null = null,
+  ) => {
+    const logoHtml = companyDetail?.logo
+      ? `<img src="${companyDetail.logo}" alt="Logo" style="height:60px;max-width:180px;object-fit:contain;" />`
+      : `<span style="font-size:18px;font-weight:800;color:#4f46e5;">${companyDetail?.name ?? rec.company ?? "—"}</span>`;
+
+    const companyAddress = [
+      companyDetail?.address,
+      companyDetail?.address_line2,
+      companyDetail?.city,
+      companyDetail?.state,
+      companyDetail?.pincode,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    const statusColor: Record<string, string> = {
+      Draft: "#64748b",
+      Pending: "#d97706",
+      Approved: "#059669",
+      Rejected: "#dc2626",
+    };
+    const sColor = statusColor[rec.status] ?? "#64748b";
+
+    const modeColor: Record<string, string> = {
+      Cheque: "#4f46e5",
+      "Post-Dated Cheque": "#7c3aed",
+      NEFT: "#0891b2",
+      UPI: "#059669",
+      RTGS: "#d97706",
+      IMPS: "#ea580c",
+      Cash: "#16a34a",
+    };
+    const mColor = modeColor[rec.mode] ?? "#4f46e5";
+
+    const field = (label: string, value: string | null | undefined) =>
+      value
+        ? `<tr>
+            <td style="padding:7px 12px;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;width:160px;">${label}</td>
+            <td style="padding:7px 12px;font-size:13px;font-weight:500;color:#111827;">${value}</td>
+           </tr>`
+        : "";
+
+    const sectionTitle = (label: string) =>
+      `<div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#4f46e5;margin:20px 0 8px;">${label}</div>`;
+
+    const supplier = chain?.supplier ?? null;
+    const docChain = chain?.chain ?? null;
+
+    const supplierRows = supplier
+      ? [
+          field("Supplier Name", supplier.name),
+          field("Supplier Code", supplier.code),
+          field("Address", supplier.address),
+          field("Contact No.", supplier.phone),
+          field("Email", supplier.email),
+          field("GST No.", supplier.gst),
+          field("PAN No.", supplier.pan),
+        ].join("")
+      : "";
+
+    const docRefRows = [
+      field("Invoice No.", docChain?.vendorInvoiceNo || null),
+      field("Invoice Date", docChain?.vendorInvoiceDate || null),
+      field("Purchase Order Ref.", docChain?.poNo || null),
+      field("GRN Ref.", docChain?.grnNo || null),
+      field("Material Request Ref.", docChain?.mrDocNo || null),
+      field(
+        "Expense Booking Ref.",
+        docChain?.expenseDocNo || rec.expenseRef || null,
+      ),
+    ].join("");
+
+    const paymentRows = [
+      field("Payment Ref", rec.docNo || "—"),
+      field("Payment Purpose", rec.paymentName),
+      field("Paid To", rec.paidTo),
+      field("Date", rec.date || "—"),
+      field("Mode", rec.mode || "—"),
+      field("Bank Account", rec.bankName || null),
+      field(
+        "Reference / Txn ID",
+        rec.chequeNo
+          ? `Cheque #${rec.chequeNo}`
+          : rec.neftNumber ||
+              rec.upiTransactionId ||
+              rec.rtgsReference ||
+              rec.impsReference ||
+              rec.cardReference ||
+              null,
+      ),
+      field("Cheque Date", rec.chequeDate || null),
+      field("Cheque Lot", rec.chequeLotNumber || null),
+      field("Card Used", rec.cardDisplay || null),
+      field("Company", rec.company || "—"),
+      field("Project", rec.project || "—"),
+      field("Project Site", rec.projectSite || null),
+      field("Parent Doc", rec.parentDocNo || null),
+    ].join("");
+
+    const baseAmount = rec.baseAmount ?? null;
+    const cgstRate = rec.cgstRate ?? null;
+    const sgstRate = rec.sgstRate ?? null;
+    const igstRate = rec.igstRate ?? null;
+    const hasTaxDetails =
+      baseAmount != null && (cgstRate || sgstRate || igstRate);
+    const cgstAmt =
+      hasTaxDetails && cgstRate ? (baseAmount! * cgstRate) / 100 : 0;
+    const sgstAmt =
+      hasTaxDetails && sgstRate ? (baseAmount! * sgstRate) / 100 : 0;
+    const igstAmt =
+      hasTaxDetails && igstRate ? (baseAmount! * igstRate) / 100 : 0;
+
+    const taxRows = hasTaxDetails
+      ? [
+          field("Taxable Amount", formatINR(baseAmount!)),
+          cgstRate ? field(`CGST (${cgstRate}%)`, formatINR(cgstAmt)) : "",
+          sgstRate ? field(`SGST (${sgstRate}%)`, formatINR(sgstAmt)) : "",
+          igstRate ? field(`IGST (${igstRate}%)`, formatINR(igstAmt)) : "",
+        ].join("")
+      : "";
+
+    // Direct Expense Payment (migration 303) — paid straight against one
+    // or more Expense Heads, no Party involved.
+    const expenseHeadRows =
+      rec.expenseHeadAllocations && rec.expenseHeadAllocations.length > 0
+        ? rec.expenseHeadAllocations
+            .map((a) => field(a.label ?? "Expense Head", formatINR(a.amount)))
+            .join("")
+        : "";
+
+    // TDS (migration 304)
+    const tdsRows = rec.tdsId
+      ? [
+          field("TDS Nature", rec.tdsNature),
+          field("TDS Name", rec.tdsName),
+          rec.tdsPercentage != null ? field("TDS Rate", `${rec.tdsPercentage}%`) : "",
+          field("TDS Amount", formatINR(rec.tdsAmount || 0)),
+          field("Net Payable", formatINR(Math.max(0, (rec.amount ?? 0) - (rec.tdsAmount || 0)))),
+        ].join("")
+      : "";
+
+    const printedAt = new Date().toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    const signBlock = (label: string) =>
+      `<div style="flex:1;text-align:center;">
+         <div style="border-top:1px solid #9ca3af;margin:36px 12px 6px;"></div>
+         <div style="font-size:11px;color:#6b7280;">${label}</div>
+       </div>`;
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Payment Receipt — ${rec.docNo || rec.paymentName}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #111827; padding: 36px; font-size: 13px; }
+    table { border-collapse: collapse; width: 100%; }
+    tr:nth-child(even) { background: #f9fafb; }
+    @media print { body { padding: 16px; } button { display: none !important; } }
+  </style>
+</head>
+<body>
+  <!-- Company header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:2px solid #4f46e5;margin-bottom:8px;">
+    <div>
+      ${logoHtml}
+      ${companyAddress ? `<div style="margin-top:6px;font-size:11px;color:#6b7280;max-width:340px;">${companyAddress}</div>` : ""}
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">
+        ${[companyDetail?.phone_number, companyDetail?.email].filter(Boolean).join("  ·  ")}
+      </div>
+      <div style="font-size:11px;color:#6b7280;margin-top:2px;">
+        ${[companyDetail?.gst_no ? `GSTIN: ${companyDetail.gst_no}` : null, companyDetail?.pan ? `PAN: ${companyDetail.pan}` : null].filter(Boolean).join("  ·  ")}
+      </div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:22px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PAYMENT RECEIPT</div>
+      <div style="font-size:14px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${rec.docNo || "—"}</div>
+      <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
+        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sColor}18;color:${sColor};border:1px solid ${sColor}40;">
+          ${rec.status}
+        </span>
+        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${mColor}18;color:${mColor};border:1px solid ${mColor}40;">
+          ${rec.mode}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Amount highlight -->
+  <div style="margin:18px 0 8px;padding:16px 20px;background:linear-gradient(135deg,#4f46e510,#7c3aed10);border-radius:12px;border:1px solid #4f46e520;display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#6b7280;margin-bottom:2px;">Payment Amount</div>
+      <div style="font-size:28px;font-weight:800;color:#4f46e5;font-family:monospace;">${formatINR(rec.amount ?? 0)}</div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#6b7280;margin-bottom:2px;">Payment Date</div>
+      <div style="font-size:16px;font-weight:700;color:#111827;">${rec.date || "—"}</div>
+    </div>
+  </div>
+
+  ${supplierRows ? sectionTitle("Supplier / Vendor Information") : ""}
+  ${supplierRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${supplierRows}</tbody></table></div>` : ""}
+
+  ${sectionTitle("Payment Information")}
+  <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+    <table><tbody>${paymentRows}${docRefRows}</tbody></table>
+  </div>
+
+  ${taxRows ? sectionTitle("Tax Details") : ""}
+  ${taxRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${taxRows}</tbody></table></div>` : ""}
+
+  ${expenseHeadRows ? sectionTitle(rec.expenseHeadAllocations!.length > 1 ? "Expense Heads" : "Expense Head") : ""}
+  ${expenseHeadRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${expenseHeadRows}</tbody></table></div>` : ""}
+
+  ${tdsRows ? sectionTitle("TDS Details") : ""}
+  ${tdsRows ? `<div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;"><table><tbody>${tdsRows}</tbody></table></div>` : ""}
+
+  <!-- Signatories -->
+  <div style="display:flex;gap:8px;margin-top:48px;">
+    ${signBlock("Prepared By")}
+    ${signBlock("Approved By")}
+    ${signBlock("Authorized Signatory")}
+  </div>
+
+  <!-- Footer -->
+  <div style="margin-top:28px;padding-top:12px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:10px;color:#9ca3af;">
+    <span>This is a system-generated receipt and does not require a physical signature.</span>
+    <span>Printed: ${printedAt}</span>
+  </div>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    const win = window.open(blobUrl, "_blank", "width=860,height=720");
+    if (!win) {
+      URL.revokeObjectURL(blobUrl);
+      toast.error("Pop-up blocked — please allow pop-ups.");
+      return;
+    }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    win.onload = () => {
+      win.focus();
+      win.print();
+    };
+  };
+  const [loadingExpense, setLoadingExpense] = useState(false);
+  const [syncingBalances, setSyncingBalances] = useState(false);
+  const [linkedGRNs, setLinkedGRNs] = useState<GRNRef[]>([]);
+  const [grnGstBreakdown, setGrnGstBreakdown] = useState<{
+    items: {
+      itemName: string;
+      hsnCode: string;
+      gstPercent: number;
+      receivedQty: number;
+      totalAmountInclGST: number;
+      baseAmount: number;
+      cgstRate: number;
+      cgstAmount: number;
+      sgstRate: number;
+      sgstAmount: number;
+      gstAmount: number;
+    }[];
+    totals: {
+      totalBase: number;
+      totalCGST: number;
+      totalSGST: number;
+      totalGST: number;
+      totalInclGST: number;
+    };
+  } | null>(null);
+  const [oaAdjustmentsForInvoice, setOaAdjustmentsForInvoice] = useState<
+    OAInvoiceAdjustment[]
+  >([]);
+  const [, setSupplierBookingFilter] = useState("");
+  const [bookingFilters, setBookingFilters] = useState<BookingFilters>({
+    company: "",
+    project: "",
+    year: "",
+    supplier: "",
+  });
+
+  // ── Queries ────────────────────────────────────────────────────────────────
+
+  const {
+    data: dbData,
+    isLoading,
+    isError,
+    refetch: refetchPayments,
+  } = useQuery({
+    queryKey: [
+      "payments",
+      page,
+      supplierFilter,
+      companyNameFilter,
+      projectFilter,
+      finYearFilter,
+      docNumberFilter,
+      dateFromFilter,
+      dateToFilter,
+    ],
+    queryFn: () =>
+      getPayments(
+        page,
+        PAGE_SIZE,
+        supplierFilter,
+        companyNameFilter,
+        projectFilter,
+        finYearFilter,
+        docNumberFilter,
+        "",
+        "",
+        "",
+        "",
+        dateFromFilter,
+        dateToFilter,
+      ),
+    staleTime: 0,
+  });
+
+  const { data: banks = [] } = useQuery<BankOption[]>({
+    queryKey: ["bank-options-payment"],
+    queryFn: fetchBankOptions,
+  });
+
+  // ── Banks scoped to the selected company ────────────────────────────────
+  // Same convention ReceivedPayment.tsx already uses: a bank with no
+  // company tagged is shared across every company, so it stays in the
+  // list regardless; one tagged to a DIFFERENT company is hidden. Falls
+  // back to the full list if the filter would otherwise leave nothing to
+  // pick — better an unscoped dropdown than a dead end.
+  const filteredBanks = useMemo(() => {
+    if (!form.company) return banks;
+    const selected = normalizeCompanyName(form.company);
+    const matched = banks.filter((b) => {
+      const bankCompany = normalizeCompanyName(b.companyName);
+      return !bankCompany || bankCompany === selected;
+    });
+    return matched.length > 0 ? matched : banks;
+  }, [banks, form.company]);
+
+  const { data: enterprises = [] } = useQuery<{ id: number; label: string }[]>({
+    queryKey: ["company-options-payment-filter"],
+    queryFn: fetchCompanyOptions,
+  });
+
+  // Companies fetched with business_type=C from enterprise table
+  const companyOptions = enterprises;
+
+  // TDS eligibility — live-checked against the chosen Payee/Party for a
+  // direct (no invoice linked) payment. Reuses the same generic endpoint
+  // the Invoice form uses (AccountHeadMaster eligibility isn't module-
+  // specific — Payee/Party here is the exact same Supplier/Contractor
+  // master row an Invoice's supplier resolves to).
+  useEffect(() => {
+    if (form.expenseRef || !form.partyId || !form.company) {
+      setTdsEligibility(null);
+      return;
+    }
+    const companyIdNum = companyOptions.find((c) => c.label === form.company)?.id;
+    if (!companyIdNum) {
+      setTdsEligibility(null);
+      return;
+    }
+    let cancelled = false;
+    const qs = new URLSearchParams({
+      supplierId: String(form.partyId),
+      companyId: String(companyIdNum),
+      amount: String(form.amount || 0),
+    });
+    if (form.date) qs.set("date", form.date);
+    fetchWithAuth(`/api/expense-booking/tds-eligibility?${qs.toString()}`)
+      .then((r) => r.json().catch(() => null))
+      .then((data) => {
+        if (!cancelled) setTdsEligibility(data);
+      })
+      .catch(() => {
+        if (!cancelled) setTdsEligibility(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.expenseRef, form.partyId, form.company, form.amount, form.date, companyOptions]);
+
+  const { data: projectOptions = [] } = useQuery<
+    {
+      id: number;
+      label: string;
+      belongs_to?: number | null;
+      company_id?: number | null;
+    }[]
+  >({
+    queryKey: ["project-options-payment-filter"],
+    queryFn: fetchProjectOptions,
+  });
+
+  const { data: supplierOptions = [] } = useQuery<
+    { id: number; label: string; type?: string }[]
+  >({
+    queryKey: ["supplier-options-payment-filter"],
+    queryFn: fetchSupplierOptions,
+  });
+
+  const { data: finYearOptions = [] } = useQuery<
+    { id: number; label: string }[]
+  >({
+    queryKey: ["fin-year-options-payment-filter"],
+    queryFn: fetchFinYearOptions,
+  });
+
+  const dbItems: DbPayment[] = Array.isArray(dbData?.data) ? dbData.data : [];
+  const totalPages: number = dbData?.totalPages ?? 1;
+  const totalRecords: number = dbData?.total ?? 0;
+  const records: PaymentRecord[] = dbItems.map(dbToRecord);
+
+  // Export must cover every matching record, not just the current page —
+  // the list endpoint caps `limit` at 100 server-side, so page through
+  // everything under the SAME filters already applied to the visible table.
+  const fetchAllPaymentsForExport = useCallback(async () => {
+    const pageLimit = 100;
+    let all: DbPayment[] = [];
+    let p = 1;
+    let pages = 1;
+    do {
+      const data = await getPayments(
+        p,
+        pageLimit,
+        supplierFilter,
+        companyNameFilter,
+        projectFilter,
+        finYearFilter,
+        docNumberFilter,
+        "",
+        "",
+        "",
+        "",
+        dateFromFilter,
+        dateToFilter,
+      );
+      all = all.concat(Array.isArray(data?.data) ? data.data : []);
+      pages = data?.totalPages ?? 1;
+      p += 1;
+    } while (p <= pages);
+    return all.map(dbToRecord) as unknown as Record<string, unknown>[];
+  }, [supplierFilter, companyNameFilter, projectFilter, finYearFilter, docNumberFilter, dateFromFilter, dateToFilter]);
+
+  // Fetch full detail (name + logo + address) for the selected company — used in PDF export
+  const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
+    {
+      queryKey: ["company-detail-export", companyFilter],
+      queryFn: () =>
+        companyFilter
+          ? getCompanyById(Number(companyFilter))
+          : Promise.resolve(null),
+      enabled: !!companyFilter,
+    },
+  );
+
+  const { data: paymentReasons = [] } = useQuery({
+    queryKey: ["payment-reason-options"],
+    queryFn: getPaymentReasonOptions,
+    staleTime: 5 * 60_000,
+  });
+
+  const { data: expenseOptions = [], refetch: refetchExpenseOptions } = useQuery<ExpenseOption[]>({
+    queryKey: ["expense-options-payment", oaAdjustCtx?.partyId ?? null],
+    queryFn: async () => {
+      const url = oaAdjustCtx?.partyId
+        ? `/api/expense-booking/options?partyId=${oaAdjustCtx.partyId}`
+        : "/api/expense-booking/options";
+      const res = await fetchWithAuth(url);
+      if (!res.ok) return [];
+      const raw = await res.json().catch(() => ({}));
+      const items: any[] = Array.isArray(raw) ? raw : (raw?.data ?? []);
+      return normaliseExpenseOptions(items);
+    },
+    staleTime: 0,
+    // staleTime: 0 only means "eligible to refetch" — it does NOT force a
+    // refetch on its own once this query has already run once in this tab.
+    // This list backs the invoice picker (amount, remainingAmount, TDS) and
+    // the Invoice Balance / Payment Breakdown cards; without this, all three
+    // can silently show whatever an invoice's numbers were the first time
+    // this page happened to fetch them, even after real edits (TDS applied,
+    // payments made) change the true remainingAmount server-side.
+    refetchOnMount: "always",
+  });
+
+  // ── Contract source ─────────────────────────────────────────────────────────
+  const [selectedContract, setSelectedContract] = useState<any | null>(null);
+
+  // ── Journal Voucher source ───────────────────────────────────────────────────
+  // Settle a JV's unpaid liability leg (DR that same head, CR bank — the
+  // GL posting is identical to any other payment; see
+  // backend/routes/journalVoucher.js's GET /payable-lines for eligibility).
+  const [selectedJVLine, setSelectedJVLine] = useState<PayableJVLine | null>(null);
+  const { data: jvLineOptions = [], isLoading: jvLinesLoading } = useQuery<PayableJVLine[]>({
+    queryKey: ["payment-payable-jv-lines"],
+    queryFn: () => getPayableJVLines(),
+    staleTime: 30_000,
+  });
+  const handleJVLineSelect = (line: PayableJVLine) => {
+    setSelectedContract(null);
+    setLinkedGRNs([]);
+    setSelectedJVLine(line);
+    const companyOpt = companyOptions.find((c) => c.id === line.CompanyId);
+    const projectOpt = projectOptions.find((p) => p.id === line.ProjectId);
+    const companyLabel = companyOpt?.label || line.CompanyName || String(line.CompanyId || "");
+    const projectLabel = projectOpt?.label || line.ProjectName || String(line.ProjectId || "");
+    setForm((prev) => ({
+      ...prev,
+      paymentName: `Payment against ${line.JVNo || `JV-${line.JVID}`} — ${line.LHeadName}`,
+      expenseId: "",
+      expenseRef: "",
+      parentDocNo: "",
+      rootExBDocNo: "",
+      docType: "",
+      contractId: "",
+      jvLineId: line.LineID,
+      company: companyLabel,
+      project: projectLabel,
+      projectSite: projectLabel,
+      partyId: line.LHeadId,
+      paidTo: line.LHeadName,
+      amount: Math.max(Number(line.RemainingAmount) || 0, 0),
+    }));
+  };
+  const clearJVLineLink = () => {
+    setSelectedJVLine(null);
+    setForm((prev) => ({
+      ...prev,
+      paymentName: "",
+      jvLineId: null,
+      company: "",
+      project: "",
+      projectSite: "",
+      partyId: null,
+      paidTo: "",
+      amount: null,
+    }));
+  };
+
+  // TDS — invoice-linked payment. Live preview of exactly what will be
+  // inherited (or what will block the save) once an invoice is picked —
+  // calls the exact same resolver the save itself uses.
+  useEffect(() => {
+    if (!form.expenseRef || selectedContract) {
+      setInvoiceTdsPreview(null);
+      return;
+    }
+    const companyIdNum = companyOptions.find((c) => c.label === form.company)?.id;
+    let cancelled = false;
+    const qs = new URLSearchParams({ expenseRef: form.expenseRef });
+    if (companyIdNum) qs.set("companyId", String(companyIdNum));
+    if (form.date) qs.set("date", form.date);
+    fetchWithAuth(`/api/new-payment/tds-preview?${qs.toString()}`)
+      .then((r) => r.json().catch(() => null))
+      .then((data) => {
+        if (!cancelled) setInvoiceTdsPreview(data);
+      })
+      .catch(() => {
+        if (!cancelled) setInvoiceTdsPreview(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.expenseRef, selectedContract, form.company, form.date, companyOptions]);
+  const { data: contractOptions = [], isLoading: contractsLoading } = useQuery<any[]>({
+    queryKey: ["payment-contracts"],
+    queryFn: async () => {
+      const r = await fetchWithAuth("/api/contract?status=Approved");
+      return r.ok ? r.json() : [];
+    },
+    staleTime: 60_000,
+  });
+  const handleContractSelect = (contract: any) => {
+    const purpose = `Payment to ${contract.ContactPerson || "Contractor"} for ${contract.Reason || contract.NatureOfContract || "contract work"}`;
+    setSelectedContract(contract);
+    setLinkedGRNs([]);
+    // Resolve Company/Project against the actual dropdown option lists
+    // rather than trusting the contract's own denormalized name strings —
+    // the Company/Project <select>s match by exact label string, and a
+    // casing/whitespace difference between dbo.enterprise (source of these
+    // dropdowns) and the contract's own joined name silently left the
+    // select unmatched (shows "Select company…" despite a value being set).
+    // Matching by id first and reading the label back from the option list
+    // guarantees it's a string the select actually has.
+    const companyOpt = companyOptions.find((c) => c.id === contract.CompanyId);
+    const projectOpt = projectOptions.find((p) => p.id === contract.ProjectId);
+    const companyLabel = companyOpt?.label || contract.CompanyName || String(contract.CompanyId || "");
+    const projectLabel = projectOpt?.label || contract.ProjectName || String(contract.ProjectId || "");
+    setForm((prev) => ({
+      ...prev,
+      paymentName: purpose,
+      expenseRef: contract.DocNo || "",
+      // Clear any stale invoice-side link — picking a contract supersedes
+      // it. Previously this cleanup happened via a *separate* onChange("")
+      // call fired right after this handler by the picker, which raced
+      // with this setForm and usually won, wiping out the company/project/
+      // party fields being set below. Doing it in the same update instead.
+      expenseId: "",
+      parentDocNo: "",
+      rootExBDocNo: "",
+      docType: "",
+      contractId: contract.ContractId != null ? String(contract.ContractId) : "",
+      company: companyLabel,
+      project: projectLabel,
+      projectSite: projectLabel,
+      // Payee/Party was never set here before — the field stayed on
+      // whatever (or nothing) was previously selected.
+      partyId: contract.ContactPartyId ?? prev.partyId,
+      paidTo: contract.ContactPerson || prev.paidTo,
+      // Default to what's still outstanding on the contract, not its full
+      // value — most payments against an already-active contract are
+      // another advance/installment, not the whole thing at once. Falls
+      // back to the full contract amount only for a brand-new contract
+      // with nothing paid yet (PendingAmount === ContractAmount then
+      // anyway, so this is really just a null/undefined guard).
+      amount:
+        contract.PendingAmount != null
+          ? Math.max(Number(contract.PendingAmount), 0)
+          : (contract.ContractAmount ?? prev.amount),
+    }));
+  };
+  const clearContractLink = () => {
+    setSelectedContract(null);
+    setForm((prev) => ({
+      ...prev,
+      paymentName: "",
+      expenseRef: "",
+      contractId: "",
+      company: "",
+      project: "",
+      projectSite: "",
+      partyId: null,
+      paidTo: "",
+      amount: null,
+    }));
+  };
+
+  // ── Loan Disbursement (Inter-Company) ───────────────────────────────────
+  // The only loan-related action left on this page — repayment of every
+  // loan type now happens exclusively through Received Payment (see its
+  // own Loan Repayment picker). Disbursement is the initial money-out
+  // event: pick a Sanctioned, undisbursed Inter-Company loan and post it.
+  // No NewPayment record and no fresh bank/cheque entry needed — the
+  // loan's own sanction already carries its Lender/Borrower Bank A/C, and
+  // POST /:id/post-to-gl posts both companies' legs from those, the same
+  // mechanism that used to fire automatically at sanction time.
+  const loanDisbursementCompanyId = companyOptions.find((c) => c.label === bookingFilters.company)?.id;
+  const {
+    data: undisbursedLoans = [],
+    isLoading: undisbursedLoansLoading,
+    refetch: refetchUndisbursedLoans,
+  } = useQuery<UndisbursedLoan[]>({
+    queryKey: ["payment-undisbursed-loans", loanDisbursementCompanyId],
+    queryFn: () => getUndisbursedLoans(loanDisbursementCompanyId!),
+    enabled: !!loanDisbursementCompanyId,
+    staleTime: 30_000,
+  });
+  const [disbursingLoanId, setDisbursingLoanId] = useState<number | null>(null);
+  const handleDisburseLoan = async (loan: UndisbursedLoan) => {
+    if (!loan.LenderBankAccountId || !loan.BorrowerBankAccountId) {
+      toast.error(
+        `${loan.LoanNo} is missing a Lender or Borrower Bank A/C — add it from Loan Sanction before disbursing.`,
+      );
+      return;
+    }
+    setDisbursingLoanId(loan.LoanId);
+    try {
+      const res = await postLoanToGL(loan.LoanId);
+      toast.success(`${loan.LoanNo} disbursed — JV ${res.voucherNo}`);
+      refetchUndisbursedLoans();
+    } catch (err: any) {
+      toast.error(err.message || "Disbursement failed");
+    } finally {
+      setDisbursingLoanId(null);
+    }
+  };
+
+  // Customer Loan disbursement — unlike Inter-Company (a real bank account
+  // on both sides, so one click posts a voucher directly with no separate
+  // document), the other side here is a customer, not one of our own
+  // companies — a real NewPayment is needed as the bank-side record (bank/
+  // cheque/reference the user actually picks), same as loan repayment
+  // already requires. Selecting one just pre-fills the party + amount on
+  // THIS form; the rest (bank, mode, project, date) is filled normally,
+  // and POST /:id/disburse links the two once the payment is saved below.
+  const [disbursingCustomerLoan, setDisbursingCustomerLoan] = useState<UndisbursedLoan | null>(null);
+  const handleSelectCustomerLoanDisbursement = (loan: UndisbursedLoan) => {
+    if (loan.BorrowerCustomerSource === "CRM") {
+      toast.error(`${loan.LoanNo}'s borrower is a CRM customer — record this disbursement manually for now.`);
+      return;
+    }
+    if (!loan.BorrowerCustomerId) {
+      toast.error(`${loan.LoanNo} has no borrower customer on file.`);
+      return;
+    }
+    setDisbursingCustomerLoan(loan);
+    const isChequeMode = loan.PaymentMode === "Cheque" || loan.PaymentMode === "Post-Dated Cheque";
+    setForm((f) => ({
+      ...f,
+      // Company wasn't being pre-filled — the picker itself is scoped by
+      // company (bookingFilters.company, same label form.company expects),
+      // but nothing carried it onto the form. Left empty, the Bank field
+      // below has no company to scope its options by, so every mode
+      // (Cheque included) looked "locked" — there was simply nothing to
+      // pick from, not an actual disabled control.
+      company: bookingFilters.company || f.company,
+      partyId: loan.BorrowerCustomerId,
+      amount: loan.Amount,
+      paymentName: f.paymentName || `Loan disbursement — ${loan.LoanNo}`,
+      // The loan already recorded which bank/cheque it was disbursed
+      // through at sanction time — carry all of it over instead of leaving
+      // the Bank field on whatever was last selected (previously this left
+      // the wrong bank showing, and the cheque number blank/unpickable
+      // since it had already been deducted from the lot under this loan).
+      // bankName has to be carried over alongside bankId — unlike
+      // handleBankSelect (the normal dropdown path), this pre-fill never
+      // went through that handler, so form.bankName was silently left
+      // unset and the save failed with a NOT NULL violation on
+      // NewPayment.PBankName the moment the user didn't happen to
+      // re-touch the Bank dropdown themselves.
+      bankId: loan.LenderBankAccountId ?? f.bankId,
+      bankName: loan.LenderBankAccountId
+        ? (banks.find((b) => b.id === loan.LenderBankAccountId)?.label?.split(" — ")[0] ?? f.bankName)
+        : f.bankName,
+      mode: loan.PaymentMode || f.mode,
+      chequeLotId: isChequeMode ? (loan.ChequeLotId ?? f.chequeLotId) : f.chequeLotId,
+      chequeLotNumber: isChequeMode ? (loan.ChequeLotNumber || f.chequeLotNumber) : f.chequeLotNumber,
+      chequeNo: isChequeMode ? (loan.ChequeNo || f.chequeNo) : f.chequeNo,
+      chequeDate: isChequeMode ? (loan.ChequeDate ? loan.ChequeDate.slice(0, 10) : f.chequeDate) : f.chequeDate,
+      isPostDated: isChequeMode ? !!loan.IsPostDated : f.isPostDated,
+    }));
+    toast.success(`${loan.LoanNo} selected — bank/cheque carried over from the loan. Review and save to disburse.`);
+  };
+
+
+  // ── Stats ──────────────────────────────────────────────────────────────────
+
+  const totalAmount = dbItems.reduce((s, p) => s + (p.PAmount || 0), 0);
+  const chequeCount = dbItems.filter(
+    (p) => p.PMode === "Cheque" || p.PMode === "Post-Dated Cheque",
+  ).length;
+  const cashCount = dbItems.filter((p) => p.PMode === "Cash").length;
+
+  // ── Form helpers ───────────────────────────────────────────────────────────
+
+  const set = <K extends keyof Omit<PaymentRecord, "id">>(
+    field: K,
+    value: Omit<PaymentRecord, "id">[K],
+  ) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const openNew = () => {
+    setEditingId(null);
+    setForm(blankForm());
+    setLinkedGRNs([]);
+    setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
+    setSelectedContract(null);
+    setSelectedJVLine(null);
+    setFormLiveRemaining(null);
+    setFormKnownTotalPaid(null);
+    setFormKnownTdsAmount(null);
+    setView("form");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    // The invoice picker (amount, remainingAmount, TDS) reads from this
+    // list — this page's query mounts once and never remounts as the user
+    // toggles list/form internally, so staleTime/refetchOnMount alone won't
+    // catch edits made to an invoice since this page was first opened.
+    // Force it current every time a fresh payment form is opened.
+    refetchExpenseOptions();
+  };
+
+  const openEdit = (rec: PaymentRecord) => {
+    setSelectedContract(null);
+    setSelectedJVLine(null);
+    setEditingId(rec.id);
+    refetchExpenseOptions();
+    const { id, ...rest } = rec;
+    const matchedOption = rest.expenseRef
+      ? expenseOptions.find(
+          (o) =>
+            o.label.startsWith(rest.expenseRef + " ") ||
+            o.label.startsWith(rest.expenseRef + " —"),
+        )
+      : undefined;
+    setForm({ ...rest, expenseId: matchedOption?.id ?? "" });
+    setLinkedGRNs([]);
+    setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
+    setView("form");
+  };
+
+  const cancelForm = () => {
+    setView("list");
+    setEditingId(null);
+    setForm(blankForm());
+    setLinkedGRNs([]);
+    setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
+    setSelectedContract(null);
+    setSelectedJVLine(null);
+  };
+
+  const blank = blankForm();
+  const isDirty = (Object.keys(blank) as (keyof typeof blank)[]).some(
+    (k) => String(form[k] ?? "") !== String(blank[k] ?? ""),
+  );
+
+  const canSave = !!(
+    form.paymentName.trim() &&
+    form.mode &&
+    form.date &&
+    (Number(form.amount) > 0 || form.expenseRef)
+  );
+
+  const handleReset = () => {
+    setForm(blankForm());
+    setLinkedGRNs([]);
+    setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
+  };
+
+  // ── Mode change — clear irrelevant fields ──────────────────────────────────
+
+  const handleModeChange = (newMode: string) => {
+    const today = new Date().toISOString().slice(0, 10);
+    setForm((prev) => ({
+      ...prev,
+      mode: newMode,
+      isPostDated: newMode === "Post-Dated Cheque",
+      // Clear cheque fields when switching away from cheque modes
+      ...(newMode !== "Cheque" && newMode !== "Post-Dated Cheque"
+        ? {
+            chequeNo: "",
+            chequeLotId: null,
+            chequeLotNumber: "",
+            chequeDate: "",
+            chequeAccountNumber: "",
+            chequeIfsc: "",
+          }
+        : newMode === "Cheque"
+          ? {
+              // Plain (non-PDC) cheque: defaults to today but is editable —
+              // backdate it to whenever the cheque was actually issued.
+              // Never clobber a date the user already picked.
+              chequeDate: prev.chequeDate || today,
+            }
+          : {
+              // Post-Dated Cheque: auto-fill today as a starting point only
+              // if not already set — the user is expected to pick a future
+              // date, so don't clobber one they've already chosen.
+              chequeDate: prev.chequeDate || today,
+            }),
+      // Clear digital fields when switching away from digital modes
+      ...(!["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(newMode)
+        ? {
+            neftNumber: "",
+            upiTransactionId: "",
+            rtgsReference: "",
+            impsReference: "",
+            cardReference: "",
+            cardId: null,
+          }
+        : {}),
+    }));
+  };
+
+  // ── Expense booking selection → auto-fill ──────────────────────────────────
+
+  const handleExpenseSelect = useCallback(
+    async (expenseId: string, amountOverride?: number) => {
+      // Reset known total paid unless this is a Pay Remaining call (amountOverride set)
+      if (amountOverride == null) setFormKnownTotalPaid(null);
+      if (!expenseId) {
+        setFormKnownTdsAmount(null);
+        setForm((prev) => ({
+          ...prev,
+          expenseId: "",
+          expenseRef: "",
+          parentDocNo: "",
+          rootExBDocNo: "",
+          project: "",
+          company: "",
+          amount: null,
+          docType: "",
+          partyId: null,
+          paidTo: "",
+        }));
+        return;
+      }
+
+      const selectedOption = expenseOptions.find((o) => o.id === expenseId);
+      if (selectedOption?.type === "emi") {
+        setFormKnownTdsAmount(null);
+        const parentDocNo =
+          selectedOption.parentDocNo ||
+          selectedOption.refNumber?.replace(/-EMI-\d+$/i, "") ||
+          selectedOption.docNo?.replace(/-EMI-\d+$/i, "") ||
+          "";
+        const padded = String(selectedOption.installmentNo ?? 1).padStart(
+          2,
+          "0",
+        );
+        const emiSuffix = `EMI-${padded}`;
+        const ref =
+          selectedOption.refNumber ||
+          (selectedOption.parentDocNo
+            ? `${selectedOption.parentDocNo}-${emiSuffix}`
+            : selectedOption.docNo
+              ? `${selectedOption.docNo}-${emiSuffix}`
+              : emiSuffix);
+        setForm((prev) => ({
+          ...prev,
+          expenseId,
+          expenseRef: ref,
+          parentDocNo,
+          rootExBDocNo: parentDocNo,
+          project: selectedOption.projectName || "",
+          company: (() => {
+            const name = selectedOption.companyName;
+            if (name && name.trim()) return name.trim();
+            const matched = companyOptions.find(
+              (c) => c.id === selectedOption.companyId,
+            );
+            return matched?.label || String(selectedOption.companyId ?? "");
+          })(),
+          amount: selectedOption.amount ?? null,
+          docType: `EMI-${padded}`,
+          partyId: selectedOption.partyId ?? null,
+          paidTo: selectedOption.supplierName || prev.paidTo,
+        }));
+        if (selectedOption.expenseBookingId) {
+          fetchExpenseGRNs(String(selectedOption.expenseBookingId))
+            .then((grns) => {
+              setLinkedGRNs(grns);
+              if (grns.length > 0 && grns[0].ProjectName) {
+                setForm((prev) => ({
+                  ...prev,
+                  projectSite: grns[0].ProjectName!,
+                }));
+              }
+            })
+            .catch(() => setLinkedGRNs([]));
+        }
+        return;
+      }
+
+      setLoadingExpense(true);
+      try {
+        const detail = await fetchExpenseDetail(expenseId);
+        if (!detail) throw new Error("Not found");
+        const parentDocNo = detail.ParentDocNo || detail.EDocNo || "";
+        const rootExBDocNo = detail.RootExBDocNo || detail.EDocNo || "";
+        // Freshly-fetched, never from the (possibly stale) expenseOptions
+        // cache — this is what the Invoice Balance card and Payment
+        // Breakdown panel now read via formKnownTdsAmount instead of
+        // re-deriving their own value from expenseOptions.find(...).
+        const freshTdsAmt =
+          (detail as any).TDSAmount != null
+            ? parseFloat(String((detail as any).TDSAmount)) || 0
+            : (selectedOption?.tdsAmount ?? 0);
+        setFormKnownTdsAmount(freshTdsAmt);
+        setForm((prev) => ({
+          ...prev,
+          expenseId,
+          expenseRef: detail.EDocNo || "",
+          parentDocNo,
+          rootExBDocNo,
+          project: detail.EProjectDisplayName || detail.EProjectName || "",
+          company: (() => {
+            const name = (detail as any).ECompanyName;
+            if (name && name.trim()) return name.trim();
+            // Fall back to label from the enterprise options list
+            const matched = companyOptions.find(
+              (c) => c.id === detail.ECompanyId,
+            );
+            return matched?.label || String(detail.ECompanyId ?? "");
+          })(),
+          // If an override is provided (Pay Remaining flow), always use it.
+          // Otherwise compute what's actually still payable: gross amount,
+          // minus TDS withheld at source, minus whatever's already been
+          // paid. Computed directly from amount/tdsAmount/totalPaid rather
+          // than trusting selectedOption.remainingAmount (ExpenseBooking.
+          // ERemainingAmount) to already be correct — that column is only
+          // refreshed at invoice approval and on payment changes, so an
+          // invoice whose TDS was added afterward (e.g. via an amendment)
+          // could still have it stuck at the pre-TDS figure.
+          // Fall back to full invoice amount if nothing better is available.
+          amount: (() => {
+            if (amountOverride != null) return amountOverride;
+            const fullAmt = detail.ENetAmount
+              ? parseFloat(String(detail.ENetAmount))
+              : (detail as any).EGrnTotalAmount
+                ? parseFloat((detail as any).EGrnTotalAmount)
+                : (detail.EAmount ?? null);
+            if (fullAmt == null) return fullAmt;
+            const paidSoFar = selectedOption?.totalPaid ?? 0;
+            const trueRemaining = Math.max(0, fullAmt - freshTdsAmt - paidSoFar);
+            return trueRemaining > 0 ? trueRemaining : fullAmt - freshTdsAmt;
+          })(),
+          docType: detail.DocTypeName || detail.EDocumentType || "",
+          // For GRN: baseAmount = pre-tax base (totalBase), rates from DB.
+          // GST breakdown API will override these with precise per-item values.
+          // If EGrnTotalAmount is set but breakdown hasn't loaded yet,
+          // zero out GST rates to avoid double-counting on the incl-GST figure.
+          baseAmount: (detail as any).EGrnTotalAmount
+            ? parseFloat((detail as any).EGrnTotalAmount) // will be overridden by GRN breakdown
+            : (detail.EAmount ?? null),
+          // Zero out GST rates for GRN records — the GRN breakdown fetch below
+          // will set correct totalBase + rates. Without this, if the breakdown
+          // API fails, cgstRate applied on EGrnTotalAmount (incl-GST) would double-count GST.
+          cgstRate: (detail as any).EGrnTotalAmount
+            ? 0
+            : (detail.ECgstRate ?? null),
+          sgstRate: (detail as any).EGrnTotalAmount
+            ? 0
+            : (detail.ESgstRate ?? null),
+          igstRate: (detail as any).EGrnTotalAmount
+            ? 0
+            : (detail.EIgstRate ?? null),
+          billingTermsData:
+            detail.EBillingTermsData ?? detail.EDiscountData ?? null,
+          partyId: selectedOption?.partyId ?? null,
+          paidTo: selectedOption?.supplierName || prev.paidTo,
+        }));
+
+        // For WORK_DONE entries, resolve project from the linked WorkDone record
+        if (detail.EDocumentType === "WORK_DONE" && detail.ESourceId) {
+          const wd = await fetchWorkDoneById(detail.ESourceId);
+          if (wd?.ProjectName) {
+            setForm((prev) => ({ ...prev, projectSite: wd.ProjectName! }));
+          }
+        }
+
+        const grns = await fetchExpenseGRNs(expenseId);
+        setLinkedGRNs(grns);
+        if (grns.length > 0 && grns[0].ProjectName) {
+          setForm((prev) => ({ ...prev, projectSite: grns[0].ProjectName! }));
+        } else if (detail.EProjectDisplayName || detail.EProjectName) {
+          setForm((prev) => ({
+            ...prev,
+            projectSite:
+              detail.EProjectDisplayName || detail.EProjectName || "",
+          }));
+        }
+
+        // Helper: given a GRNID, fetch its item-level GST breakdown and populate
+        // grnGstBreakdown + form rates. Used by both GRN-direct and PO-indirect paths.
+        const applyGrnBreakdown = async (grnId: number | string) => {
+          try {
+            const bdRes = await fetchWithAuth(
+              `/api/grns/${grnId}/gst-breakdown`,
+            );
+            if (bdRes.ok) {
+              const bd = await bdRes.json();
+              setGrnGstBreakdown(bd);
+              // Override form amounts with correct values from GRN item-level GST breakdown,
+              // then apply billing terms (pre/post-GST) to arrive at the true Net Payable.
+              if (bd?.totals?.totalInclGST > 0) {
+                setGrnGstBreakdown(bd);
+                const t = bd.totals;
+                const avgCGST =
+                  t.totalBase > 0 ? (t.totalCGST / t.totalBase) * 100 : 0;
+                const avgSGST =
+                  t.totalBase > 0 ? (t.totalSGST / t.totalBase) * 100 : 0;
+
+                // Parse billing terms from the expense detail
+                let billingTerms: any[] = [];
+                try {
+                  const raw =
+                    detail.EBillingTermsData ?? detail.EDiscountData ?? null;
+                  if (raw) {
+                    let parsed = JSON.parse(raw);
+                    if (typeof parsed === "string") parsed = JSON.parse(parsed);
+                    billingTerms = Array.isArray(parsed) ? parsed : [];
+                  }
+                } catch {
+                  /* ignore parse errors */
+                }
+
+                // Compute net payable: apply billing terms on GRN gross with
+                // correct pre/post-GST ordering (same logic as MaterialExpenseBooking)
+                const netPayable =
+                  billingTerms.length > 0
+                    ? computeGrnNetWithTerms(
+                        t.totalInclGST,
+                        billingTerms,
+                        t.totalBase,
+                      )
+                    : Math.round(t.totalInclGST * 100) / 100;
+
+                // netPayable is the full GST-inclusive gross — it does NOT yet
+                // account for TDS withheld or anything already paid. Left
+                // unadjusted, this silently overwrote the correct TDS-net/
+                // paid-net amount the synchronous set above (line ~1433)
+                // already computed, making form.amount exceed the invoice's
+                // real outstanding balance by the TDS amount (and any prior
+                // payments) — which then made the Payment Breakdown card's
+                // "entered > prevOutstanding" check misfire and mislabel a
+                // perfectly normal payment as "On A/c" overpayment. Apply
+                // the same TDS/paid-so-far subtraction here.
+                const paidSoFarGrn = selectedOption?.totalPaid ?? 0;
+                const trueRemainingGrn = Math.max(0, netPayable - freshTdsAmt - paidSoFarGrn);
+                const netPayableAfterTdsAndPaid =
+                  trueRemainingGrn > 0 ? trueRemainingGrn : netPayable - freshTdsAmt;
+
+                setForm((prev) => ({
+                  ...prev,
+                  amount: amountOverride != null ? amountOverride : netPayableAfterTdsAndPaid,
+                  baseAmount: Math.round(t.totalBase * 100) / 100,
+                  cgstRate: Math.round(avgCGST * 100) / 100,
+                  sgstRate: Math.round(avgSGST * 100) / 100,
+                  igstRate: 0,
+                }));
+              }
+            }
+          } catch {
+            /* non-fatal */
+          }
+        };
+
+        // Same as applyGrnBreakdown, but sums the breakdown across every
+        // linked GRN instead of fetching just one — the total for a
+        // combined invoice is the sum of all its source GRNs, not any
+        // single one of them.
+        const applyMultiGrnBreakdown = async (grnIds: number[]) => {
+          try {
+            const results = await Promise.all(
+              grnIds.map((id) =>
+                fetchWithAuth(`/api/grns/${id}/gst-breakdown`)
+                  .then((r) => (r.ok ? r.json() : null))
+                  .catch(() => null),
+              ),
+            );
+            const valid = results.filter(
+              (bd): bd is NonNullable<typeof bd> =>
+                !!bd && bd.totals?.totalInclGST > 0,
+            );
+            if (valid.length === 0) return;
+
+            const totals = valid.reduce(
+              (acc, bd) => ({
+                totalBase: acc.totalBase + (bd.totals.totalBase || 0),
+                totalCGST: acc.totalCGST + (bd.totals.totalCGST || 0),
+                totalSGST: acc.totalSGST + (bd.totals.totalSGST || 0),
+                totalGST: acc.totalGST + (bd.totals.totalGST || 0),
+                totalInclGST: acc.totalInclGST + (bd.totals.totalInclGST || 0),
+              }),
+              { totalBase: 0, totalCGST: 0, totalSGST: 0, totalGST: 0, totalInclGST: 0 },
+            );
+            const items = valid.flatMap((bd) => bd.items ?? []);
+            const combined = { items, totals };
+            setGrnGstBreakdown(combined);
+
+            const avgCGST =
+              totals.totalBase > 0 ? (totals.totalCGST / totals.totalBase) * 100 : 0;
+            const avgSGST =
+              totals.totalBase > 0 ? (totals.totalSGST / totals.totalBase) * 100 : 0;
+
+            let billingTerms: any[] = [];
+            try {
+              const raw = detail.EBillingTermsData ?? detail.EDiscountData ?? null;
+              if (raw) {
+                let parsed = JSON.parse(raw);
+                if (typeof parsed === "string") parsed = JSON.parse(parsed);
+                billingTerms = Array.isArray(parsed) ? parsed : [];
+              }
+            } catch {
+              /* ignore parse errors */
+            }
+
+            const netPayable =
+              billingTerms.length > 0
+                ? computeGrnNetWithTerms(
+                    totals.totalInclGST,
+                    billingTerms,
+                    totals.totalBase,
+                  )
+                : Math.round(totals.totalInclGST * 100) / 100;
+
+            // Same TDS/paid-so-far adjustment as applyGrnBreakdown — see the
+            // comment there for why this is required (netPayable is the raw
+            // GST-inclusive gross across every linked GRN, not yet net of
+            // TDS or prior payments).
+            const paidSoFarMulti = selectedOption?.totalPaid ?? 0;
+            const trueRemainingMulti = Math.max(0, netPayable - freshTdsAmt - paidSoFarMulti);
+            const netPayableAfterTdsAndPaid =
+              trueRemainingMulti > 0 ? trueRemainingMulti : netPayable - freshTdsAmt;
+
+            setForm((prev) => ({
+              ...prev,
+              amount: amountOverride != null ? amountOverride : netPayableAfterTdsAndPaid,
+              baseAmount: Math.round(totals.totalBase * 100) / 100,
+              cgstRate: Math.round(avgCGST * 100) / 100,
+              sgstRate: Math.round(avgSGST * 100) / 100,
+              igstRate: 0,
+            }));
+          } catch {
+            /* non-fatal */
+          }
+        };
+
+        // Multi-GRN combined invoices (see MaterialExpenseBooking's
+        // "combine multiple GRNs" flow) have several source GRNs, not one —
+        // applyGrnBreakdown(detail.ESourceId) would only fetch the primary
+        // GRN's breakdown and silently overwrite the correct combined
+        // amount with just that one GRN's total. Sum every linked GRN's
+        // breakdown instead.
+        let linkedGrnIds: number[] = [];
+        try {
+          const raw = (detail as any).ELinkedGrnIds;
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) linkedGrnIds = parsed;
+          }
+        } catch {
+          /* not multi-GRN */
+        }
+
+        // If this expense is linked to a GRN directly, fetch the per-item GST breakdown.
+        // For PO/WO_PO-linked bookings, find the GRN created against that PO and use its breakdown —
+        // because the actual GST lives in the GRN items (PO stores rates but GRN stores received actuals).
+        if (linkedGrnIds.length > 1) {
+          await applyMultiGrnBreakdown(linkedGrnIds);
+        } else if (detail.ESourceType === "GRN" && detail.ESourceId) {
+          await applyGrnBreakdown(detail.ESourceId);
+        } else if (
+          (detail.ESourceType === "PO" || detail.ESourceType === "WO_PO") &&
+          detail.ESourceId
+        ) {
+          try {
+            const poGrnsRes = await fetchWithAuth(
+              `/api/grns/by-po/${detail.ESourceId}`,
+            );
+            if (poGrnsRes.ok) {
+              const poGrns: { GRNID: number }[] = await poGrnsRes.json();
+              if (Array.isArray(poGrns) && poGrns.length > 0) {
+                // grns returned newest-first; use most recent GRN's breakdown
+                await applyGrnBreakdown(poGrns[0].GRNID);
+              }
+            }
+          } catch {
+            /* non-fatal — breakdown stays null, standard cgstRate/sgstRate used */
+          }
+        } else {
+          setGrnGstBreakdown(null);
+        }
+
+        // Show any On Account adjustments already applied to this invoice
+        // (see backend/utils/oaAdjustments.js) — e.g. "On A/C adjusted with
+        // ₹30,000 from Shiv Shakti Building Materials" — so picking the
+        // same invoice again for payment doesn't look like the adjustment
+        // never happened.
+        getOAAdjustmentsForInvoice(detail.EDocNo || "").then(
+          setOaAdjustmentsForInvoice,
+        );
+
+        // When amountOverride is provided (Pay Remaining / partial invoice click),
+        // use it directly — it was computed from live chain data.
+        // Otherwise, the useEffect on formChainData handles setting formLiveRemaining
+        // once the chain loads (correct: uses ENetAmount and excludes bounce charges).
+        if (amountOverride != null) {
+          setFormLiveRemaining(amountOverride);
+        }
+      } catch {
+        toast.error("Could not load expense booking details.");
+      } finally {
+        setLoadingExpense(false);
+      }
+    },
+    [expenseOptions, companyOptions],
+  );
+
+  // Auto-select the matching invoice for re-issue once expenseOptions loads
+  useEffect(() => {
+    if (!reissueCtx || !expenseOptions.length || form.expenseId) return;
+    const ref = reissueCtx.expenseRef;
+    if (!ref) return;
+    const opt =
+      expenseOptions.find((o) => o.docNo === ref) ??
+      expenseOptions.find(
+        (o) =>
+          o.label.startsWith(ref + " ") || o.label.startsWith(ref + " —"),
+      );
+    if (opt) handleExpenseSelect(opt.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenseOptions, reissueCtx]);
+
+  // Auto-select the invoice + fill filters when coming from On A/C Adjustment
+  useEffect(() => {
+    if (!oaAdjustCtx?.invoiceDocNo || !expenseOptions.length || form.expenseId) return;
+    const ref = oaAdjustCtx.invoiceDocNo;
+    const opt =
+      expenseOptions.find((o) => o.docNo === ref) ??
+      expenseOptions.find((o) => o.value === ref) ??
+      expenseOptions.find((o) => o.label.startsWith(ref + " ") || o.label.startsWith(ref + " —"));
+    if (!opt) return;
+    // Fill the filter bar so it matches the invoice context
+    setBookingFilters({
+      company: opt.companyName ?? "",
+      project: opt.projectName ?? "",
+      year: opt.financialYear ?? "",
+      supplier: opt.supplierName ?? opt.partyName ?? "",
+    });
+    // Select the invoice — this fills company, project, amount in the form
+    handleExpenseSelect(opt.id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenseOptions, oaAdjustCtx?.invoiceDocNo]);
+
+  // When OA Adjust context is active: cap the payment amount at min(invoiceAmount, oaBalance)
+  useEffect(() => {
+    if (!oaAdjustCtx || form.amount == null || form.amount <= 0) return;
+    const oaBal = oaAdjustCtx.availableBalance;
+    const cappedAmount = Math.min(form.amount, oaBal);
+    if (cappedAmount !== form.amount) {
+      setForm((prev) => ({ ...prev, amount: cappedAmount }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.amount, oaAdjustCtx?.availableBalance]);
+
+  // Fetch On Account balance when invoice changes
+  useEffect(() => {
+    setUseOnAccountBalance(true); // reset to default for the newly-selected invoice
+    if (!form.expenseRef) { setOaBalance(0); return; }
+    getOABalanceByRef(form.expenseRef)
+      .then((d) => setOaBalance(d.balance ?? 0))
+      .catch(() => setOaBalance(0));
+  }, [form.expenseRef]);
+
+  // Invoice outstanding before any on-account offset — same computation the
+  // "On Account Balance" card's preview uses, hoisted here so the actual
+  // Amount field (what gets paid via this bank/cheque transaction) can react
+  // to it too instead of only the informational preview text reacting.
+  const oaInvoiceRemaining = useMemo(() => {
+    if (!form.expenseRef) return 0;
+    const opt = expenseOptions.find(
+      (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
+    );
+    const grnTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
+    const netAmt = grnTotal > 0 ? grnTotal : (opt?.amount ?? 0);
+    return resolveOutstanding(netAmt, formLiveRemaining, formKnownTotalPaid ?? opt?.totalPaid);
+  }, [form.expenseRef, form.expenseId, expenseOptions, grnGstBreakdown, formLiveRemaining, formKnownTotalPaid]);
+
+  const oaPreview = useMemo(
+    () => (oaBalance > 0.01 ? previewOAAdjustment(oaBalance, oaInvoiceRemaining) : null),
+    [oaBalance, oaInvoiceRemaining],
+  );
+
+  // Real-time: the actual bank/cheque Amount due is the invoice outstanding
+  // minus whatever on-account credit is being applied — recompute the moment
+  // the toggle changes (or the balance/invoice does), not just the preview text.
+  useEffect(() => {
+    if (!form.expenseRef || !oaPreview || oaPreview.applyAmount <= 0) return;
+    const target = useOnAccountBalance ? oaPreview.invoiceRemainingAfter : oaInvoiceRemaining;
+    setForm((prev) => (prev.amount === target ? prev : { ...prev, amount: target }));
+  }, [useOnAccountBalance, oaPreview, oaInvoiceRemaining, form.expenseRef]);
+
+  // Fetch payment chain for the form view whenever an invoice is linked
+  useEffect(() => {
+    if (!form.expenseRef) {
+      setFormChainData(null);
+      return;
+    }
+    let cancelled = false;
+    setLoadingFormChain(true);
+    getPaymentChain(form.expenseRef)
+      .then((data) => { if (!cancelled) setFormChainData(data); })
+      .catch(() => { if (!cancelled) setFormChainData(null); })
+      .finally(() => { if (!cancelled) setLoadingFormChain(false); });
+    return () => { cancelled = true; };
+  }, [form.expenseRef]);
+
+  // Once chain data loads, derive the live remaining from chain payments (source of truth).
+  // ENetAmount is the net payable (base + GST + adjustments), minus TDS
+  // withheld at source (never actually paid to the supplier — see
+  // backend/utils/syncBillStatus.js for the same formula server-side).
+  // BounceCharge is excluded because it's paid to the bank, not the supplier.
+  useEffect(() => {
+    if (!formChainData || editingId) return;
+    const inv = formChainData.invoice;
+    if (!inv) return;
+    const grossAmt = parseFloat(String(inv.ENetAmount ?? inv.EAmount ?? 0)) || 0;
+    const fullAmt = Math.max(0, grossAmt - (parseFloat(String(inv.TDSAmount ?? 0)) || 0));
+    if (!fullAmt) return;
+    const { totalPaid: paidExcludingBounced, remaining: liveRemaining } =
+      computePaymentStatus(fullAmt, formChainData.payments);
+    // formLiveRemaining is always the true invoice outstanding (excludes bounced payments).
+    setFormLiveRemaining(liveRemaining);
+
+    // When re-issuing a bounced cheque, pre-fill with the bounced payment's original amount
+    // (not the full outstanding) — re-issue clears only that specific bounced cheque.
+    if (reissueCtx) {
+      const bouncedPayment = formChainData.payments.find(
+        (p) => p.PPaymentID === reissueCtx.replacesPaymentId
+      );
+      if (bouncedPayment) {
+        const bouncedAmt = parseFloat(String(bouncedPayment.PAmount ?? 0)) || 0;
+        setForm((prev) => ({ ...prev, amount: bouncedAmt }));
+      }
+      return;
+    }
+
+    if (paidExcludingBounced > 0 && liveRemaining > 0) {
+      setForm((prev) => ({ ...prev, amount: liveRemaining }));
+    }
+  }, [formChainData, editingId, reissueCtx]);
+
+  const clearExpenseLink = () => {
+    setForm((prev) => ({
+      ...prev,
+      expenseId: "",
+      expenseRef: "",
+      parentDocNo: "",
+      rootExBDocNo: "",
+      project: "",
+      company: "",
+      amount: null,
+      docType: "",
+      baseAmount: null,
+      cgstRate: null,
+      sgstRate: null,
+      igstRate: null,
+      billingTermsData: null,
+    }));
+    setLinkedGRNs([]);
+    setGrnGstBreakdown(null);
+    setOaAdjustmentsForInvoice([]);
+    setFormLiveRemaining(null);
+    setFormKnownTotalPaid(null);
+    setSupplierBookingFilter("");
+  };
+
+  // ── Bank selection ─────────────────────────────────────────────────────────
+
+  const handleBankSelect = (bankIdStr: string) => {
+    if (!bankIdStr) {
+      set("bankId", null);
+      set("bankName", "");
+      return;
+    }
+    const bank = banks.find((b) => String(b.id) === bankIdStr);
+    set("bankId", bank?.id ?? null);
+    set("bankName", bank?.label?.split(" — ")[0] ?? "");
+    // Reset cheque lot when bank changes
+    set("chequeLotId", null);
+    set("chequeLotNumber", "");
+    set("chequeNo", "");
+    // Reset selected card when bank changes (cards are bank-specific)
+    set("cardId", null);
+    // A Cash in Hand bank isn't a real bank account — picking one locks the
+    // Payment Mode to Cash the same way clicking the Cash chip would,
+    // instead of leaving it possible to record e.g. a Cheque "from"
+    // cash-in-hand. Matched by LHeadCode prefix, not the display label, so
+    // a rename in Bank Master can't silently break it — "CASH-IN-HAND" is
+    // the original global head (migration 418), "CASH-C-<companyId>" is
+    // each company's own (see generalLedger.js's ensureCashInHandHead).
+    if (bank?.code?.startsWith("CASH-")) {
+      handleModeChange("Cash");
+    }
+  };
+
+  // ── Validation ─────────────────────────────────────────────────────────────
+
+  const validate = (): boolean => {
+    if (!form.paymentName.trim()) {
+      toast.error("Payment purpose is required.");
+      return false;
+    }
+    if (!form.mode) {
+      toast.error("Please select a payment mode.");
+      return false;
+    }
+    if (!form.date) {
+      toast.error("Payment date is required.");
+      return false;
+    }
+
+    const isChequeMode =
+      form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
+    const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(
+      form.mode,
+    );
+
+    if (isChequeMode) {
+      if (!form.bankId) {
+        toast.error("Please select a bank account.");
+        return false;
+      }
+      if (!form.chequeLotId) {
+        toast.error("No active cheque lot found for the selected bank.");
+        return false;
+      }
+      if (!form.chequeNo) {
+        toast.error("Please select a cheque number from the lot.");
+        return false;
+      }
+      if (form.mode === "Post-Dated Cheque" && !form.chequeDate) {
+        toast.error("Post-dated cheque requires a cheque date.");
+        return false;
+      }
+      if (form.mode === "Post-Dated Cheque" && form.chequeDate) {
+        const validUntil = new Date(form.chequeDate);
+        validUntil.setMonth(validUntil.getMonth() + 3);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        if (validUntil < today) {
+          toast.error("This post-dated cheque has expired. Please select a valid cheque date.");
+          return false;
+        }
+      }
+      // Plain Cheque (not PDC) can be backdated to when it was actually
+      // issued, but never dated in the future — a future-dated cheque is by
+      // definition a Post-Dated Cheque, its own mode.
+      if (form.mode === "Cheque" && form.chequeDate) {
+        const todayStr = new Date().toISOString().slice(0, 10);
+        if (form.chequeDate > todayStr) {
+          toast.error("Cheque date cannot be in the future — use Post-Dated Cheque for a future date.");
+          return false;
+        }
+      }
+    }
+
+    if (form.mode === "Cash" && !form.amount) {
+      toast.error("Amount is required for Cash payment.");
+      return false;
+    }
+
+    if ((form.expenseHeadAllocations?.length ?? 0) > 0) {
+      const allocSum = Math.round(
+        (form.expenseHeadAllocations ?? []).reduce((s, r) => s + (Number(r.amount) || 0), 0) * 100,
+      ) / 100;
+      const target = Math.round((form.amount ?? 0) * 100) / 100;
+      if (Math.abs(allocSum - target) > 0.5) {
+        toast.error(
+          `Expense Head amounts (₹${allocSum.toFixed(2)}) must add up to the payment amount (₹${target.toFixed(2)}).`,
+        );
+        return false;
+      }
+      if ((form.expenseHeadAllocations ?? []).some((r) => !r.lHeadId)) {
+        toast.error("Every Expense Head row needs a ledger selected.");
+        return false;
+      }
+    }
+
+    if (!form.expenseRef && tdsEligibility?.thresholdMet && !form.tdsId) {
+      toast.error("TDS is due on this payment — please select a TDS.");
+      return false;
+    }
+
+    if (form.expenseRef && !selectedContract && invoiceTdsPreview?.blocked) {
+      toast.error(invoiceTdsPreview.message || "TDS is due on this invoice but none was selected — please correct the invoice first.");
+      return false;
+    }
+
+    if (isDigitalMode) {
+      if (!form.bankId) {
+        toast.error("Please select a bank account.");
+        return false;
+      }
+      if (form.mode === "NEFT" && !form.neftNumber.trim()) {
+        toast.error("NEFT UTR number is required.");
+        return false;
+      }
+      if (form.mode === "UPI" && !form.upiTransactionId.trim()) {
+        toast.error("UPI Transaction ID is required.");
+        return false;
+      }
+      if (form.mode === "RTGS" && !form.rtgsReference.trim()) {
+        toast.error("RTGS reference is required.");
+        return false;
+      }
+      if (form.mode === "IMPS" && !form.impsReference.trim()) {
+        toast.error("IMPS reference is required.");
+        return false;
+      }
+      if (form.mode === "Card" && !form.cardReference.trim()) {
+        toast.error("Card transaction/approval ID is required.");
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  // ── Save ───────────────────────────────────────────────────────────────────
+
+  const handleSave = async () => {
+    if (!validate()) return;
+
+    const payload = {
+      // BaseTransactionSchema fields
+      companyId: form.company || null,
+      projectId: form.projectSite || form.project || null,
+      docDate: form.date || "",
+      docTypeId: form.docType || null,
+      remarks: form.paymentName || null,
+      notes: form.notes || null,
+      // PaymentPayloadSchema fields
+      supplierId: form.expenseRef || null,
+      partyId: form.partyId ?? null,
+      bankId: form.bankId ?? null,
+      amount: form.amount ?? 0,
+      // Extended payment fields (passed through for backend processing)
+      bankName: form.bankName || null,
+      parentDocNo: form.parentDocNo || null,
+      rootExBDocNo: form.rootExBDocNo || null,
+      mode: form.mode || null,
+      // Cheque
+      chequeNo: form.chequeNo || null,
+      chequeLotId: form.chequeLotId ?? null,
+      chequeLotNumber: form.chequeLotNumber || null,
+      chequeDate: form.chequeDate || null,
+      chequeAccountNumber: form.chequeAccountNumber || null,
+      chequeIfsc: form.chequeIfsc || null,
+      isPostDated: form.isPostDated,
+      // Digital
+      neftNumber: form.neftNumber || null,
+      upiTransactionId: form.upiTransactionId || null,
+      rtgsReference: form.rtgsReference || null,
+      impsReference: form.impsReference || null,
+      cardReference: form.cardReference || null,
+      cardId: form.cardId ?? null,
+      ContractId: form.contractId ? Number(form.contractId) : null,
+      JVLineId: form.jvLineId ?? null,
+      // Direct Expense Payment (migration 303) — pay one or more Expense
+      // Heads straight from the bank instead of a Party/Invoice.
+      EExpenseHeadAllocations:
+        form.expenseHeadAllocations && form.expenseHeadAllocations.length > 0
+          ? form.expenseHeadAllocations
+              .filter((r) => r.lHeadId && r.amount > 0)
+              .map((r) => ({ lHeadId: r.lHeadId, amount: r.amount }))
+          : [],
+      // TDS (migration 304) — only meaningful for a direct (no invoice
+      // linked) payment; ignored server-side for an invoice-linked one,
+      // which always inherits the invoice's own snapshot instead.
+      TDSId: form.tdsId || null,
+      // "Keep the balance on his on account" — unchecked means don't let the
+      // approve-time hook auto-apply this party's on-account balance.
+      oaSkipAutoApply: oaBalance > 0.01 ? !useOnAccountBalance : undefined,
+      // Re-issue fields
+      ...(reissueCtx ? {
+        ReplacesPaymentId: reissueCtx.replacesPaymentId,
+        BounceCharge: bounceCharge ? parseFloat(bounceCharge) : null,
+        // Total = original amount + bounce charge
+        amount: (form.amount ?? 0) + (bounceCharge ? parseFloat(bounceCharge) : 0),
+      } : {}),
+    } as any;
+
+    try {
+      setSaving(true);
+      if (editingId) {
+        await updatePayment(editingId, payload);
+        toast.success("Payment updated.");
+      } else {
+        const created = await addPayment(payload);
+        toast.success(reissueCtx ? "Re-issue payment saved. Linked to original." : "Payment saved.");
+
+        // This payment IS a Customer Loan disbursement — link it back to
+        // the loan (migration 401), the same way loan repayment already
+        // does, so the loan's ledger side posts and DisbursedAt reflects a
+        // real bank-side record instead of never being set.
+        if (disbursingCustomerLoan) {
+          try {
+            const res = await disburseLoan(disbursingCustomerLoan.LoanId, { newPaymentId: created.PPaymentID });
+            toast.success(`${disbursingCustomerLoan.LoanNo} disbursed — JV ${res.voucherNo}`);
+            refetchUndisbursedLoans();
+          } catch (loanErr: any) {
+            toast.error(
+              `Payment was recorded, but linking it to the loan failed: ${loanErr.message}. Post it manually from Loan Sanction.`,
+            );
+          }
+        }
+      }
+      queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
+      queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+      queryClient.invalidateQueries({ queryKey: ["payment-payable-jv-lines"] });
+      setDisbursingCustomerLoan(null);
+      cancelForm();
+    } catch (err: any) {
+      toast.error("Save failed: " + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Delete ─────────────────────────────────────────────────────────────────
+
+  const handleDelete = async (id: string) => {
+    try {
+      await deletePayment(id);
+      toast.success("Payment deleted.");
+      queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
+      queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+      queryClient.invalidateQueries({ queryKey: ["payment-payable-jv-lines"] });
+      setDeleteId(null);
+    } catch (err: any) {
+      toast.error("Delete failed: " + err.message);
+    }
+  };
+
+  // ── Derived ────────────────────────────────────────────────────────────────
+
+  const isChequeMode =
+    form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
+  const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS", "Card"].includes(
+    form.mode,
+  );
+  const isCashMode = form.mode === "Cash";
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  return (
+    <>
+      <Breadcrumbs items={["Dashboard", "Finance", "Payments"]} />
+      <FinanceShell
+        title="Payment Management"
+        subtitle="Record and track payments linked to expense bookings"
+        icon={Wallet}
+        action={
+          view === "list" ? (
+            <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+              {rights.canCreate && (
+                <Button
+                  onClick={openNew}
+                  className="shrink-0 gradient-accent text-white shadow-sm font-heading font-semibold px-3 sm:px-4 py-1.5 text-xs h-auto"
+                >
+                  <Plus size={13} className="sm:mr-1" />
+                  <span className="hidden sm:inline">New Payment</span>
+                </Button>
+              )}
+              <ExportMenu
+                data={records as unknown as Record<string, unknown>[]}
+                fetchData={fetchAllPaymentsForExport}
+                columns={EXPORT_COLUMNS}
+                title="Payment Management"
+                filename="payments"
+                subtitle={
+                  companyFilter
+                    ? `Company: ${companyOptions.find((c) => String(c.id) === companyFilter)?.label || companyFilter}`
+                    : undefined
+                }
+                companyName={
+                  selectedCompanyDetail?.name ||
+                  selectedCompanyDetail?.short_name ||
+                  undefined
+                }
+                logoBase64={selectedCompanyDetail?.logo || undefined}
+                disabled={
+                  !rights.canExport || isLoading || records.length === 0
+                }
+              />
+              <button
+                onClick={() => refetchPayments()}
+                className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 text-xs rounded-lg border border-indigo-500/30 hover:bg-indigo-500/10 transition-colors"
+                style={{ color: "#818cf8" }}
+              >
+                <RefreshCw size={13} />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
+            </div>
+          ) : undefined
+        }
+      >
+        {/* ── Summary stats ── */}
+        {view === "list" && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {[
+              {
+                label: "Total Paid",
+                value: formatINR(totalAmount),
+                icon: Banknote,
+                ring: "ring-primary/20",
+                bg: "bg-primary/10",
+                blob: "bg-primary",
+                borderL: "border-l-primary",
+                color: "text-primary",
+              },
+              {
+                label: "By Cheque",
+                value: String(chequeCount),
+                icon: Clock,
+                ring: "ring-amber-500/20",
+                bg: "bg-amber-500/10",
+                blob: "bg-amber-500",
+                borderL: "border-l-amber-500",
+                color: "text-amber-500",
+              },
+              {
+                label: "By Cash",
+                value: String(cashCount),
+                icon: CheckCircle2,
+                ring: "ring-emerald-500/20",
+                bg: "bg-emerald-500/10",
+                blob: "bg-emerald-500",
+                borderL: "border-l-emerald-500",
+                color: "text-emerald-500",
+              },
+            ].map(
+              ({
+                label,
+                value,
+                icon: Icon,
+                ring,
+                bg,
+                blob,
+                borderL,
+                color,
+              }) => (
+                <div
+                  key={label}
+                  className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}
+                >
+                  <div
+                    className={`absolute top-0 right-0 w-20 h-20 rounded-full opacity-10 -translate-y-4 translate-x-4 ${blob}`}
+                  />
+                  <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
+                    <Icon size={16} />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-lg font-bold font-heading text-foreground leading-none">
+                      {value}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                      {label}
+                    </p>
+                  </div>
+                </div>
+              ),
+            )}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* FORM VIEW                                                          */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {view === "form" && (
+          <div
+            className="rounded-2xl overflow-hidden"
+            onKeyDown={preventEnterSubmit}
+            style={{
+              background: isDark
+                ? "rgba(12,14,22,0.55)"
+                : "rgba(255,255,255,0.80)",
+              border: isDark
+                ? "1px solid rgba(99,102,241,0.20)"
+                : "1px solid rgba(99,102,241,0.18)",
+              backdropFilter: "blur(20px) saturate(160%)",
+              WebkitBackdropFilter: "blur(20px) saturate(160%)",
+              boxShadow: isDark
+                ? "0 8px 40px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)"
+                : "0 8px 40px rgba(99,102,241,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+            }}
+          >
+            {/* Form header */}
+            <div
+              className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 relative overflow-hidden"
+              style={{
+                background: isDark
+                  ? "rgba(99,102,241,0.10)"
+                  : "rgba(99,102,241,0.06)",
+                borderBottom: isDark
+                  ? "1px solid rgba(99,102,241,0.18)"
+                  : "1px solid rgba(99,102,241,0.14)",
+              }}
+            >
+              {/* Left accent stripe */}
+              <div
+                className="absolute left-0 top-0 bottom-0 w-0.5"
+                style={{
+                  background:
+                    "linear-gradient(to bottom, transparent 10%, #6366f1 30%, #6366f1 70%, transparent 90%)",
+                }}
+              />
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={cancelForm}
+                  className="flex items-center gap-1.5 text-sm transition-colors hover:opacity-70"
+                  style={{ color: isDark ? "#94a3b8" : "#6366f1" }}
+                >
+                  <ArrowLeft size={15} />
+                  <span className="hidden sm:inline">Back</span>
+                </button>
+                <span
+                  style={{
+                    color: isDark
+                      ? "rgba(99,102,241,0.4)"
+                      : "rgba(99,102,241,0.3)",
+                  }}
+                >
+                  |
+                </span>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-6 h-6 rounded-lg flex items-center justify-center"
+                    style={{
+                      background: "rgba(99,102,241,0.18)",
+                      border: "1px solid rgba(99,102,241,0.30)",
+                    }}
+                  >
+                    <Receipt size={12} style={{ color: "#818cf8" }} />
+                  </div>
+                  <h2
+                    className="text-sm font-heading font-bold"
+                    style={{ color: isDark ? "#e0e7ff" : "#3730a3" }}
+                  >
+                    {editingId ? "Edit Payment" : "New Payment"}
+                  </h2>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 sm:px-6 py-6 space-y-7">
+              {/* ── 1. Link Expense Booking ── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Link2} label="Expense Booking" />
+
+                {/* Filter bar + picker — only shown before a booking is linked */}
+                {!form.expenseRef &&
+                  (() => {
+                    const filteredOptions = expenseOptions.filter((o) => {
+                      // Never show fully-paid invoices in the new payment dropdown
+                      if ((o as any).billStatus === "Paid") return false;
+                      if (
+                        bookingFilters.company &&
+                        (o.companyName ?? "") !== bookingFilters.company
+                      )
+                        return false;
+                      if (
+                        bookingFilters.project &&
+                        (o.projectName ?? "") !== bookingFilters.project
+                      )
+                        return false;
+                      if (
+                        bookingFilters.year &&
+                        (o.financialYear ?? "") !== bookingFilters.year
+                      )
+                        return false;
+                      if (
+                        bookingFilters.supplier &&
+                        (o.supplierName ?? "") !== bookingFilters.supplier
+                      )
+                        return false;
+                      return true;
+                    });
+
+                    return (
+                      <div className="space-y-3">
+                        <FilterBar
+                          companyOptions={companyOptions}
+                          projectOptions={projectOptions}
+                          supplierOptions={supplierOptions}
+                          finYearOptions={finYearOptions}
+                          filters={bookingFilters}
+                          selectedCompanyId={
+                            bookingFilters.company
+                              ? (companyOptions.find(
+                                  (c) => c.label === bookingFilters.company,
+                                )?.id ?? null)
+                              : null
+                          }
+                          onChange={(key, val) => {
+                            setBookingFilters((prev) => {
+                              const next = { ...prev, [key]: val };
+                              // When company changes, clear project if it no longer belongs to the new company
+                              if (key === "company") {
+                                const newCompanyId = val
+                                  ? (companyOptions.find((c) => c.label === val)
+                                      ?.id ?? null)
+                                  : null;
+                                if (prev.project) {
+                                  const projStillValid = newCompanyId
+                                    ? projectOptions.some(
+                                        (p) =>
+                                          p.label === prev.project &&
+                                          (p.belongs_to === newCompanyId ||
+                                            p.company_id === newCompanyId),
+                                      )
+                                    : true;
+                                  if (!projStillValid) next.project = "";
+                                }
+                              }
+                              return next;
+                            });
+                          }}
+                        />
+                        {!!loanDisbursementCompanyId && (undisbursedLoansLoading || undisbursedLoans.length > 0) && (
+                          <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+                            <p className="text-xs font-heading font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                              Loan Disbursement — loans not yet posted to GL
+                            </p>
+                            {undisbursedLoansLoading ? (
+                              <p className="text-[11px] text-muted-foreground">Checking for undisbursed loans…</p>
+                            ) : (
+                              <div className="space-y-1.5">
+                                {undisbursedLoans.map((loan) => {
+                                  const isInterCompany = loan.LoanType === "Inter-Company";
+                                  const selected = disbursingCustomerLoan?.LoanId === loan.LoanId;
+                                  return (
+                                    <div
+                                      key={loan.LoanId}
+                                      className={`flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-md bg-background border ${selected ? "border-amber-500" : "border-border"}`}
+                                    >
+                                      <div className="min-w-0">
+                                        <p className="font-mono text-xs font-semibold text-foreground truncate">
+                                          {loan.LoanNo}{" "}
+                                          {isInterCompany
+                                            ? loan.BorrowerCompanyName ? `— to ${loan.BorrowerCompanyName}` : ""
+                                            : loan.BorrowerCustomerName ? `— to ${loan.BorrowerCustomerName}` : ""}
+                                        </p>
+                                        <p className="text-[11px] text-muted-foreground">
+                                          {formatINR(loan.Amount)} · sanctioned {new Date(loan.LoanDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                                          {!isInterCompany && " · Customer Loan"}
+                                        </p>
+                                      </div>
+                                      {isInterCompany ? (
+                                        <button
+                                          type="button"
+                                          disabled={disbursingLoanId === loan.LoanId}
+                                          onClick={() => handleDisburseLoan(loan)}
+                                          className="shrink-0 px-3 py-1 rounded-md text-[11px] font-heading font-semibold bg-amber-600 text-white hover:bg-amber-600/90 transition-colors disabled:opacity-50"
+                                        >
+                                          {disbursingLoanId === loan.LoanId ? "Disbursing…" : "Disburse"}
+                                        </button>
+                                      ) : (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSelectCustomerLoanDisbursement(loan)}
+                                          className={`shrink-0 px-3 py-1 rounded-md text-[11px] font-heading font-semibold transition-colors ${
+                                            selected
+                                              ? "bg-amber-600/20 text-amber-700 dark:text-amber-400 border border-amber-500"
+                                              : "bg-amber-600 text-white hover:bg-amber-600/90"
+                                          }`}
+                                        >
+                                          {selected ? "Selected ✓" : "Select"}
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {disbursingCustomerLoan && (
+                              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                                Disbursing <span className="font-semibold">{disbursingCustomerLoan.LoanNo}</span> — party and amount pre-filled below. Pick the bank/mode, then Save.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        <ExpenseBookingPicker
+                          options={filteredOptions}
+                          value={form.expenseId}
+                          onChange={handleExpenseSelect}
+                          loading={loadingExpense}
+                          contracts={contractOptions}
+                          contractsLoading={contractsLoading}
+                          selectedContract={selectedContract}
+                          onContractSelect={handleContractSelect}
+                          onContractClear={clearContractLink}
+                          jvLines={jvLineOptions}
+                          jvLinesLoading={jvLinesLoading}
+                          selectedJVLine={selectedJVLine}
+                          onJVLineSelect={handleJVLineSelect}
+                          onJVLineClear={clearJVLineLink}
+                        />
+                        <div className="flex items-center gap-2 pt-1">
+                          {filteredOptions.length === 0 && !loadingExpense && (
+                            <p className="text-[11px] text-muted-foreground">Invoice not visible?</p>
+                          )}
+                          <button
+                            type="button"
+                            disabled={syncingBalances}
+                            className="flex items-center gap-1 text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity disabled:opacity-50"
+                            onClick={async () => {
+                              setSyncingBalances(true);
+                              try {
+                                const r = await fetchWithAuth("/api/new-payment/recalculate-balances", { method: "POST" });
+                                const d = await r.json().catch(() => ({}));
+                                await queryClient.invalidateQueries({ queryKey: ["expense-options-payment"] });
+                                toast.success(`Balances synced (${d.updated ?? 0} invoices updated)`);
+                              } catch {
+                                toast.error("Sync failed — please try again.");
+                              } finally {
+                                setSyncingBalances(false);
+                              }
+                            }}
+                          >
+                            {syncingBalances && <div className="w-2.5 h-2.5 border border-primary border-t-transparent rounded-full animate-spin" />}
+                            {syncingBalances ? "Syncing…" : "Sync invoice balances"}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                {!form.expenseRef && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-1">
+                    <Field label="Company">
+                      <div className="relative">
+                        <Building2
+                          size={13}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                        <select
+                          value={(() => {
+                            const asNum = parseInt(form.company, 10);
+                            if (
+                              !isNaN(asNum) &&
+                              String(asNum) === form.company.trim()
+                            )
+                              return String(asNum);
+                            const matched = companyOptions.find(
+                              (c) => c.label === form.company,
+                            );
+                            return matched ? String(matched.id) : "";
+                          })()}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            const label =
+                              companyOptions.find((c) => String(c.id) === id)
+                                ?.label || "";
+                            set("company", label);
+                            set("project", "");
+                            set("projectSite", "");
+                          }}
+                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Select company…</option>
+                          {companyOptions.map((c) => (
+                            <option key={c.id} value={String(c.id)}>
+                              {c.label}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown
+                          size={11}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Project / Site">
+                      <div className="relative">
+                        <FolderKanban
+                          size={13}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                        <select
+                          value={(() => {
+                            const matched = projectOptions.find(
+                              (p) =>
+                                p.label === form.project ||
+                                p.label === form.projectSite,
+                            );
+                            return matched ? String(matched.id) : "";
+                          })()}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            const label =
+                              projectOptions.find((p) => String(p.id) === id)
+                                ?.label || "";
+                            set("project", label);
+                            set("projectSite", label);
+                          }}
+                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Select project…</option>
+                          {(() => {
+                            const asNum = parseInt(form.company, 10);
+                            const companyId =
+                              !isNaN(asNum) &&
+                              String(asNum) === form.company.trim()
+                                ? asNum
+                                : (companyOptions.find(
+                                    (c) => c.label === form.company,
+                                  )?.id ?? null);
+                            return (
+                              companyId
+                                ? projectOptions.filter(
+                                    (p) => p.company_id === companyId,
+                                  )
+                                : projectOptions
+                            ).map((p) => (
+                              <option key={p.id} value={String(p.id)}>
+                                {p.label}
+                              </option>
+                            ));
+                          })()}
+                        </select>
+                        <ChevronDown
+                          size={11}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
+                    </Field>
+                    <Field
+                      label="Payee / Party"
+                      hint="Required for On Account tracking — who this payment is being made to"
+                    >
+                      <div className="relative">
+                        <Users
+                          size={13}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                        <select
+                          value={form.partyId !== null ? String(form.partyId) : ""}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            const opt = supplierOptions.find((s) => String(s.id) === id);
+                            set("partyId", id ? Number(id) : null);
+                            set("paidTo", opt?.label || "");
+                          }}
+                          className="w-full appearance-none pl-8 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">Select party…</option>
+                          {(() => {
+                            // Group by category (Suppliers / Contractors / Brokers / Customers)
+                            // so the list isn't one flat undifferentiated block — falls back
+                            // to a single "Other" group for any row missing a recognised type.
+                            const groups = new Map<string, typeof supplierOptions>();
+                            supplierOptions.forEach((s) => {
+                              const key = PARTY_TYPE_LABELS[(s.type ?? "").trim()] ?? "Other";
+                              if (!groups.has(key)) groups.set(key, []);
+                              groups.get(key)!.push(s);
+                            });
+                            const order = ["Vendors", "Suppliers", "Contractors", "Brokers", "Customers", "Partners", "Other"];
+                            const sortedKeys = [...groups.keys()].sort(
+                              (a, b) => order.indexOf(a) - order.indexOf(b),
+                            );
+                            return sortedKeys.map((groupLabel) => (
+                              <optgroup key={groupLabel} label={groupLabel}>
+                                {groups.get(groupLabel)!.map((s) => (
+                                  <option key={s.id} value={String(s.id)}>
+                                    {s.label}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ));
+                          })()}
+                        </select>
+                        <ChevronDown
+                          size={11}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                      </div>
+                    </Field>
+                    {/* TDS — only shown once the chosen party is actually
+                        TDS-eligible. Never mandatory to fill here in the
+                        sense of blocking typing — the ₹30k/₹1L threshold is
+                        enforced server-side on save. */}
+                    {tdsEligibility?.tdsApplicable && (
+                      <Field
+                        label="TDS"
+                        hint={
+                          tdsEligibility.thresholdMet
+                            ? "This party has crossed the TDS threshold — select the applicable TDS"
+                            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} paid this year so far) — optional`
+                        }
+                      >
+                        <select
+                          value={form.tdsId ?? ""}
+                          onChange={(e) => {
+                            const id = e.target.value ? Number(e.target.value) : null;
+                            const rec = tdsRecords.find((t) => Number(t.id) === id);
+                            set("tdsId", id);
+                            set("tdsPercentage", rec?.percentage ?? null);
+                            set(
+                              "tdsAmount",
+                              rec ? Math.round(((Number(form.amount) || 0) * rec.percentage) / 100 * 100) / 100 : 0,
+                            );
+                          }}
+                          className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          <option value="">-- No TDS --</option>
+                          {tdsRecords.filter((t) => t.status).map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name || t.nature} — {t.percentage}%
+                            </option>
+                          ))}
+                        </select>
+                        {!!form.tdsId && (
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            TDS ₹{(form.tdsAmount || 0).toLocaleString("en-IN")} · Net ₹{Math.max(0, (form.amount || 0) - (form.tdsAmount || 0)).toLocaleString("en-IN")}
+                          </p>
+                        )}
+                      </Field>
+                    )}
+                  </div>
+                )}
+
+                {/* Direct Expense Payment (migration 303) — an alternative to
+                    picking a Party above: split the payment across one or
+                    more Expense Heads instead, debited directly with no
+                    counter-party at all (e.g. paying a courier or bank
+                    charge with no invoice/vendor on file). */}
+                {!form.expenseRef && !selectedContract && (() => {
+                  const expanded = showExpenseHeadPayment || (form.expenseHeadAllocations?.length ?? 0) > 0;
+                  return (
+                    <div className="space-y-2">
+                      {!expanded ? (
+                        <button
+                          type="button"
+                          onClick={() => setShowExpenseHeadPayment(true)}
+                          className="text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
+                        >
+                          or pay Expense Head(s) directly →
+                        </button>
+                      ) : (
+                        <Field
+                          label="Expense Head"
+                          hint="Pay one or more ledger heads directly — no party required. Must add up to the amount below."
+                        >
+                          <ExpenseHeadAllocationEditor
+                            rows={form.expenseHeadAllocations ?? []}
+                            onChange={(rows) => set("expenseHeadAllocations", rows)}
+                            targetAmount={form.amount ?? 0}
+                          />
+                          {(form.expenseHeadAllocations?.length ?? 0) === 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowExpenseHeadPayment(false)}
+                              className="mt-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                            >
+                              Cancel — pay a Party instead
+                            </button>
+                          )}
+                        </Field>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {form.expenseRef && selectedContract && (
+                  <AutoFillBanner
+                    docNo={selectedContract.DocNo || form.expenseRef}
+                    label="Linked to contract"
+                    onClear={clearContractLink}
+                  />
+                )}
+
+                {form.expenseRef && !selectedContract && (
+                  <AutoFillBanner
+                    docNo={form.expenseRef}
+                    onClear={clearExpenseLink}
+                  />
+                )}
+
+                {/* TDS (migration 304) — invoice-linked payment always
+                    inherits the invoice's own snapshot read-only; this is
+                    a live preview of exactly what will be applied (or what
+                    will block the save) on save, from the same resolver. */}
+                {form.expenseRef && !selectedContract && invoiceTdsPreview?.blocked && (
+                  <div className="flex items-start gap-2.5 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
+                    <AlertCircle size={14} className="text-destructive shrink-0 mt-0.5" />
+                    <p className="text-xs text-destructive">
+                      {invoiceTdsPreview.message || "TDS is due on this invoice but none was selected — please correct the invoice before paying it."}
+                    </p>
+                  </div>
+                )}
+                {form.expenseRef && !selectedContract && !invoiceTdsPreview?.blocked && invoiceTdsPreview?.thresholdMet && (invoiceTdsPreview.tdsAmount ?? 0) > 0 && (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-500/25 bg-amber-500/5 px-4 py-3">
+                    <div className="flex items-center gap-2 text-xs text-foreground">
+                      <span>
+                        TDS <span className="font-semibold">{invoiceTdsPreview.tdsName || invoiceTdsPreview.tdsNature}</span>
+                        {invoiceTdsPreview.tdsPercentage != null && <span className="text-muted-foreground"> — {invoiceTdsPreview.tdsPercentage}%</span>}
+                        {" "}(inherited from invoice)
+                      </span>
+                    </div>
+                    <span className="text-xs font-mono text-muted-foreground whitespace-nowrap">
+                      TDS {formatINR(invoiceTdsPreview.tdsAmount)} · Net {formatINR(Math.max(0, (form.amount || 0) - invoiceTdsPreview.tdsAmount))}
+                    </span>
+                  </div>
+                )}
+
+                {form.expenseRef && selectedContract && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-1">
+                    <Field label="Company">
+                      <div className="flex items-center gap-2">
+                        <Building2
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.company}
+                          placeholder="From contract"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Project / Site">
+                      <div className="flex items-center gap-2">
+                        <FolderKanban
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.projectSite}
+                          placeholder="From contract"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Contractor">
+                      <div className="flex items-center gap-2">
+                        <Users
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={selectedContract.ContactPerson || form.paidTo || ""}
+                          placeholder="From contract"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Contract Doc No">
+                      <div className="flex items-center gap-2">
+                        <FileText
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={selectedContract.DocNo || form.expenseRef}
+                          placeholder="Auto-fetched"
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                )}
+
+                {form.expenseRef && !selectedContract && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-1">
+                    <Field label="Company">
+                      <div className="flex items-center gap-2">
+                        <Building2
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={(() => {
+                            // form.company may be a raw ID string if ECompanyName was blank
+                            const asNum = parseInt(form.company, 10);
+                            if (
+                              !isNaN(asNum) &&
+                              String(asNum) === form.company.trim()
+                            ) {
+                              return (
+                                companyOptions.find((c) => c.id === asNum)
+                                  ?.label || form.company
+                              );
+                            }
+                            return form.company;
+                          })()}
+                          placeholder="From expense booking"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Project / Site">
+                      <div className="flex items-center gap-2">
+                        <FolderKanban
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.projectSite}
+                          placeholder="From linked GRN"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Supplier / Party">
+                      <div className="flex items-center gap-2">
+                        <FolderKanban
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={
+                            expenseOptions.find((o) => o.id === form.expenseId)
+                              ?.supplierName || form.paidTo || ""
+                          }
+                          placeholder={reissueCtx ? "—" : "From expense booking"}
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Doc Type">
+                      <div className="flex items-center gap-2">
+                        <FileText
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.docType}
+                          placeholder="From expense booking"
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                )}
+
+                {form.expenseRef && linkedGRNs.length > 0 && (
+                  <div className="mt-3">
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-3 space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-heading font-semibold text-teal-600 dark:text-teal-400">
+                        <Truck size={12} /> Linked GRNs ({linkedGRNs.length})
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {linkedGRNs.map((g) => (
+                          <div
+                            key={g.GRNID}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-500/30 bg-background text-xs"
+                          >
+                            <Truck
+                              size={11}
+                              className="text-teal-500 shrink-0"
+                            />
+                            <span className="font-mono font-semibold text-teal-600 dark:text-teal-400">
+                              {g.GRNNo}
+                            </span>
+                            {g.PONumber && (
+                              <span className="text-muted-foreground hidden sm:inline">
+                                · PO: {g.PONumber}
+                              </span>
+                            )}
+                            {g.GRNDate && (
+                              <span className="text-muted-foreground">
+                                {g.GRNDate.slice(0, 10)}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* ── Outstanding Balance Card ── */}
+              {form.expenseRef && (() => {
+                const opt = expenseOptions.find((o) => o.id === form.expenseId || o.docNo === form.expenseRef);
+                if (!opt || opt.type === "emi") return null;
+                // opt.amount is the stored ENetAmount (GST + billing terms
+                // already applied server-side) — normally correct, but a
+                // handful of GRN-linked bookings have it stuck at the base
+                // (pre-GST) amount from before ENetAmount was computed
+                // correctly at save time. When there are no active billing
+                // terms on this invoice, the live GST-inclusive GRN total is
+                // exactly what ENetAmount should equal, so prefer it when it
+                // disagrees — self-heals the stale-data case without
+                // touching billing-terms-adjusted invoices, where opt.amount
+                // legitimately differs from the raw GST-inclusive total.
+                let hasActiveBillingTerms = false;
+                try {
+                  const bt = form.billingTermsData
+                    ? JSON.parse(form.billingTermsData)
+                    : [];
+                  hasActiveBillingTerms =
+                    Array.isArray(bt) && bt.some((t: any) => t?.applicable);
+                } catch {
+                  /* malformed/legacy data — treat as no active terms */
+                }
+                const grnInclTotal = grnGstBreakdown?.totals?.totalInclGST ?? 0;
+                const netAmt =
+                  !hasActiveBillingTerms &&
+                  grnInclTotal > 0 &&
+                  Math.abs(grnInclTotal - (opt.amount ?? 0)) > 0.01
+                    ? grnInclTotal
+                    : (opt.amount ?? 0);
+                // TDS withheld at source is never paid to the supplier — the
+                // amount actually payable in cash is netAmt minus it. Computed
+                // directly from opt.tdsAmount rather than trusting
+                // opt.remainingAmount (ExpenseBooking.ERemainingAmount) to
+                // already reflect it: that column is only refreshed at
+                // approval and on payment changes, so an invoice whose TDS
+                // was added afterward (e.g. via an amendment) can still be
+                // stuck showing its pre-TDS figure.
+                const tdsAmt = formKnownTdsAmount ?? opt.tdsAmount ?? 0;
+                const payableAfterTds = Math.max(0, netAmt - tdsAmt);
+                // Use live chain-derived values when available (excludes bounced, subtracts bounce charges).
+                // formLiveRemaining is already TDS-net (see the effect that sets it), so
+                // paid-so-far is payableAfterTds minus it, not netAmt minus it.
+                const livePaid = formLiveRemaining != null ? Math.max(0, payableAfterTds - formLiveRemaining) : null;
+                // Real cash paid only — TDS is withheld, not paid to the
+                // supplier, so it must never be counted as "Paid" here (it
+                // gets its own card below instead). opt.totalPaid's fallback
+                // path historically folded TDS into the paid figure the
+                // moment it was applied to the invoice; strip it back out.
+                const paid = livePaid ?? Math.max(0, (opt.totalPaid ?? 0) - tdsAmt);
+                const remaining = formLiveRemaining ?? Math.max(0, payableAfterTds - paid);
+                const bStatus = deriveBillStatus(paid, remaining, payableAfterTds);
+                return (
+                  <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary flex items-center gap-1.5">
+                        <Wallet size={9} /> Invoice Balance
+                      </p>
+                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                        bStatus === "Paid"
+                          ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                          : bStatus === "Partially Paid"
+                          ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                          : "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400"
+                      }`}>
+                        {bStatus}
+                      </span>
+                    </div>
+                    <div className={`grid gap-2 ${tdsAmt > 0 ? "grid-cols-4" : "grid-cols-3"}`}>
+                      <div className="text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Invoice Total</p>
+                        <p className="font-mono text-xs font-bold text-foreground">{formatINR(netAmt)}</p>
+                      </div>
+                      {tdsAmt > 0 && (
+                        <div className="text-center">
+                          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">TDS Deducted</p>
+                          <p className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">{formatINR(tdsAmt)}</p>
+                        </div>
+                      )}
+                      <div className="text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Paid</p>
+                        <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">{formatINR(paid)}</p>
+                      </div>
+                      <div className="text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Outstanding</p>
+                        <p className={`font-mono text-xs font-bold ${remaining > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                          {formatINR(remaining)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+
+              {/* ── On A/C Adjustment context banner ── */}
+              {oaAdjustCtx && (
+                <div className="rounded-xl border border-blue-500/25 bg-blue-500/5 px-4 py-3 flex items-center justify-between">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-700 dark:text-blue-400">
+                      On A/C Adjustment — {oaAdjustCtx.partyName}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Select an invoice for this party — the On A/C balance will auto-apply on save
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Source: {oaAdjustCtx.sourceDocNo}
+                    </p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="font-mono text-sm font-bold text-blue-600 dark:text-blue-400">
+                      {typeof formatINR === "function" ? formatINR(oaAdjustCtx.availableBalance) : `₹${oaAdjustCtx.availableBalance}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => { setOaAdjustCtx(null); setOaBalance(0); }}
+                      className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── On Account Balance section ── */}
+              {form.expenseRef && oaBalance > 0.01 && (() => {
+                const preview = oaPreview;
+                if (!preview || preview.applyAmount <= 0) return null; // invoice already fully covered — nothing to offer
+
+                return (
+                  <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/[0.07] via-emerald-500/[0.03] to-transparent overflow-hidden shadow-sm">
+                    <div className="flex items-center justify-between gap-3 px-4 py-3.5 border-b border-emerald-500/10">
+                      <div className="flex items-center gap-2.5">
+                        <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-emerald-500/15 shrink-0">
+                          <Wallet size={15} className="text-emerald-600 dark:text-emerald-400" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
+                            On Account Balance
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5">Available for this supplier</p>
+                        </div>
+                      </div>
+                      <span className="font-mono text-lg font-bold text-emerald-600 dark:text-emerald-400">
+                        {formatINR(oaBalance)}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setUseOnAccountBalance(!useOnAccountBalance)}
+                      className="w-full flex items-start gap-3 px-4 py-3.5 text-left hover:bg-emerald-500/[0.04] transition-colors"
+                    >
+                      {/* Toggle switch */}
+                      <span
+                        className={`relative shrink-0 mt-0.5 w-9 h-5 rounded-full transition-colors ${useOnAccountBalance ? "bg-emerald-500" : "bg-muted-foreground/25"}`}
+                      >
+                        <span
+                          className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform ${useOnAccountBalance ? "translate-x-4" : "translate-x-0"}`}
+                        />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-foreground">
+                          Use on-account balance for this payment
+                        </p>
+                        {useOnAccountBalance ? (
+                          <div className="mt-2 rounded-lg border border-emerald-500/20 bg-background/60 divide-y divide-emerald-500/10 overflow-hidden">
+                            <div className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+                              <span className="text-muted-foreground">Adjusted from balance</span>
+                              <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                {formatINR(preview.applyAmount)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+                              <span className="text-muted-foreground">
+                                {preview.isFullyCovered ? "Invoice status" : "Remaining outstanding"}
+                              </span>
+                              {preview.isFullyCovered ? (
+                                <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
+                                  <CheckCircle2 size={11} /> Fully settled
+                                </span>
+                              ) : (
+                                <span className="font-mono font-semibold text-amber-600 dark:text-amber-400">
+                                  {formatINR(preview.invoiceRemainingAfter)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            Balance stays untouched — {formatINR(oaBalance)} kept on his on-account.
+                          </p>
+                        )}
+                      </div>
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {/* ── 2. Payment Details ── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Receipt} label="Payment Details" />
+                {editingId && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Doc No">
+                      <ReadOnlyField value={form.docNo} placeholder="—" />
+                    </Field>
+                    <Field label="Root ExB Doc No">
+                      <ReadOnlyField
+                        value={form.rootExBDocNo}
+                        placeholder="Standalone payment"
+                      />
+                    </Field>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field label="Payment Purpose" required>
+                    <select
+                      value={form.paymentName}
+                      onChange={(e) => set("paymentName", e.target.value)}
+                      className="w-full appearance-none px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">— Select reason —</option>
+                      {/* An existing payment's purpose can be free text that predates
+                          the reasons master, or a reason since renamed/removed there —
+                          without this, re-saving such a record would silently swap it
+                          for whatever option the browser falls back to selecting. */}
+                      {form.paymentName &&
+                        !paymentReasons.some((r) => r.name === form.paymentName) && (
+                          <option value={form.paymentName}>{form.paymentName}</option>
+                        )}
+                      {paymentReasons.map((r) => (
+                        <option key={r.id} value={r.name}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Payment Date" required>
+                    <div className="relative">
+                      <CalendarDays
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                      <input
+                        type="date"
+                        value={form.date}
+                        onChange={(e) => set("date", e.target.value)}
+                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                      />
+                    </div>
+                  </Field>
+                </div>
+
+                <Field label="Remarks">
+                  <textarea
+                    value={form.notes}
+                    onChange={(e) => set("notes", e.target.value)}
+                    placeholder="Any additional notes for this payment (optional)"
+                    rows={2}
+                    className="w-full px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                  />
+                </Field>
+
+                {oaAdjustmentsForInvoice.length > 0 && (
+                  <div className="rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-2 space-y-1">
+                    {oaAdjustmentsForInvoice.map((adj, i) => (
+                      <p key={i} className="text-xs text-emerald-700 dark:text-emerald-400 flex items-center gap-1.5">
+                        <Wallet size={12} className="shrink-0" />
+                        On A/C adjusted with <span className="font-mono font-semibold">{formatINR(adj.amount)}</span> from <span className="font-semibold">{adj.partyName}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field
+                    label="Amount (₹)"
+                    required={isCashMode}
+                    hint={
+                      grnGstBreakdown
+                        ? "Auto-filled from GRN item totals (incl. GST) — editable if needed."
+                        : selectedContract
+                          ? "Defaults to the contract's pending balance — lower this for a partial advance."
+                          : form.expenseRef
+                            ? "Net amount from expense booking — editable if needed."
+                            : undefined
+                    }
+                  >
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold pointer-events-none">
+                        ₹
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={form.amount ?? ""}
+                        onChange={(e) =>
+                          set("amount", parseFloat(e.target.value) || null)
+                        }
+                        placeholder="0.00"
+                        className="w-full pl-7 pr-3 py-2 rounded-lg text-sm font-mono bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/60"
+                      />
+                    </div>
+                  </Field>
+                  {(form.amount ?? 0) > 0 &&
+                    (() => {
+                      // Only render a breakdown when we have reliable GST data:
+                      // either a GRN item-level breakdown OR explicit GST rates on the booking.
+                      const hasGrnBreakdown = !!(
+                        grnGstBreakdown &&
+                        grnGstBreakdown.totals.totalInclGST > 0
+                      );
+                      const hasExplicitGst =
+                        (form.cgstRate ?? 0) > 0 ||
+                        (form.sgstRate ?? 0) > 0 ||
+                        (form.igstRate ?? 0) > 0;
+                      const hasBaseAmount = !!(
+                        form.baseAmount && form.baseAmount > 0
+                      );
+
+                      // Don't render if we can't compute a meaningful breakdown
+                      if (!hasGrnBreakdown && !hasExplicitGst && !hasBaseAmount)
+                        return null;
+
+                      const base = hasBaseAmount
+                        ? form.baseAmount!
+                        : (form.amount ?? 0);
+                      const cgstRate = form.cgstRate ?? 0;
+                      const sgstRate = form.sgstRate ?? 0;
+                      const igstRate = form.igstRate ?? 0;
+
+                      // TDS is deducted once, at the invoice — GST math above
+                      // is untouched by it. Resolved fresh from expenseOptions
+                      // (same source the Invoice Balance card above already
+                      // uses correctly) rather than trusting form.tdsAmount,
+                      // which nothing in this form actually sets.
+                      const tdsOpt = expenseOptions.find(
+                        (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
+                      );
+                      const tdsAmt = formKnownTdsAmount ?? tdsOpt?.tdsAmount ?? 0;
+
+                      // Parse billing terms — must be an array of term objects.
+                      // EDiscountData is a legacy flat discount object {applicable,type,value}
+                      // and must NOT be treated as billing terms; skip it if not an array.
+                      let billingTerms: {
+                        masterTermName?: string;
+                        type: string;
+                        value: number;
+                        appliedOn: string;
+                        deductionType?: string;
+                        applicable?: boolean;
+                      }[] = [];
+                      try {
+                        if (form.billingTermsData) {
+                          const parsed = JSON.parse(form.billingTermsData);
+                          // Only treat as billing terms if it's a proper array
+                          // with items that have an `appliedOn` field (billing term shape).
+                          if (
+                            Array.isArray(parsed) &&
+                            parsed.length > 0 &&
+                            parsed[0].appliedOn !== undefined
+                          ) {
+                            billingTerms = parsed.filter(
+                              (t: any) => t.applicable !== false,
+                            );
+                          }
+                        }
+                      } catch {
+                        /* ignore */
+                      }
+
+                      const preGst = billingTerms.filter(
+                        (t) => t.appliedOn !== "post-gst",
+                      );
+                      const postGst = billingTerms.filter(
+                        (t) => t.appliedOn === "post-gst",
+                      );
+
+                      // Apply pre-GST terms sequentially to taxable base, then
+                      // recompute GST on adjusted base. Post-GST terms apply on gross.
+                      let taxable = base;
+                      const preGstRows: {
+                        term: (typeof preGst)[0];
+                        amt: number;
+                      }[] = [];
+                      for (const t of preGst) {
+                        const amt =
+                          t.type === "percentage"
+                            ? (taxable * t.value) / 100
+                            : t.value;
+                        preGstRows.push({ term: t, amt });
+                        if (t.deductionType === "Addition") taxable += amt;
+                        else taxable = Math.max(0, taxable - amt);
+                      }
+
+                      // Derive effective GST rates from GRN breakdown to recompute
+                      // GST correctly on the adjusted taxable base.
+                      const effectiveCGSTRate =
+                        grnGstBreakdown && grnGstBreakdown.totals.totalBase > 0
+                          ? (grnGstBreakdown.totals.totalCGST /
+                              grnGstBreakdown.totals.totalBase) *
+                            100
+                          : cgstRate;
+                      const effectiveSGSTRate =
+                        grnGstBreakdown && grnGstBreakdown.totals.totalBase > 0
+                          ? (grnGstBreakdown.totals.totalSGST /
+                              grnGstBreakdown.totals.totalBase) *
+                            100
+                          : sgstRate;
+
+                      // When pre-GST terms exist, recompute GST on adjusted base.
+                      // Otherwise use exact per-item sums from GRN breakdown.
+                      const hasPreTerms = preGstRows.length > 0;
+                      const cgst = hasPreTerms
+                        ? (taxable * effectiveCGSTRate) / 100
+                        : grnGstBreakdown
+                          ? grnGstBreakdown.totals.totalCGST
+                          : (taxable * cgstRate) / 100;
+                      const sgst = hasPreTerms
+                        ? (taxable * effectiveSGSTRate) / 100
+                        : grnGstBreakdown
+                          ? grnGstBreakdown.totals.totalSGST
+                          : (taxable * sgstRate) / 100;
+                      const igst = hasPreTerms
+                        ? 0
+                        : grnGstBreakdown
+                          ? 0
+                          : (taxable * igstRate) / 100;
+                      let gross = hasPreTerms
+                        ? taxable + cgst + sgst + igst
+                        : grnGstBreakdown
+                          ? grnGstBreakdown.totals.totalInclGST
+                          : taxable + cgst + sgst + igst;
+
+                      // Apply post-GST terms sequentially on gross
+                      const postGstRows: {
+                        term: (typeof postGst)[0];
+                        amt: number;
+                      }[] = [];
+                      for (const t of postGst) {
+                        const amt =
+                          t.type === "percentage"
+                            ? (gross * t.value) / 100
+                            : t.value;
+                        postGstRows.push({ term: t, amt });
+                        if (t.deductionType === "Addition") gross += amt;
+                        else gross = Math.max(0, gross - amt);
+                      }
+
+                      // Net Payable = gross after all term adjustments, rounded to nearest rupee
+                      const net = Math.round(gross);
+                      const roundOff = net - gross;
+                      // What's actually still payable in cash — TDS was
+                      // already withheld/remitted at the invoice, it's not
+                      // something this payment pays again.
+                      const netAfterTds = Math.max(0, net - tdsAmt);
+
+                      const hasGst = cgst + sgst + igst > 0;
+                      const hasTerms =
+                        preGstRows.length > 0 || postGstRows.length > 0;
+
+                      const Row = ({
+                        label,
+                        sub,
+                        value,
+                        color,
+                        bold,
+                        large,
+                      }: {
+                        label: string;
+                        sub?: string;
+                        value: string;
+                        color?: string;
+                        bold?: boolean;
+                        large?: boolean;
+                      }) => (
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <span
+                              className={`text-xs ${bold ? "font-heading font-semibold text-foreground" : "text-muted-foreground"}`}
+                            >
+                              {label}
+                            </span>
+                            {sub && (
+                              <p className="text-[10px] text-muted-foreground/60">
+                                {sub}
+                              </p>
+                            )}
+                          </div>
+                          <span
+                            className={`font-mono shrink-0 ${large ? "text-base font-bold text-primary" : bold ? "text-sm font-semibold text-foreground" : `text-xs ${color ?? "text-muted-foreground"}`}`}
+                          >
+                            {value}
+                          </span>
+                        </div>
+                      );
+
+                      return (
+                        <div className="rounded-xl bg-primary/5 border border-primary/20 px-4 py-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <TrendingUp
+                              size={13}
+                              className="text-primary shrink-0"
+                            />
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                              Payment Breakdown
+                            </p>
+                          </div>
+
+                          {/* ── GST Summary Cards (cumulative) ── */}
+                          {grnGstBreakdown &&
+                            grnGstBreakdown.totals.totalInclGST > 0 && (
+                              <>
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
+                                  {[
+                                    {
+                                      label: "Base Amount",
+                                      value: grnGstBreakdown.totals.totalBase,
+                                      cls: "border-blue-500/30 bg-blue-500/5 text-blue-700 dark:text-blue-300",
+                                    },
+                                    {
+                                      label: "CGST",
+                                      value: grnGstBreakdown.totals.totalCGST,
+                                      cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                                    },
+                                    {
+                                      label: "SGST",
+                                      value: grnGstBreakdown.totals.totalSGST,
+                                      cls: "border-violet-500/30 bg-violet-500/5 text-violet-700 dark:text-violet-300",
+                                    },
+                                    {
+                                      label: "Total GST",
+                                      value: grnGstBreakdown.totals.totalGST,
+                                      cls: "border-orange-500/30 bg-orange-500/5 text-orange-700 dark:text-orange-300",
+                                    },
+                                  ].map(({ label, value, cls }) => (
+                                    <div
+                                      key={label}
+                                      className={`rounded-lg border px-3 py-2 ${cls}`}
+                                    >
+                                      <div className="text-[10px] font-heading uppercase tracking-wider opacity-70">
+                                        {label}
+                                      </div>
+                                      <div className="text-sm font-mono font-bold mt-1">
+                                        {formatINR(value)}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                                <div className="px-4 py-2.5 bg-muted/10 border border-blue-500/10 rounded-lg flex flex-wrap items-center gap-1.5 text-[11px] font-mono mb-2">
+                                  <span className="text-blue-600 dark:text-blue-400 font-semibold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalBase,
+                                    )}
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    (base)
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    +
+                                  </span>
+                                  <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalCGST,
+                                    )}
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    (CGST)
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    +
+                                  </span>
+                                  <span className="text-violet-600 dark:text-violet-400 font-semibold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalSGST,
+                                    )}
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    (SGST)
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    =
+                                  </span>
+                                  <span className="text-foreground font-bold">
+                                    {formatINR(
+                                      grnGstBreakdown.totals.totalInclGST,
+                                    )}
+                                  </span>
+                                </div>
+                              </>
+                            )}
+
+                          <div className="space-y-1.5">
+                            {/* Base — for GRN breakdown always show totalBase (pre-tax),
+                                not form.baseAmount which may still hold the incl-GST figure
+                                if the setForm override hasn't landed yet */}
+                            <Row
+                              label="Basic Amount"
+                              sub={grnGstBreakdown ? "Excl. GST" : undefined}
+                              value={formatINR(
+                                grnGstBreakdown
+                                  ? grnGstBreakdown.totals.totalBase
+                                  : base,
+                              )}
+                            />
+
+                            {/* Pre-GST billing terms */}
+                            {preGstRows.map(({ term, amt }, i) => {
+                              const isAdd = term.deductionType === "Addition";
+                              return (
+                                <Row
+                                  key={i}
+                                  label={term.masterTermName ?? `Term ${i + 1}`}
+                                  sub={`${isAdd ? "Addition" : "Deduction"} · Before GST${term.type === "percentage" ? ` · ${term.value}%` : ""}`}
+                                  value={(isAdd ? "+ " : "− ") + formatINR(amt)}
+                                  color={
+                                    isAdd
+                                      ? "text-green-500"
+                                      : "text-destructive"
+                                  }
+                                />
+                              );
+                            })}
+
+                            {/* Taxable subtotal — only show if pre-GST terms changed it */}
+                            {preGstRows.length > 0 && (
+                              <>
+                                <div className="border-t border-border/40 pt-1" />
+                                <Row
+                                  label="Taxable Amount"
+                                  sub="After pre-GST adjustments"
+                                  value={formatINR(taxable)}
+                                  bold
+                                />
+                              </>
+                            )}
+
+                            {/* GST */}
+                            {hasGst && (
+                              <>
+                                {preGstRows.length === 0 && (
+                                  <div className="border-t border-border/40 pt-1" />
+                                )}
+                                {grnGstBreakdown ? (
+                                  /* Cumulative GST totals */
+                                  <>
+                                    {grnGstBreakdown.totals.totalCGST > 0 && (
+                                      <Row
+                                        label="CGST"
+                                        value={formatINR(
+                                          grnGstBreakdown.totals.totalCGST,
+                                        )}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                    {grnGstBreakdown.totals.totalSGST > 0 && (
+                                      <Row
+                                        label="SGST"
+                                        value={formatINR(
+                                          grnGstBreakdown.totals.totalSGST,
+                                        )}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                  </>
+                                ) : (
+                                  /* Non-GRN: single averaged rate is the actual rate */
+                                  <>
+                                    {cgst > 0 && (
+                                      <Row
+                                        label={`CGST @ ${cgstRate}%`}
+                                        value={formatINR(cgst)}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                    {sgst > 0 && (
+                                      <Row
+                                        label={`SGST @ ${sgstRate}%`}
+                                        value={formatINR(sgst)}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                    {igst > 0 && (
+                                      <Row
+                                        label={`IGST @ ${igstRate}%`}
+                                        value={formatINR(igst)}
+                                        color="text-primary"
+                                      />
+                                    )}
+                                  </>
+                                )}
+                              </>
+                            )}
+
+                            {/* Gross before post-GST — use the pre-computed `gross`
+                                variable which equals totalInclGST when a GRN breakdown
+                                is available, avoiding the double-count from
+                                (inclGST base) + cgst + sgst */}
+                            {(hasGst || hasTerms) && (
+                              <>
+                                <div className="border-t border-border/40 pt-1" />
+                                <Row
+                                  label="Gross Amount"
+                                  sub={
+                                    hasGst
+                                      ? "Taxable + GST"
+                                      : "Before post-GST adjustments"
+                                  }
+                                  value={formatINR(gross)}
+                                  bold
+                                />
+                              </>
+                            )}
+
+                            {/* Post-GST billing terms */}
+                            {postGstRows.map(({ term, amt }, i) => {
+                              const isAdd = term.deductionType === "Addition";
+                              return (
+                                <Row
+                                  key={i}
+                                  label={term.masterTermName ?? `Term ${i + 1}`}
+                                  sub={`${isAdd ? "Addition" : "Deduction"} · After GST${term.type === "percentage" ? ` · ${term.value}%` : ""}`}
+                                  value={(isAdd ? "+ " : "− ") + formatINR(amt)}
+                                  color={
+                                    isAdd
+                                      ? "text-green-500"
+                                      : "text-destructive"
+                                  }
+                                />
+                              );
+                            })}
+
+                            {/* Round off */}
+                            {Math.abs(roundOff) >= 0.01 && (
+                              <Row
+                                label="Round Off"
+                                value={
+                                  (roundOff >= 0 ? "+ " : "− ") +
+                                  formatINR(Math.abs(roundOff))
+                                }
+                              />
+                            )}
+
+                            {/* Net payable */}
+                            <div className="border-t border-border/60 pt-1.5" />
+                            <Row
+                              label="Net Payable"
+                              value={formatINR(net)}
+                              bold={tdsAmt <= 0}
+                              large={tdsAmt <= 0}
+                            />
+
+                            {/* TDS — withheld at the invoice, informational
+                                only here, never something this payment pays
+                                again. */}
+                            {tdsAmt > 0 && (
+                              <>
+                                <Row
+                                  label="TDS Deducted"
+                                  sub="Withheld at invoice — not paid again here"
+                                  value={"− " + formatINR(tdsAmt)}
+                                  color="text-amber-500"
+                                />
+                                <div className="border-t border-border/60 pt-1.5" />
+                                <Row
+                                  label="Amount Payable (After TDS)"
+                                  value={formatINR(netAfterTds)}
+                                  bold
+                                  large
+                                />
+                              </>
+                            )}
+
+                            {/* ── Payment calculation chain ── */}
+                            {(() => {
+                              const entered = Number(form.amount ?? 0);
+                              if (entered <= 0 || Math.abs(entered - netAfterTds) < 0.01) return null;
+
+                              const opt = expenseOptions.find(
+                                (o) => o.id === form.expenseId || o.docNo === form.expenseRef,
+                              );
+                              const prevOutstanding = resolveOutstanding(
+                                netAfterTds,
+                                formLiveRemaining,
+                                formKnownTotalPaid ?? opt?.totalPaid,
+                              );
+                              const alreadyPaid = Math.max(0, netAfterTds - prevOutstanding);
+                              const afterThisPayment = Math.max(0, prevOutstanding - entered);
+                              const isExact   = Math.abs(entered - prevOutstanding) < 0.01;
+                              const isPartial = !isExact && entered < prevOutstanding;
+                              const isOver    = !isExact && entered > prevOutstanding;
+
+                              const chainColor = isOver
+                                ? "border-amber-500/30 bg-amber-500/5"
+                                : isExact
+                                  ? "border-emerald-500/30 bg-emerald-500/5"
+                                  : "border-blue-500/30 bg-blue-500/5";
+
+                              return (
+                                <div className={`mt-3 rounded-xl border px-4 py-3.5 space-y-1.5 text-sm ${chainColor}`}>
+                                  {/* Step 1: Net − Already Paid = Outstanding (only when there are prior payments) */}
+                                  {alreadyPaid > 0.01 && (
+                                    <>
+                                      <div className="flex justify-between items-center text-muted-foreground">
+                                        <span>Net payable (after TDS)</span>
+                                        <span className="font-mono">{formatINR(netAfterTds)}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center text-muted-foreground">
+                                        <span>Already paid</span>
+                                        <span className="font-mono text-emerald-600 dark:text-emerald-400">− {formatINR(alreadyPaid)}</span>
+                                      </div>
+                                      <div className="flex justify-between items-center font-semibold border-t border-border/30 pt-1.5">
+                                        <span>Outstanding</span>
+                                        <span className="font-mono">{formatINR(prevOutstanding)}</span>
+                                      </div>
+                                    </>
+                                  )}
+
+                                  {/* Step 2: Outstanding − This payment = Remaining */}
+                                  <div className={`flex justify-between items-center text-muted-foreground ${alreadyPaid > 0.01 ? "pt-1" : ""}`}>
+                                    <span>Outstanding{alreadyPaid <= 0.01 ? ` (full invoice)` : ""}</span>
+                                    <span className="font-mono">{formatINR(prevOutstanding)}</span>
+                                  </div>
+                                  <div className="flex justify-between items-center text-muted-foreground">
+                                    <span>This payment</span>
+                                    <span className="font-mono text-primary">− {formatINR(entered)}</span>
+                                  </div>
+                                  <div className={`flex justify-between items-center font-bold border-t border-border/30 pt-1.5 ${
+                                    isExact || isOver
+                                      ? "text-emerald-600 dark:text-emerald-400"
+                                      : "text-amber-600 dark:text-amber-400"
+                                  }`}>
+                                    <span className="flex items-center gap-1.5">
+                                      {isExact
+                                        ? <><CheckCircle2 size={12} /> Fully settled</>
+                                        : isPartial
+                                          ? "Remaining"
+                                          : <><Wallet size={12} /> On A/c for {form.paidTo || "Supplier"}</>}
+                                    </span>
+                                    <span className="font-mono text-base">
+                                      {isOver ? `+ ${formatINR(entered - prevOutstanding)}` : formatINR(afterThisPayment)}
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                </div>
+              </div>
+
+              {/* ── Payment Chain (form view) ── */}
+              {form.expenseRef && (formChainData?.payments?.length ?? 0) > 0 && (
+                <div className="rounded-xl border border-border/60 bg-muted/20 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40 bg-background/60">
+                    <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                      <History size={9} /> Payment Chain
+                    </p>
+                    <div className="flex items-center gap-2.5">
+                      {selectedContract && selectedContract.PendingAmount != null && (
+                        <span className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-400">
+                          Pending {formatINR(Math.max(selectedContract.PendingAmount, 0))}
+                        </span>
+                      )}
+                      <span className="text-[10px] font-mono text-muted-foreground">
+                        {formChainData!.payments.length} attempt{formChainData!.payments.length !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="px-4 py-3 space-y-2">
+                    {loadingFormChain ? (
+                      <p className="text-[11px] text-muted-foreground text-center py-2">Loading…</p>
+                    ) : (
+                      formChainData!.payments.map((p: PaymentChainItem, idx: number) => {
+                        const ds = p.DisplayStatus;
+                        const borderCls =
+                          ds === "Success" || ds === "Cheque Cleared"
+                            ? "border-emerald-500"
+                            : ds === "Cheque Bounced" || ds === "Cheque Cancelled"
+                            ? "border-red-500"
+                            : ds === "Reissued"
+                            ? "border-violet-500"
+                            : ds === "Cheque Issued"
+                            ? "border-blue-500"
+                            : ds === "Pending"
+                            ? "border-amber-500"
+                            : "border-border";
+                        const badgeCls =
+                          ds === "Success" || ds === "Cheque Cleared"
+                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20"
+                            : ds === "Cheque Bounced" || ds === "Cheque Cancelled"
+                            ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-500/20"
+                            : ds === "Reissued"
+                            ? "bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20"
+                            : ds === "Cheque Issued"
+                            ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20"
+                            : ds === "Pending"
+                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"
+                            : "bg-muted text-muted-foreground border-border";
+                        return (
+                          <div key={p.PPaymentID} className={`flex gap-2.5 pl-3 border-l-2 ${borderCls}`}>
+                            <div className="min-w-0 flex-1 py-0.5 space-y-0.5">
+                              <div className="flex items-center justify-between gap-2 flex-wrap">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-mono text-[11px] font-semibold text-foreground">
+                                    {p.DocNo ?? `#${p.PPaymentID}`}
+                                  </span>
+                                  {idx === formChainData!.payments.length - 1 && (
+                                    <span className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 font-semibold">LATEST</span>
+                                  )}
+                                </div>
+                                <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${badgeCls}`}>{ds}</span>
+                              </div>
+                              <div className="flex items-center gap-2 flex-wrap text-[10px] text-muted-foreground">
+                                <span>{p.PDate ? new Date(p.PDate).toLocaleDateString("en-IN") : "—"}</span>
+                                <span>·</span>
+                                <span className="font-mono font-semibold text-foreground">{formatINR(p.PAmount ?? 0)}</span>
+                                <span>·</span>
+                                <span>{p.PMode ?? "—"}</span>
+                                {(() => {
+                                  const bank = p.PBankName || bankNameFromIfsc(p.PChequeIfsc);
+                                  return bank ? <><span>·</span><span className="font-medium text-foreground/70">{bank}</span></> : null;
+                                })()}
+                                {p.PChequeNo && <><span>·</span><span>Chq {p.PChequeNo}</span></>}
+                                {!!p.PIsChequeCancelled && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold">
+                                    Cancelled Cheque
+                                  </span>
+                                )}
+                                {(p.BounceCharge ?? 0) > 0 && (
+                                  <span className="text-amber-600 dark:text-amber-400 font-medium">
+                                    +{formatINR(p.BounceCharge!)} bank charge
+                                  </span>
+                                )}
+                              </div>
+                              {p.BounceReason && (
+                                <p className="text-[10px] text-red-600 dark:text-red-400 italic">
+                                  Bounced: {p.BounceReason}
+                                  {p.BounceDate && <> on {new Date(p.BounceDate).toLocaleDateString("en-IN")}</>}
+                                </p>
+                              )}
+                              {p.ReplacementDocNo && (
+                                <p className="text-[10px] text-violet-600 dark:text-violet-400">
+                                  Reissued as {p.ReplacementDocNo}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Re-issue banner ── */}
+              {reissueCtx && (
+                <div className="flex items-start gap-3 rounded-xl bg-amber-500/[0.08] border border-amber-500/30 px-4 py-3">
+                  <RefreshCw size={15} className="text-amber-500 shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1 space-y-0.5">
+                    <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                      Re-issuing bounced payment
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Replaces <span className="font-mono font-medium">{reissueCtx.replacesDocNo}</span>
+                      {reissueCtx.bounceReason && <> · <span className="italic">{reissueCtx.bounceReason}</span></>}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground">
+                      Original amount: <span className="font-mono font-semibold">{formatINR(reissueCtx.amount)}</span>
+                      {bounceCharge && parseFloat(bounceCharge) > 0 && (
+                        <> + bounce charge: <span className="font-mono font-semibold text-red-500">{formatINR(parseFloat(bounceCharge))}</span>
+                        {" "}= <span className="font-mono font-semibold text-foreground">{formatINR(reissueCtx.amount + parseFloat(bounceCharge))}</span></>
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setReissueCtx(null); setBounceCharge(""); }}
+                    className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    title="Cancel re-issue"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+              )}
+
+              {/* ── Bounce Charge (re-issue only) ── */}
+              {reissueCtx && (
+                <div className="space-y-3">
+                  <SectionHeader icon={AlertTriangle} label="Bounce Charge" />
+                  <Field label="Bank Bounce Charge" hint="Optional — added on top of the original payment amount">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold pointer-events-none">₹</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={bounceCharge}
+                        onChange={(e) => setBounceCharge(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/60 font-mono"
+                      />
+                    </div>
+                  </Field>
+                </div>
+              )}
+
+              {/* ── 3. Bank Account ── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Landmark} label="Bank Account" />
+                <Field
+                  label="Bank"
+                  required={isChequeMode || isDigitalMode}
+                  hint={
+                    isCashMode
+                      ? "Not applicable for cash payments."
+                      : isChequeMode
+                        ? "Required — used to filter cheque lots."
+                        : !form.mode
+                          ? "Pick a bank now, or after choosing a Payment Mode below — either order works."
+                          : "Bank account from which the transfer was made."
+                  }
+                >
+                  <div className={`relative ${isCashMode ? "opacity-40 pointer-events-none" : ""}`}>
+                    <Landmark
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <select
+                      value={form.bankId ? String(form.bankId) : ""}
+                      onChange={(e) => handleBankSelect(e.target.value)}
+                      disabled={isCashMode}
+                      className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:cursor-not-allowed"
+                    >
+                      <option value="">— Select bank account —</option>
+                      {filteredBanks.map((b) => (
+                        <option key={b.id} value={String(b.id)}>
+                          {b.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={14}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                  {!isCashMode &&
+                    form.bankId &&
+                    (() => {
+                      const selected = banks.find((b) => b.id === form.bankId);
+                      if (!selected) return null;
+                      const details = [
+                        selected.ifscCode && `IFSC: ${selected.ifscCode}`,
+                        selected.branch && `Branch: ${selected.branch}`,
+                        selected.accountType && `Type: ${selected.accountType}`,
+                      ].filter(Boolean);
+                      if (!details.length) return null;
+                      return (
+                        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
+                          {details.join(" · ")}
+                        </p>
+                      );
+                    })()}
+                </Field>
+              </div>
+
+              {/* ── 4. Payment Mode ── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Wallet} label="Payment Mode" />
+                <Field label="Mode" required>
+                  <div className="flex flex-wrap gap-2">
+                    {PAYMENT_MODES.filter((m) => !reissueCtx || m !== "Cash").map((m) => {
+                      const s = MODE_STYLE[m] ?? {
+                        ring: "ring-border bg-muted",
+                        text: "text-muted-foreground",
+                        dot: "bg-muted-foreground",
+                      };
+                      const active = form.mode === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => handleModeChange(m)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ring-1 ${
+                            active
+                              ? `${s.ring} ${s.text} border-transparent shadow-sm`
+                              : "bg-background border-border text-muted-foreground ring-transparent hover:border-primary/40"
+                          }`}
+                        >
+                          {active && (
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${s.dot}`}
+                            />
+                          )}
+                          {m}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Field>
+
+                {form.mode && <ModeInfoBanner mode={form.mode} />}
+              </div>
+
+              {/* ── 5. Mode-specific section ── */}
+
+              {/* Cash — nothing extra, amount above is sufficient */}
+              {isCashMode && (
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-center gap-2.5">
+                  <Banknote size={14} className="text-emerald-500 shrink-0" />
+                  <p className="text-xs text-muted-foreground">
+                    Cash payment — enter the amount above and save.
+                  </p>
+                </div>
+              )}
+
+              {/* Cheque / Post-Dated Cheque */}
+              {isChequeMode && (
+                <div className="space-y-3">
+                  <SectionHeader
+                    icon={BookOpen}
+                    label={
+                      form.mode === "Post-Dated Cheque"
+                        ? "Post-Dated Cheque Details"
+                        : "Cheque Details"
+                    }
+                    badge={
+                      form.mode === "Post-Dated Cheque" ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 ring-1 ring-indigo-500/20">
+                          <CalendarClock size={9} /> Scheduled
+                        </span>
+                      ) : null
+                    }
+                  />
+                  <ChequePanel
+                    bankId={form.bankId}
+                    form={form}
+                    set={set}
+                    isPostDated={form.mode === "Post-Dated Cheque"}
+                  />
+                </div>
+              )}
+
+              {/* NEFT / UPI / RTGS / IMPS / Card */}
+              {isDigitalMode && (
+                <div className="space-y-3">
+                  <SectionHeader icon={Hash} label={`${form.mode} Reference`} />
+                  {form.mode === "Card" && (
+                    <CardPanel bankId={form.bankId} form={form} set={set} />
+                  )}
+                  <DigitalRefPanel mode={form.mode} form={form} set={set} />
+                </div>
+              )}
+
+              {/* ── Save footer ── */}
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
+                <p className="text-[11px] text-muted-foreground hidden sm:block">
+                  {canSave ? (
+                    <span className="text-emerald-500 font-medium">
+                      Ready to save
+                    </span>
+                  ) : (
+                    "Fill in the required fields to save"
+                  )}
+                </p>
+                <div className="flex items-center gap-2 sm:ml-auto">
+                  <button
+                    onClick={handleReset}
+                    disabled={!isDirty && !editingId}
+                    className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-1.5"
+                  >
+                    <RotateCcw size={12} />
+                    {editingId ? "Cancel" : "Reset"}
+                  </button>
+                  <button
+                    onClick={handleSave}
+                    disabled={saving || !canSave}
+                    className="flex-1 sm:flex-none px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5 transition-opacity whitespace-nowrap"
+                  >
+                    {saving ? (
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    ) : editingId ? (
+                      <Check size={12} />
+                    ) : (
+                      <Plus size={12} />
+                    )}
+                    {saving
+                      ? "Saving…"
+                      : editingId
+                        ? "Update Payment"
+                        : "Save Payment"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* LIST VIEW                                                          */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {view === "list" && (
+          <>
+            {/* ── Filter Panel ── */}
+            {(() => {
+              const hasActiveFilters = !!(
+                companyFilter ||
+                projectFilter ||
+                finYearFilter ||
+                docNumberFilter ||
+                dateFromFilter ||
+                dateToFilter ||
+                supplierFilter
+              );
+              const clearAll = () => {
+                setCompanyFilter("");
+                setCompanyNameFilter("");
+                setProjectFilter("");
+                setFinYearFilter("");
+                setDocNumberFilter("");
+                setDateFromFilter("");
+                setDateToFilter("");
+                setSupplierFilter("");
+                setPage(1);
+              };
+              return (
+                <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                  {/* Header / toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowFilters((v) => !v)}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/30 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-center w-5 h-5 rounded bg-primary/10">
+                        <Search size={11} className="text-primary" />
+                      </div>
+                      <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">
+                        Filters
+                      </span>
+                      {hasActiveFilters && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary text-primary-foreground">
+                          {
+                            [
+                              companyFilter,
+                              projectFilter,
+                              finYearFilter,
+                              docNumberFilter,
+                              dateFromFilter,
+                              dateToFilter,
+                              supplierFilter,
+                            ].filter(Boolean).length
+                          }{" "}
+                          active
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {hasActiveFilters && (
+                        <span
+                          role="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearAll();
+                          }}
+                          className="text-[11px] text-destructive/70 hover:text-destructive font-heading transition-colors cursor-pointer"
+                        >
+                          Clear all
+                        </span>
+                      )}
+                      <ChevronDown
+                        size={13}
+                        className={`text-muted-foreground transition-transform duration-200 ${showFilters ? "rotate-180" : ""}`}
+                      />
+                    </div>
+                  </button>
+
+                  {/* Collapsible grid */}
+                  {showFilters && (
+                    <div className="border-t border-border px-4 py-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
+                        {/* 1. Company */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Building2 size={10} /> Company
+                          </label>
+                          <div className="relative">
+                            <select
+                              value={companyFilter}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setCompanyFilter(val);
+                                const label = val
+                                  ? (companyOptions.find(
+                                      (c) => String(c.id) === val,
+                                    )?.label ?? val)
+                                  : "";
+                                setCompanyNameFilter(label);
+                                // Clear project filter if it doesn't belong to new company
+                                if (projectFilter && val) {
+                                  const stillValid = projectOptions.some(
+                                    (p) =>
+                                      p.label === projectFilter &&
+                                      (p.belongs_to === Number(val) ||
+                                        p.company_id === Number(val)),
+                                  );
+                                  if (!stillValid) setProjectFilter("");
+                                }
+                                setPage(1);
+                              }}
+                              className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="">All Companies</option>
+                              {companyOptions.map((c) => (
+                                <option key={c.id} value={String(c.id)}>
+                                  {c.label}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown
+                              size={11}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                            />
+                          </div>
+                        </div>
+
+                        {/* 2. Project */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <FolderKanban size={10} /> Project
+                          </label>
+                          <div className="relative">
+                            <select
+                              value={projectFilter}
+                              onChange={(e) => {
+                                setProjectFilter(e.target.value);
+                                setPage(1);
+                              }}
+                              className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="">All Projects</option>
+                              {(companyFilter
+                                ? projectOptions.filter(
+                                    (p) =>
+                                      p.belongs_to === Number(companyFilter) ||
+                                      p.company_id === Number(companyFilter),
+                                  )
+                                : projectOptions
+                              ).map((p) => (
+                                <option key={p.id} value={p.label}>
+                                  {p.label}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown
+                              size={11}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                            />
+                          </div>
+                        </div>
+
+                        {/* 3. Fin Year */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <CalendarDays size={10} /> Fin Year
+                          </label>
+                          <div className="relative">
+                            <select
+                              value={finYearFilter}
+                              onChange={(e) => {
+                                setFinYearFilter(e.target.value);
+                                setPage(1);
+                              }}
+                              className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="">All Fin Years</option>
+                              {finYearOptions.map((y) => (
+                                <option key={y.id} value={y.label}>
+                                  {y.label}
+                                </option>
+                              ))}
+                            </select>
+                            <ChevronDown
+                              size={11}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                            />
+                          </div>
+                        </div>
+
+                        {/* 4. Document Number */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Hash size={10} /> Document Number
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="e.g. PAY-2024-001"
+                              value={docNumberFilter}
+                              onChange={(e) => {
+                                setDocNumberFilter(e.target.value);
+                                setPage(1);
+                              }}
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                            {docNumberFilter && (
+                              <button
+                                onClick={() => {
+                                  setDocNumberFilter("");
+                                  setPage(1);
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 5. Payment Date range */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <FileText size={10} /> Date From
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="date"
+                              value={dateFromFilter}
+                              max={dateToFilter || undefined}
+                              onChange={(e) => {
+                                setDateFromFilter(e.target.value);
+                                setPage(1);
+                              }}
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                            />
+                            {dateFromFilter && (
+                              <button
+                                onClick={() => {
+                                  setDateFromFilter("");
+                                  setPage(1);
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 5b. Payment Date range — To */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <FileText size={10} /> Date To
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="date"
+                              value={dateToFilter}
+                              min={dateFromFilter || undefined}
+                              onChange={(e) => {
+                                setDateToFilter(e.target.value);
+                                setPage(1);
+                              }}
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                            />
+                            {dateToFilter && (
+                              <button
+                                onClick={() => {
+                                  setDateToFilter("");
+                                  setPage(1);
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 6. Supplier / Contractor / Broker */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Truck size={10} /> Supplier / Contractor / Broker
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="Search name…"
+                              value={supplierFilter}
+                              onChange={(e) => {
+                                setSupplierFilter(e.target.value);
+                                setPage(1);
+                              }}
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                            {supplierFilter && (
+                              <button
+                                onClick={() => {
+                                  setSupplierFilter("");
+                                  setPage(1);
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Active filter chips — always visible when filters set */}
+                  {hasActiveFilters && (
+                    <div className="flex flex-wrap gap-1.5 px-4 pb-3 border-t border-border/50 pt-2.5">
+                      {companyFilter &&
+                        (() => {
+                          const co = companyOptions.find(
+                            (c) => String(c.id) === companyFilter,
+                          );
+                          return (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-primary/10 text-primary border border-primary/20">
+                              <Building2 size={9} />
+                              {co?.label || companyFilter}
+                              <button
+                                onClick={() => {
+                                  setCompanyFilter("");
+                                  setCompanyNameFilter("");
+                                  setPage(1);
+                                }}
+                                className="ml-0.5 hover:text-destructive"
+                              >
+                                <X size={9} />
+                              </button>
+                            </span>
+                          );
+                        })()}
+                      {projectFilter && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-violet-500/10 text-violet-600 border border-violet-500/20">
+                          <FolderKanban size={9} />
+                          {projectFilter}
+                          <button
+                            onClick={() => {
+                              setProjectFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X size={9} />
+                          </button>
+                        </span>
+                      )}
+                      {finYearFilter && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                          <CalendarDays size={9} />
+                          FY {finYearFilter}
+                          <button
+                            onClick={() => {
+                              setFinYearFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X size={9} />
+                          </button>
+                        </span>
+                      )}
+                      {docNumberFilter && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                          <Hash size={9} />
+                          {docNumberFilter}
+                          <button
+                            onClick={() => {
+                              setDocNumberFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X size={9} />
+                          </button>
+                        </span>
+                      )}
+                      {(dateFromFilter || dateToFilter) && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-cyan-500/10 text-cyan-600 border border-cyan-500/20">
+                          <FileText size={9} />
+                          Date: {dateFromFilter || "…"} – {dateToFilter || "…"}
+                          <button
+                            onClick={() => {
+                              setDateFromFilter("");
+                              setDateToFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X size={9} />
+                          </button>
+                        </span>
+                      )}
+                      {supplierFilter && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-teal-500/10 text-teal-600 border border-teal-500/20">
+                          <Truck size={9} />
+                          {supplierFilter}
+                          <button
+                            onClick={() => {
+                              setSupplierFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X size={9} />
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {isLoading && (
+              <div className="text-center py-16 text-muted-foreground text-sm">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                Loading payments…
+              </div>
+            )}
+
+            {isError && (
+              <div className="text-center py-16 text-destructive text-sm">
+                Failed to load payments. Please log in and try again.
+              </div>
+            )}
+
+            {!isLoading && !isError && (
+              <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                {/* Mobile cards — the desktop table switches over at lg
+                    (1024px), not sm (640px): six columns (Payment Purpose,
+                    Doc No, Expense Ref, Amount, Status, Actions) genuinely
+                    don't fit in the 640-1024px range, where the header row
+                    used to render as an illegible squeeze (e.g. "Amount"
+                    and "Status" crowding together with no visible gap). */}
+                <div className="lg:hidden divide-y divide-border">
+                  {records.length === 0 && (
+                    <div className="text-center py-14 text-muted-foreground text-sm">
+                      <AlertCircle
+                        size={20}
+                        className="mx-auto mb-2 opacity-30"
+                      />
+                      No payments yet.
+                    </div>
+                  )}
+                  {records.map((rec) => (
+                    <div key={rec.id} className="p-4 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-heading font-semibold text-sm text-foreground truncate">
+                          {rec.paymentName}
+                        </span>
+                        <ModeBadge mode={rec.mode} />
+                      </div>
+                      {rec.paidTo && (
+                        <p className="text-xs text-muted-foreground truncate">
+                          Paid to{" "}
+                          <span className="text-foreground font-medium">
+                            {rec.paidTo}
+                          </span>
+                        </p>
+                      )}
+                      {rec.docNo && (
+                        <span className="inline-block font-mono text-[11px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                          {rec.docNo}
+                        </span>
+                      )}
+                      {rec.expenseRef && (
+                        <span className="inline-block font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md">
+                          {rec.expenseRef}
+                        </span>
+                      )}
+                      {rec.chequeNo && (
+                        <span className="inline-block font-mono text-[11px] bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md">
+                          Chq #{rec.chequeNo}
+                        </span>
+                      )}
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{rec.date}</span>
+                        <span className="font-mono font-semibold text-foreground">
+                          {formatINR(rec.amount ?? 0)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex flex-col gap-1">
+                          <ApprovalStatusChain
+                            table="NewPayment"
+                            recordId={rec.id}
+                          />
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <ApprovalActions
+                            status={rec.status}
+                            recordId={Number(rec.id)}
+                            endpoint="/api/new-payment"
+                            submitOnly
+                            onSuccess={() => {
+                              queryClient.invalidateQueries({
+                                queryKey: ["payments"],
+                                exact: false,
+                              });
+                              queryClient.invalidateQueries({
+                                queryKey: ["expense-options-payment"],
+                              });
+                              refetchPayments();
+                              window.dispatchEvent(
+                                new CustomEvent("approval-action"),
+                              );
+                            }}
+                          />
+                          <button
+                            onClick={() => openViewRec(rec)}
+                            title="View details"
+                            className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                          >
+                            <Eye size={12} />
+                          </button>
+                          {rights.canEdit && (
+                            <button
+                              onClick={() => openEdit(rec)}
+                              title="Edit"
+                              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                            >
+                              <Edit size={12} />
+                            </button>
+                          )}
+                          {rights.canDelete && (
+                            <button
+                              onClick={() => setDeleteId(rec.id)}
+                              className="p-1.5 rounded-md border border-destructive/30 text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop table — compact, no horizontal scroll. Matches
+                    the lg breakpoint on the mobile-cards wrapper above. */}
+                <div className="hidden lg:block">
+                  <table className="w-full text-sm table-fixed">
+                    <thead>
+                      <tr className="bg-muted/30 border-b border-border">
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
+                          Payment Purpose
+                        </th>
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
+                          Doc No
+                        </th>
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
+                          Expense Ref
+                        </th>
+                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%]">
+                          Amount
+                        </th>
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
+                          Status
+                        </th>
+                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
+                          Actions
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {records.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={6}
+                            className="text-center py-14 text-muted-foreground text-sm"
+                          >
+                            <AlertCircle
+                              size={18}
+                              className="mx-auto mb-2 opacity-30"
+                            />
+                            No payments yet. Click "New Payment" to get started.
+                          </td>
+                        </tr>
+                      )}
+                      {records.map((rec) => (
+                        <tr
+                          key={rec.id}
+                          className="hover:bg-muted/20 transition-colors"
+                        >
+                          {/* Payment purpose + paid-to + date + bank stacked */}
+                          <td className="px-4 py-4">
+                            <p className="font-heading font-medium text-foreground text-xs truncate">
+                              {rec.paymentName || "—"}
+                            </p>
+                            {rec.paidTo && (
+                              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                                Paid to{" "}
+                                <span className="text-foreground/80">
+                                  {rec.paidTo}
+                                </span>
+                              </p>
+                            )}
+                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                              {rec.date || "—"}
+                            </p>
+                            {rec.bankName && (
+                              <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">{rec.bankName}</p>
+                            )}
+                          </td>
+                          {/* Doc No + Mode + Cheque/Ref stacked */}
+                          <td className="px-4 py-4">
+                            <span className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                              {rec.docNo || "—"}
+                            </span>
+                            <div className="mt-1">
+                              <ModeBadge mode={rec.mode} />
+                            </div>
+                            {(rec.chequeNo || rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference) && (
+                              <p className="font-mono text-[10px] text-blue-500 mt-0.5 truncate">
+                                {rec.chequeNo ? `#${rec.chequeNo}` : rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference}
+                              </p>
+                            )}
+                          </td>
+                          {/* Expense Ref + JV + GRN stacked */}
+                          <td className="px-4 py-4">
+                            {rec.expenseRef ? (
+                              <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
+                                {rec.expenseRef}
+                              </span>
+                            ) : rec.jvNo ? (
+                              <span className="font-mono text-[11px] bg-teal-500/10 text-teal-600 border border-teal-500/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
+                                {rec.jvNo}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">
+                                —
+                              </span>
+                            )}
+                            <div className="mt-1">
+                              <PaymentGRNBadges
+                                expenseId={rec.expenseId || ""}
+                              />
+                            </div>
+                          </td>
+                          {/* Amount */}
+                          <td className="px-4 py-4 font-mono text-xs font-semibold text-right whitespace-nowrap">
+                            {formatINR(rec.amount ?? 0)}
+                          </td>
+                          {/* Status */}
+                          <td className="px-4 py-4">
+                            <div className="flex flex-col gap-1">
+                              {rec.displayStatus && rec.displayStatus !== rec.status ? (
+                                <span className={`inline-flex items-center justify-center w-28 py-px rounded text-[9px] font-semibold border whitespace-nowrap ${
+                                  rec.displayStatus === "Success" || rec.displayStatus === "Cheque Cleared"
+                                    ? "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
+                                  : rec.displayStatus === "Pending"
+                                    ? "bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800"
+                                  : rec.displayStatus === "Cheque Issued"
+                                    ? "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-400 dark:border-blue-800"
+                                  : rec.displayStatus === "Cheque Bounced" || rec.displayStatus === "Cheque Cancelled"
+                                    ? "bg-red-100 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800"
+                                  : rec.displayStatus === "Reissued"
+                                    ? "bg-violet-100 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-400 dark:border-violet-800"
+                                  : "bg-gray-100 text-gray-700 border-gray-200 dark:bg-gray-950/40 dark:text-gray-400 dark:border-gray-800"
+                                }`}>
+                                  {rec.displayStatus}
+                                </span>
+                              ) : (
+                                <StatusBadge status={rec.status} />
+                              )}
+                              {rec.status === "Pending" && (
+                                <ApprovalStatusChain
+                                  table="NewPayment"
+                                  recordId={rec.id}
+                                />
+                              )}
+                            </div>
+                          </td>
+                          {/* Actions */}
+                          <td className="px-3 py-4">
+                            <div className="flex items-center gap-1.5 justify-end flex-wrap">
+                              <ApprovalActions
+                                status={rec.status}
+                                recordId={Number(rec.id)}
+                                endpoint="/api/new-payment"
+                                submitOnly
+                                onSuccess={() => {
+                                  queryClient.invalidateQueries({
+                                    queryKey: ["payments"],
+                                    exact: false,
+                                  });
+                                  queryClient.invalidateQueries({
+                                    queryKey: ["expense-options-payment"],
+                                  });
+                                  refetchPayments();
+                                  window.dispatchEvent(
+                                    new CustomEvent("approval-action"),
+                                  );
+                                }}
+                              />
+                              <button
+                                onClick={() => openViewRec(rec)}
+                                title="View details"
+                                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                              >
+                                <Eye size={12} />
+                              </button>
+                              {rights.canEdit && (
+                                <button
+                                  onClick={() => openEdit(rec)}
+                                  title="Edit"
+                                  className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                >
+                                  <Edit size={12} />
+                                </button>
+                              )}
+                              {rights.canDelete && (
+                                <button
+                                  onClick={() => setDeleteId(rec.id)}
+                                  className="p-1.5 rounded-md border border-destructive/30 text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between mt-2 px-1">
+                <p className="text-xs text-muted-foreground">
+                  Page {page} of {totalPages} · {totalRecords} total
+                </p>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                    className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    const pg = page <= 3 ? i + 1 : page - 2 + i;
+                    if (pg < 1 || pg > totalPages) return null;
+                    return (
+                      <button
+                        key={pg}
+                        onClick={() => setPage(pg)}
+                        className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${pg === page ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                      >
+                        {pg}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages}
+                    className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </FinanceShell>
+
+      {/* Payment detail view modal */}
+      {viewingRec && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={() => {
+            setViewingRec(null);
+            setViewingChain(null);
+          }}
+        >
+          <div
+            className="w-full max-w-4xl rounded-xl bg-card border border-border shadow-xl overflow-hidden flex flex-col max-h-[92vh]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-primary/10">
+                  <Receipt size={15} className="text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-heading font-semibold text-foreground text-sm">
+                    Payment Details
+                  </h3>
+                  {viewingRec.docNo && (
+                    <span className="text-[11px] font-mono text-muted-foreground">
+                      {viewingRec.docNo}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setViewingRec(null);
+                  setViewingChain(null);
+                }}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Tab strip — shown for every payment, including direct/TOD
+                ones with no linked invoice: Posting always applies (via the
+                per-payment fallback URL below), and Payment Chain shows an
+                explanatory empty state instead of just vanishing. */}
+            <div className="flex border-b border-border px-5 bg-muted/10">
+              {(["details", "chain", "posting"] as const).map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setDetailTab(t)}
+                  className={`px-4 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+                    detailTab === t
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  {t === "details" ? "Details" : t === "chain" ? "Payment Chain" : "Posting"}
+                  {t === "chain" && paymentChainData && (
+                    <span className="ml-1.5 text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-semibold">
+                      {paymentChainData.payments.length}
+                    </span>
+                  )}
+                  {t === "posting" && pmtPostingData?.isPosted && (
+                    <span className="ml-1.5 text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.5 rounded-full font-semibold">✓</span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4 flex-1 overflow-y-auto">
+
+              {/* ── Payment Chain Tab ── */}
+              {detailTab === "chain" && !viewingRec.expenseRef && (
+                <p className="text-center text-xs text-muted-foreground py-8">
+                  This is a direct payment with no linked invoice — there's no payment chain to show.
+                </p>
+              )}
+              {detailTab === "chain" && viewingRec.expenseRef && (
+                <div className="space-y-3">
+                  {/* Invoice summary */}
+                  {paymentChainData?.invoice && (() => {
+                    // Use live GRN breakdown total when available (viewingGrnTotal), chain endpoint GrnTotalAmount as fallback
+                    const chainInvoiceTotal = viewingGrnTotal > 0 ? viewingGrnTotal : Number(
+                      (paymentChainData.invoice.ESourceType === "GRN" && paymentChainData.invoice.GrnTotalAmount)
+                        ? paymentChainData.invoice.GrnTotalAmount
+                        : (paymentChainData.invoice.ENetAmount ?? paymentChainData.invoice.EAmount ?? 0)
+                    );
+                    // Sum non-bounced Approved payments, subtract bounce charge (bank fee, not supplier payment)
+                    const {
+                      totalPaid: chainTotalPaid,
+                      bounceChargeTotal: chainBounceTotal,
+                      remaining: chainOutstanding,
+                    } = computePaymentStatus(chainInvoiceTotal, paymentChainData.payments);
+                    return (
+                    <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
+                        Invoice Summary
+                      </p>
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div>
+                          <p className="text-[9px] text-muted-foreground uppercase">Invoice Total</p>
+                          <p className="font-mono text-xs font-bold text-foreground">
+                            {formatINR(chainInvoiceTotal)}
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-[9px] text-muted-foreground uppercase">Paid</p>
+                          <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                            {formatINR(chainTotalPaid)}
+                          </p>
+                          {chainBounceTotal > 0 && (
+                            <p className="text-[8px] text-red-500 dark:text-red-400 font-mono">+{formatINR(chainBounceTotal)} bounce</p>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-[9px] text-muted-foreground uppercase">Outstanding</p>
+                          <p className={`font-mono text-xs font-bold ${chainOutstanding > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
+                            {formatINR(chainOutstanding)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    );
+                  })()}
+
+                  {/* Timeline */}
+                  {loadingChain ? (
+                    <div className="flex items-center justify-center py-8 text-muted-foreground text-xs">Loading chain…</div>
+                  ) : paymentChainData?.payments.length === 0 ? (
+                    <p className="text-center text-xs text-muted-foreground py-6">No payments found for this invoice.</p>
+                  ) : (
+                    <div className="relative">
+                      {/* Vertical line */}
+                      <div className="absolute left-3 top-0 bottom-0 w-px bg-border" />
+                      <div className="space-y-3 pl-8">
+                        {paymentChainData?.payments.map((p: PaymentChainItem) => {
+                          const ds = p.DisplayStatus as DisplayStatus;
+                          const borderColor =
+                            ds === "Success" || ds === "Cheque Cleared" ? "border-l-emerald-500" :
+                            ds === "Pending" ? "border-l-amber-500" :
+                            ds === "Cheque Issued" ? "border-l-blue-500" :
+                            ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "border-l-red-500" :
+                            ds === "Reissued" ? "border-l-violet-500" :
+                            "border-l-gray-400";
+                          const dotColor =
+                            ds === "Success" || ds === "Cheque Cleared" ? "bg-emerald-500" :
+                            ds === "Pending" ? "bg-amber-500" :
+                            ds === "Cheque Issued" ? "bg-blue-500" :
+                            ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "bg-red-500" :
+                            ds === "Reissued" ? "bg-violet-500" :
+                            "bg-gray-400";
+                          const badgeClass =
+                            ds === "Success" || ds === "Cheque Cleared" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400" :
+                            ds === "Pending" ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400" :
+                            ds === "Cheque Issued" ? "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400" :
+                            ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400" :
+                            ds === "Reissued" ? "bg-violet-500/10 border-violet-500/20 text-violet-700 dark:text-violet-400" :
+                            "bg-gray-500/10 border-gray-500/20 text-gray-700 dark:text-gray-400";
+                          return (
+                            <div key={p.PPaymentID} className="relative">
+                              {/* Dot */}
+                              <div className={`absolute -left-5 top-3 w-2.5 h-2.5 rounded-full border-2 border-background ${dotColor}`} />
+                              <div className={`rounded-lg border border-l-2 bg-card p-3 space-y-1.5 ${borderColor}`}>
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-mono text-[10px] font-semibold text-foreground">{p.DocNo ?? "—"}</span>
+                                    {p.PDate && <span className="text-[10px] text-muted-foreground">· {p.PDate.slice(0, 10)}</span>}
+                                  </div>
+                                  <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${badgeClass}`}>
+                                    {ds}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                                  <span className="font-mono font-semibold text-foreground text-xs">{formatINR(Number(p.PAmount ?? 0))}</span>
+                                  {p.PMode && <span>· {p.PMode}</span>}
+                                  {p.PChequeNo && <span>· Chq #{p.PChequeNo}</span>}
+                                  {!!p.PIsChequeCancelled && (
+                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold">
+                                      Cancelled Cheque
+                                    </span>
+                                  )}
+                                </div>
+                                {p.BounceDate && (
+                                  <div className="text-[10px] text-red-600 dark:text-red-400 flex items-center gap-1">
+                                    <AlertTriangle size={9} />
+                                    Bounced {p.BounceDate.slice(0,10)}{p.BounceReason ? ` — ${p.BounceReason}` : ""}
+                                  </div>
+                                )}
+                                {p.ReplacementDocNo && (
+                                  <div className="text-[10px] text-violet-600 dark:text-violet-400 flex items-center gap-1">
+                                    <RefreshCw size={9} /> Reissued as {p.ReplacementDocNo}
+                                  </div>
+                                )}
+                                {p.OriginalDocNo && (
+                                  <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                    <ArrowLeft size={9} /> Replaces {p.OriginalDocNo}
+                                  </div>
+                                )}
+                                {p.BounceCharge && Number(p.BounceCharge) > 0 && (
+                                  <div className="flex items-center justify-between mt-1 pt-1.5 border-t border-dashed border-red-300 dark:border-red-800">
+                                    <span className="text-[10px] text-red-600 dark:text-red-400 flex items-center gap-1">
+                                      <AlertTriangle size={9} /> Bounce charge (separate)
+                                    </span>
+                                    <span className="font-mono text-[11px] font-semibold text-red-600 dark:text-red-400">
+                                      {formatINR(Number(p.BounceCharge))}
+                                    </span>
+                                  </div>
+                                )}
+                                {/* Reissue button for bounced payments with no replacement */}
+                                {ds === "Cheque Bounced" && !p.ReplacementDocNo && (
+                                  <button
+                                    className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-1 mt-0.5"
+                                    onClick={() => {
+                                      setViewingRec(null);
+                                      setViewingChain(null);
+                                      setReissueCtx({
+                                        replacesPaymentId: p.PPaymentID,
+                                        replacesDocNo: p.DocNo ?? "",
+                                        amount: Number(p.PAmount ?? 0),
+                                        paymentName: "",
+                                        companyName: viewingRec?.company ?? "",
+                                        expenseRef: viewingRec?.expenseRef ?? null,
+                                        bounceReason: p.BounceReason ?? null,
+                                      });
+                                      setBounceCharge("");
+                                      setView("form");
+                                    }}
+                                  >
+                                    <RefreshCw size={9} /> Reissue Payment
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── Details Tab (default) ── */}
+              {detailTab === "details" && (
+                <>
+
+              {/* Status + Mode row */}
+              <div className="flex items-center gap-2">
+                <StatusBadge status={viewingRec.status} />
+                <ModeBadge mode={viewingRec.mode} />
+                {viewingChain?.billStatus && (
+                  <span
+                    className={`flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-lg border ${
+                      viewingChain.billStatus === "Paid"
+                        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                        : viewingChain.billStatus === "Partially Paid"
+                          ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                          : "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400"
+                    }`}
+                  >
+                    {viewingChain.billStatus === "Paid" ? (
+                      <CheckCircle2 size={10} />
+                    ) : viewingChain.billStatus === "Partially Paid" ? (
+                      <Clock size={10} />
+                    ) : (
+                      <AlertCircle size={10} />
+                    )}
+                    {viewingChain.billStatus}
+                  </span>
+                )}
+              </div>
+
+              {/* Company info */}
+              {viewingCompanyDetail && (
+                <div className="rounded-xl border border-border bg-muted/10 p-3 flex items-center gap-3">
+                  {viewingCompanyDetail.logo ? (
+                    <img
+                      src={viewingCompanyDetail.logo}
+                      alt="Company logo"
+                      className="h-9 w-auto max-w-[110px] object-contain shrink-0"
+                    />
+                  ) : (
+                    <div className="p-1.5 rounded-lg bg-primary/10 shrink-0">
+                      <Receipt size={14} className="text-primary" />
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="text-xs font-heading font-semibold text-foreground truncate">
+                      {viewingCompanyDetail.name || viewingRec.company}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground truncate">
+                      {[
+                        viewingCompanyDetail.address,
+                        viewingCompanyDetail.city,
+                        viewingCompanyDetail.state,
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground truncate">
+                      {[
+                        viewingCompanyDetail.phone_number,
+                        viewingCompanyDetail.email,
+                        viewingCompanyDetail.gst_no
+                          ? `GSTIN: ${viewingCompanyDetail.gst_no}`
+                          : null,
+                        viewingCompanyDetail.pan
+                          ? `PAN: ${viewingCompanyDetail.pan}`
+                          : null,
+                      ]
+                        .filter(Boolean)
+                        .join("  ·  ")}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Supplier / Vendor info */}
+              {viewingChain?.supplier && (
+                <div className="rounded-xl border border-border bg-muted/10 p-3 space-y-1.5">
+                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                    <Building2 size={9} className="text-primary" /> Supplier /
+                    Vendor
+                  </p>
+                  <p className="text-xs font-medium text-foreground">
+                    {viewingChain.supplier.name}
+                    {viewingChain.supplier.code ? (
+                      <span className="text-muted-foreground font-normal">
+                        {" "}
+                        · {viewingChain.supplier.code}
+                      </span>
+                    ) : null}
+                  </p>
+                  {viewingChain.supplier.address && (
+                    <p className="text-[10px] text-muted-foreground">
+                      {viewingChain.supplier.address}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-muted-foreground">
+                    {[
+                      viewingChain.supplier.phone,
+                      viewingChain.supplier.email,
+                      viewingChain.supplier.gst
+                        ? `GSTIN: ${viewingChain.supplier.gst}`
+                        : null,
+                      viewingChain.supplier.pan
+                        ? `PAN: ${viewingChain.supplier.pan}`
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join("  ·  ")}
+                  </p>
+                </div>
+              )}
+
+              {/* Traceability chain */}
+              {viewingChain && (
+                <div className="rounded-xl border border-border bg-muted/10 p-3 space-y-2.5">
+                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                    <ArrowRight size={9} className="text-primary" /> Document
+                    Chain
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                    {viewingChain.chain.mrDocNo && (
+                      <>
+                        <span className="bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-400 px-2 py-1 rounded-md font-mono font-semibold">
+                          MR: {viewingChain.chain.mrDocNo}
+                        </span>
+                        <ArrowRight
+                          size={9}
+                          className="text-muted-foreground shrink-0"
+                        />
+                      </>
+                    )}
+                    {viewingChain.chain.workDoneRef && (
+                      <>
+                        <span className="bg-violet-500/10 border border-violet-500/20 text-violet-700 dark:text-violet-400 px-2 py-1 rounded-md font-mono font-semibold">
+                          WD: {viewingChain.chain.workDoneRef}
+                        </span>
+                        <ArrowRight
+                          size={9}
+                          className="text-muted-foreground shrink-0"
+                        />
+                      </>
+                    )}
+                    {viewingChain.chain.poNo && (
+                      <>
+                        <span className="bg-blue-500/10 border border-blue-500/20 text-blue-700 dark:text-blue-400 px-2 py-1 rounded-md font-mono font-semibold">
+                          PO: {viewingChain.chain.poNo}
+                        </span>
+                        <ArrowRight
+                          size={9}
+                          className="text-muted-foreground shrink-0"
+                        />
+                      </>
+                    )}
+                    {viewingChain.chain.grnNo && (
+                      <>
+                        <span className="bg-teal-500/10 border border-teal-500/20 text-teal-700 dark:text-teal-400 px-2 py-1 rounded-md font-mono font-semibold">
+                          GRN: {viewingChain.chain.grnNo}
+                        </span>
+                        <ArrowRight
+                          size={9}
+                          className="text-muted-foreground shrink-0"
+                        />
+                      </>
+                    )}
+                    {viewingChain.chain.expenseDocNo && (
+                      <>
+                        <span className="bg-primary/10 border border-primary/20 text-primary px-2 py-1 rounded-md font-mono font-semibold">
+                          {viewingChain.chain.expenseDocNo}
+                        </span>
+                        <ArrowRight
+                          size={9}
+                          className="text-muted-foreground shrink-0"
+                        />
+                      </>
+                    )}
+                    <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 px-2 py-1 rounded-md font-mono font-semibold">
+                      {viewingRec.docNo || "This Payment"}
+                    </span>
+                  </div>
+
+                  {/* Payment summary strip */}
+                  {viewingChain.netAmount > 0 && (() => {
+                    const grnTotal = viewingGrnTotal > 0 ? viewingGrnTotal
+                      : paymentChainData?.invoice?.GrnTotalAmount
+                        ? parseFloat(String(paymentChainData.invoice.GrnTotalAmount))
+                        : 0;
+                    const grossNet = grnTotal > 0 ? grnTotal : viewingChain.netAmount;
+                    // TDS is withheld at source, never paid to the supplier through
+                    // NewPayment — so the amount actually still owed in cash is the
+                    // invoice's net (GST-inclusive, untouched) minus TDS, not the raw
+                    // invoice net itself. GST/netAmount math above is unaffected.
+                    const displayTds = viewingChain.tdsAmount ?? 0;
+                    const displayNet = Math.max(0, grossNet - displayTds);
+                    // Exclude bounce charges — they're bank fees, not supplier payments
+                    const chainStatus = computePaymentStatus(displayNet, paymentChainData?.payments);
+                    const displayTotalPaid = paymentChainData?.payments?.length
+                      ? chainStatus.totalPaid
+                      : viewingChain.totalPaid;
+                    const displayBounceTotal = chainStatus.bounceChargeTotal;
+                    const displayRemaining = Math.max(0, displayNet - displayTotalPaid);
+                    return (
+                    <div className="flex items-center gap-2 pt-1 border-t border-border/60 mt-2">
+                      <div className="flex-1 text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                          Net Payable
+                        </p>
+                        <p className="font-mono text-xs font-bold text-foreground">
+                          {formatINR(displayNet)}
+                        </p>
+                      </div>
+                      {displayTds > 0 && (
+                        <>
+                          <div className="w-px h-6 bg-border" />
+                          <div className="flex-1 text-center">
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                              TDS
+                            </p>
+                            <p className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">
+                              {formatINR(displayTds)}
+                            </p>
+                          </div>
+                        </>
+                      )}
+                      <div className="w-px h-6 bg-border" />
+                      <div className="flex-1 text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                          Total Paid
+                        </p>
+                        <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                          {formatINR(displayTotalPaid)}
+                        </p>
+                        {displayBounceTotal > 0 && (
+                          <p className="text-[8px] text-red-500 dark:text-red-400 font-mono">+{formatINR(displayBounceTotal)} bounce</p>
+                        )}
+                      </div>
+                      <div className="w-px h-6 bg-border" />
+                      <div className="flex-1 text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                          Remaining
+                        </p>
+                        <p
+                          className={`font-mono text-xs font-bold ${displayRemaining > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+                        >
+                          {formatINR(displayRemaining)}
+                        </p>
+                      </div>
+                      {viewingOaBalance > 0 && (
+                        <>
+                          <div className="w-px h-6 bg-border" />
+                          <div className="flex-1 text-center">
+                            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                              On A/C
+                            </p>
+                            <p className="font-mono text-xs font-bold text-violet-500 dark:text-violet-400">
+                              {formatINR(viewingOaBalance)}
+                            </p>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                    );
+                  })()}
+
+                  {/* Vendor invoice if present */}
+                  {viewingChain.chain.vendorInvoiceNo && (
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-1 border-t border-border/60">
+                      <FileText size={9} />
+                      Vendor Invoice:
+                      <span className="font-mono font-semibold text-foreground">
+                        {viewingChain.chain.vendorInvoiceNo}
+                      </span>
+                      {viewingChain.chain.vendorInvoiceDate && (
+                        <span className="text-muted-foreground">
+                          ({viewingChain.chain.vendorInvoiceDate})
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Grid of fields */}
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: "Payment Purpose", value: viewingRec.paymentName },
+                  { label: "Paid To", value: [viewingRec.supplierContact, viewingRec.paidTo].filter(Boolean).join(" · ") || "—" },
+                  { label: "Amount", value: formatINR(viewingRec.amount ?? 0) },
+                  { label: "Date", value: viewingRec.date || "—" },
+                  { label: "Mode", value: viewingRec.mode || "—" },
+                  { label: "Company", value: viewingRec.company || "—" },
+                  { label: "Project", value: viewingRec.project || "—" },
+                  {
+                    label: "Project Site",
+                    value: viewingRec.projectSite || "—",
+                  },
+                  {
+                    label: "Expense Ref",
+                    value: viewingRec.expenseRef || viewingRec.jvNo || "—",
+                  },
+                  ...(viewingRec.notes
+                    ? [{ label: "Remarks", value: viewingRec.notes }]
+                    : []),
+                  ...(viewingRec.bankName
+                    ? [{ label: "Bank", value: viewingRec.bankName }]
+                    : []),
+                  ...(viewingRec.chequeNo
+                    ? [
+                        {
+                          label: "Cheque No.",
+                          value: `#${viewingRec.chequeNo}`,
+                        },
+                      ]
+                    : []),
+                  ...(viewingRec.chequeDate
+                    ? [{ label: "Cheque Date", value: viewingRec.chequeDate }]
+                    : []),
+                  ...(viewingRec.chequeLotNumber
+                    ? [
+                        {
+                          label: "Cheque Lot",
+                          value: viewingRec.chequeLotNumber,
+                        },
+                      ]
+                    : []),
+                  ...(viewingRec.neftNumber
+                    ? [{ label: "NEFT Ref.", value: viewingRec.neftNumber }]
+                    : []),
+                  ...(viewingRec.upiTransactionId
+                    ? [
+                        {
+                          label: "UPI Txn ID",
+                          value: viewingRec.upiTransactionId,
+                        },
+                      ]
+                    : []),
+                  ...(viewingRec.rtgsReference
+                    ? [{ label: "RTGS Ref.", value: viewingRec.rtgsReference }]
+                    : []),
+                  ...(viewingRec.impsReference
+                    ? [{ label: "IMPS Ref.", value: viewingRec.impsReference }]
+                    : []),
+                  ...(viewingRec.cardReference
+                    ? [{ label: "Card Ref.", value: viewingRec.cardReference }]
+                    : []),
+                  ...(viewingRec.cardDisplay
+                    ? [{ label: "Card Used", value: viewingRec.cardDisplay }]
+                    : []),
+                  ...(viewingRec.parentDocNo
+                    ? [{ label: "Parent Doc", value: viewingRec.parentDocNo }]
+                    : []),
+                ].map(({ label, value }) => (
+                  <div key={label} className="space-y-0.5">
+                    <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                      {label}
+                    </p>
+                    <p className="text-xs font-medium text-foreground truncate">
+                      {value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Direct Expense Payment (migration 303) — paid straight
+                  against one or more Expense Heads, no Party involved. */}
+              {viewingRec.expenseHeadAllocations && viewingRec.expenseHeadAllocations.length > 0 && (
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                    Expense Head{viewingRec.expenseHeadAllocations.length > 1 ? "s" : ""}
+                  </p>
+                  {viewingRec.expenseHeadAllocations.map((a) => (
+                    <div key={a._key} className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/50 last:border-b-0">
+                      <span className="text-xs text-foreground truncate">
+                        {a.label}
+                        {a.code ? <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">({a.code})</span> : null}
+                      </span>
+                      <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+                        {formatINR(a.amount)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* TDS (migration 304) */}
+              {!!viewingRec.tdsId && (
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                    TDS Details
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3">
+                    {[
+                      { label: "TDS Nature", value: viewingRec.tdsNature },
+                      { label: "TDS Name", value: viewingRec.tdsName },
+                      { label: "TDS Rate", value: viewingRec.tdsPercentage != null ? `${viewingRec.tdsPercentage}%` : null },
+                      { label: "TDS Amount", value: formatINR(viewingRec.tdsAmount || 0) },
+                    ].map(({ label, value }) => (
+                      <div key={label}>
+                        <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                        <p className="text-xs font-semibold text-foreground truncate">{value ?? "—"}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              </>
+              )}
+
+              {/* ── Posting Tab ── */}
+              {detailTab === "posting" && (
+                <div className="flex flex-col gap-4 h-full">
+                  {/* Header */}
+                  <div className="flex items-center gap-2">
+                    <BookOpen size={14} className="text-primary" />
+                    <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                      GL Postings — Full Payment Chain
+                    </span>
+                  </div>
+
+                  {pmtPostingLoading ? (
+                    <div className="rounded-xl border border-border py-10 text-center text-xs text-muted-foreground">Loading posting details…</div>
+                  ) : !pmtPostingData ? (
+                    <div className="rounded-xl border border-dashed border-border py-10 text-center text-xs text-muted-foreground">Could not load posting data.</div>
+                  ) : !pmtPostingData.entries?.length ? (
+                    <div className="rounded-xl border border-dashed border-border py-10 text-center text-xs text-muted-foreground">No approved payments to post yet.</div>
+                  ) : (() => {
+                    const fmtAmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                    const fmtDate = (d: string) => d ? new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", year: "numeric" }).format(new Date(d)) : "—";
+                    type ChainEntry = {
+                      date: string; docNo: string; pmtId: number; type: "payment" | "bounce_charge" | "debit_note";
+                      amount: number; mode: string; bounceReason?: string;
+                      isBounced?: boolean;
+                      accounts: any; isPosted: boolean; jvNo: string | null;
+                    };
+                    const entries: ChainEntry[] = pmtPostingData.entries;
+                    return (
+                      <div className="space-y-4">
+                        {entries.map((entry, idx) => {
+                          const isPayment = entry.type === "payment";
+                          const isBounce = entry.type === "bounce_charge";
+                          const isDebitNote = entry.type === "debit_note";
+                          const isBouncedPayment = isPayment && !!entry.isBounced;
+                          const rows = isPayment
+                            ? [
+                                { label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const },
+                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const },
+                              ]
+                            : isDebitNote
+                            ? [
+                                { label: entry.accounts?.debitLeg?.label ?? "—", code: entry.accounts?.debitLeg?.code, side: "debit" as const },
+                                { label: entry.accounts?.creditLeg?.label ?? "—", code: entry.accounts?.creditLeg?.code, side: "credit" as const },
+                              ]
+                            : [
+                                { label: entry.accounts?.bankCharges?.label ?? "Bank Charges (Other Expenses)", code: entry.accounts?.bankCharges?.code, side: "debit" as const },
+                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const },
+                              ];
+
+                          const entryKey = `${entry.pmtId}-${entry.type}`;
+
+                          return (
+                            <div key={entryKey} className={`rounded-xl border overflow-hidden ${isBounce ? "border-rose-500/30" : isDebitNote ? "border-primary/30" : isBouncedPayment ? "border-rose-500/20 opacity-60" : "border-border"}`}>
+                              {/* Entry header */}
+                              <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isBounce ? "bg-rose-500/5 border-rose-500/20" : isDebitNote ? "bg-primary/5 border-primary/20" : isBouncedPayment ? "bg-rose-500/5 border-rose-500/10" : "bg-muted/40 border-border"}`}>
+                                <div className="flex items-center gap-2.5 flex-wrap">
+                                  <span className={`text-[10px] font-semibold uppercase tracking-widest ${isBounce ? "text-rose-600" : isDebitNote ? "text-primary" : isBouncedPayment ? "text-rose-500" : "text-muted-foreground"}`}>
+                                    {isBounce ? "Bounce Charge" : isDebitNote ? "Debit Note" : "Payment"}
+                                  </span>
+                                  <span className="text-[10px] font-mono text-muted-foreground">{entry.docNo}</span>
+                                  <span className="text-[10px] text-muted-foreground">{fmtDate(entry.date)}</span>
+                                  {entry.mode && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{entry.mode}</span>
+                                  )}
+                                  {isBounce && entry.bounceReason && (
+                                    <span className="text-[9px] text-rose-500 italic">{entry.bounceReason}</span>
+                                  )}
+                                  {isBouncedPayment && (
+                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 font-medium">
+                                      Cheque Bounced — not postable
+                                    </span>
+                                  )}
+                                </div>
+                                {isBouncedPayment ? null : entry.isPosted ? (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
+                                    ✓ {entry.jvNo}
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
+                                    <span className="w-2.5 h-2.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                                    Posting…
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Dr/Cr rows */}
+                              <div className="divide-y divide-border/50">
+                                <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                                  <span>Account</span>
+                                  <span className="text-right">Debit (₹)</span>
+                                  <span className="text-right">Credit (₹)</span>
+                                </div>
+                                {rows.map((row, ri) => (
+                                  <div key={ri} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2.5 items-center gap-2">
+                                    <div className="flex items-center gap-2 min-w-0">
+                                      <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                                      <span className="text-xs text-foreground truncate">
+                                        {row.label}{row.code ? ` (${row.code})` : ""}
+                                      </span>
+                                    </div>
+                                    <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
+                                      {row.side === "debit" ? fmtAmt(entry.amount) : ""}
+                                    </span>
+                                    <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
+                                      {row.side === "credit" ? fmtAmt(entry.amount) : ""}
+                                    </span>
+                                  </div>
+                                ))}
+                                <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
+                                  <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                                  <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtAmt(entry.amount)}</span>
+                                  <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtAmt(entry.amount)}</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+
+                      </div>
+                    );
+                  })()}
+                  {pmtPostingError && (
+                    <div className="flex items-center gap-2.5 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 mt-2">
+                      <AlertCircle size={13} className="text-destructive flex-shrink-0" />
+                      <p className="text-xs text-destructive">
+                        Auto-posting failed: {pmtPostingError}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Posting tab — invoice summary bar pinned above footer */}
+            {detailTab === "posting" && pmtPostingData?.invoiceTotal > 0 && (() => {
+              const fmtAmt = (n: number) => n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+              const totalPosted = (pmtPostingData.entries ?? [])
+                .filter((e: any) => e.type === "payment" && !e.isBounced)
+                .reduce((s: number, e: any) => s + (e.amount ?? 0), 0);
+              const remaining = Math.max(0, pmtPostingData.invoiceTotal - totalPosted);
+              return (
+                <div className={`flex items-center justify-between px-5 py-2.5 border-t text-[11px] font-medium ${
+                  remaining <= 0.01
+                    ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                    : "bg-amber-500/5 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                }`}>
+                  <span>
+                    {remaining <= 0.01
+                      ? `Invoice fully posted — ₹${fmtAmt(pmtPostingData.invoiceTotal)} cleared`
+                      : `Posted ₹${fmtAmt(totalPosted)} of ₹${fmtAmt(pmtPostingData.invoiceTotal)}`}
+                  </span>
+                  {remaining > 0.01 && (
+                    <span className="font-semibold">₹{fmtAmt(remaining)} outstanding</span>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Footer */}
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/20">
+              {rights.canPrint && (
+                <button
+                  onClick={() =>
+                    handlePrintPayment(
+                      viewingRec,
+                      viewingCompanyDetail,
+                      viewingChain,
+                    )
+                  }
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+                >
+                  <Printer size={12} /> Print / PDF
+                </button>
+              )}
+              {rights.canEdit && (
+                <button
+                  onClick={() => {
+                    setViewingRec(null);
+                    setViewingChain(null);
+                    openEdit(viewingRec);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 text-primary text-xs font-medium hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
+                >
+                  <Edit size={12} />
+                  Edit
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setViewingRec(null);
+                  setViewingChain(null);
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium gradient-accent text-white shadow-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete confirm */}
+      {deleteId && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-xl bg-card border border-border shadow-xl p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-destructive/10 shrink-0">
+                <Trash2 size={16} className="text-destructive" />
+              </div>
+              <div>
+                <h3 className="font-heading font-semibold text-foreground">
+                  Delete Payment
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Are you sure you want to delete this payment? This cannot be
+                  undone.
+                </p>
+              </div>
+            </div>
+            {/* Doc numbers are never reused after a delete — the sequence
+                simply continues from its current max, so removing a
+                record permanently leaves a gap. */}
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+              <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+              <span>
+                {(() => {
+                  const rec = records.find((r) => r.id === deleteId);
+                  const docNo = rec?.docNo;
+                  return docNo
+                    ? `${docNo}'s number will not be reused — it leaves a permanent gap in the document sequence.`
+                    : "This document's number will not be reused — it leaves a permanent gap in the document sequence.";
+                })()}
+              </span>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setDeleteId(null)}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteId && handleDelete(deleteId)}
+                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+};
+
+export default Payment;
