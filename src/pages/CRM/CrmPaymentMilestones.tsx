@@ -60,10 +60,19 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 
 async function fetchMilestones(bookingId: string): Promise<any> {
   if (!bookingId) return null;
-  try {
-    const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
-    return r.ok ? r.json() : null;
-  } catch { return null; }
+  // Unlike the other fetch* helpers on this page (banks, on-account, money
+  // receipts — supporting data where a silent empty fallback is harmless),
+  // this one drives the page's main content. Swallowing a failure to null
+  // rendered exactly the same "No milestone data found" empty state as a
+  // booking that genuinely has none — a permissions regression or backend
+  // outage looked identical to "nothing here" on a money-tracking page.
+  // Throwing lets React Query's own isError state distinguish the two.
+  const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    throw new Error(data.error || `Failed to load milestones (${r.status})`);
+  }
+  return r.json();
 }
 // The booking picker below is a native <select> — fetching every booking in
 // the system into it is fine for a small deployment but degrades badly as
@@ -156,11 +165,12 @@ const CrmPaymentMilestones: React.FC = () => {
     queryFn: () => fetchBookings(pickerScope),
     staleTime: 5 * 60_000,
   });
-  const { data: milestoneData, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+  const { data: milestoneData, isLoading, isError, error: milestoneError, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-milestones", selectedBookingId],
     queryFn: () => fetchMilestones(selectedBookingId),
     enabled: !!selectedBookingId,
     staleTime: 30_000,
+    retry: 1,
   });
   const { data: onAccountData } = useQuery({
     queryKey: ["crm-on-account", selectedBookingId],
@@ -649,6 +659,10 @@ const CrmPaymentMilestones: React.FC = () => {
         ) : isLoading ? (
           <div className="py-16 text-center text-muted-foreground text-sm flex items-center justify-center gap-2">
             <RefreshCw size={14} className="animate-spin" /> Loading milestones...
+          </div>
+        ) : isError ? (
+          <div className="py-16 text-center text-red-600 text-sm">
+            Failed to load milestones{milestoneError instanceof Error ? `: ${milestoneError.message}` : ""}
           </div>
         ) : !milestoneData ? (
           <div className="py-16 text-center text-muted-foreground text-sm">No milestone data found</div>

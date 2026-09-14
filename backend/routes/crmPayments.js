@@ -101,12 +101,17 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
     };
   }
 
+  // Same "earlier milestone must be settled first" predicate as
+  // createReceiptForMilestone and applyCrmMilestonePaymentApproval below —
+  // deliberately does NOT exempt zero-amount milestones (this one used to,
+  // the other two never did; a zero-AmountDue milestone left Pending should
+  // be explicitly marked Paid/Waived through one of these same flows, not
+  // silently treated as "no blockage" in only one of the three paths staff
+  // can use to settle the exact same pair of milestones).
   const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
     .query(`
       SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND MilestoneNo < @mno
-        AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
-        AND AmountDue > 0
+      WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
       ORDER BY MilestoneNo
     `);
   if (earlier.recordset.length) {
@@ -152,8 +157,21 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
     remaining = Number(oaRow.Amount) - Number(oaRow.AppliedAmount);
 
     const m = await tx.request().input("id", sql.Int, milestoneId).query(`
-      SELECT AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+      SELECT AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
     `);
+    // A Paid milestone is self-protected (its balance is already 0, so
+    // `requested <= 0` below catches it) — but a Waived one is NOT: waiving
+    // only sets Status='Waived', it never zeroes AmountDue or touches
+    // AmountPaid, so milestoneBalance can still be a large positive number.
+    // Without this check, on-account money applied to an already-waived
+    // milestone would insert a real receipt and the UPDATE below would flip
+    // Status back to 'Paid' — silently un-waiving money staff explicitly
+    // decided to forgive, and re-firing handleMilestoneBecamePaid's
+    // downstream cascade (sales deed, brokerage, next-demand auto-raise).
+    if (m.recordset[0].Status === "Waived") {
+      await tx.rollback();
+      return { error: `Cannot apply to "${targetRow.MilestoneName}" — it has been Waived` };
+    }
     const milestoneBalance = Number(m.recordset[0].AmountDue) - Number(m.recordset[0].AmountPaid || 0);
 
     requested = Math.min(remaining, milestoneBalance, amount != null ? amount : Infinity);
@@ -1108,13 +1126,24 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     // Fetch the current row up front — needed for the AmountDue override's
     // %-recompute against the booking's GrandTotal.
     const curRes = await pool.request().input("id", sql.Int, id).query(`
-      SELECT m.AmountDue, m.MilestoneName, bk.GrandTotal, bk.TotalValue, bk.ProjectId
+      SELECT m.AmountDue, m.MilestoneName, bk.Id AS BookingId, bk.GrandTotal, bk.TotalValue, bk.ProjectId
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking bk ON bk.Id = m.BookingId
       WHERE m.Id = @id
     `);
     if (!curRes.recordset.length) return res.status(404).json({ error: "Milestone not found" });
     const curRow = curRes.recordset[0];
+
+    // Every other mutation on this table gates on the booking still being
+    // active — a payment (paidRaw != null) already gets this for free via
+    // createReceiptForMilestone below, but an AmountDue/DueDate/Remarks-only
+    // edit skipped straight to the transaction with no check at all,
+    // letting a cancelled/rejected booking's payment schedule still be
+    // reproportioned (recalculateRemainingMilestones cascades to every
+    // other open milestone) and its demands invalidated. Checked
+    // unconditionally here so both paths are covered.
+    const activeErr = await requireActiveBooking(pool, curRow.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
     // Recording an actual payment here now goes through the exact same
     // submit-for-approval path POST /:id/receipts uses (createReceiptForMilestone)
