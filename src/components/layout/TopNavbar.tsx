@@ -149,7 +149,7 @@ const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
   crm: { h: 199, s: 89, l: 48 }, // #0ea5e9 sky
   maintenance: { h: 85, s: 85, l: 35 }, // #65a30d lime
-  "hr-payroll": { h: 142, s: 71, l: 45 }, // #22c55e green (Citrus Green)
+  "hr-payroll": { h: 45, s: 93, l: 47 }, // #eab308 yellow
 };
 
 function moduleColorVars(id: string): React.CSSProperties {
@@ -315,28 +315,28 @@ const hrPayrollSetupItems = [
     icon: UserSquare,
     label: "Designation Master",
     path: "/hr-payroll/setup/designation-master",
-    color: "text-green-500",
+    color: "text-yellow-500",
     pageKey: "designation-master",
   },
   {
     icon: UserSquare,
     label: "Candidate Master",
     path: "/hr-payroll/setup/candidate-master",
-    color: "text-green-500",
+    color: "text-yellow-500",
     pageKey: "candidate-master",
   },
   {
     icon: UserSquare,
     label: "Shift Master",
     path: "/hr-payroll/setup/shift-master",
-    color: "text-green-500",
+    color: "text-yellow-500",
     pageKey: "shift-master",
   },
   {
     icon: UserSquare,
     label: "Grace Time Master",
     path: "/hr-payroll/setup/grace-time-master",
-    color: "text-green-500",
+    color: "text-yellow-500",
     pageKey: "grace-time-master",
   },
 ];

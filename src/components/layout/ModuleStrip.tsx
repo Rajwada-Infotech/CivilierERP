@@ -157,9 +157,9 @@ const MODULES = [
     icon: Profile2User,
     label: "HR and Payroll",
     desc: "Employees, attendance & payroll",
-    color: "#22c55e",
-    bg: "rgba(34,197,94,0.22)",
-    ringRgb: "34,197,94",
+    color: "#eab308",
+    bg: "rgba(234,179,8,0.22)",
+    ringRgb: "234,179,8",
   },
   // Records is always last — new modules get inserted above this entry
   {

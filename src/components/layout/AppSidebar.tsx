@@ -162,9 +162,9 @@ const MODULE_HEADER: Record<
   "hr-payroll": {
     label: "HR and Payroll",
     icon: Profile2User,
-    color: "#22c55e",
-    from: "from-green-500/30",
-    to: "to-green-500/0",
+    color: "#eab308",
+    from: "from-yellow-500/30",
+    to: "to-yellow-500/0",
   },
   admin: {
     label: "Admin",
