@@ -553,9 +553,19 @@ function agreementDateError(message, status) {
 // THEM to respond — never while waiting on the other side. Writes
 // CrmAgreementDateHistory exactly as before (unchanged shape/consumers).
 async function proposeAgreementDate(pool, agreementId, proposedBy, proposedDate, actorUserId) {
+  // UPDLOCK+HOLDLOCK: this turn-taking check is reachable from at least
+  // four independent entry points on the same agreement (staff propose/
+  // accept, staff proxy-propose/proxy-accept, and the customer portal's own
+  // propose/accept) — two racing at once (e.g. staff proxy-accepts the
+  // instant the customer independently accepts via the portal) could both
+  // read the same "my turn" state before either write lands, producing two
+  // CrmAgreementDateHistory rows and leaving ProposedDateStatus pointed at
+  // the wrong side's turn. The lock only actually holds if the caller has
+  // this running inside a transaction (every caller does, or is fixed to,
+  // per this session's callers of proposeAgreementDate/acceptAgreementDate).
   const row = await pool.request().input("id", sql.Int, agreementId).query(`
     SELECT AgreementDate, DateApprovalStatus, ProposedDateStatus
-    FROM dbo.CrmAgreement WHERE Id = @id
+    FROM dbo.CrmAgreement WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
   `);
   const ag = row.recordset[0];
   if (!ag) throw agreementDateError("Agreement not found", 404);
@@ -596,9 +606,10 @@ async function proposeAgreementDate(pool, agreementId, proposedBy, proposedDate,
 // under the old two-column design. Returns true if this call is the one
 // that just opened that gate.
 async function acceptAgreementDate(pool, agreementId, acceptedBy) {
+  // Same UPDLOCK+HOLDLOCK reasoning as proposeAgreementDate above.
   const row = await pool.request().input("id", sql.Int, agreementId).query(`
     SELECT AgreementDate, DateApprovalStatus, ProposedDate, ProposedDateStatus
-    FROM dbo.CrmAgreement WHERE Id = @id
+    FROM dbo.CrmAgreement WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
   `);
   const ag = row.recordset[0];
   if (!ag) throw agreementDateError("Agreement not found", 404);
