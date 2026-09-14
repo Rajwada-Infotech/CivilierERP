@@ -177,6 +177,15 @@ function getNextStep(b: any): NextStep {
   // this, since that's not what unblocks Agreement auto-creation either.
   if (!b.HasWelcomeCall) return { label: "Welcome Call", color: "text-amber-500 border-amber-200 bg-amber-50", path: `/crm/welcome-calls?bookingId=${b.Id}` };
   if (!b.BankDetailsComplete) return { label: "Bank Details", color: "text-amber-600 border-amber-200 bg-amber-50", path: `/crm/customer-bank-details?bookingId=${b.Id}` };
+  // Milestone 1 (Booking Amount) must actually be Paid before Agreement prep
+  // can succeed (validateAgreementPreparationPrerequisites in
+  // crmWorkflowGuards.js hard-blocks on exactly this) — checked here too so
+  // this chip never points staff at an Agreement page that will reject the
+  // booking as ineligible. No separate "already has an agreement" carve-out
+  // needed: a booking that already has one necessarily cleared this already.
+  if (!b.AgreementId && b.Milestone1Status !== CrmStatus.PAID) {
+    return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
+  }
   // Agreement sub-stages: draft → senior approval → customer approval → date negotiation → date approval → executed
   if (!b.AgreementId || b.SeniorApprovalStatus !== CrmStatus.APPROVED || b.CustomerApprovalStatus !== CrmStatus.APPROVED) {
     return { label: "Agreement", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };

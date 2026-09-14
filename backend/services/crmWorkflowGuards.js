@@ -201,10 +201,26 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   // is best-effort and can silently fail (missing bank, DB hiccup), so this
   // is checked independently rather than trusted from booking creation alone.
   const milestone1 = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
+    SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
   `);
   if (!milestone1.recordset.length || milestone1.recordset[0].Status !== "Paid") {
-    errors.push("Booking Amount (Milestone 1) must be fully paid before agreement preparation — if the customer's payment is showing under On Account, apply it to this milestone first via On Account Adjustment");
+    // On Account Adjustment (crmPayments.js applyOnAccountToMilestone) needs
+    // the on-account pool to cover THIS milestone's own balance — not the
+    // whole booking — so check against that, not GrandTotal, or this would
+    // wrongly tell staff to wait on money that's already enough to unblock
+    // Milestone 1 specifically.
+    const m1 = milestone1.recordset[0];
+    const m1Balance = m1 ? Math.max(0, Number(m1.AmountDue || 0) - Number(m1.AmountPaid || 0)) : 0;
+    const onAccountRow = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) AS AvailableOnAccount FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+    `);
+    const availableOnAccount = Number(onAccountRow.recordset[0]?.AvailableOnAccount) || 0;
+    if (m1Balance > 0 && availableOnAccount < m1Balance) {
+      const shortfall = Math.round((m1Balance - availableOnAccount) * 100) / 100;
+      errors.push(`Booking Amount (Milestone 1) must be fully paid before agreement preparation — ₹${shortfall.toLocaleString("en-IN")} is still needed (₹${availableOnAccount.toLocaleString("en-IN")} available On Account of the ₹${m1Balance.toLocaleString("en-IN")} due)`);
+    } else {
+      errors.push("Booking Amount (Milestone 1) must be fully paid before agreement preparation — the customer's payment is showing under On Account; apply it to this milestone via On Account Adjustment");
+    }
   }
 
   // Financing Type must be explicitly declared (Self-funded / Loan-financed)

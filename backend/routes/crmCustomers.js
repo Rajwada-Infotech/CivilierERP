@@ -289,20 +289,16 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
   try {
     const pool = getPool();
     const b = req.body;
-    const missing = [];
-    if (!b.CustomerName?.trim()) missing.push("Customer Name");
-    if (!b.Mobile?.trim()) missing.push("Mobile");
-    if (!b.PanNo?.trim()) missing.push("PAN Number");
-    if (!b.PermanentAddress?.trim()) missing.push("Permanent Address");
-    if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(", ")}` });
 
-    const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())
-      .query("SELECT Id, CustomerNo, CustomerName FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
-    if (existing.recordset.length) {
-      return res.status(409).json({
-        error: `A customer with this mobile number already exists — ${existing.recordset[0].CustomerNo} (${existing.recordset[0].CustomerName})`,
-        existingCustomerId: existing.recordset[0].Id,
-      });
+    if (b.Mobile?.trim()) {
+      const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())
+        .query("SELECT Id, CustomerNo, CustomerName FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
+      if (existing.recordset.length) {
+        return res.status(409).json({
+          error: `A customer with this mobile number already exists — ${existing.recordset[0].CustomerNo} (${existing.recordset[0].CustomerName})`,
+          existingCustomerId: existing.recordset[0].Id,
+        });
+      }
     }
 
     // This is the actual "only a converted lead may enter the CRM module"
@@ -340,15 +336,15 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     const result = await pool.request()
       .input("no",       sql.NVarChar(30),  customerNo)
       .input("lid",       sql.Int,           b.LeadId ? parseInt(b.LeadId) : null)
-      .input("name",      sql.NVarChar(200), b.CustomerName.trim())
-      .input("mob",       sql.NVarChar(20),  b.Mobile.trim())
+      .input("name",      sql.NVarChar(200), b.CustomerName?.trim() || null)
+      .input("mob",       sql.NVarChar(20),  b.Mobile?.trim() || null)
       .input("altmob",    sql.NVarChar(20),  b.AltMobile || null)
       .input("email",     sql.NVarChar(200), email)
-      .input("pan",       sql.NVarChar(20),  b.PanNo.trim())
+      .input("pan",       sql.NVarChar(20),  b.PanNo?.trim() || null)
       .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo || null)
       .input("occ",       sql.NVarChar(100), b.Occupation || null)
       .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
-      .input("addr",      sql.NVarChar(500), b.PermanentAddress.trim())
+      .input("addr",      sql.NVarChar(500), b.PermanentAddress?.trim() || null)
       .input("city",      sql.NVarChar(100), b.PermanentCity || null)
       .input("state",     sql.NVarChar(100), b.PermanentState || null)
       .input("pin",       sql.NVarChar(10),  b.PermanentPincode || null)

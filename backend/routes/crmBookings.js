@@ -155,6 +155,14 @@ const BOOKING_SELECT = `
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.AadhaarNo, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.Occupation, ''))), '') IS NOT NULL
     ) THEN 1 ELSE 0 END AS BIT) AS BankDetailsComplete,
+    -- The list's "next step" chip must not offer Agreement before Milestone 1
+    -- (Booking Amount) is actually Paid — validateAgreementPreparationPrerequisites
+    -- (crmWorkflowGuards.js) hard-blocks agreement prep on exactly this, and
+    -- under the on-account-hold rule that only happens after On Account
+    -- Adjustment, which itself won't run until 100% of GrandTotal is
+    -- received. Without this, the chip pointed staff at an Agreement page
+    -- that would immediately reject the booking as ineligible.
+    (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Status,
     ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
     ag.AgreementDate, ag.DateApprovalStatus, ag.Status AS AgreementStatus,
     ag.AfsStampDuty, ag.AfsRegistrationFee,

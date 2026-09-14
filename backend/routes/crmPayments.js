@@ -75,31 +75,15 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   const activeErr = await requireActiveBooking(pool, targetRow.BookingId);
   if (activeErr) return { error: activeErr };
 
-  // Full-booking hold: every rupee a customer pays lands in On Account
-  // first (see the flow comment below) and sits there UNTOUCHED — no
-  // milestone gets adjusted/settled at all — until the customer has paid
-  // 100% of the booking's own GrandTotal. Only once the whole booking is
-  // fully paid does staff start working through the on-account pool,
-  // applying it to milestones one at a time in sequence (the earlier-
-  // milestone-first check above already enforces the "in order" part; this
-  // is the new "not before everything's in" part). Still a manual action —
-  // this only gates whether that click is allowed to succeed, it doesn't
-  // trigger anything automatically.
-  const totals = await pool.request().input("bid", sql.Int, targetRow.BookingId).query(`
-    SELECT
-      ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid), 0) AS TotalReceived,
-      ISNULL(GrandTotal, TotalValue) AS BookingTotal
-    FROM dbo.CrmBooking WHERE Id = @bid
-  `);
-  const { TotalReceived, BookingTotal } = totals.recordset[0] || {};
-  const totalReceived = Number(TotalReceived) || 0;
-  const bookingTotal = Number(BookingTotal) || 0;
-  if (bookingTotal > 0 && totalReceived < bookingTotal) {
-    const shortfall = Math.round((bookingTotal - totalReceived) * 100) / 100;
-    return {
-      error: `Cannot adjust On Account yet — the full booking amount hasn't been received. ₹${shortfall.toLocaleString("en-IN")} is still outstanding out of ₹${bookingTotal.toLocaleString("en-IN")}. All payments are held in On Account until the entire booking is paid in full; adjustment against milestones only begins once that's complete.`,
-    };
-  }
+  // Per-milestone sufficiency (not a full-booking hold): a deposit can be
+  // applied to a milestone as soon as the on-account pool covers that
+  // milestone's own amount — the customer doesn't have to have paid the
+  // entire booking first. The earlier-milestone-first check below still
+  // enforces "in order"; the amount actually applied is capped to both the
+  // deposit's remaining balance and the milestone's own balance further
+  // down (requested = Math.min(remaining, milestoneBalance, amount)), so a
+  // deposit bigger than this one milestone simply carries its leftover
+  // forward for the next Apply instead of being blocked here.
 
   // Same "earlier milestone must be settled first" predicate as
   // createReceiptForMilestone and applyCrmMilestonePaymentApproval below —

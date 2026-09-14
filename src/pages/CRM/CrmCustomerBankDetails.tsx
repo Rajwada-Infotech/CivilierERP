@@ -128,6 +128,12 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
   const [milestone1Status, setMilestone1Status] = useState<string | null>(null);
   const [milestone1PendingApproval, setMilestone1PendingApproval] = useState(false);
   const [milestone1AwaitingAdjustment, setMilestone1AwaitingAdjustment] = useState(false);
+  // On Account Adjustment (crmPayments.js applyOnAccountToMilestone) needs
+  // the on-account pool to cover Milestone 1's OWN balance, not the whole
+  // booking — kept so the checklist below can show the real per-milestone
+  // shortfall instead of implying "go apply it" when nothing's available yet.
+  const [milestone1Balance, setMilestone1Balance] = useState(0);
+  const [onAccountAvailable, setOnAccountAvailable] = useState(0);
   const bookingAmountPaid = milestone1Status === CrmStatus.PAID;
 
   useQuery({
@@ -137,6 +143,8 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
       setMilestone1Status(d?.Milestone1Status ?? null);
       setMilestone1PendingApproval(!!d?.Milestone1PendingApproval);
       setMilestone1AwaitingAdjustment(!!d?.Milestone1AwaitingAdjustment);
+      setMilestone1Balance(Number(d?.Milestone1Balance) || 0);
+      setOnAccountAvailable(Number(d?.OnAccountAvailable) || 0);
       setForm(d ? {
         BankName: d.BankName || "", BranchName: d.BranchName || "", AccountNo: d.AccountNo || "",
         IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
@@ -259,7 +267,11 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
                   <p className="text-[11px] text-amber-700 pt-0.5 border-t border-amber-200/70">No Booking Amount payment has been submitted yet.</p>
                 )}
                 {approved && (
-                  <p className="text-[11px] text-amber-700 pt-0.5 border-t border-amber-200/70">Payment is approved and held On Account — go to On Account Adjustment to apply it to Milestone 1.</p>
+                  <p className="text-[11px] text-amber-700 pt-0.5 border-t border-amber-200/70">
+                    {milestone1Balance > 0 && onAccountAvailable < milestone1Balance
+                      ? `Payment is approved and held On Account, but ₹${(milestone1Balance - onAccountAvailable).toLocaleString("en-IN")} more is still needed (₹${onAccountAvailable.toLocaleString("en-IN")} available of the ₹${milestone1Balance.toLocaleString("en-IN")} due) before On Account Adjustment can settle Milestone 1.`
+                      : "Payment is approved and held On Account — go to On Account Adjustment to apply it to Milestone 1."}
+                  </p>
                 )}
               </div>
             );

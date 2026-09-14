@@ -272,7 +272,7 @@ router.get("/timeline", async (req, res) => {
 
     if (!bk) return res.json({ stage: "Application", steps: [], holds: holds.recordset });
 
-    const [welcomeCall, customerDetails, agreement, milestones, deed, handover, possessionNotice, constructionUpdates, legalMilestone, nocs, prePossession, queryPayment, registry] = await Promise.all([
+    const [welcomeCall, customerDetails, agreement, milestones, deed, handover, possessionNotice, constructionUpdates, legalMilestone, nocs, prePossession, queryPayment, registry, onAccountTotal] = await Promise.all([
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT TOP 1 * FROM dbo.CrmWelcomeCall WHERE BookingId = @bid ORDER BY CreatedAt DESC"),
       pool.request().input("bid", sql.Int, bk.Id).query(`
         SELECT TOP 1
@@ -329,6 +329,14 @@ router.get("/timeline", async (req, res) => {
         WHERE qp.BookingId = @bid
       `),
       pool.request().input("bid", sql.Int, bk.Id).query("SELECT Id, RegNo, Status, ScheduledDate, CompletedDate FROM dbo.CrmRegistry WHERE BookingId = @bid"),
+      // Every payment now lands in On Account first and stays there until an
+      // explicit staff-side On Account Adjustment (crmPayments.js
+      // applyOnAccountToMilestone) — so a customer who has genuinely paid can
+      // still show AmountPaid=0 on every milestone. Surfaced separately here
+      // so the portal's own "Total Paid" (PortalPayments.tsx) can reflect
+      // real money received instead of only what's been swept, the same fix
+      // already applied to the staff-side Dashboard/Customer 360.
+      pool.request().input("bid", sql.Int, bk.Id).query("SELECT ISNULL(SUM(Amount), 0) AS Total FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid"),
     ]);
 
     res.json({
@@ -337,6 +345,7 @@ router.get("/timeline", async (req, res) => {
       customerDetails: customerDetails.recordset[0] || null,
       agreement: agreement.recordset[0] || null,
       paymentMilestones: milestones.recordset,
+      onAccountTotalReceived: Number(onAccountTotal.recordset[0]?.Total) || 0,
       salesDeed: deed.recordset[0] || null,
       handover: handover.recordset[0] || null,
       possessionNotice: possessionNotice.recordset[0] || null,
