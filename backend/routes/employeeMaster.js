@@ -9,7 +9,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
-const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.Department, e.Designation, e.BranchLocation, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
+const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
 
 router.get("/", cache("employee-master", 300), async (req, res) => {
   try {
@@ -18,6 +18,7 @@ router.get("/", cache("employee-master", 300), async (req, res) => {
       "SELECT " + SELECT_COLUMNS + " FROM dbo.EmployeeMaster e " +
       "LEFT JOIN dbo.EmployeeMaster mgr ON mgr.EmployeeId = e.ReportingManagerId " +
       "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = e.CostCenterId " +
+      "LEFT JOIN dbo.enterprise comp ON comp.id = e.CompanyId " +
       "ORDER BY e.EmployeeName"
     );
     res.json(result.recordset);
@@ -52,6 +53,7 @@ function bindEmployeeFields(request, body) {
     .input("EmergencyContactPhone", sql.NVarChar(20), body.EmergencyContactPhone || null)
     .input("JoiningDate", sql.Date, body.JoiningDate || null)
     .input("ConfirmationDate", sql.Date, body.ConfirmationDate || null)
+    .input("CompanyId", sql.Int, body.CompanyId || null)
     .input("Department", sql.NVarChar(100), body.Department || null)
     .input("Designation", sql.NVarChar(100), body.Designation || null)
     .input("BranchLocation", sql.NVarChar(150), body.BranchLocation || null)
@@ -87,13 +89,13 @@ router.post("/", requirePageRight("employee-master", "create"), async (req, res)
       .query(
         "INSERT INTO dbo.EmployeeMaster (" +
         "EmployeeCode, EmployeeName, PhotoBase64, DateOfBirth, Gender, Mobile, Email, Address, " +
-        "EmergencyContactName, EmergencyContactPhone, JoiningDate, ConfirmationDate, " +
+        "EmergencyContactName, EmergencyContactPhone, JoiningDate, ConfirmationDate, CompanyId, " +
         "Department, Designation, BranchLocation, ReportingManagerId, EmploymentType, GradeLevel, " +
         "CostCenterId, BankName, BankAccountNumber, BankIFSC, PAN, Aadhaar, UAN, ESICNumber, PFNumber, " +
         "NomineeName, NomineeRelationship, NomineeContact, IsActive, CreatedBy, CreatedAt" +
         ") OUTPUT INSERTED.EmployeeId VALUES (" +
         "@EmployeeCode, @EmployeeName, @PhotoBase64, @DateOfBirth, @Gender, @Mobile, @Email, @Address, " +
-        "@EmergencyContactName, @EmergencyContactPhone, @JoiningDate, @ConfirmationDate, " +
+        "@EmergencyContactName, @EmergencyContactPhone, @JoiningDate, @ConfirmationDate, @CompanyId, " +
         "@Department, @Designation, @BranchLocation, @ReportingManagerId, @EmploymentType, @GradeLevel, " +
         "@CostCenterId, @BankName, @BankAccountNumber, @BankIFSC, @PAN, @Aadhaar, @UAN, @ESICNumber, @PFNumber, " +
         "@NomineeName, @NomineeRelationship, @NomineeContact, @IsActive, @CreatedBy, SYSDATETIME())"
@@ -128,7 +130,7 @@ router.put("/:id", requirePageRight("employee-master", "edit"), async (req, res)
         "EmployeeCode = @EmployeeCode, EmployeeName = @EmployeeName, PhotoBase64 = @PhotoBase64, " +
         "DateOfBirth = @DateOfBirth, Gender = @Gender, Mobile = @Mobile, Email = @Email, Address = @Address, " +
         "EmergencyContactName = @EmergencyContactName, EmergencyContactPhone = @EmergencyContactPhone, " +
-        "JoiningDate = @JoiningDate, ConfirmationDate = @ConfirmationDate, " +
+        "JoiningDate = @JoiningDate, ConfirmationDate = @ConfirmationDate, CompanyId = @CompanyId, " +
         "Department = @Department, Designation = @Designation, BranchLocation = @BranchLocation, " +
         "ReportingManagerId = @ReportingManagerId, EmploymentType = @EmploymentType, GradeLevel = @GradeLevel, " +
         "CostCenterId = @CostCenterId, BankName = @BankName, BankAccountNumber = @BankAccountNumber, BankIFSC = @BankIFSC, " +

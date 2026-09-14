@@ -16,6 +16,8 @@ export interface EmployeeRow {
   EmergencyContactPhone: string | null;
   JoiningDate: string | null;
   ConfirmationDate: string | null;
+  CompanyId: number | null;
+  CompanyName: string | null;
   Department: string | null;
   Designation: string | null;
   BranchLocation: string | null;
@@ -57,6 +59,7 @@ export interface EmployeePayload {
   EmergencyContactPhone?: string | null;
   JoiningDate?: string | null;
   ConfirmationDate?: string | null;
+  CompanyId?: number | null;
   Department?: string | null;
   Designation?: string | null;
   BranchLocation?: string | null;
@@ -156,3 +159,15 @@ export const deleteEmployeeDocument = (attachmentId: number) =>
 
 export const employeeDocumentUrl = (attachmentId: number) =>
   `${BASE}/document/${attachmentId}`;
+
+export interface EmployeeCompanyOption {
+  id: number;
+  label: string;
+}
+
+// Same /api/enterprises/options?business_type=C source Bank/Card/Cheque
+// Master already use for their Company pickers.
+export const getEmployeeCompanyOptions = async (): Promise<EmployeeCompanyOption[]> => {
+  const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
+  return handle(res);
+};

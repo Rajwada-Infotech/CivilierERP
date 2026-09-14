@@ -13,6 +13,7 @@ import {
   addEmployee,
   updateEmployee,
   deleteEmployee,
+  getEmployeeCompanyOptions,
   type EmployeeRow,
   type EmployeePayload,
 } from "@/api/employeeMasterApi";
@@ -35,6 +36,8 @@ const mapRow = (r: EmployeeRow): RecordWithId => ({
   emergencyContactPhone: r.EmergencyContactPhone || "",
   joiningDate: r.JoiningDate ? r.JoiningDate.slice(0, 10) : "",
   confirmationDate: r.ConfirmationDate ? r.ConfirmationDate.slice(0, 10) : "",
+  companyId: r.CompanyId ? String(r.CompanyId) : "",
+  companyName: r.CompanyName || "-",
   department: r.Department || "",
   designation: r.Designation || "",
   branchLocation: r.BranchLocation || "",
@@ -72,6 +75,7 @@ const toPayload = (form: Record<string, unknown>): EmployeePayload => ({
   EmergencyContactPhone: (form.emergencyContactPhone as string) || null,
   JoiningDate: (form.joiningDate as string) || null,
   ConfirmationDate: (form.confirmationDate as string) || null,
+  CompanyId: form.companyId ? Number(form.companyId) : null,
   Department: (form.department as string) || null,
   Designation: (form.designation as string) || null,
   BranchLocation: (form.branchLocation as string) || null,
@@ -175,11 +179,21 @@ export default function EmployeeMaster() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: companyData } = useQuery({
+    queryKey: ["employee-company-options"],
+    queryFn: getEmployeeCompanyOptions,
+    staleTime: 5 * 60 * 1000,
+  });
+
   const rows: EmployeeRow[] = Array.isArray(data) ? data : [];
   const mappedData: RecordWithId[] = rows.map(mapRow);
   const costCenterOptions = (Array.isArray(costCenterData) ? costCenterData : []).map((c) => ({
     value: String(c.id),
     label: c.code ? c.code + " - " + c.label : c.label,
+  }));
+  const companyOptions = (Array.isArray(companyData) ? companyData : []).map((c) => ({
+    value: String(c.id),
+    label: c.label,
   }));
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["employee-master"] });
@@ -218,6 +232,7 @@ export default function EmployeeMaster() {
     { name: "sec-basic", label: "Basic Information", type: "section" },
     { name: "employeeCode", label: "Employee ID / Employee Code", type: "text", required: true, uppercase: true, placeholder: "e.g. EMP-0001" },
     { name: "employeeName", label: "Employee Name", type: "text", required: true, fullWidth: true },
+    { name: "companyId", label: "Company", type: "select", asyncOptions: async () => companyOptions },
     { name: "photoBase64", label: "Photo", type: "custom", fullWidth: true, render: (p) => <PhotoField value={p.value} onChange={p.onChange} /> },
     { name: "dateOfBirth", label: "Date of Birth", type: "date" },
     { name: "gender", label: "Gender", type: "select", options: GENDERS },
@@ -272,6 +287,7 @@ export default function EmployeeMaster() {
   const columns: ColumnDef[] = [
     { key: "employeeCode", label: "Code" },
     { key: "employeeName", label: "Name" },
+    { key: "companyName", label: "Company", hideOnMobile: true, sortable: false },
     { key: "designation", label: "Designation", hideOnMobile: true },
     { key: "department", label: "Department", hideOnMobile: true },
     { key: "employmentType", label: "Type", hideOnMobile: true },
@@ -328,6 +344,7 @@ export default function EmployeeMaster() {
             columns: [
               { header: "Employee Code", accessor: "employeeCode" },
               { header: "Employee Name", accessor: "employeeName" },
+              { header: "Company", accessor: "companyName" },
               { header: "Department", accessor: "department" },
               { header: "Designation", accessor: "designation" },
               { header: "Branch / Location", accessor: "branchLocation" },
