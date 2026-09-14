@@ -149,7 +149,7 @@ const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
   crm: { h: 199, s: 89, l: 48 }, // #0ea5e9 sky
   maintenance: { h: 85, s: 85, l: 35 }, // #65a30d lime
-  "hr-payroll": { h: 258, s: 90, l: 66 }, // #8b5cf6 violet
+  "hr-payroll": { h: 142, s: 71, l: 45 }, // #22c55e green (Citrus Green)
 };
 
 function moduleColorVars(id: string): React.CSSProperties {
@@ -315,7 +315,7 @@ const hrPayrollSetupItems = [
     icon: UserSquare,
     label: "Employee Master",
     path: "/hr-payroll/employees",
-    color: "text-violet-500",
+    color: "text-green-500",
     pageKey: "employee-master",
   },
 ];

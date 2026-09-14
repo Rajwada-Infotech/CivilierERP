@@ -5,7 +5,7 @@ import { GlassShell } from "@/components/dashboard/GlassShell";
 // Single source of truth for the HR and Payroll module's accent — change
 // this one value (and its twins in ModuleStrip.tsx / AppSidebar.tsx) to
 // re-theme the whole module.
-export const HR_PAYROLL_ACCENT = "#8b5cf6"; // violet-500
+export const HR_PAYROLL_ACCENT = "#22c55e"; // green-500 (Citrus Green)
 
 interface HrPayrollShellProps {
   title: string;
