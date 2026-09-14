@@ -1,6 +1,7 @@
 const PDFDocument = require("pdfkit");
 const { sql } = require("../db");
 const { drawFinancialBreakdown } = require("./pdfFinancials");
+const { getGstSplit } = require("./crmLedger");
 
 function money(n) {
   const num = Number(n || 0);
@@ -72,7 +73,7 @@ async function fetchInvoiceData(pool, invoiceId) {
   const result = await pool.request().input("id", sql.Int, invoiceId).query(`
     SELECT
       inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate, inv.Description, inv.CreatedAt, inv.Status, inv.MilestoneId, inv.OnAccountPaymentId,
-      b.BookingNo, b.UnitNo, b.BlockName, b.ProjectName, b.AreaSqFt, b.RatePerSqFt, b.GrandTotal, b.HsnCode,
+      b.Id AS BookingId, b.BookingNo, b.UnitNo, b.BlockName, b.ProjectName, b.AreaSqFt, b.RatePerSqFt, b.GrandTotal, b.HsnCode,
       b.TotalGstAmount, b.UnitParkingGstRate,
       a.ApplicationNo, a.ApplicantName, a.Mobile, a.Email,
       comp.name AS CompanyName, comp.address AS CompanyAddress, comp.address_line2 AS CompanyAddress2,
@@ -93,7 +94,20 @@ async function fetchInvoiceData(pool, invoiceId) {
     LEFT JOIN dbo.CrmOnAccountPayment oa ON oa.Id = inv.OnAccountPaymentId
     WHERE inv.Id = @id
   `);
-  return result.recordset[0] || null;
+  const row = result.recordset[0];
+  if (!row) return null;
+
+  // GST split for this invoice's amount MUST come from the same canonical
+  // getGstSplit() every other CRM money event uses (crmLedger.js) — this
+  // used to re-derive its own ratio inline with `GrandTotal || 1` as the
+  // zero-guard, which silently produced a nonsensical GST/taxable split
+  // (dividing the raw GST amount by 1) for any booking with GrandTotal
+  // left 0/NULL instead of falling back to "no split" like getGstSplit()
+  // correctly does.
+  const { gstAmount, baseAmount } = await getGstSplit(pool, row.BookingId, Number(row.Amount) || 0);
+  row.InvGst = gstAmount;
+  row.InvBase = baseAmount;
+  return row;
 }
 
 // Renders the invoice to an in-memory PDF buffer — nothing touches disk.
@@ -218,15 +232,12 @@ function renderInvoicePdfBuffer(d) {
     // document reads identically. The invoice bills a single amount (a
     // milestone / booking / on-account payment), so it's a single row.
     //
-    // GST split for this invoice's amount is derived from the booking-level
-    // effective rate (TotalGstAmount / GrandTotal); the combined rate is
-    // CGST + SGST (e.g. 5% → 2.5% + 2.5%).
+    // GST split computed by fetchInvoiceData() via the canonical
+    // getGstSplit() (crmLedger.js) — never re-derived here. The combined
+    // rate shown is CGST + SGST (e.g. 5% → 2.5% + 2.5%).
     const invAmt = Number(d.Amount || 0);
-    const grandTotal = Number(d.GrandTotal || 1);
-    const totalGstAmt = Number(d.TotalGstAmount || 0);
-    const gstRatio = totalGstAmt / grandTotal;
-    const invGst = Math.round(invAmt * gstRatio * 100) / 100;
-    const invBase = Math.round((invAmt - invGst) * 100) / 100;
+    const invGst = Number(d.InvGst || 0);
+    const invBase = Number(d.InvBase != null ? d.InvBase : invAmt);
     const combinedRate = Number(d.UnitParkingGstRate || 0);
     const particulars = d.MilestoneName || INVOICE_TYPE_LABEL[d.InvoiceType] || d.InvoiceType || "Payment";
     const freeDescription = d.Description && d.Description !== particulars ? d.Description : null;

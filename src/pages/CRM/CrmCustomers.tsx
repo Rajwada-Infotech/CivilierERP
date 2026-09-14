@@ -79,7 +79,7 @@ function AddressFields({
   return (
     <>
       <div>
-        <label className="text-xs text-muted-foreground block mb-1">Permanent Address *</label>
+        <label className="text-xs text-muted-foreground block mb-1">Permanent Address</label>
         <textarea value={form.PermanentAddress} readOnly={readOnly}
           onChange={(e) => setForm((f: any) => ({ ...f, PermanentAddress: e.target.value }))}
           rows={2} className={`${inputCls} resize-none`} />
@@ -264,11 +264,11 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
             </h3>
             <div className="grid grid-cols-3 gap-2.5">
               {[
-                { key: "CustomerName", label: "Customer Name *", type: "text" },
-                { key: "Mobile", label: "Mobile *", type: "text" },
+                { key: "CustomerName", label: "Customer Name", type: "text" },
+                { key: "Mobile", label: "Mobile", type: "text" },
                 { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                 { key: "Email", label: "Email", type: "email" },
-                { key: "PanNo", label: "PAN Number *", type: "text" },
+                { key: "PanNo", label: "PAN Number", type: "text" },
                 { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                 { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                 { key: "Occupation", label: "Occupation", type: "text" },
@@ -456,17 +456,13 @@ const CrmCustomers: React.FC = () => {
   }, []);
 
   const handleCreate = async () => {
-    if (!form.CustomerName.trim() || !form.Mobile.trim() || !form.PanNo.trim() || !form.PermanentAddress.trim()) {
-      toast.error("Customer Name, Mobile, PAN and Permanent Address are required");
-      return;
-    }
-    if (!/^\d{10}$/.test(form.Mobile.trim())) {
+    if (form.Mobile.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
       toast.error("Mobile must be exactly 10 digits"); return;
     }
     if (form.AltMobile.trim() && !/^\d{10}$/.test(form.AltMobile.trim())) {
       toast.error("Alternate mobile must be exactly 10 digits"); return;
     }
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
+    if (form.PanNo.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
       toast.error("PAN must be in format ABCDE1234F"); return;
     }
     if (form.AadhaarNo.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
@@ -732,11 +728,11 @@ const CrmCustomers: React.FC = () => {
               </h3>
               <div className="grid grid-cols-3 gap-2.5">
                 {[
-                  { key: "CustomerName", label: "Customer Name *", type: "text" },
-                  { key: "Mobile", label: "Mobile *", type: "text" },
+                  { key: "CustomerName", label: "Customer Name", type: "text" },
+                  { key: "Mobile", label: "Mobile", type: "text" },
                   { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                   { key: "Email", label: "Email", type: "email" },
-                  { key: "PanNo", label: "PAN Number *", type: "text" },
+                  { key: "PanNo", label: "PAN Number", type: "text" },
                   { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                   { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                   { key: "Occupation", label: "Occupation", type: "text" },
@@ -801,10 +797,6 @@ const CrmCustomers: React.FC = () => {
               </div>
             </div>
           </div>
-
-          <p className="text-xs text-muted-foreground">
-            Name, Mobile, PAN and Permanent Address are required — every Application will auto-fetch its details from this record.
-          </p>
 
           {/* Duplicate warning banner — shown when the /suggest endpoint finds
               existing customers that match the entered Mobile, PAN, or Name.

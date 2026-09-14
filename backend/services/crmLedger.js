@@ -559,7 +559,7 @@ async function postCrmRefundPaid(pool, refundId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
 
   const r = await pool.request().input("id", sql.Int, refundId).query(`
-    SELECT Id, RefundNo, DeductionAmount, CompanyId, ProjectId, CustomerId, PaidAt
+    SELECT Id, RefundNo, DeductionAmount, NetAmount, BookingId, CompanyId, ProjectId, CustomerId, PaidAt
     FROM dbo.CrmRefund WHERE Id = @id
   `);
   const row = r.recordset[0];
@@ -567,24 +567,61 @@ async function postCrmRefundPaid(pool, refundId, userEmail) {
   if (!row.CustomerId) return { posted: false, reason: `Refund ${refundId}: no linked CrmCustomer` };
 
   const deduction = Number(row.DeductionAmount) || 0;
-  if (deduction <= 0) return { none: true, reason: `Refund ${refundId} has no forfeiture — bank leg posted by the NewPayment voucher` };
-
-  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  const forfeitureHeadId = await getGLHeadId(pool, CRM_FORFEITURE_ACCOUNT);
+  const netAmount = Number(row.NetAmount) || 0;
   const docNo = row.RefundNo || `CRFD-${refundId}`;
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
+  const legs = [];
+
+  // GST reversal on the portion actually credited BACK to the customer —
+  // the "issue a credit note, reduce output liability" mechanism under
+  // Section 34 CGST Act for a cancelled supply. Only the amount genuinely
+  // returned qualifies: the forfeited/retained slice (below) is NOT reversed
+  // — the company keeps that money, so from a GST standpoint nothing was
+  // "returned" on it. NOTE: Section 34 time-bars a credit note to 30 Sept of
+  // the FY following the original supply/advance — this posts the reversal
+  // unconditionally and does NOT check that deadline (CRM has no reliable
+  // per-rupee trace back to the original receipt's FY to check it against).
+  // If a refund is settled after that window has lapsed, Finance/the GST
+  // filer must verify this leg is still correct rather than trusting it
+  // blindly — the correct treatment past the deadline is the CUSTOMER filing
+  // for a refund directly with the tax authority, not the company adjusting
+  // its own output liability.
+  //
+  // NOT a full Dr Customer / Cr Bank entry here — that's the generic
+  // PaymentPosting voucher NewPayment's own "Post to GL" action books
+  // separately for the full NetAmount (resolvePaymentSupplierHeadId falls
+  // back to PPartyId = this same customerHeadId for a refund payout). This
+  // is purely the RECLASSIFICATION on top of that: of the NetAmount that
+  // voucher debits to the customer, gstAmount of it actually belongs against
+  // GST Output Liability, not the customer — Dr GST-Output / Cr Customer
+  // moves it there. Crediting the customer here a second time (e.g. with
+  // baseAmount) would double-count against that other voucher.
+  if (row.BookingId && netAmount > 0) {
+    const { gstAmount } = await getGstSplit(pool, row.BookingId, netAmount);
+    if (gstAmount > 0) {
+      const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
+      legs.push({ lHeadId: gstHeadId, debit: gstAmount, narration: `${docNo} — GST output liability reversed (credit note on refund; verify Sec.34 time limit)` });
+      legs.push({ lHeadId: customerHeadId, credit: gstAmount, narration: `${docNo} — reclass GST portion off customer head` });
+    }
+  }
+
+  if (deduction > 0) {
+    const forfeitureHeadId = await getGLHeadId(pool, CRM_FORFEITURE_ACCOUNT);
+    legs.push({ lHeadId: customerHeadId, debit: deduction, narration: `${docNo} — cancellation forfeiture retained` });
+    legs.push({ lHeadId: forfeitureHeadId, credit: deduction, narration: `${docNo} — booking cancellation forfeiture income` });
+  }
+
+  if (!legs.length) return { none: true, reason: `Refund ${refundId} has nothing to post (no GST, no forfeiture)` };
 
   await postVoucher(pool, {
-    voucherNo: `${docNo}-FORF`,
+    voucherNo: `${docNo}-ADJ`,
     voucherDate: row.PaidAt || new Date(),
     sourceType: "CrmRefund",
     sourceId: refundId,
     companyId: row.CompanyId ?? null,
     projectId: row.ProjectId ?? null,
     createdBy: userEmail,
-    legs: [
-      { lHeadId: customerHeadId, debit: deduction, narration: `${docNo} — cancellation forfeiture retained` },
-      { lHeadId: forfeitureHeadId, credit: deduction, narration: `${docNo} — booking cancellation forfeiture income` },
-    ],
+    legs,
   });
   return { posted: true };
 }

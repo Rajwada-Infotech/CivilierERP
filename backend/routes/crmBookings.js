@@ -155,6 +155,14 @@ const BOOKING_SELECT = `
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.AadhaarNo, ''))), '') IS NOT NULL
         AND NULLIF(LTRIM(RTRIM(ISNULL(bd.Occupation, ''))), '') IS NOT NULL
     ) THEN 1 ELSE 0 END AS BIT) AS BankDetailsComplete,
+    -- The list's "next step" chip must not offer Agreement before Milestone 1
+    -- (Booking Amount) is actually Paid — validateAgreementPreparationPrerequisites
+    -- (crmWorkflowGuards.js) hard-blocks agreement prep on exactly this, and
+    -- under the on-account-hold rule that only happens after On Account
+    -- Adjustment, which itself won't run until 100% of GrandTotal is
+    -- received. Without this, the chip pointed staff at an Agreement page
+    -- that would immediately reject the booking as ineligible.
+    (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Status,
     ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
     ag.AgreementDate, ag.DateApprovalStatus, ag.Status AS AgreementStatus,
     ag.AfsStampDuty, ag.AfsRegistrationFee,
@@ -1230,12 +1238,12 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
       throw txErr;
     }
 
-    // Revert the Application from Approved → back to a cancellable/re-bookable
-    // state. createCrmBookingRecord force-advanced Application to Approved when
-    // the booking was created; without this call the Application stays at
-    // Approved forever with no live booking behind it — it can't be cancelled
-    // through the normal UI (APPLICATION_TRANSITIONS['Approved'] = []) and
-    // can't be re-booked, leaving the Application orphaned with no recovery path.
+    // Mirror the Booking's deletion onto its parent Application so it's not
+    // left looking like a live/converted deal with no Booking behind it —
+    // and, for any legacy row still sitting at Status='Approved' from before
+    // that ever stopped being set (see crmApplicationWorkflow.js's module
+    // docstring), so it can be cancelled through the normal UI again
+    // instead of being stuck (APPLICATION_TRANSITIONS['Approved'] = []).
     // For cancelled bookings these steps were already executed when the
     // cancellation was approved — skip to avoid double-sync and ghost holds.
     if (!isCancelled) {
@@ -1893,6 +1901,11 @@ router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "vie
 // same approver set as Money Receipt approval (crmMoneyReceiptWorkflow.js's
 // APPROVER_ROLES) since this is a financial-document correction, not routine
 // booking editing.
+// Mirrored (not shared — frontend can't import backend code) in
+// src/pages/CRM/CrmInvoices.tsx's own INVOICE_VOID_ROLES, purely to hide/
+// show the Void button — that copy is advisory only, this list is the real
+// enforcement. If this list ever changes, update the frontend copy too or
+// the button's visibility will silently drift from what the server allows.
 const INVOICE_VOID_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
 router.put("/:id/invoices/:invoiceId/void", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {

@@ -75,38 +75,27 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
   const activeErr = await requireActiveBooking(pool, targetRow.BookingId);
   if (activeErr) return { error: activeErr };
 
-  // Full-booking hold: every rupee a customer pays lands in On Account
-  // first (see the flow comment below) and sits there UNTOUCHED — no
-  // milestone gets adjusted/settled at all — until the customer has paid
-  // 100% of the booking's own GrandTotal. Only once the whole booking is
-  // fully paid does staff start working through the on-account pool,
-  // applying it to milestones one at a time in sequence (the earlier-
-  // milestone-first check above already enforces the "in order" part; this
-  // is the new "not before everything's in" part). Still a manual action —
-  // this only gates whether that click is allowed to succeed, it doesn't
-  // trigger anything automatically.
-  const totals = await pool.request().input("bid", sql.Int, targetRow.BookingId).query(`
-    SELECT
-      ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid), 0) AS TotalReceived,
-      ISNULL(GrandTotal, TotalValue) AS BookingTotal
-    FROM dbo.CrmBooking WHERE Id = @bid
-  `);
-  const { TotalReceived, BookingTotal } = totals.recordset[0] || {};
-  const totalReceived = Number(TotalReceived) || 0;
-  const bookingTotal = Number(BookingTotal) || 0;
-  if (bookingTotal > 0 && totalReceived < bookingTotal) {
-    const shortfall = Math.round((bookingTotal - totalReceived) * 100) / 100;
-    return {
-      error: `Cannot adjust On Account yet — the full booking amount hasn't been received. ₹${shortfall.toLocaleString("en-IN")} is still outstanding out of ₹${bookingTotal.toLocaleString("en-IN")}. All payments are held in On Account until the entire booking is paid in full; adjustment against milestones only begins once that's complete.`,
-    };
-  }
+  // Per-milestone sufficiency (not a full-booking hold): a deposit can be
+  // applied to a milestone as soon as the on-account pool covers that
+  // milestone's own amount — the customer doesn't have to have paid the
+  // entire booking first. The earlier-milestone-first check below still
+  // enforces "in order"; the amount actually applied is capped to both the
+  // deposit's remaining balance and the milestone's own balance further
+  // down (requested = Math.min(remaining, milestoneBalance, amount)), so a
+  // deposit bigger than this one milestone simply carries its leftover
+  // forward for the next Apply instead of being blocked here.
 
+  // Same "earlier milestone must be settled first" predicate as
+  // createReceiptForMilestone and applyCrmMilestonePaymentApproval below —
+  // deliberately does NOT exempt zero-amount milestones (this one used to,
+  // the other two never did; a zero-AmountDue milestone left Pending should
+  // be explicitly marked Paid/Waived through one of these same flows, not
+  // silently treated as "no blockage" in only one of the three paths staff
+  // can use to settle the exact same pair of milestones).
   const earlier = await pool.request().input("bid", sql.Int, targetRow.BookingId).input("mno", sql.Int, targetRow.MilestoneNo)
     .query(`
       SELECT TOP 1 MilestoneName FROM dbo.CrmPaymentMilestone
-      WHERE BookingId = @bid AND MilestoneNo < @mno
-        AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
-        AND AmountDue > 0
+      WHERE BookingId = @bid AND MilestoneNo < @mno AND Status NOT IN ('${CrmStatus.PAID}', 'Waived')
       ORDER BY MilestoneNo
     `);
   if (earlier.recordset.length) {
@@ -152,8 +141,21 @@ async function applyOnAccountToMilestone(pool, { onAccountId, milestoneId, amoun
     remaining = Number(oaRow.Amount) - Number(oaRow.AppliedAmount);
 
     const m = await tx.request().input("id", sql.Int, milestoneId).query(`
-      SELECT AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+      SELECT AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
     `);
+    // A Paid milestone is self-protected (its balance is already 0, so
+    // `requested <= 0` below catches it) — but a Waived one is NOT: waiving
+    // only sets Status='Waived', it never zeroes AmountDue or touches
+    // AmountPaid, so milestoneBalance can still be a large positive number.
+    // Without this check, on-account money applied to an already-waived
+    // milestone would insert a real receipt and the UPDATE below would flip
+    // Status back to 'Paid' — silently un-waiving money staff explicitly
+    // decided to forgive, and re-firing handleMilestoneBecamePaid's
+    // downstream cascade (sales deed, brokerage, next-demand auto-raise).
+    if (m.recordset[0].Status === "Waived") {
+      await tx.rollback();
+      return { error: `Cannot apply to "${targetRow.MilestoneName}" — it has been Waived` };
+    }
     const milestoneBalance = Number(m.recordset[0].AmountDue) - Number(m.recordset[0].AmountPaid || 0);
 
     requested = Math.min(remaining, milestoneBalance, amount != null ? amount : Infinity);
@@ -1111,13 +1113,24 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     // Fetch the current row up front — needed for the AmountDue override's
     // %-recompute against the booking's GrandTotal.
     const curRes = await pool.request().input("id", sql.Int, id).query(`
-      SELECT m.AmountDue, m.MilestoneName, bk.GrandTotal, bk.TotalValue, bk.ProjectId
+      SELECT m.AmountDue, m.MilestoneName, bk.Id AS BookingId, bk.GrandTotal, bk.TotalValue, bk.ProjectId
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking bk ON bk.Id = m.BookingId
       WHERE m.Id = @id
     `);
     if (!curRes.recordset.length) return res.status(404).json({ error: "Milestone not found" });
     const curRow = curRes.recordset[0];
+
+    // Every other mutation on this table gates on the booking still being
+    // active — a payment (paidRaw != null) already gets this for free via
+    // createReceiptForMilestone below, but an AmountDue/DueDate/Remarks-only
+    // edit skipped straight to the transaction with no check at all,
+    // letting a cancelled/rejected booking's payment schedule still be
+    // reproportioned (recalculateRemainingMilestones cascades to every
+    // other open milestone) and its demands invalidated. Checked
+    // unconditionally here so both paths are covered.
+    const activeErr = await requireActiveBooking(pool, curRow.BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
 
     // Recording an actual payment here now goes through the exact same
     // submit-for-approval path POST /:id/receipts uses (createReceiptForMilestone)

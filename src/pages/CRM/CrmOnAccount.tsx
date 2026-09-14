@@ -131,6 +131,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
              Number(m.AmountDue) - Number(m.AmountPaid) > 0
     ), [bk]);
 
+
   const sel = outstanding.find((m) => m.Id === selId);
   const maxAmt = sel
     ? Math.min(Number(deposit.AvailableBalance), Number(sel.AmountDue) - Number(sel.AmountPaid))

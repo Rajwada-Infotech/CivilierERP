@@ -1038,7 +1038,20 @@ router.put("/:id/propose-date", requirePageRight("crm-agreements", "edit"), asyn
     const agRow = ag.recordset[0];
     if (!agRow.SentToCustomerAt) return res.status(400).json({ error: "Agreement hasn't been sent to the customer yet" });
 
-    await proposeAgreementDate(pool, id, "Company", proposedDate, actorId(req));
+    // Wrapped like every other caller of proposeAgreementDate (proxy-
+    // propose-date, portal propose-date) — this was the one path that
+    // wasn't, leaving a mid-sequence failure (DateHistory insert succeeds,
+    // Agreement UPDATE fails, or vice versa) able to point the negotiation
+    // status at a date history entry that was never actually recorded.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await proposeAgreementDate(tx, id, "Company", proposedDate, actorId(req));
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     await logCommunication(pool, {
       bookingId: agRow.BookingId, direction: "Outbound",
@@ -1071,7 +1084,17 @@ router.put("/:id/date/accept", requirePageRight("crm-agreements", "edit"), async
     if (!ag.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     const agRow = ag.recordset[0];
 
-    await acceptAgreementDate(pool, id, "Company");
+    // Wrapped like every other caller of acceptAgreementDate (proxy-date-
+    // accept, portal date/accept) — same reasoning as propose-date above.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await acceptAgreementDate(tx, id, "Company");
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     await logCommunication(pool, {
       bookingId: agRow.BookingId, direction: "Outbound",
