@@ -175,18 +175,31 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
     // dashboard — previously used a bare pool.request() with no @pid binding at all,
     // so selecting a project in the dropdown left this one chart showing every
     // project regardless, contradicting the route's own "scope all KPIs" contract.
+    // TotalPaid intentionally adds each booking's unswept On Account balance
+    // (Amount - AppliedAmount) on top of the milestone AmountPaid sum — under
+    // the current "everything holds in On Account until an explicit sweep"
+    // rule (see crmPayments.js applyCrmMilestonePaymentApproval /
+    // applyCrmOnAccountPaymentApproval), every payment sits un-swept by
+    // default, so AmountPaid alone would under-report real cash collected.
+    // Rolled up per-booking first (BookingTotals) to avoid the fan-out that
+    // joining CrmOnAccountPayment straight onto CrmPaymentMilestone rows
+    // would cause (one on-account row would be double-counted once per
+    // milestone on that booking).
     const collectionPerProjectQ = addPid(pool.request()).query(`
-      SELECT
-        COALESCE(proj.name, b.ProjectName) AS ProjectName,
-        ISNULL(SUM(m.AmountDue), 0)  AS TotalDue,
-        ISNULL(SUM(m.AmountPaid), 0) AS TotalPaid,
-        SUM(CASE WHEN m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END) AS OverdueCount
-      FROM dbo.CrmPaymentMilestone m
-      JOIN dbo.CrmBooking b ON b.Id = m.BookingId
-      LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
-      WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
-      GROUP BY COALESCE(proj.name, b.ProjectName)
-      ORDER BY COALESCE(proj.name, b.ProjectName)
+      ;WITH BookingTotals AS (
+        SELECT b.Id AS BookingId, COALESCE(proj.name, b.ProjectName) AS ProjectName,
+          ISNULL((SELECT SUM(AmountDue) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0) AS TotalDue,
+          ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0)
+            + ISNULL((SELECT SUM(Amount - ISNULL(AppliedAmount,0)) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS TotalPaid,
+          (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id AND Status = '${CrmStatus.PENDING}' AND DueDate < CAST(SYSDATETIME() AS DATE)) AS OverdueCount
+        FROM dbo.CrmBooking b
+        LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
+        WHERE b.IsActive = 1 AND b.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b.Status = 'Approved' OR b.ConfirmDeadline IS NULL OR b.ConfirmDeadline >= SYSDATETIME()) ${projBookingCond}
+      )
+      SELECT ProjectName, SUM(TotalDue) AS TotalDue, SUM(TotalPaid) AS TotalPaid, SUM(OverdueCount) AS OverdueCount
+      FROM BookingTotals
+      GROUP BY ProjectName
+      ORDER BY ProjectName
     `);
 
     // Forward-looking: amount due in next 30 days
@@ -243,10 +256,19 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
       GROUP BY Status
     `);
 
+    // Same "add unswept On Account balance" reasoning as collectionPerProjectQ
+    // above — a single scalar subquery (own WHERE, scoped identically to the
+    // outer query) is safe here since there's no per-milestone GROUP BY to
+    // fan out against.
     const paymentsQ = addPid(pool.request()).query(`
       SELECT
         ISNULL(SUM(m.AmountDue), 0)  AS TotalDue,
-        ISNULL(SUM(m.AmountPaid), 0) AS TotalPaid,
+        ISNULL(SUM(m.AmountPaid), 0) + ISNULL((
+          SELECT SUM(oa.Amount - ISNULL(oa.AppliedAmount,0))
+          FROM dbo.CrmOnAccountPayment oa
+          JOIN dbo.CrmBooking b2 ON b2.Id = oa.BookingId
+          WHERE b2.IsActive = 1 AND b2.Status NOT IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}','Expired') AND (b2.Status = 'Approved' OR b2.ConfirmDeadline IS NULL OR b2.ConfirmDeadline >= SYSDATETIME()) ${projectId ? "AND b2.ProjectId = @pid" : ""}
+        ), 0) AS TotalPaid,
         SUM(CASE WHEN m.Status = '${CrmStatus.PENDING}' AND m.DueDate < CAST(SYSDATETIME() AS DATE) THEN 1 ELSE 0 END) AS OverdueCount
       FROM dbo.CrmPaymentMilestone m
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
@@ -297,10 +319,18 @@ router.get("/", requirePageRight("crm-dashboard", "view"), async (req, res) => {
           WHERE b.IsActive = 1 ${projBookingCond}
             AND b.BookingDate >= mo.MonthStart AND b.BookingDate < DATEADD(MONTH,1,mo.MonthStart)
         ) AS Bookings,
-        (SELECT ISNULL(SUM(pm.AmountPaid),0)
-          FROM dbo.CrmPaymentMilestone pm
-          JOIN dbo.CrmBooking b ON b.Id = pm.BookingId
-          WHERE ${projectId ? "b.ProjectId = @pid AND" : ""} pm.PaidDate >= mo.MonthStart AND pm.PaidDate < DATEADD(MONTH,1,mo.MonthStart)
+        -- Sourced from CrmOnAccountPayment.ReceivedDate (full Amount, not the
+        -- unswept balance) rather than milestone PaidDate: every payment now
+        -- lands in On Account first and is only later swept onto a milestone
+        -- (crmPayments.js applyCrmMilestonePaymentApproval /
+        -- applyCrmOnAccountPaymentApproval), often in a different month than
+        -- it was received. ReceivedDate is when the cash actually came in,
+        -- so this reflects real monthly collections without double-counting
+        -- the same rupee once at receipt and again at sweep.
+        (SELECT ISNULL(SUM(oa.Amount),0)
+          FROM dbo.CrmOnAccountPayment oa
+          JOIN dbo.CrmBooking b ON b.Id = oa.BookingId
+          WHERE ${projectId ? "b.ProjectId = @pid AND" : ""} oa.ReceivedDate >= mo.MonthStart AND oa.ReceivedDate < DATEADD(MONTH,1,mo.MonthStart)
         ) AS Collected
       FROM Months mo ORDER BY mo.MonthStart
     `);

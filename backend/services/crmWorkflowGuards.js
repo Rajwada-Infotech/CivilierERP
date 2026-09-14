@@ -201,10 +201,26 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   // is best-effort and can silently fail (missing bank, DB hiccup), so this
   // is checked independently rather than trusted from booking creation alone.
   const milestone1 = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
+    SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
   `);
   if (!milestone1.recordset.length || milestone1.recordset[0].Status !== "Paid") {
-    errors.push("Booking Amount (Milestone 1) must be fully paid before agreement preparation — if the customer's payment is showing under On Account, apply it to this milestone first via On Account Adjustment");
+    // On Account Adjustment (crmPayments.js applyOnAccountToMilestone) needs
+    // the on-account pool to cover THIS milestone's own balance — not the
+    // whole booking — so check against that, not GrandTotal, or this would
+    // wrongly tell staff to wait on money that's already enough to unblock
+    // Milestone 1 specifically.
+    const m1 = milestone1.recordset[0];
+    const m1Balance = m1 ? Math.max(0, Number(m1.AmountDue || 0) - Number(m1.AmountPaid || 0)) : 0;
+    const onAccountRow = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) AS AvailableOnAccount FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+    `);
+    const availableOnAccount = Number(onAccountRow.recordset[0]?.AvailableOnAccount) || 0;
+    if (m1Balance > 0 && availableOnAccount < m1Balance) {
+      const shortfall = Math.round((m1Balance - availableOnAccount) * 100) / 100;
+      errors.push(`Booking Amount (Milestone 1) must be fully paid before agreement preparation — ₹${shortfall.toLocaleString("en-IN")} is still needed (₹${availableOnAccount.toLocaleString("en-IN")} available On Account of the ₹${m1Balance.toLocaleString("en-IN")} due)`);
+    } else {
+      errors.push("Booking Amount (Milestone 1) must be fully paid before agreement preparation — the customer's payment is showing under On Account; apply it to this milestone via On Account Adjustment");
+    }
   }
 
   // Financing Type must be explicitly declared (Self-funded / Loan-financed)
@@ -445,13 +461,19 @@ async function getProjectSaleGate(pool, bookingId) {
 }
 
 /**
- * Auto-advance step: the moment an agreement is Executed AND every payment
- * milestone is Paid/Waived (in either order), automatically create the
- * sales deed shell — instead of waiting for staff to notice both conditions
- * landed. No-op if a deed already exists for the booking (UNIQUE BookingId)
- * or either prerequisite is still outstanding.
- * Call sites: crmAgreements.js (after /:id/mark-executed) and
- * crmPayments.js (after a milestone becomes Paid or is waived).
+ * Auto-advance step: the moment Handover is Completed AND the Agreement is
+ * Registered (in either order), automatically create the sales deed shell —
+ * instead of waiting for staff to notice both conditions landed. No-op if a
+ * deed already exists for the booking (UNIQUE BookingId) or either
+ * prerequisite is still outstanding. (Sale Deed/Conveyance Deed is executed
+ * AFTER possession handover in the under-construction workflow, not before —
+ * see commit 566b6cbb.)
+ * Real call site: crmHandover.js (after a Handover's status transitions to
+ * Completed). Also called from crmPayments.js (after a milestone becomes
+ * Paid or is waived) — a holdover from when milestone-settlement was the
+ * trigger; harmless no-op there now since Handover/Agreement are checked
+ * fresh on every call, but Handover completion is the only path that can
+ * actually flip this from no-op to creating the deed.
  */
 async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   const existing = await pool.request().input("bid", sql.Int, bookingId)
@@ -547,9 +569,19 @@ function agreementDateError(message, status) {
 // THEM to respond — never while waiting on the other side. Writes
 // CrmAgreementDateHistory exactly as before (unchanged shape/consumers).
 async function proposeAgreementDate(pool, agreementId, proposedBy, proposedDate, actorUserId) {
+  // UPDLOCK+HOLDLOCK: this turn-taking check is reachable from at least
+  // four independent entry points on the same agreement (staff propose/
+  // accept, staff proxy-propose/proxy-accept, and the customer portal's own
+  // propose/accept) — two racing at once (e.g. staff proxy-accepts the
+  // instant the customer independently accepts via the portal) could both
+  // read the same "my turn" state before either write lands, producing two
+  // CrmAgreementDateHistory rows and leaving ProposedDateStatus pointed at
+  // the wrong side's turn. The lock only actually holds if the caller has
+  // this running inside a transaction (every caller does, or is fixed to,
+  // per this session's callers of proposeAgreementDate/acceptAgreementDate).
   const row = await pool.request().input("id", sql.Int, agreementId).query(`
     SELECT AgreementDate, DateApprovalStatus, ProposedDateStatus
-    FROM dbo.CrmAgreement WHERE Id = @id
+    FROM dbo.CrmAgreement WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
   `);
   const ag = row.recordset[0];
   if (!ag) throw agreementDateError("Agreement not found", 404);
@@ -590,9 +622,10 @@ async function proposeAgreementDate(pool, agreementId, proposedBy, proposedDate,
 // under the old two-column design. Returns true if this call is the one
 // that just opened that gate.
 async function acceptAgreementDate(pool, agreementId, acceptedBy) {
+  // Same UPDLOCK+HOLDLOCK reasoning as proposeAgreementDate above.
   const row = await pool.request().input("id", sql.Int, agreementId).query(`
     SELECT AgreementDate, DateApprovalStatus, ProposedDate, ProposedDateStatus
-    FROM dbo.CrmAgreement WHERE Id = @id
+    FROM dbo.CrmAgreement WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
   `);
   const ag = row.recordset[0];
   if (!ag) throw agreementDateError("Agreement not found", 404);

@@ -13,7 +13,7 @@ const { getNextDocNumber } = require("../services/docNumber");
 const { logCommunication } = require("../services/crmCommunicationLog");
 const { requireActiveBooking, requireApprovedBooking, checkLoanProcessingCleared, maybeAutoCreateLegalMilestone, getProjectSaleGate } = require("../services/crmWorkflowGuards");
 const { logCrmAudit } = require("../services/crmAudit");
-const { transition: approvalTransition, recordGLPosting, canPerformCrmGatedAction } = require("../services/approvalService");
+const { transition: approvalTransition, recordGLPosting, canPerformCrmGatedAction, CRM_APPROVER_ROLES } = require("../services/approvalService");
 const { emitNotification } = require("../services/notify");
 const { postCrmSalesDeedStatutoryToGL } = require("../services/crmLedger");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
@@ -130,6 +130,35 @@ async function logDeedApprovalHistory(deedId, action, remarks, actorIdVal, actor
     .input('aid', sql.Int, actorIdVal)
     .query(`INSERT INTO dbo.CrmSalesDeedApprovalLog (SalesDeedId, Action, Remarks, ActorType, ActorId, CreatedAt)
             VALUES (@did, @act, @rem, @atype, @aid, SYSDATETIME())`);
+}
+
+// Uploading the Sales Deed's documents is a legal/registration act tied to
+// an official government record — it must come from the specific Legal
+// Executive assigned to THIS deed (PUT /:id/assign-legal), not just anyone
+// holding generic crm-sales-deed "edit" rights. Mirrors the ownership-gate
+// pattern in crmCustomerBankDetails.js's requireAssignedOrApprover: an
+// approver-tier role (or the legal department head) still overrides, the
+// same as a locked KYC record.
+async function requireAssignedLegalOrApprover(req, res, pool, deedId) {
+  const role = String(req.user?.role || "").trim().toLowerCase();
+  if ([...CRM_APPROVER_ROLES, "legal_head"].includes(role)) return true;
+
+  const row = await pool.request().input("id", sql.Int, deedId)
+    .query("SELECT LegalExecutiveId FROM dbo.CrmSalesDeed WHERE Id = @id");
+  if (!row.recordset.length) {
+    res.status(404).json({ error: "Sale deed not found" });
+    return false;
+  }
+  const legalExecutiveId = row.recordset[0].LegalExecutiveId;
+  const actor = actorId(req);
+  if (legalExecutiveId != null && actor != null && legalExecutiveId === actor) return true;
+
+  res.status(403).json({
+    error: legalExecutiveId == null
+      ? "No Legal Executive is assigned to this deed yet — assign one before uploading documents"
+      : "This deed is locked to its assigned Legal Executive — only they (or Legal/admin) can upload documents or submit it",
+  });
+  return false;
 }
 
 async function getDeedBookingLockReason(pool, deedId) {
@@ -1433,6 +1462,7 @@ router.put("/:id/submit", requirePageRight("crm-sales-deed", "edit"), async (req
   try {
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
+    if (!(await requireAssignedLegalOrApprover(req, res, pool, id))) return;
     const lock = await getDeedBookingLockReason(pool, id);
     if (lock) return res.status(400).json({ error: `Cannot submit deed because ${lock}` });
     
@@ -1950,6 +1980,7 @@ router.post("/:id/documents/upload", requirePageRight("crm-sales-deed", "edit"),
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
     const { DocumentType = 'Other', Label, IsMandatory = 0, Remarks } = req.body;
+    if (!(await requireAssignedLegalOrApprover(req, res, pool, id))) return;
     const lock = await getDeedBookingLockReason(pool, id);
     if (lock) return res.status(400).json({ error: `Cannot upload documents because ${lock}` });
 
@@ -2094,6 +2125,7 @@ router.post("/:id/documents/:docId/attach", requirePageRight("crm-sales-deed", "
     const pool = getPool();
     const id = parseInt(req.params.id, 10);
     const docId = parseInt(req.params.docId, 10);
+    if (!(await requireAssignedLegalOrApprover(req, res, pool, id))) return;
     const lock = await getDeedBookingLockReason(pool, id);
     if (lock) return res.status(400).json({ error: `Cannot attach file because ${lock}` });
 

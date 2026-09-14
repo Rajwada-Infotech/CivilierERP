@@ -79,18 +79,14 @@ const APP_SELECT = `
     -- longer represents a real conversion, so its Application falls back
     -- to NotConverted alongside every other dead-end Application, instead
     -- of permanently masquerading as a successful sale.
-    -- This is safe against re-booking the same unit twice: the moment a
-    -- Booking is cancelled/rejected, syncApplicationOnBookingTerminal (see
-    -- crmApplicationWorkflow.js, called from crmCancellations.js /:id/approve)
-    -- force-advances this Application's own Status to match — so it no
-    -- longer reads 'Approved' either, which is what actually keeps it out
-    -- of the forBooking dropdown below (Stage alone was never the guard
-    -- against a second booking; Status is). NOTE: this assumes that sync
-    -- has always run — any pre-existing row where a booking died before
-    -- that cascade was wired in could still show Status = '${CrmStatus.APPROVED}' with a
-    -- dead booking, which this change would make eligible for forBooking
-    -- again. Worth a one-time check for Status = '${CrmStatus.APPROVED}' AND
-    -- BookingStatus IN ('${CrmStatus.CANCELLED}','${CrmStatus.REJECTED}') before relying on this.
+    -- This is what actually keeps the same unit from being re-booked twice
+    -- via the forBooking dropdown below: that filter checks Stage !==
+    -- 'Converted' directly (computed live off CrmBooking's own existence/
+    -- status), not CrmApplication.Status — Status is legacy-only (nothing
+    -- in current code ever sets it to 'Approved'; see
+    -- crmApplicationWorkflow.js's module docstring) and plays no role in
+    -- this guard. Stage being derived fresh from the live Booking row on
+    -- every query is exactly what makes it safe regardless of that history.
     CASE
       WHEN bk.Id IS NOT NULL AND bk.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 'Converted'
       WHEN a.Status IN ('${CrmStatus.REJECTED}', '${CrmStatus.CANCELLED}') THEN 'NotConverted'
@@ -415,12 +411,12 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const changingUnitSelection =
       b.CompanyId !== undefined || b.ProjectId !== undefined ||
       b.PreferredUnitId !== undefined || b.PaymentPlanId !== undefined;
-    // Rejected included deliberately: PUT /:id/reject is now a real
-    // "revert to fill/re-check" verification action (see approvalService's
-    // crm-applications module + crmApplications.js PUT /:id/reject), and
-    // the whole point of a revert is that the preparer can fix what the
-    // verifier flagged — including the unit/plan selection itself — before
-    // resubmitting. Locked again once Approved, same as before.
+    // Rejected included deliberately: it's the legacy resubmit path (see
+    // crmApplicationWorkflow.js's module docstring — nothing in current
+    // code sets Rejected, but old data may still carry it), resubmittable
+    // back to Pending via PUT /:id/submit. Whoever picks it back up should
+    // be able to fix the unit/plan selection itself before resubmitting,
+    // same as any other pre-submission edit.
     if (changingUnitSelection && ![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(existingStatus)) {
       return res.status(400).json({
         error: `Cannot change the Company/Project/Unit/Payment Plan selection once the application is ${existingStatus} — this is locked after approval.`,
@@ -523,16 +519,6 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
         return res.status(planErr.status || 400).json({ error: planErr.message });
       }
     }
-
-    // Mandatory-bank rule — same pattern as crmPayments.js's
-    // createReceiptForMilestone (the auto-sync's own receipt-write check)
-    // and CrmBooking.tsx's client-side check: once a real token amount is
-    // on the application and the project has at least one tagged company
-    // bank, a DepositBankId must be present (either just supplied, or
-    // already saved from an earlier step). Only gated on TokenValue —
-    // matches the wizard, which only shows/requires the picker once a
-    // token value is actually entered.
-
 
     const BROKERAGE_PLANS = ["OneTime", "TwoPart", "AgreementOnly"];
     if (b.BrokeragePaymentPlan !== undefined && b.BrokeragePaymentPlan !== null && !BROKERAGE_PLANS.includes(b.BrokeragePaymentPlan)) {

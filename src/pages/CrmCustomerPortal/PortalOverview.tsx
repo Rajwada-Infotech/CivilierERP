@@ -31,7 +31,11 @@ const PortalOverview: React.FC = () => {
 
   const milestones = timeline.paymentMilestones || [];
   const totalDue = milestones.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
-  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+  // Includes money held in On Account but not yet swept onto a milestone —
+  // same fix as PortalPayments.tsx, so a customer who's paid in full doesn't
+  // see a stalled progress bar while staff work through the sweep.
+  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0)
+    + Number(timeline.onAccountTotalReceived || 0);
   const pctPaid = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
   const nextDue = milestones.find((m: any) => m.Status === "Pending");
 

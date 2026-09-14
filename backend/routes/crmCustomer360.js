@@ -42,9 +42,18 @@ router.get("/", requirePageRight("crm-customer-360", "view"), async (req, res) =
         (SELECT COUNT(*) FROM dbo.CrmApplication a WHERE a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AS ApplicationCount,
         (SELECT COUNT(*) FROM dbo.CrmBooking b JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS ActiveBookingCount,
-        (SELECT ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0)
+        -- Includes each booking's unswept On Account balance alongside
+        -- milestone AmountPaid — under the current "everything holds in On
+        -- Account until an explicit sweep" rule (crmPayments.js
+        -- applyCrmMilestonePaymentApproval / applyCrmOnAccountPaymentApproval)
+        -- every payment sits un-swept by default, so AmountPaid alone would
+        -- under-report real cash received from this customer.
+        ((SELECT ISNULL(SUM(ISNULL(m.AmountPaid, 0)), 0)
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
-          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS TotalPaid,
+          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}'))
+        + (SELECT ISNULL(SUM(oa.Amount - ISNULL(oa.AppliedAmount,0)), 0)
+          FROM dbo.CrmOnAccountPayment oa JOIN dbo.CrmBooking b ON b.Id = oa.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+          WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}'))) AS TotalPaid,
         (SELECT ISNULL(SUM(CASE WHEN m.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m.AmountDue - ISNULL(m.AmountPaid, 0) ELSE 0 END), 0)
           FROM dbo.CrmPaymentMilestone m JOIN dbo.CrmBooking b ON b.Id = m.BookingId JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
           WHERE (a.Mobile = c.Mobile OR a.AltMobile = c.Mobile) AND b.Status NOT IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}')) AS TotalOutstanding
@@ -127,7 +136,10 @@ router.get("/:mobile", requirePageRight("crm-customer-360", "view"), async (req,
                pp.Status AS PrePossessionStatus,
                (SELECT COUNT(*) FROM dbo.CrmNoc n WHERE n.BookingId = b.Id AND n.Status <> 'Issued') AS NocPendingCount,
                (SELECT COUNT(*) FROM dbo.CrmNoc n WHERE n.BookingId = b.Id) AS NocTotalCount,
-               (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalPaid,
+               -- Plus unswept On Account balance — same reasoning as the
+               -- customer-level TotalPaid above.
+               (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+                 + (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS TotalPaid,
                (SELECT ISNULL(SUM(AmountDue),0)  FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalDue,
                CASE WHEN b.Status IN ('${CrmStatus.CANCELLED}', '${CrmStatus.REJECTED}') THEN 0 ELSE
                  (SELECT ISNULL(SUM(CASE WHEN m2.Status NOT IN ('${CrmStatus.PAID}', 'Waived') THEN m2.AmountDue - ISNULL(m2.AmountPaid, 0) ELSE 0 END), 0)

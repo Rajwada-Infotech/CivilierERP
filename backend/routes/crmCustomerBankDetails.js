@@ -125,7 +125,13 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
                JOIN dbo.CrmPaymentMilestone m ON m.Id = rp.CrmMilestoneId
                WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
                  AND oap.Amount > oap.AppliedAmount
-             ) THEN 1 ELSE 0 END AS BIT) AS Milestone1AwaitingAdjustment
+             ) THEN 1 ELSE 0 END AS BIT) AS Milestone1AwaitingAdjustment,
+             -- On Account Adjustment (crmPayments.js applyOnAccountToMilestone)
+             -- needs the on-account pool to cover Milestone 1's OWN balance,
+             -- not the whole booking — surfaced here so the frontend can show
+             -- the real per-milestone shortfall instead of "go apply it".
+             (SELECT TOP 1 AmountDue - ISNULL(AmountPaid,0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Balance,
+             ISNULL((SELECT SUM(Amount - ISNULL(AppliedAmount,0)) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS OnAccountAvailable
       FROM dbo.CrmBooking b WHERE b.Id = @bid
     `);
     const bookingExtra = bookingRow.recordset[0] || {};
@@ -194,10 +200,23 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
     // booking amount was actually paid. Mirror the same rule here, server-
     // side, using the identical Milestone1Status subquery GET already uses.
     const m1 = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
+      SELECT TOP 1 Status, AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
     `);
     if (m1.recordset[0]?.Status !== CrmStatus.PAID) {
-      return res.status(400).json({ error: "Booking Amount (Milestone 1) must be paid before Bank/KYC details can be saved — if the customer's payment is showing under On Account, apply it to this milestone first via On Account Adjustment" });
+      // On Account Adjustment (crmPayments.js applyOnAccountToMilestone) needs
+      // the on-account pool to cover Milestone 1's OWN balance, not the whole
+      // booking — same fix as validateAgreementPreparationPrerequisites
+      // (crmWorkflowGuards.js).
+      const m1Row = m1.recordset[0];
+      const m1Balance = m1Row ? Math.max(0, Number(m1Row.AmountDue || 0) - Number(m1Row.AmountPaid || 0)) : 0;
+      const onAccountRow = await pool.request().input("bid", sql.Int, bid).query(`
+        SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) AS AvailableOnAccount FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+      `);
+      const availableOnAccount = Number(onAccountRow.recordset[0]?.AvailableOnAccount) || 0;
+      const error = m1Balance > 0 && availableOnAccount < m1Balance
+        ? `Booking Amount (Milestone 1) must be paid before Bank/KYC details can be saved — ₹${Math.round((m1Balance - availableOnAccount) * 100) / 100} still needed (₹${availableOnAccount} available On Account of the ₹${m1Balance} due)`
+        : "Booking Amount (Milestone 1) must be paid before Bank/KYC details can be saved — the customer's payment is showing under On Account; apply it to this milestone via On Account Adjustment";
+      return res.status(400).json({ error });
     }
 
     // Financing Type (Self-funded / Loan-financed) lives on CrmBooking, not

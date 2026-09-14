@@ -70,7 +70,10 @@ const PortalProfile: React.FC = () => {
 
   const milestones = timeline.paymentMilestones || [];
   const totalDue = milestones.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
-  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+  // Includes money held in On Account but not yet swept onto a milestone —
+  // same fix as PortalPayments.tsx / PortalOverview.tsx.
+  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0)
+    + Number(timeline.onAccountTotalReceived || 0);
   const openTickets = (tickets as any[]).filter((t) => t.Status !== "Resolved" && t.Status !== "Closed").length;
 
   const keyDates = [
