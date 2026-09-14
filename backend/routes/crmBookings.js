@@ -1893,6 +1893,11 @@ router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "vie
 // same approver set as Money Receipt approval (crmMoneyReceiptWorkflow.js's
 // APPROVER_ROLES) since this is a financial-document correction, not routine
 // booking editing.
+// Mirrored (not shared — frontend can't import backend code) in
+// src/pages/CRM/CrmInvoices.tsx's own INVOICE_VOID_ROLES, purely to hide/
+// show the Void button — that copy is advisory only, this list is the real
+// enforcement. If this list ever changes, update the frontend copy too or
+// the button's visibility will silently drift from what the server allows.
 const INVOICE_VOID_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
 router.put("/:id/invoices/:invoiceId/void", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {
