@@ -497,6 +497,9 @@ async function createApp() {
   // Version number is not sensitive — served publicly so the Login/Landing
   // footers (pre-auth) can show the real DB-driven version, not "…".
   app.use("/api/app-version", require("./routes/appVersion"));
+  // "New: X just launched" badge on the Login page — public/pre-auth for
+  // the same reason as app-version above.
+  app.use("/api/feature-announcement", require("./routes/featureAnnouncement"));
   // Customer portal manages its own auth entirely (public /login using the
   // separate CrmCustomerPortalUser table + JWT, then portalAuth for
   // everything past that) — same reason /api/users is registered here
