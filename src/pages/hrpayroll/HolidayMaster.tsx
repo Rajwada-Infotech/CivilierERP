@@ -55,24 +55,29 @@ const HolidayMaster: React.FC = () => {
     staleTime: 60 * 1000,
   });
 
-  const { data: finYearData } = useQuery({
-    queryKey: ["fin-year-options"],
-    queryFn: getFinYears,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const finYearOptions = (Array.isArray(finYearData) ? finYearData : []).map((fy: any) => ({
-    value: String(fy.FId),
-    label: fy.FName,
-  }));
-
   const rows: HolidayRow[] = Array.isArray(data) ? data : [];
   const mappedData: RecordWithId[] = rows.map(mapRow);
 
+  // Self-fetching rather than reading from a separate useQuery here --
+  // MasterPage calls asyncOptions() exactly once on mount, so relying on an
+  // outer query's `data` risks a race where that query hasn't resolved yet
+  // and an empty options list gets cached for the rest of the page's life.
   const fields: FieldDef[] = [
     { name: "holidayName", label: "Holiday Name", type: "text", required: true },
     { name: "holidayDate", label: "Date", type: "date", required: true },
-    { name: "finYearId", label: "Fin Year", type: "select", asyncOptions: async () => finYearOptions, defaultToFirstOption: true },
+    {
+      name: "finYearId",
+      label: "Fin Year",
+      type: "select",
+      asyncOptions: async () => {
+        const list = await getFinYears();
+        return (Array.isArray(list) ? list : []).map((fy: any) => ({
+          value: String(fy.FId),
+          label: fy.FName,
+        }));
+      },
+      defaultToFirstOption: true,
+    },
     { name: "isActive", label: "Status", type: "toggle", defaultValue: true },
   ];
 

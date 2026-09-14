@@ -55,24 +55,28 @@ const DesignationMaster: React.FC = () => {
     staleTime: 60 * 1000,
   });
 
-  const { data: departmentData } = useQuery({
-    queryKey: ["department-master"],
-    queryFn: getDepartmentOptions,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const departmentOptions = (Array.isArray(departmentData) ? departmentData : []).map((d) => ({
-    value: String(d.Id),
-    label: d.DepartmentName,
-  }));
-
   const rows: DesignationRow[] = Array.isArray(data) ? data : [];
   const mappedData: RecordWithId[] = rows.map(mapRow);
 
+  // Self-fetching rather than reading from a separate useQuery here --
+  // MasterPage calls asyncOptions() exactly once on mount, so relying on an
+  // outer query's `data` risks a race where that query hasn't resolved yet
+  // and an empty options list gets cached for the rest of the page's life.
   const fields: FieldDef[] = [
     { name: "designationName", label: "Designation Name", type: "text", required: true },
     { name: "designationCode", label: "DG Code", type: "text", required: true, uppercase: true },
-    { name: "departmentId", label: "Department", type: "select", asyncOptions: async () => departmentOptions },
+    {
+      name: "departmentId",
+      label: "Department",
+      type: "select",
+      asyncOptions: async () => {
+        const list = await getDepartmentOptions();
+        return (Array.isArray(list) ? list : []).map((d) => ({
+          value: String(d.Id),
+          label: d.DepartmentName,
+        }));
+      },
+    },
     { name: "isActive", label: "Status", type: "toggle", defaultValue: true },
   ];
 
