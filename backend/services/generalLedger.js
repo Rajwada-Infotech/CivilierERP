@@ -23,8 +23,11 @@ const GL_ACCOUNTS = {
   ON_ACCOUNT: "Company On Account A/c",
   // Pooled liability for a standalone Received Payment (no invoice,
   // contract, or CRM milestone/booking to apply against) — see
-  // postReceivedPaymentApproval below. Migration 424.
-  ADVANCE_FROM_CUSTOMERS: "Advance from Customers A/c",
+  // postReceivedPaymentApproval below. Migration 424 seeded a new head
+  // named "Advance from Customers A/c" for this; migration 425 consolidated
+  // it onto the pre-existing "Advance from Customer" head instead (same
+  // concept, one head, no "A/c" suffix) — this name must match that head.
+  ADVANCE_FROM_CUSTOMERS: "Advance from Customer",
   // Cash-mode counter-account is NOT listed here — since migration 418 it's
   // a real, user-selectable Bank (LHeadType='B'), resolved via
   // getCashInHandBankId() by LHeadCode='CASH-IN-HAND', not this
@@ -1284,7 +1287,7 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
   // the customer's own Sundry Debtors head here would be wrong: an advance
   // is a liability (goods/services still owed to them), not a reduction of
   // what they owe US — the two are opposite sides of the balance sheet.
-  // Posts to the pooled "Advance from Customers A/c" head instead (same
+  // Posts to the pooled "Advance from Customer" head instead (same
   // pattern as GL_ACCOUNTS.ON_ACCOUNT on the supplier side), tagged in the
   // narration with who it's actually from since the pooled head itself
   // carries no per-customer breakdown.
