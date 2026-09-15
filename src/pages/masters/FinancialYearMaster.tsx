@@ -71,31 +71,19 @@ const FinancialYearMaster: React.FC = () => {
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
-      try {
-        await addFinYear(toPayload(event.record));
-        toast.success("Financial year saved!");
-        await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
+      await addFinYear(toPayload(event.record));
+      toast.success("Financial year saved!");
+      await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
     }
     if (event.action === "update") {
-      try {
-        await updateFinYear(event.id, toPayload(event.record));
-        toast.success("Financial year updated!");
-        await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+      await updateFinYear(event.id, toPayload(event.record));
+      toast.success("Financial year updated!");
+      await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
     }
     if (event.action === "delete") {
-      try {
-        await deleteFinYear(event.id);
-        toast.success("Financial year deleted!");
-        await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
-      }
+      await deleteFinYear(event.id);
+      toast.success("Financial year deleted!");
+      await queryClient.invalidateQueries({ queryKey: ["fin-years"] });
     }
   };
 

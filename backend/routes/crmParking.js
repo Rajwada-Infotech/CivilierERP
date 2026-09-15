@@ -114,7 +114,11 @@ const ALLOTMENT_SELECT = `
          COALESCE(p.BlockId,     s.BlockId)      AS BlockId,
          s.SlotNo, a.ApplicantName, a.Mobile,
          b.BookingNo, b.Status AS BookingStatus, b.GrandTotal AS BookingGrandTotal,
-         ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0) AS BookingTotalPaid
+         -- Plus unswept On Account balance — under the current "everything
+         -- holds in On Account until an explicit sweep" rule, AmountPaid
+         -- alone would under-report real cash received against the booking.
+         ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id), 0)
+           + ISNULL((SELECT SUM(Amount - ISNULL(AppliedAmount,0)) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS BookingTotalPaid
   FROM dbo.CrmParkingAllotment pa
   LEFT JOIN dbo.ParkingMaster p ON p.Id = pa.ParkingMasterId
   LEFT JOIN dbo.ParkingSlot s ON s.Id = pa.ParkingSlotId

@@ -482,6 +482,15 @@ export default function FundTransfer() {
   const isDigitalMode = DIGITAL_MODES.includes(mode as FundTransferMode);
   const isPostDated = mode === "Post-Dated Cheque";
 
+  // A Cash in Hand bank (LHeadCode "CASH-IN-HAND" or per-company
+  // "CASH-C-<companyId>" — see generalLedger.js's ensureCashInHandHead)
+  // isn't a real bank account — either side of the transfer being one
+  // locks Payment Mode to Cash the same way Payment.tsx does, instead of
+  // leaving it possible to record e.g. a Cheque against cash-in-hand.
+  const isCashInHandBank = (bankId: string) =>
+    banks.find((b) => String(b.BId) === bankId)?.BCode?.startsWith("CASH-") ?? false;
+  const cashInHandInvolved = isCashInHandBank(sourceBankId) || isCashInHandBank(destBankId);
+
   // The cheque book being drawn from belongs to the SOURCE bank — that's
   // the account the money (and the physical cheque) actually leaves from.
   useEffect(() => {
@@ -632,7 +641,9 @@ export default function FundTransfer() {
       const saved = localStorage.getItem(ftDraftKey);
       if (saved) {
         const d = JSON.parse(saved);
-        if (d.transferType) setTransferType(d.transferType);
+        // Never restore "Inter" from a stale pre-existing draft — the type
+        // picker for it no longer exists, so there'd be no way to change it.
+        if (d.transferType === "Intra") setTransferType(d.transferType);
         if (d.transferDate) setTransferDate(d.transferDate);
         if (d.sourceCompanyId) setSourceCompanyId(d.sourceCompanyId);
         if (d.destCompanyId) setDestCompanyId(d.destCompanyId);
@@ -693,6 +704,13 @@ export default function FundTransfer() {
     }
     if (!DIGITAL_MODES.includes(m)) setDigitalRefNumber("");
   };
+
+  // Picking a Cash in Hand bank on either side locks Payment Mode to Cash —
+  // see cashInHandInvolved above.
+  useEffect(() => {
+    if (cashInHandInvolved && mode !== "Cash") handleModeChange("Cash");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cashInHandInvolved]);
 
   const submit = async () => {
     if (!sourceCompanyId) { toast.error("Select the source company."); return; }
@@ -1018,55 +1036,30 @@ export default function FundTransfer() {
               <div className="min-w-0">
                 <DialogTitle className="text-base font-semibold font-heading">New Fund Transfer</DialogTitle>
                 <DialogDescription className="text-xs mt-0.5">
-                  Move cash between bank accounts. Inter-company transfers create a Loan Sanction record automatically.
+                  Move cash between two banks of the same company. Moving money between two different companies is a loan — use the Loan Sanction module for that instead.
                 </DialogDescription>
               </div>
             </div>
           </DialogHeader>
 
           <div className="px-4 sm:px-7 py-3.5 sm:py-4 space-y-3.5 sm:space-y-4 flex-1 min-h-0 overflow-y-auto">
-            {/* Type toggle */}
-            <div className="grid grid-cols-2 gap-2.5 sm:gap-3">
-              <button
-                type="button"
-                onClick={() => setTransferType("Intra")}
-                className={cn(
-                  "relative flex items-center gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border-2 text-left transition-all",
-                  transferType === "Intra" ? "border-primary bg-primary/5 shadow-sm shadow-primary/10" : "border-border hover:bg-muted/40 hover:border-border/80",
-                )}
-              >
-                <div className={cn("w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center shrink-0 transition-colors", transferType === "Intra" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground")}>
-                  <Building2 size={15} className="sm:hidden" />
-                  <Building2 size={16} className="hidden sm:block" />
-                </div>
-                <div className="min-w-0">
-                  <p className={cn("text-xs sm:text-sm font-semibold", transferType === "Intra" ? "text-primary" : "text-foreground")}>Intra-Company</p>
-                  <p className="hidden sm:block text-[11px] text-muted-foreground">Between two banks of the same company</p>
-                </div>
-                {transferType === "Intra" && (
-                  <CheckCircle2 size={14} className="absolute top-2 right-2 text-primary" />
-                )}
-              </button>
-              <button
-                type="button"
-                onClick={() => setTransferType("Inter")}
-                className={cn(
-                  "relative flex items-center gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border-2 text-left transition-all",
-                  transferType === "Inter" ? "border-violet-500 bg-violet-500/5 shadow-sm shadow-violet-500/10" : "border-border hover:bg-muted/40 hover:border-border/80",
-                )}
-              >
-                <div className={cn("w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center shrink-0 transition-colors", transferType === "Inter" ? "bg-violet-500/15 text-violet-600" : "bg-muted text-muted-foreground")}>
-                  <Landmark size={15} className="sm:hidden" />
-                  <Landmark size={16} className="hidden sm:block" />
-                </div>
-                <div className="min-w-0">
-                  <p className={cn("text-xs sm:text-sm font-semibold", transferType === "Inter" ? "text-violet-700" : "text-foreground")}>Inter-Company</p>
-                  <p className="hidden sm:block text-[11px] text-muted-foreground">Between two different companies</p>
-                </div>
-                {transferType === "Inter" && (
-                  <CheckCircle2 size={14} className="absolute top-2 right-2 text-violet-600" />
-                )}
-              </button>
+            {/* Inter-company transfers were removed from this form — moving
+                money between two different companies is a loan (one now
+                owes the other), so it belongs in the Loan Sanction module,
+                which already has the interest/installment machinery this
+                form never did. Fund Transfer is Intra-company only now;
+                transferType stays "Intra" unconditionally (see useState
+                above) — kept as a field rather than deleted outright since
+                historical Inter transfers still need TransferType to
+                display correctly in the list/detail views below. */}
+            <div className="flex items-center gap-2.5 sm:gap-3 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border-2 border-primary bg-primary/5">
+              <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center shrink-0 bg-primary/15 text-primary">
+                <Building2 size={16} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs sm:text-sm font-semibold text-primary">Intra-Company</p>
+                <p className="hidden sm:block text-[11px] text-muted-foreground">Between two banks of the same company</p>
+              </div>
             </div>
 
             {/* Source / Destination panels */}
@@ -1181,22 +1174,33 @@ export default function FundTransfer() {
                 <Wallet size={11} /> Payment Mode *
               </p>
               <div className="flex flex-wrap gap-1.5">
-                {PAYMENT_MODES.map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => handleModeChange(m)}
-                    className={cn(
-                      "px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all",
-                      mode === m
-                        ? "border-primary bg-primary/10 text-primary shadow-sm"
-                        : "border-border text-muted-foreground hover:bg-muted/40 hover:border-border/80",
-                    )}
-                  >
-                    {m}
-                  </button>
-                ))}
+                {PAYMENT_MODES.map((m) => {
+                  const disabled = cashInHandInvolved && m !== "Cash";
+                  return (
+                    <button
+                      key={m}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => !disabled && handleModeChange(m)}
+                      className={cn(
+                        "px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all",
+                        disabled
+                          ? "border-border/40 text-muted-foreground/30 cursor-not-allowed"
+                          : mode === m
+                            ? "border-primary bg-primary/10 text-primary shadow-sm"
+                            : "border-border text-muted-foreground hover:bg-muted/40 hover:border-border/80",
+                      )}
+                    >
+                      {m}
+                    </button>
+                  );
+                })}
               </div>
+              {cashInHandInvolved && (
+                <p className="text-[11px] text-muted-foreground/70">
+                  Cash in Hand isn't a real bank account — Payment Mode is locked to Cash.
+                </p>
+              )}
 
               {isChequeMode && (
                 <div className="rounded-xl border border-border bg-muted/10 p-3 sm:p-3.5 space-y-3 mt-1">

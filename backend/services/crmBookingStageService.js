@@ -237,11 +237,29 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
   // Approved — which is exactly our "Confirmed".
   const result = await approvalTransition("crm-bookings", bookingId, "Approved", userEmail, userRole, null, userId);
 
-  const nextStage = stage === STAGE_MARKETING ? STAGE_DIRECTOR : STAGE_CONFIRMED;
   // Require at least 2 approval levels (Marketing Head + Director) before confirming.
   // A misconfigured 1-level workflow must never bypass Director approval.
   const MIN_APPROVAL_LEVELS = 2;
-  const confirmedNow = nextStage === STAGE_CONFIRMED && result.level >= result.totalLevels && result.totalLevels >= MIN_APPROVAL_LEVELS;
+  const confirmedNow = result.level >= result.totalLevels && result.totalLevels >= MIN_APPROVAL_LEVELS;
+  // nextStage is derived from the level approvalTransition ACTUALLY just
+  // recorded (result.level), never from the `stage` parameter this request
+  // started with. Those can disagree: approvalTransition holds its own
+  // UPDLOCK/HOLDLOCK on this booking's ApprovalAuditLog rows, so two
+  // concurrent approve calls (a double-click, a network retry, or — since
+  // admin/super_admin are valid approvers at BOTH levels — the same admin
+  // genuinely clicking Approve twice in quick succession) are correctly
+  // serialized THERE. But `stage` was read before this function's own
+  // requireActiveStage call, with no lock — the second call's `stage` can
+  // still say 'MarketingHeadApproval' even though the first call already
+  // advanced WorkflowStage to 'DirectorApproval' and this second call's
+  // approvalTransition just recorded level 2 (Director). Computing
+  // nextStage from `stage` in that case would advance WorkflowStage
+  // backward to 'DirectorApproval' while Status is already 'Approved' — a
+  // contradictory record that also skips the confirmedNow side effects
+  // (portal provisioning, pending-MR sweep) below. Keying off result.level
+  // instead makes this call correctly recognize itself as the confirming
+  // action whenever it actually was one, regardless of what `stage` says.
+  const nextStage = confirmedNow ? STAGE_CONFIRMED : STAGE_DIRECTOR;
 
   // approvalTransition (above) owns its own internal transaction/locking and
   // must run on the plain pool first — same established rule as every other
@@ -250,16 +268,25 @@ async function approveStageRequest(pool, bookingId, stage, userEmail, userRole, 
   // can't leave a booking's WorkflowStage advanced (or Confirmed) with no
   // trace of it in the stage log.
   const actionWord = confirmedNow ? "Confirmed" : "StageApproved";
+  // Same reasoning as nextStage above — which level was just recorded
+  // (result.level), not which stage this request started at (`stage`),
+  // decides which approval timestamp/actor this call stamps. The ISNULL
+  // guards in the UPDATE already make this idempotent against a genuine
+  // re-run, but keying off the wrong level here would mis-attribute a
+  // Director approval as a repeat Marketing Head stamp (or vice versa) in
+  // exactly the race this whole function is now hardened against.
+  const isMarketingLevel = result.level === 1;
+  const isDirectorLevel = result.level >= MIN_APPROVAL_LEVELS;
   const tx = pool.transaction();
   await tx.begin();
   try {
     await tx.request()
       .input("bid", sql.Int, bookingId)
       .input("stg", sql.NVarChar(40), nextStage)
-      .input("mhAt", sql.DateTime2, stage === STAGE_MARKETING ? new Date() : null)
-      .input("mhBy", sql.Int, stage === STAGE_MARKETING ? userId : null)
-      .input("drAt", sql.DateTime2, stage === STAGE_DIRECTOR ? new Date() : null)
-      .input("drBy", sql.Int, stage === STAGE_DIRECTOR ? userId : null)
+      .input("mhAt", sql.DateTime2, isMarketingLevel ? new Date() : null)
+      .input("mhBy", sql.Int, isMarketingLevel ? userId : null)
+      .input("drAt", sql.DateTime2, isDirectorLevel ? new Date() : null)
+      .input("drBy", sql.Int, isDirectorLevel ? userId : null)
       .input("cfAt", sql.DateTime2, confirmedNow ? new Date() : null)
       .input("cfBy", sql.Int, confirmedNow ? userId : null)
       .query(`
@@ -378,6 +405,31 @@ async function rejectStageRequest(pool, bookingId, stage, userEmail, userRole, u
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Re-verify WorkflowStage under lock, inside this same transaction,
+    // immediately before acting — the requireActiveStage call above read it
+    // with no lock at all, so a concurrent approve on this same booking
+    // (which DOES take a real UPDLOCK/HOLDLOCK via approvalTransition) could
+    // have already advanced WorkflowStage in the gap between that read and
+    // this transaction starting. Without this re-check, a reject acting on
+    // stale stage info would bounce WorkflowStage backward over a genuinely
+    // newer approval and DELETE the ApprovalAuditLog row that approval just
+    // wrote — silently erasing a committed approval instead of rejecting
+    // the state the rejecter actually saw.
+    const lockRow = await tx.request().input("bid", sql.Int, bookingId).query(`
+      SELECT WorkflowStage, Status, IsActive FROM dbo.CrmBooking WITH (UPDLOCK, HOLDLOCK) WHERE Id = @bid
+    `);
+    const current = lockRow.recordset[0];
+    if (!current) throw Object.assign(new Error("Booking not found"), { status: 404 });
+    if (current.Status === "Cancelled" || current.Status === "Rejected" || current.IsActive === false) {
+      throw Object.assign(new Error(`This booking has been ${current.Status} — no further workflow actions are allowed`), { status: 400 });
+    }
+    if (current.WorkflowStage !== stage) {
+      throw Object.assign(
+        new Error(`Booking has already moved to '${stageLabel(current.WorkflowStage)}' — refresh and try again`),
+        { status: 409 },
+      );
+    }
+
     await tx.request()
       .input("bid", sql.Int, bookingId)
       .input("stg", sql.NVarChar(40), prevStage)

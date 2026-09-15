@@ -21,6 +21,13 @@ const GL_ACCOUNTS = {
   // AccountGroup wiring in 230) — was seeded but never actually posted to
   // until postOnAccountAdjustment/postPaymentApproval below.
   ON_ACCOUNT: "Company On Account A/c",
+  // Pooled liability for a standalone Received Payment (no invoice,
+  // contract, or CRM milestone/booking to apply against) — see
+  // postReceivedPaymentApproval below. Migration 424 seeded a new head
+  // named "Advance from Customers A/c" for this; migration 425 consolidated
+  // it onto the pre-existing "Advance from Customer" head instead (same
+  // concept, one head, no "A/c" suffix) — this name must match that head.
+  ADVANCE_FROM_CUSTOMERS: "Advance from Customer",
   // Cash-mode counter-account is NOT listed here — since migration 418 it's
   // a real, user-selectable Bank (LHeadType='B'), resolved via
   // getCashInHandBankId() by LHeadCode='CASH-IN-HAND', not this
@@ -77,16 +84,78 @@ async function getGLHeadId(pool, name) {
 // find it. Resolved by LHeadCode instead, same sentinel-lookup convention
 // 'DUMMY-BANK' already uses (see newPayment.js's IsInterCompanyTransfer
 // handling) rather than a name match.
-let cashInHandBankIdCache = null;
-async function getCashInHandBankId(pool) {
-  if (cashInHandBankIdCache != null) return cashInHandBankIdCache;
-  const result = await pool
+//
+// One head PER COMPANY (LHeadCode `CASH-C-<companyId>`), not the single
+// global 'CASH-IN-HAND' head migration 418 originally seeded — every
+// company's cash payments used to credit that ONE shared bucket, so
+// Company A's physical cash-on-hand balance was indistinguishable from
+// Company B's. Get-or-create, mirroring loanSanction.js's
+// ensureLoanLedgerHead — lazily seeds a company's own head the first time
+// it actually makes a cash payment, so no migration/backfill is needed for
+// companies that already existed, and new companies get one automatically
+// too. The old global 'CASH-IN-HAND' head is left untouched (its
+// historical GL activity stays exactly where it is) and is only used as a
+// last-resort fallback when a payment has no resolvable companyId at all.
+const cashInHandBankIdCache = new Map(); // companyId -> LHeadId
+async function ensureCashInHandHead(pool, companyId, createdBy) {
+  const code = `CASH-C-${companyId}`;
+  const existing = await pool
     .request()
-    .query(
-      `SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = 'CASH-IN-HAND' AND Status = 'Approved'`,
-    );
-  const id = result.recordset[0]?.LHeadId ?? null;
-  if (id) cashInHandBankIdCache = id;
+    .input("code", sql.NVarChar(20), code)
+    .query(`SELECT LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = @code`);
+  if (existing.recordset.length) return existing.recordset[0].LHeadId;
+
+  const companyRes = await pool
+    .request()
+    .input("id", sql.Int, companyId)
+    .query(`SELECT name FROM dbo.enterprise WHERE id = @id`);
+  const companyName = companyRes.recordset[0]?.name || `Company ${companyId}`;
+
+  const banksGroup = await pool.request().query(`SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'BNK'`);
+  const banksGroupId = banksGroup.recordset[0]?.AGId ?? null;
+
+  const inserted = await pool
+    .request()
+    .input("LHeadName", sql.NVarChar(200), `Cash in Hand - ${companyName}`)
+    .input("LHeadCode", sql.NVarChar(20), code)
+    .input("LHeadAddress", sql.NVarChar(300), "N/A")
+    .input("LHeadContactPerson", sql.NVarChar(100), "System Admin")
+    .input("LHeadType", sql.VarChar(50), "B")
+    .input("LHeadStatus", sql.Bit, 1)
+    .input("LBelongsTo", sql.Int, banksGroupId)
+    .input("Status", sql.NVarChar(20), "Approved")
+    .input("DisplayName", sql.NVarChar(200), `Cash in Hand — ${companyName}`)
+    .input("CompanyName", sql.NVarChar(500), companyName)
+    .input("CreatedBy", sql.NVarChar(150), createdBy || "system").query(`
+      INSERT INTO dbo.AccountHeadMaster
+        (LHeadName, LHeadCode, LHeadAddress, LHeadContactPerson, LHeadType, LHeadStatus,
+         LBelongsTo, Status, DisplayName, CompanyName, ApprovedBy, ApprovedAt, CreatedBy, CreatedAt)
+      OUTPUT INSERTED.LHeadId
+      VALUES
+        (@LHeadName, @LHeadCode, @LHeadAddress, @LHeadContactPerson, @LHeadType, @LHeadStatus,
+         @LBelongsTo, @Status, @DisplayName, @CompanyName, @CreatedBy, SYSDATETIME(), @CreatedBy, SYSDATETIME())
+    `);
+  try {
+    const { bumpCacheVersion } = require("../redis");
+    await bumpCacheVersion("account-head-master");
+  } catch { /* cache invalidation is best-effort, never block posting on it */ }
+  return inserted.recordset[0].LHeadId;
+}
+
+async function getCashInHandBankId(pool, companyId, createdBy) {
+  if (!companyId) {
+    // No resolvable company — fall back to the original global head rather
+    // than failing the posting outright (e.g. a payment predating any
+    // company scoping, or a party/JV payment where companyId genuinely
+    // isn't known).
+    const result = await pool
+      .request()
+      .query(`SELECT TOP 1 LHeadId FROM dbo.AccountHeadMaster WHERE LHeadCode = 'CASH-IN-HAND' AND Status = 'Approved'`);
+    return result.recordset[0]?.LHeadId ?? null;
+  }
+  if (cashInHandBankIdCache.has(companyId)) return cashInHandBankIdCache.get(companyId);
+  const id = await ensureCashInHandHead(pool, companyId, createdBy);
+  if (id) cashInHandBankIdCache.set(companyId, id);
   return id;
 }
 
@@ -735,11 +804,11 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   if (!payment) return { posted: false, reason: `Payment ${paymentId} not found` };
 
   // Cash-mode payments never carry a PBankID (Payment.tsx disables the Bank
-  // field for Cash) — Cash-in-Hand (migration 339) stands in for the bank
-  // leg instead of hard-failing for lack of one.
+  // field for Cash) — that company's own Cash-in-Hand head stands in for
+  // the bank leg instead of hard-failing for lack of one.
   let bankId = payment.PBankID;
   if (!bankId && payment.PMode === "Cash") {
-    bankId = await getCashInHandBankId(pool).catch(() => null);
+    bankId = await getCashInHandBankId(pool, parseInt(payment.PCompany, 10) || null, userEmail).catch(() => null);
   }
   if (!bankId)
     return { posted: false, reason: `Payment ${paymentId} has no PBankID (bank account)` };
@@ -1138,7 +1207,8 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
     .input("RPPaymentID", sql.Int, rpId)
     .query(`
       SELECT RPPaymentID, RPAmount, RPDocDate, RPDepositBankId, RPCustomerName,
-             RPReceivedFrom, RPCompanyId, RPProjectId, SourceSaleInvoiceId, DocNo
+             RPReceivedFrom, RPCompanyId, RPProjectId, SourceSaleInvoiceId, DocNo,
+             ContractId, CrmMilestoneId, CrmBookingId, CrmApplicationId
       FROM dbo.ReceivedPayment
       WHERE RPPaymentID = @RPPaymentID
     `);
@@ -1212,25 +1282,45 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
     };
   }
 
+  // Standalone advance — nothing yet to apply this receipt against (no
+  // invoice, no contract, not a CRM milestone/booking payment). Crediting
+  // the customer's own Sundry Debtors head here would be wrong: an advance
+  // is a liability (goods/services still owed to them), not a reduction of
+  // what they owe US — the two are opposite sides of the balance sheet.
+  // Posts to the pooled "Advance from Customer" head instead (same
+  // pattern as GL_ACCOUNTS.ON_ACCOUNT on the supplier side), tagged in the
+  // narration with who it's actually from since the pooled head itself
+  // carries no per-customer breakdown.
+  const isStandaloneAdvance =
+    !rp.SourceSaleInvoiceId && !rp.ContractId && !rp.CrmMilestoneId && !rp.CrmBookingId && !rp.CrmApplicationId;
+
   let customerHeadId = null;
-  if (rp.SourceSaleInvoiceId) {
-    const siResult = await pool
-      .request()
-      .input("SaleInvoiceID", sql.Int, rp.SourceSaleInvoiceId)
-      .query(`SELECT CustomerID FROM dbo.SaleInvoices WHERE SaleInvoiceID = @SaleInvoiceID`);
-    customerHeadId = siResult.recordset[0]?.CustomerID ?? null;
-  }
-  if (!customerHeadId) {
-    customerHeadId = await getHeadIdByName(
-      pool,
-      rp.RPCustomerName || rp.RPReceivedFrom,
-    );
+  if (isStandaloneAdvance) {
+    customerHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
+  } else {
+    if (rp.SourceSaleInvoiceId) {
+      const siResult = await pool
+        .request()
+        .input("SaleInvoiceID", sql.Int, rp.SourceSaleInvoiceId)
+        .query(`SELECT CustomerID FROM dbo.SaleInvoices WHERE SaleInvoiceID = @SaleInvoiceID`);
+      customerHeadId = siResult.recordset[0]?.CustomerID ?? null;
+    }
+    if (!customerHeadId) {
+      customerHeadId = await getHeadIdByName(
+        pool,
+        rp.RPCustomerName || rp.RPReceivedFrom,
+      );
+    }
   }
   if (!customerHeadId)
     return {
       posted: false,
       reason: `ReceivedPayment ${rpId}: could not resolve customer (invoice ${rp.SourceSaleInvoiceId ?? "none"}, name "${rp.RPCustomerName || rp.RPReceivedFrom}")`,
     };
+
+  const creditNarration = isStandaloneAdvance
+    ? `${docNo} — advance received from ${rp.RPCustomerName || rp.RPReceivedFrom || "customer"}`
+    : `${docNo} — payment received`;
 
   await postVoucher(pool, {
     voucherNo: docNo,
@@ -1249,7 +1339,7 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
       {
         lHeadId: customerHeadId,
         credit: amount,
-        narration: `${docNo} — payment received`,
+        narration: creditNarration,
       },
     ],
   });
@@ -1415,6 +1505,7 @@ module.exports = {
   GL_ACCOUNTS,
   getGLHeadId,
   getCashInHandBankId,
+  ensureCashInHandHead,
   getHeadIdByName,
   hasPosting,
   postVoucher,

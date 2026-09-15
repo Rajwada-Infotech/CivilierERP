@@ -247,6 +247,93 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
 });
 
 /**
+ * GET /api/inventory-master/item-ledger
+ * ?itemId=<int> (required) &godownId=<int> (required)
+ * ?date=YYYY-MM-DD  or  ?dateFrom=&dateTo=  (same modes as the main list)
+ *
+ * Drill-down for the Stock page: every StockLedger movement (GRN receipt,
+ * Material Issue, transfer, etc.) behind one item's In/Out figures for the
+ * selected godown + period, so a user can trace a number back to the
+ * document that produced it.
+ */
+router.get("/item-ledger", async (req, res) => {
+  try {
+    const pool = getPool();
+    const { hasCreatedDate, hasEntryDate, hasGodownCol } = await getSchema(pool);
+
+    const ledgerDateExpr =
+      hasCreatedDate && hasEntryDate
+        ? "COALESCE(sl.CreatedDate, sl.EntryDate)"
+        : hasCreatedDate
+          ? "sl.CreatedDate"
+          : hasEntryDate
+            ? "sl.EntryDate"
+            : null;
+
+    const itemId = req.query.itemId;
+    const godownId = req.query.godownId ? parseInt(req.query.godownId, 10) : null;
+    if (!itemId) {
+      return res.status(400).json({ error: "itemId is required" });
+    }
+
+    const rawDate = req.query.date;
+    const targetDate =
+      rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+        ? rawDate
+        : new Date().toISOString().slice(0, 10);
+    const rawDateFrom = req.query.dateFrom;
+    const rawDateTo = req.query.dateTo;
+    const dateFrom = rawDateFrom && /^\d{4}-\d{2}-\d{2}$/.test(rawDateFrom) ? rawDateFrom : null;
+    const dateTo = rawDateTo && /^\d{4}-\d{2}-\d{2}$/.test(rawDateTo) ? rawDateTo : targetDate;
+
+    const periodFilter = ledgerDateExpr
+      ? dateFrom
+        ? `CAST(${ledgerDateExpr} AS DATE) >= @dateFrom AND CAST(${ledgerDateExpr} AS DATE) <= @dateTo`
+        : `CAST(${ledgerDateExpr} AS DATE) = @targetDate`
+      : "1=0";
+
+    const request = pool
+      .request()
+      .input("itemId", sql.NVarChar(50), String(itemId))
+      .input("targetDate", sql.Date, targetDate);
+    if (dateFrom) {
+      request.input("dateFrom", sql.Date, dateFrom);
+      request.input("dateTo", sql.Date, dateTo);
+    }
+
+    let godownFilter = "";
+    if (hasGodownCol && godownId) {
+      request.input("godownId", sql.Int, godownId);
+      godownFilter = "AND sl.GodownID = @godownId";
+    }
+
+    const result = await request.query(`
+      SELECT
+        sl.StockID, sl.Type, sl.RefType, sl.RefID, sl.DocNo, sl.Qty, sl.UOM,
+        ${ledgerDateExpr ? ledgerDateExpr : "NULL"} AS MovementDate
+      FROM dbo.StockLedger sl
+      WHERE CONVERT(NVARCHAR(50), sl.ItemID) = @itemId
+        ${godownFilter}
+        AND ${periodFilter}
+      ORDER BY MovementDate DESC, sl.StockID DESC
+    `);
+
+    const rows = result.recordset.map((r) => ({
+      ...r,
+      Qty: Number(r.Qty || 0),
+    }));
+
+    res.json({ itemId: String(itemId), godownId, data: rows, total: rows.length });
+  } catch (err) {
+    console.error("[inventory-master] item-ledger GET error:", err.message);
+    res.status(500).json({
+      error: "Failed to fetch item ledger",
+      message: err.message,
+    });
+  }
+});
+
+/**
  * POST /api/inventory-master/cache-bust
  */
 router.post("/cache-bust", async (req, res) => {

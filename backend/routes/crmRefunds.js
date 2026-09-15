@@ -41,6 +41,71 @@ async function deductionPctForHeld(pool, heldOnAccountId) {
   return Number(r.recordset[0]?.DeductionPercent) || 0;
 }
 
+// A single CrmOnAccountPayment row can be claimed by a Refund AND a Rebooking
+// Transfer independently — each only checked (Amount - AppliedAmount) at ITS
+// OWN creation time, and AppliedAmount is only updated when ITS OWN flow
+// finally disburses/applies. Between creation and disbursal (which can span
+// the whole Draft -> Pending -> Approved -> FinancePending -> FinanceApproved
+// chain, realistically days) the other flow sees the same "remaining" balance
+// as still fully available, letting the same rupee be promised twice. This
+// computes what's ALREADY spoken for by any live (non-terminal) claim on the
+// source, on top of AppliedAmount, so callers can check against the true
+// remaining-and-unclaimed balance instead of just Amount - AppliedAmount.
+// `excludeRefundId`/`excludeTransferId` let a re-check exclude the very row
+// being disbursed (it's about to consume the balance itself, not compete for it).
+async function getUnclaimedRemaining(pool, onAccountId, { excludeRefundId = null, excludeTransferId = null } = {}) {
+  const r = await pool.request()
+    .input("id", sql.Int, onAccountId)
+    .input("exRefund", sql.Int, excludeRefundId)
+    .input("exTransfer", sql.Int, excludeTransferId)
+    .query(`
+      SELECT
+        oa.Amount, oa.AppliedAmount,
+        ISNULL((
+          SELECT SUM(GrossAmount) FROM dbo.CrmRefund
+          WHERE SourceOnAccountId = @id AND Status NOT IN ('Rejected', 'Paid')
+            AND (@exRefund IS NULL OR Id <> @exRefund)
+        ), 0) AS ReservedByRefunds,
+        ISNULL((
+          SELECT SUM(Amount) FROM dbo.CrmRebookingTransfer
+          WHERE HeldOnAccountId = @id AND Status NOT IN ('Rejected', 'Applied')
+            AND (@exTransfer IS NULL OR Id <> @exTransfer)
+        ), 0) AS ReservedByTransfers
+      FROM dbo.CrmOnAccountPayment oa WHERE oa.Id = @id
+    `);
+  const row = r.recordset[0];
+  if (!row) return { found: false, remaining: 0, reserved: 0, unclaimed: 0 };
+  const remaining = Number(row.Amount) - Number(row.AppliedAmount || 0);
+  const reserved = Number(row.ReservedByRefunds || 0) + Number(row.ReservedByTransfers || 0);
+  return { found: true, remaining, reserved, unclaimed: Math.round((remaining - reserved) * 100) / 100 };
+}
+
+// Once a source credit is fully consumed (Applied) by one flow, any other
+// still-open claim on it is now stale — auto-reject it the same way
+// cancellation-approval already auto-rejects conflicting amendment requests,
+// instead of leaving it sitting in the queue for someone to approve/pay by
+// mistake weeks later. Best-effort: never allowed to fail the caller's own
+// commit, since the source flow already succeeded.
+async function rejectStaleClaimsOnSource(pool, onAccountId, { exceptRefundId = null, exceptTransferId = null, note }, userEmail) {
+  try {
+    await pool.request()
+      .input("id", sql.Int, onAccountId).input("ex", sql.Int, exceptRefundId).input("n", sql.NVarChar(500), note)
+      .query(`
+        UPDATE dbo.CrmRefund SET Status = 'Rejected', RejectionNote = @n, UpdatedAt = SYSDATETIME()
+        WHERE SourceOnAccountId = @id AND Status NOT IN ('Rejected', 'Paid') AND (@ex IS NULL OR Id <> @ex)
+      `);
+    await pool.request()
+      .input("id", sql.Int, onAccountId).input("ex", sql.Int, exceptTransferId)
+      .query(`
+        UPDATE dbo.CrmRebookingTransfer SET Status = 'Rejected', UpdatedAt = SYSDATETIME()
+        WHERE HeldOnAccountId = @id AND Status NOT IN ('Rejected', 'Applied') AND (@ex IS NULL OR Id <> @ex)
+      `);
+    await bumpCacheVersion("crm-refunds");
+  } catch (e) {
+    console.error("[crm-refunds] rejectStaleClaimsOnSource failed (non-fatal):", e.message);
+  }
+}
+
 const REFUND_SELECT = `
   SELECT
     r.Id, r.RefundNo, r.CustomerId, r.CompanyId, r.ProjectId, r.BookingId,
@@ -130,6 +195,16 @@ router.get("/", requirePageRight("crm-refunds", "view"), async (req, res) => {
   }
 });
 
+// Amount already spoken for by another live (non-terminal) claim on the same
+// source — a Pending/FinancePending/etc. CrmRefund, or a Draft/PendingTransfer
+// CrmRebookingTransfer — that hasn't touched AppliedAmount yet. Mirrors
+// getUnclaimedRemaining's JS logic in SQL so this list-view figure agrees
+// with what the create/apply endpoints will actually accept.
+const RESERVED_SUBQUERY = `(
+  ISNULL((SELECT SUM(GrossAmount) FROM dbo.CrmRefund WHERE SourceOnAccountId = oa.Id AND Status NOT IN ('Rejected', 'Paid')), 0) +
+  ISNULL((SELECT SUM(Amount) FROM dbo.CrmRebookingTransfer WHERE HeldOnAccountId = oa.Id AND Status NOT IN ('Rejected', 'Applied')), 0)
+)`;
+
 // ── GET /eligible-sources — pickable money for a NEW refund ────────────────
 // Held credit from cancelled bookings (deduction applies) + unapplied
 // on-account / overpayment on live bookings (no deduction).
@@ -144,7 +219,7 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
       SELECT
         'CancellationHeldCredit' AS SourceType,
         oa.Id AS OnAccountId, oa.Amount, oa.AppliedAmount,
-        (oa.Amount - oa.AppliedAmount) AS Remaining,
+        (oa.Amount - oa.AppliedAmount - ${RESERVED_SUBQUERY}) AS Remaining,
         oa.HeldAt AS AsOf, b.Id AS BookingId, b.BookingNo, b.CompanyId, b.ProjectId,
         a.CustomerId, cu.CustomerName, cxl.CancellationNo, c.DeductionPercent
       FROM dbo.CrmOnAccountPayment oa
@@ -153,14 +228,14 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
       JOIN dbo.CrmCustomer cu ON cu.Id = a.CustomerId
       LEFT JOIN dbo.CrmCancellation c ON c.Id = oa.HeldSourceRefId
       LEFT JOIN dbo.CrmCancellation cxl ON cxl.Id = oa.HeldSourceRefId
-      WHERE oa.Status = 'Held' AND (oa.Amount - oa.AppliedAmount) > 0.01 ${custFilter}
+      WHERE oa.Status = 'Held' AND (oa.Amount - oa.AppliedAmount - ${RESERVED_SUBQUERY}) > 0.01 ${custFilter}
 
       UNION ALL
 
       SELECT
         'OverpaymentOnAccount' AS SourceType,
         oa.Id AS OnAccountId, oa.Amount, oa.AppliedAmount,
-        (oa.Amount - oa.AppliedAmount) AS Remaining,
+        (oa.Amount - oa.AppliedAmount - ${RESERVED_SUBQUERY}) AS Remaining,
         oa.ReceivedDate AS AsOf, b.Id AS BookingId, b.BookingNo, b.CompanyId, b.ProjectId,
         a.CustomerId, cu.CustomerName, NULL AS CancellationNo, CAST(0 AS DECIMAL(5,2)) AS DeductionPercent
       FROM dbo.CrmOnAccountPayment oa
@@ -168,7 +243,7 @@ router.get("/eligible-sources", requirePageRight("crm-refunds", "view"), async (
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       JOIN dbo.CrmCustomer cu ON cu.Id = a.CustomerId
       WHERE ISNULL(oa.Status,'') IN ('Unapplied','PartiallyApplied')
-        AND (oa.Amount - ISNULL(oa.AppliedAmount,0)) > 0.01
+        AND (oa.Amount - ISNULL(oa.AppliedAmount,0) - ${RESERVED_SUBQUERY}) > 0.01
         AND b.Status NOT IN ('Cancelled','Rejected') ${custFilter}
       ORDER BY AsOf DESC
     `);
@@ -234,9 +309,9 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
       `);
       const oa = oaRow.recordset[0];
       if (!oa) return res.status(404).json({ error: "Source on-account row not found" });
-      const remaining = Number(oa.Amount) - Number(oa.AppliedAmount || 0);
-      if (gross > remaining + 0.01) {
-        return res.status(400).json({ error: `Amount exceeds the source's remaining balance (₹${remaining.toLocaleString("en-IN")})` });
+      const { unclaimed } = await getUnclaimedRemaining(pool, sourceOnAccountId);
+      if (gross > unclaimed + 0.01) {
+        return res.status(400).json({ error: `Amount exceeds the source's available balance (₹${unclaimed.toLocaleString("en-IN")}) — some of it may already be claimed by another pending refund or re-booking transfer` });
       }
       customerId = oa.CustomerId; companyId = oa.CompanyId; projectId = oa.ProjectId; bookingId = oa.BookingId;
 
@@ -425,8 +500,8 @@ router.put("/:id/finance-approve", requirePageRight("crm-refunds", "edit"), asyn
       return res.status(403).json({ error: "Only accounts/finance heads or admins can finance-approve a refund" });
     }
     const cur = await pool.request().input("id", sql.Int, id).query(`
-      SELECT Id, RefundNo, Status, CustomerId, CompanyId, ProjectId, NetAmount,
-             RefundBankLHeadId, CustomerBankName, CustomerAccountNo, FinanceNewPaymentId
+      SELECT Id, RefundNo, Status, CustomerId, CompanyId, ProjectId, NetAmount, GrossAmount,
+             SourceOnAccountId, RefundBankLHeadId, CustomerBankName, CustomerAccountNo, FinanceNewPaymentId
       FROM dbo.CrmRefund WHERE Id = @id
     `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Refund not found" });
@@ -436,6 +511,20 @@ router.put("/:id/finance-approve", requirePageRight("crm-refunds", "edit"), asyn
     }
     if (rf.FinanceNewPaymentId) {
       return res.status(409).json({ error: "A payout voucher already exists for this refund" });
+    }
+    // Last checkpoint before real money leaves — re-validate against the
+    // source's CURRENT balance, not the snapshot taken when this refund was
+    // first created. A Rebooking Transfer (or another refund) may have
+    // consumed the same held credit in the days since. See
+    // getUnclaimedRemaining for why AppliedAmount alone isn't enough.
+    if (rf.SourceOnAccountId) {
+      const { found, unclaimed } = await getUnclaimedRemaining(pool, rf.SourceOnAccountId, { excludeRefundId: rf.Id });
+      if (!found) return res.status(409).json({ error: "The source credit for this refund no longer exists" });
+      if (Number(rf.GrossAmount) > unclaimed + 0.01) {
+        return res.status(409).json({
+          error: `Cannot disburse — the source credit's available balance (₹${unclaimed.toLocaleString("en-IN")}) is now less than this refund's amount (₹${Number(rf.GrossAmount).toLocaleString("en-IN")}). It was likely consumed by a re-booking transfer or another refund in the meantime.`,
+        });
+      }
     }
     const bankId = req.body?.RefundBankLHeadId ? parseInt(req.body.RefundBankLHeadId, 10) : rf.RefundBankLHeadId;
     if (!bankId) return res.status(400).json({ error: "A company bank account (RefundBankLHeadId) is required to disburse this refund" });
@@ -550,6 +639,26 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Re-check under lock: by the time the payout voucher is actually
+    // approved (funds already moved to the customer's bank), a Rebooking
+    // Transfer may have consumed the same source credit. This can no longer
+    // stop the cash that already left, but it MUST stop us from silently
+    // recording a double-consumption of the source row — surface it loudly
+    // instead (finance-approve is the real backstop; this is defense in depth).
+    if (rf.SourceOnAccountId) {
+      const oaLock = await tx.request().input("id", sql.Int, rf.SourceOnAccountId).query(`
+        SELECT Amount, AppliedAmount FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+      `);
+      const oa = oaLock.recordset[0];
+      const remaining = oa ? Number(oa.Amount) - Number(oa.AppliedAmount || 0) : 0;
+      if (!oa || Number(rf.GrossAmount) > remaining + 0.01) {
+        throw new Error(
+          `Refund ${refundId}: source on-account ${rf.SourceOnAccountId} has only ₹${remaining.toLocaleString("en-IN")} remaining, ` +
+          `less than the refund's ₹${Number(rf.GrossAmount).toLocaleString("en-IN")} — likely already consumed by a re-booking transfer. ` +
+          `Payout voucher was already approved; this needs manual reconciliation, not a silent double-consumption.`
+        );
+      }
+    }
     await tx.request().input("id", sql.Int, refundId).input("np", sql.Int, newPaymentId || null)
       .query(`
         UPDATE dbo.CrmRefund SET
@@ -574,6 +683,16 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
   } catch (txErr) {
     try { await tx.rollback(); } catch (_) { /* already rolled back */ }
     throw txErr;
+  }
+
+  // Once this refund fully consumes the source, any other still-open claim
+  // on it (a Draft/PendingTransfer rebooking transfer nobody cancelled) is
+  // now stale — reject it instead of leaving it for someone to act on later.
+  if (rf.SourceOnAccountId) {
+    await rejectStaleClaimsOnSource(pool, rf.SourceOnAccountId, {
+      exceptRefundId: refundId,
+      note: `Auto-rejected — the source credit was fully consumed by refund ${rf.Id} on ${new Date().toISOString().slice(0, 10)}.`,
+    }, userEmail);
   }
 
   // Forfeiture GL leg (no-op when DeductionAmount = 0). Never fatal.
@@ -612,15 +731,31 @@ async function applyRebookingTransferToBooking(pool, rebookingTransferId, userEm
     .query("SELECT Id, Amount, AppliedAmount, Status FROM dbo.CrmOnAccountPayment WHERE Id = @id");
   const hc = hcRes.recordset[0];
   if (!hc || hc.Status !== "Held") return { ok: false, reason: "source is not a held credit" };
-  const remaining = Number(hc.Amount) - Number(hc.AppliedAmount || 0);
   const amount = Number(rt.Amount) || 0;
-  if (amount > remaining + 0.01) return { ok: false, reason: `amount ${amount} exceeds held remaining ${remaining}` };
+  // Check against the UNCLAIMED balance, not just Amount - AppliedAmount —
+  // a live (non-terminal) CrmRefund on this same source has already spoken
+  // for some of it, even though it hasn't been marked Paid (and therefore
+  // hasn't touched AppliedAmount) yet. See getUnclaimedRemaining.
+  const { unclaimed } = await getUnclaimedRemaining(pool, rt.HeldOnAccountId, { excludeTransferId: rebookingTransferId });
+  if (amount > unclaimed + 0.01) return { ok: false, reason: `amount ${amount} exceeds unclaimed remaining ${unclaimed} (some of this credit is reserved by another pending refund)` };
 
   const receiptNo = `REBK-${rebookingTransferId}`;
   let newOaId;
   const tx = pool.transaction();
   await tx.begin();
   try {
+    // Re-check once more under lock, immediately before consuming — closes
+    // the window between the check above and this transaction acquiring the
+    // row, the same TOCTOU class this whole function already guards against
+    // for its own remaining-balance check.
+    const lockRes = await tx.request().input("id", sql.Int, rt.HeldOnAccountId).query(`
+      SELECT Amount, AppliedAmount FROM dbo.CrmOnAccountPayment WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
+    `);
+    const lockRow = lockRes.recordset[0];
+    const remainingLocked = lockRow ? Number(lockRow.Amount) - Number(lockRow.AppliedAmount || 0) : 0;
+    if (!lockRow || amount > remainingLocked + 0.01) {
+      throw new Error(`amount ${amount} exceeds held remaining ${remainingLocked} at lock time`);
+    }
     const oaIns = await tx.request()
       .input("no", sql.NVarChar(30), receiptNo)
       .input("bid", sql.Int, rt.ToBookingId)
@@ -652,6 +787,20 @@ async function applyRebookingTransferToBooking(pool, rebookingTransferId, userEm
   } catch (txErr) {
     try { await tx.rollback(); } catch (_) {}
     throw txErr;
+  }
+
+  // Once this transfer fully consumes the source, any other still-open
+  // refund claim on it is now stale — reject it rather than leaving it for
+  // Finance to approve and pay out by mistake later (the original Finding #1
+  // scenario: a Draft refund auto-created by cancellation, superseded by a
+  // rebooking the staff chose instead).
+  const postState = await pool.request().input("id", sql.Int, rt.HeldOnAccountId)
+    .query("SELECT Status FROM dbo.CrmOnAccountPayment WHERE Id = @id");
+  if (postState.recordset[0]?.Status === "Applied") {
+    await rejectStaleClaimsOnSource(pool, rt.HeldOnAccountId, {
+      exceptTransferId: rebookingTransferId,
+      note: `Auto-rejected — the source credit was fully consumed by a re-booking transfer to booking #${rt.ToBookingId} on ${new Date().toISOString().slice(0, 10)}.`,
+    }, userEmail);
   }
 
   // GL (post-commit, non-fatal): cross-company reclass first, then the
@@ -697,9 +846,9 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
     const held = heldRes.recordset[0];
     if (!held) return res.status(404).json({ error: "Held credit not found" });
     if (held.Status !== "Held") return res.status(400).json({ error: "That on-account row is not a held credit" });
-    const remaining = Number(held.Amount) - Number(held.AppliedAmount || 0);
-    if (amount > remaining + 0.01) {
-      return res.status(400).json({ error: `Amount exceeds the held remaining balance (₹${remaining.toLocaleString("en-IN")})` });
+    const { unclaimed } = await getUnclaimedRemaining(pool, heldId);
+    if (amount > unclaimed + 0.01) {
+      return res.status(400).json({ error: `Amount exceeds the held credit's available balance (₹${unclaimed.toLocaleString("en-IN")}) — some of it may already be claimed by a pending refund` });
     }
 
     const toRes = await pool.request().input("bid", sql.Int, toBookingId).query(`

@@ -72,7 +72,12 @@ const PortalPayments: React.FC = () => {
   }
 
   const totalDue = milestones.reduce((s: number, m: any) => s + Number(m.AmountDue || 0), 0);
-  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0);
+  // Includes money the customer has paid that's still sitting in On Account,
+  // not yet swept onto a specific milestone by staff (crmPayments.js
+  // applyOnAccountToMilestone) — without this, a customer who paid in full
+  // would see "0% Paid" here until staff got around to the sweep.
+  const totalPaid = milestones.reduce((s: number, m: any) => s + Number(m.AmountPaid || 0), 0)
+    + Number(timeline.onAccountTotalReceived || 0);
   const pctPaid = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
   const today = new Date(new Date().toDateString());
 

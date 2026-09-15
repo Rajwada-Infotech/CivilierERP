@@ -98,6 +98,7 @@ router.get("/", requirePageRight("partner-master", "view"), cache("partner-maste
         ahm.LHeadStatus AS status,
         ahm.LBelongsTo AS groupId,
         ag.Name        AS groupName,
+        ahm.PartnerBelongsToCode AS belongsToCode,
         ahm.CreatedBy  AS createdBy,
         ahm.CreatedAt  AS createdAt
       FROM dbo.AccountHeadMaster ahm
@@ -119,6 +120,7 @@ router.get("/", requirePageRight("partner-master", "view"), cache("partner-maste
         currentHeadId: null,
         capitalGroupName: null,
         currentGroupName: null,
+        belongsToCode: null,
       };
       if (kind === "capital") {
         entry.capitalHeadId = row.id;
@@ -131,10 +133,18 @@ router.get("/", requirePageRight("partner-master", "view"), cache("partner-maste
       // drift (shouldn't, since PUT updates both together) — last one wins.
       entry.partnerName = row.partnerName;
       entry.status = entry.status && row.status; // Active only if BOTH are active
+      entry.belongsToCode = row.belongsToCode || entry.belongsToCode;
       byBase.set(base, entry);
     }
 
-    const partners = Array.from(byBase.values()).map((p) => ({ ...p, id: p.partnerCode }));
+    // Resolve belongsToCode -> the referenced partner's own name, purely
+    // for display (e.g. "Bikash Agarwal") — a lookup against this same
+    // just-built map, not another query.
+    const partners = Array.from(byBase.values()).map((p) => ({
+      ...p,
+      id: p.partnerCode,
+      belongsToName: p.belongsToCode ? (byBase.get(p.belongsToCode)?.partnerName ?? null) : null,
+    }));
     res.json(partners);
   } catch (err) {
     console.error("GET PARTNER MASTER ERROR:", err);
@@ -144,12 +154,18 @@ router.get("/", requirePageRight("partner-master", "view"), cache("partner-maste
 
 // ── POST / — create a Partner (Capital + Current heads together) ───────────
 router.post("/", requirePageRight("partner-master", "create"), async (req, res) => {
-  const { PartnerName, PartnerCode } = req.body;
+  const { PartnerName, PartnerCode, BelongsTo } = req.body;
 
   const name = cleanStr(PartnerName, 200);
   const baseCode = cleanStr(PartnerCode, MAX_BASE_CODE_LEN);
+  // Optional, note-only reference to another existing Partner (e.g. a
+  // spouse/family relation) — never a required field, and never itself.
+  const belongsToCode = cleanStr(BelongsTo, MAX_BASE_CODE_LEN);
   if (!name) return res.status(400).json({ error: "Partner Name is required." });
   if (!baseCode) return res.status(400).json({ error: "Partner Code is required." });
+  if (belongsToCode && belongsToCode === baseCode) {
+    return res.status(400).json({ error: "A Partner can't belong to themselves." });
+  }
 
   const pool = getPool();
   const tx = new sql.Transaction(pool);
@@ -157,6 +173,16 @@ router.post("/", requirePageRight("partner-master", "create"), async (req, res) 
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
     const groups = await getPartnerGroups(pool);
+
+    if (belongsToCode) {
+      const refCheck = await pool
+        .request()
+        .input("code", sql.NVarChar(20), `${belongsToCode}${CUR_SUFFIX}`)
+        .query(`SELECT 1 FROM dbo.AccountHeadMaster WHERE LHeadType = 'P' AND LHeadCode = @code`);
+      if (!refCheck.recordset.length) {
+        return res.status(400).json({ error: `"${belongsToCode}" is not an existing Partner Code.` });
+      }
+    }
 
     await tx.begin();
     const insertHead = async (code, groupId, displayName) => {
@@ -172,17 +198,18 @@ router.post("/", requirePageRight("partner-master", "create"), async (req, res) 
         .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
         .input("LHeadCreditLimit", sql.Decimal(18, 2), 0)
         .input("LBelongsTo", sql.Int, groupId)
+        .input("PartnerBelongsToCode", sql.NVarChar(20), belongsToCode)
         .input("CreatedBy", sql.NVarChar(100), userEmail)
         .input("CreatedAt", sql.DateTime2, new Date()).query(`
           INSERT INTO dbo.AccountHeadMaster (
             LHeadName, DisplayName, LHeadType, LHeadCode, LHeadAddress, LHeadContactPerson,
-            LHeadStatus, LHeadPaymentTerms, LHeadCreditLimit, LBelongsTo,
+            LHeadStatus, LHeadPaymentTerms, LHeadCreditLimit, LBelongsTo, PartnerBelongsToCode,
             CreatedBy, CreatedAt
           )
           OUTPUT INSERTED.LHeadId AS id
           VALUES (
             @LHeadName, @DisplayName, @LHeadType, @LHeadCode, @LHeadAddress, @LHeadContactPerson,
-            @LHeadStatus, @LHeadPaymentTerms, @LHeadCreditLimit, @LBelongsTo,
+            @LHeadStatus, @LHeadPaymentTerms, @LHeadCreditLimit, @LBelongsTo, @PartnerBelongsToCode,
             @CreatedBy, @CreatedAt
           )
         `);
@@ -209,6 +236,7 @@ router.post("/", requirePageRight("partner-master", "create"), async (req, res) 
       currentHeadId,
       capitalGroupName: groups.capital.label,
       currentGroupName: groups.current.label,
+      belongsToCode,
     });
   } catch (err) {
     await tx.rollback().catch(() => {});
@@ -227,15 +255,34 @@ router.post("/", requirePageRight("partner-master", "create"), async (req, res) 
 router.put("/:code", requirePageRight("partner-master", "edit"), async (req, res) => {
   const baseCode = decodeURIComponent(String(req.params.code || "")).trim();
   if (!baseCode) return res.status(400).json({ error: "Invalid Partner Code" });
-  const { PartnerName, Status } = req.body;
+  const { PartnerName, Status, BelongsTo } = req.body;
 
   try {
     const pool = getPool();
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
+    // Unlike PartnerName/Status (COALESCE — omitted means "leave alone"),
+    // BelongsTo is a nullable reference the user can deliberately clear, so
+    // "key present in the request" (even as "") means "set it to this",
+    // not "leave it alone". Only a genuinely absent key is a no-op.
+    const touchesBelongsTo = Object.prototype.hasOwnProperty.call(req.body, "BelongsTo");
+    const belongsToCode = touchesBelongsTo ? cleanStr(BelongsTo, MAX_BASE_CODE_LEN) : undefined;
+    if (belongsToCode && belongsToCode === baseCode) {
+      return res.status(400).json({ error: "A Partner can't belong to themselves." });
+    }
+    if (belongsToCode) {
+      const refCheck = await pool
+        .request()
+        .input("code", sql.NVarChar(20), `${belongsToCode}${CUR_SUFFIX}`)
+        .query(`SELECT 1 FROM dbo.AccountHeadMaster WHERE LHeadType = 'P' AND LHeadCode = @code`);
+      if (!refCheck.recordset.length) {
+        return res.status(400).json({ error: `"${belongsToCode}" is not an existing Partner Code.` });
+      }
+    }
+
     const newName = cleanStr(PartnerName, 200);
-    const result = await pool
+    const request = pool
       .request()
       .input("CapCode", sql.NVarChar(20), `${baseCode}${CAP_SUFFIX}`)
       .input("CurCode", sql.NVarChar(20), `${baseCode}${CUR_SUFFIX}`)
@@ -247,7 +294,9 @@ router.put("/:code", requirePageRight("partner-master", "edit"), async (req, res
         sql.Bit,
         Status !== undefined ? (Boolean(Status) ? 1 : 0) : null,
       )
-      .input("UpdatedBy", sql.NVarChar(100), userEmail).query(`
+      .input("UpdatedBy", sql.NVarChar(100), userEmail);
+    if (touchesBelongsTo) request.input("BelongsToCode", sql.NVarChar(20), belongsToCode || null);
+    const result = await request.query(`
         UPDATE dbo.AccountHeadMaster SET
           LHeadName   = COALESCE(@LHeadName, LHeadName),
           DisplayName = COALESCE(
@@ -256,6 +305,7 @@ router.put("/:code", requirePageRight("partner-master", "edit"), async (req, res
             DisplayName
           ),
           LHeadStatus = COALESCE(@LHeadStatus, LHeadStatus),
+          ${touchesBelongsTo ? "PartnerBelongsToCode = @BelongsToCode," : ""}
           isEdited    = 1,
           UpdatedBy   = @UpdatedBy,
           UpdatedAt   = SYSDATETIME()

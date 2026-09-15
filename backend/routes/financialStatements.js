@@ -61,6 +61,18 @@ async function resolveLoansGroupId(pool) {
   return res.recordset[0]?.AGId ?? null;
 }
 
+// SUNDRY DEBTORS (Code='SDS', same resolution accountHeadMaster.js's
+// getSundryDebtorsGroupId already uses) — a customer head sitting here
+// with a CREDIT balance (net < 0) means they've paid more than they
+// currently owe: an advance, a liability, not a debtor. Reclassified
+// per-head into the "Advance from Customers" bucket instead of showing as
+// a negative figure under Sundry Debtors — same sign-flip convention the
+// LOANS AND ADVANCES group above already uses.
+async function resolveSundryDebtorsGroupId(pool) {
+  const res = await pool.request().query(`SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SDS'`);
+  return res.recordset[0]?.AGId ?? null;
+}
+
 async function loadGroups(pool) {
   const res = await pool.request().query(`
     SELECT AGId,
@@ -200,6 +212,7 @@ router.get("/balance-sheet", async (req, res) => {
     const groupMap = await loadGroups(pool);
     const rootIds = await resolveRootIds(pool);
     const loansGroupId = await resolveLoansGroupId(pool);
+    const sundryDebtorsGroupId = await resolveSundryDebtorsGroupId(pool);
 
     const headsRes = await pool
       .request()
@@ -486,6 +499,20 @@ router.get("/balance-sheet", async (req, res) => {
         groupName = net > 0 ? "Loan Receivable" : "Loan Payable";
       }
 
+      // A Sundry Debtors head with a CREDIT balance (net < 0) has paid
+      // more than they currently owe — an advance, a liability, not a
+      // debtor. Reclassified as a group inside Current Liabilities instead
+      // of showing as a negative figure under Sundry Debtors (same
+      // sign-flip convention as the LOANS AND ADVANCES special case
+      // above). Bypasses the normal per-group asset classification
+      // entirely for this head — pushed straight into currentLiabilities
+      // (not its own top-level section) since it's a short-term liability
+      // just like every other group already shown there.
+      if (gid === sundryDebtorsGroupId && net < 0) {
+        pushHead(sectionBuckets.currentLiabilities, gid, "Advance from Customers", { id: h.id, name: h.name, amount: -net });
+        continue;
+      }
+
       if (root === rootIds.ASSETS) {
         // Asset head: positive (debit) balance is normal. A credit balance
         // on an asset head still reports under Assets, shown as a negative
@@ -553,14 +580,18 @@ router.get("/balance-sheet", async (req, res) => {
     const totalCurrentAssets = sumTotal(currentAssets);
     const totalFictitiousAssets = sumTotal(fictitiousAssets);
 
-    // Partners' Capital = Opening + Retained Earnings b/f + Further Capital
-    // + Net Profit (current period) − Drawings, per spec.
+    // Partners' Capital = Opening + Further Capital + Net Profit (current
+    // period) − Drawings. Retained Earnings b/f (prior years' net P&L) is
+    // NOT a partner capital contribution — it's the accumulated result of
+    // invoices/payments posted in earlier financial years, so it's reported
+    // as its own "Reserves & Surplus" liability line instead of being
+    // folded into Partners' Capital.
     const partnersCapitalTotal = Math.round(
-      (capitalOpening + retainedEarningsPrior + capitalFurther + netProfitCurrent - totalDrawings) * 100,
+      (capitalOpening + capitalFurther + netProfitCurrent - totalDrawings) * 100,
     ) / 100;
 
     const totalLiabilities = Math.round(
-      (partnersCapitalTotal + totalProvisionsReserves + totalFixedLiabilities + totalCurrentLiabilities) * 100,
+      (partnersCapitalTotal + retainedEarningsPrior + totalProvisionsReserves + totalFixedLiabilities + totalCurrentLiabilities) * 100,
     ) / 100;
     const totalAssets = Math.round(
       (totalFixedAssetsTangible + totalFixedAssetsIntangible + totalInvestments + totalCurrentAssets + totalFictitiousAssets) * 100,
@@ -576,10 +607,14 @@ router.get("/balance-sheet", async (req, res) => {
     }
     const totalNonCurrentAssets = Math.round((totalAssets - totalCurrentAssets) * 100) / 100;
     const totalNonCurrentLiabilities = Math.round((totalFixedLiabilities + totalProvisionsReserves) * 100) / 100;
-    const totalEquity = partnersCapitalTotal;
+    // Equity = Partners' Capital + Reserves & Surplus (retained earnings)
+    // — Retained Earnings b/f no longer nests inside Partners' Capital's
+    // own sub-total (see reservesAndSurplus below), but it's still
+    // genuinely equity, not debt, for ratio purposes.
+    const totalEquity = Math.round((partnersCapitalTotal + retainedEarningsPrior) * 100) / 100;
 
     const safeDiv = (n, d) => (Math.abs(d) < 0.005 ? null : Math.round((n / d) * 10000) / 10000);
-    // Debt = Total Liabilities (all groups) minus Equity (Partners' Capital).
+    // Debt = Total Liabilities (all groups) minus Equity (Partners' Capital + Reserves & Surplus).
     const totalDebt = Math.round((totalLiabilities - totalEquity) * 100) / 100;
     const currentRatio = safeDiv(totalCurrentAssets, totalCurrentLiabilities);
     const quickRatio   = safeDiv(totalCurrentAssets - totalInventories, totalCurrentLiabilities);
@@ -594,16 +629,25 @@ router.get("/balance-sheet", async (req, res) => {
       entityType,
       partnersCapital: {
         openingCapital: capitalOpening,
-        retainedEarningsPrior,
         furtherCapital: capitalFurther,
         netProfitCurrent,
         drawings: totalDrawings,
         total: partnersCapitalTotal,
         capitalHeads,
       },
+      // Retained Earnings b/f (prior years' net P&L, adjusted for whatever's
+      // already been transferred via the Income Summary head) — reported as
+      // its own liability line, not folded into Partners' Capital. It's the
+      // result of invoices/payments posted in earlier financial years, not
+      // a partner capital contribution.
+      reservesAndSurplus: { retainedEarningsPrior, total: retainedEarningsPrior },
       partnersDrawings: partnersDrawingsRows,
       provisionsReserves,
       fixedLiabilities,
+      // Includes an "Advance from Customers" group for any Sundry Debtors
+      // head with a credit balance, reclassified here instead of showing
+      // as a negative figure under Sundry Debtors — see the
+      // sundryDebtorsGroupId sign-flip above.
       currentLiabilities,
       fixedAssets: { tangible: fixedAssetsTangible, intangible: fixedAssetsIntangible },
       investments,

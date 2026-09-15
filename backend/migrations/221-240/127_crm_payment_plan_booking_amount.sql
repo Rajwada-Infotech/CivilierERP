@@ -23,8 +23,7 @@ GO
 -- to infer per plan; staff should open each existing plan in
 -- CrmPaymentPlans.tsx and set its Booking Amount once.
 
-IF NOT EXISTS (SELECT 1 FROM dbo.__Migrations WHERE MigrationName = '127_crm_payment_plan_booking_amount')
-BEGIN
-  INSERT INTO dbo.__Migrations (MigrationName, AppliedAt) VALUES ('127_crm_payment_plan_booking_amount', SYSDATETIME());
-END
-GO
+-- (Migration tracking is handled entirely by umzug/baseline-migrations.js
+-- against its own table, not dbo.__Migrations with these column names — a
+-- manual insert here was vestigial and would fail if this file were ever
+-- run by hand against the real schema. Removed.)

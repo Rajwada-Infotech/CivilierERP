@@ -48,12 +48,16 @@ interface StatementGroup {
 
 interface PartnersCapital {
   openingCapital: number;
-  retainedEarningsPrior: number;
   furtherCapital: number;
   netProfitCurrent: number;
   drawings: number;
   total: number;
   capitalHeads: Head[];
+}
+
+interface ReservesAndSurplus {
+  retainedEarningsPrior: number;
+  total: number;
 }
 
 interface Ratios {
@@ -73,9 +77,14 @@ interface BalanceSheetResponse {
   companyName:  string | null;
   entityType:   string | null;
   partnersCapital: PartnersCapital;
+  reservesAndSurplus: ReservesAndSurplus;
   partnersDrawings: StatementGroup[];
   provisionsReserves: StatementGroup[];
   fixedLiabilities: StatementGroup[];
+  // Includes an "Advance from Customers" group for any Sundry Debtors head
+  // with a credit balance — an advance, not a debtor — reclassified here
+  // instead of appearing as a negative figure under Sundry Debtors on the
+  // Assets side.
   currentLiabilities: StatementGroup[];
   fixedAssets: { tangible: StatementGroup[]; intangible: StatementGroup[] };
   investments: StatementGroup[];
@@ -333,11 +342,13 @@ function GrandTotalRow({ label, amount, variant }: { label: string; amount: numb
 
 // ─── Partners' Capital block ──────────────────────────────────────────────────
 // Rendered on its own (not via SectionBlock/GroupRow) since it's a
-// roll-forward, not a flat group list: Opening + Retained Earnings b/f +
-// Further Capital + Net Profit − Drawings = Partners' Capital. Drawings
-// expands to the partner-wise drill-down (Cash Withdrawal, Interest on
-// Drawings, ...) per partner; the individual capital ledger heads (one per
-// partner's Capital A/c) expand separately.
+// roll-forward, not a flat group list: Opening + Further Capital + Net
+// Profit − Drawings = Partners' Capital. Retained Earnings b/f (prior
+// years' net P&L) is NOT a partner capital contribution, so it's reported
+// separately under Reserves & Surplus instead — see ReservesAndSurplusBlock
+// below. Drawings expands to the partner-wise drill-down (Cash Withdrawal,
+// Interest on Drawings, ...) per partner; the individual capital ledger
+// heads (one per partner's Capital A/c) expand separately.
 
 function PartnersCapitalBlock({
   data, openKey, onToggle, noteRef,
@@ -398,15 +409,6 @@ function PartnersCapitalBlock({
         </tr>
       )}
 
-      {Math.abs(data.retainedEarningsPrior) > 0.005 && (
-        <tr className="border-b border-border/30">
-          <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">+ Retained Earnings b/f (Prior Years)</td>
-          <td className="w-16" />
-          <td className="w-32" />
-          <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.retainedEarningsPrior} /></td>
-        </tr>
-      )}
-
       <tr className="border-b border-border/30">
         <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">+ Further Capital</td>
         <td className="w-16" />
@@ -432,6 +434,36 @@ function PartnersCapitalBlock({
 
       <tr className="border-t border-border/60">
         <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Partners' Capital</td>
+        <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">{fmt(data.total)}</td>
+      </tr>
+      <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
+    </>
+  );
+}
+
+// ─── Reserves & Surplus block ─────────────────────────────────────────────────
+// Retained Earnings b/f (prior years' net P&L) used to sit inside Partners'
+// Capital's roll-forward — moved out since it's the result of invoices and
+// payments posted in earlier financial years, not a partner capital
+// contribution. Same single-line-plus-subtotal shape as Partners' Capital's
+// roll-forward rows, just its own section.
+function ReservesAndSurplusBlock({ data }: { data: ReservesAndSurplus }) {
+  if (Math.abs(data.total) < 0.005) return null;
+  return (
+    <>
+      <tr>
+        <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
+          <span className="text-[11px] font-bold text-foreground uppercase tracking-wide">Reserves &amp; Surplus</span>
+        </td>
+      </tr>
+      <tr className="border-b border-border/30">
+        <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">Retained Earnings b/f (Prior Years)</td>
+        <td className="w-16" />
+        <td className="w-32" />
+        <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.retainedEarningsPrior} /></td>
+      </tr>
+      <tr className="border-t border-border/60">
+        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Reserves &amp; Surplus</td>
         <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">{fmt(data.total)}</td>
       </tr>
       <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
@@ -519,6 +551,8 @@ function VerticalStatement({
 
           <PartnersCapitalBlock data={data.partnersCapital} openKey={openKey} onToggle={toggle} noteRef={noteRef} />
 
+          <ReservesAndSurplusBlock data={data.reservesAndSurplus} />
+
           <SectionBlock label="Provisions & Reserves" amount={totalProvisionsReserves}>
             <GroupList groups={data.provisionsReserves} openKey={openKey} onToggle={toggle} emptyLabel="No provisions or reserves" noteRef={noteRef} />
           </SectionBlock>
@@ -527,6 +561,10 @@ function VerticalStatement({
             <GroupList groups={data.fixedLiabilities} openKey={openKey} onToggle={toggle} emptyLabel="No fixed liabilities" noteRef={noteRef} />
           </SectionBlock>
 
+          {/* Includes an "Advance from Customers" group for any Sundry
+              Debtors head with a credit balance — customers who've paid
+              more than they currently owe — instead of showing as a
+              negative figure under Sundry Debtors on the Assets side. */}
           <SectionBlock label="Current Liabilities" amount={totalCurrentLiabilities}>
             <GroupList groups={data.currentLiabilities} openKey={openKey} onToggle={toggle} emptyLabel="No current liabilities" noteRef={noteRef} />
           </SectionBlock>
@@ -680,7 +718,7 @@ export default function BalanceSheet() {
   const exportRows = data
     ? [
         { side: "Liabilities", group: "Partners' Capital", head: "Opening Capital", amount: data.partnersCapital.openingCapital },
-        { side: "Liabilities", group: "Partners' Capital", head: "Retained Earnings b/f", amount: data.partnersCapital.retainedEarningsPrior },
+        { side: "Liabilities", group: "Reserves & Surplus", head: "Retained Earnings b/f", amount: data.reservesAndSurplus.retainedEarningsPrior },
         { side: "Liabilities", group: "Partners' Capital", head: "Further Capital", amount: data.partnersCapital.furtherCapital },
         { side: "Liabilities", group: "Partners' Capital", head: "Net Profit (Current Period)", amount: data.partnersCapital.netProfitCurrent },
         { side: "Liabilities", group: "Partners' Capital", head: "Partners' Drawings", amount: -data.partnersCapital.drawings },
@@ -964,11 +1002,20 @@ export default function BalanceSheet() {
 
       </FinanceShell>
 
-      {/* Print styles */}
+      {/* Print styles — #bs-printable is nested deep inside FinanceShell's
+          layout chrome, not a direct child of body, so a `body > *` selector
+          can't isolate it: none of body's actual direct children match
+          #bs-printable, so they'd all get hidden — including the ancestor
+          that #bs-printable itself lives inside, taking it down too (a
+          blank print preview). visibility (inherited, but overridable per
+          element) sidesteps that: hide everything, then explicitly make
+          #bs-printable and its descendants visible again regardless of how
+          deep they're nested. */}
       <style>{`
         @media print {
-          body > *:not(#bs-printable) { display: none !important; }
-          #bs-printable { display: block !important; box-shadow: none !important; border: none !important; }
+          body * { visibility: hidden; }
+          #bs-printable, #bs-printable * { visibility: visible; }
+          #bs-printable { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; border: none !important; }
         }
       `}</style>
     </>
