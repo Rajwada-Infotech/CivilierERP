@@ -80,16 +80,21 @@ const ROLE_RIGHTS_PAGE_MAP = {
     module: "Followup",
     submodule: "UnitSelections",
   },
-  "sale-order": { module: "Material", submodule: "CustomerSaleOrders" },
   "grn-master": { module: "Material", submodule: "GRN" },
   grns: { module: "Material", submodule: "GRN" },
   "purchase-orders": { module: "Material", submodule: "PurchaseOrders" },
   "vehicle-in-out": { module: "Material", submodule: "VehicleInOut" },
   "menu-rights": { module: "Rights", submodule: "Menu" },
   admin_menu_rights: { module: "Rights", submodule: "Menu" },
-  roles: { module: "Rights", submodule: "Menu" },
+  // Was { module: "Rights", submodule: "Menu" } — collided with menu-rights/
+  // admin_menu_rights above (same Module_SubModule pair), so
+  // getCandidatePageKeys (middleware/permissions.js) could only ever
+  // resolve the saved grant back to "menu-rights", never to "roles" itself
+  // — granting Role Master access via Menu Rights silently did nothing.
+  // "RoleMaster" matches the existing PERMISSION_PAGE_KEYS["rights:rolemaster"]
+  // entry, which was already sitting there unused for exactly this pairing.
+  roles: { module: "Rights", submodule: "RoleMaster" },
   "widgets-rights": { module: "Rights", submodule: "Widgets" },
-  "fin-year": { module: "Rights", submodule: "Financial Year" },
   "user-activity": { module: "UserActivity", submodule: "List" },
   "activity-browser": { module: "UserActivity", submodule: "List" },
   users: { module: "Users", submodule: "List" },

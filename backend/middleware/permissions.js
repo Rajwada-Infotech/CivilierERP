@@ -130,7 +130,11 @@ function normalizeAction(action) {
 }
 
 const PERMISSION_PAGE_KEYS = {
-  "admin:documenttype": ["document-type", "typeofdoc"],
+  // "type-of-doc" is the key TypeOfDocMaster.tsx actually checks today —
+  // "document-type"/"typeofdoc" are older aliases for the same page kept
+  // for compatibility. Missing "type-of-doc" here meant a saved grant for
+  // this page could never resolve back to the key the live page checks.
+  "admin:documenttype": ["document-type", "typeofdoc", "type-of-doc"],
   "engineering:boq": ["boq"],
   "engineering:dashboard": ["engineering-dashboard"],
   "engineering:workdone": ["engineering-dashboard", "work-done"],
@@ -141,7 +145,9 @@ const PERMISSION_PAGE_KEYS = {
   "finance:payments": ["new-payment", "payments"],
   "finance:receivedpayments": ["received-payment"],
   "finance:reports": ["reports"],
-  "finance:transactions": ["transactions"],
+  // TrialBalance.tsx checks "trial-balance" specifically — was missing
+  // here, so a granted permission never resolved back to it.
+  "finance:transactions": ["transactions", "trial-balance"],
   "followup:agreements": ["followup-agreements"],
   "followup:applicants": ["followup-applicants", "followup-applications"],
   "followup:bookings": ["followup-bookings"],
@@ -154,6 +160,11 @@ const PERMISSION_PAGE_KEYS = {
   "material:purchaseorders": ["purchase-orders"],
   "rights:menu": ["menu-rights", "admin_menu_rights"],
   "rights:rolemaster": ["roles"],
+  // WidgetsRights.tsx checks "widgets-rights" — roles.js's ROLE_RIGHTS_PAGE_MAP
+  // saves it as Module="Rights", SubModule="Widgets" (compact -> "widgets"),
+  // which without this entry only ever produced the candidate "widgets",
+  // never "widgets-rights" itself.
+  "rights:widgets": ["widgets-rights"],
   "user control:manage users": ["users"],
   "useractivity:list": ["user-activity", "activity-browser"],
   "users:list": ["users"],
