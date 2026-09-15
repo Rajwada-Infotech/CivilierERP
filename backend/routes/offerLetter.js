@@ -202,7 +202,75 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   }
 });
 
-// PATCH — confirm/record the actual joining date + remarks (Joining tab)
+async function nextEmployeeCode(pool, sql) {
+  const res = await pool.request().query(`
+    SELECT ISNULL(MAX(TRY_CAST(SUBSTRING(EmployeeCode, 5, 10) AS INT)), 0) AS MaxSeq
+    FROM dbo.EmployeeMaster WHERE EmployeeCode LIKE 'EMP-%'
+  `);
+  const next = (res.recordset[0].MaxSeq || 0) + 1;
+  return `EMP-${String(next).padStart(5, "0")}`;
+}
+
+// Creates the Employee Master record for a just-joined candidate, if one
+// doesn't already exist for them -- idempotent (safe to call every time
+// joining is confirmed/re-confirmed), and never throws: a failure here
+// must not roll back the joining confirmation that already committed.
+async function autoCreateEmployeeFromOffer(pool, sql, offerId, createdBy) {
+  const offerRes = await pool.request().input("Id", sql.Int, offerId).query(`
+    SELECT
+      o.CandidateId, o.CompanyId, o.ActualDateOfJoining,
+      c.CandidateName, c.Contact, c.Email,
+      des.DesignationName
+    FROM dbo.OfferLetter o
+    JOIN dbo.CandidateMaster c ON c.CandidateId = o.CandidateId
+    LEFT JOIN dbo.DesignationMaster des ON des.Id = o.DesignationId
+    WHERE o.OfferId = @Id
+  `);
+  const info = offerRes.recordset[0];
+  if (!info) return null;
+
+  const existingEmp = await pool.request().input("CandidateId", sql.Int, info.CandidateId)
+    .query("SELECT EmployeeId FROM dbo.EmployeeMaster WHERE CandidateId = @CandidateId");
+  if (existingEmp.recordset.length) return null;
+
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const employeeCode = await nextEmployeeCode(pool, sql);
+    try {
+      const insertRes = await pool
+        .request()
+        .input("EmployeeCode", sql.NVarChar(30), employeeCode)
+        .input("EmployeeName", sql.NVarChar(150), info.CandidateName)
+        .input("Mobile", sql.NVarChar(20), info.Contact || null)
+        .input("Email", sql.NVarChar(150), info.Email || null)
+        .input("JoiningDate", sql.Date, info.ActualDateOfJoining)
+        .input("CompanyId", sql.Int, info.CompanyId || null)
+        .input("Designation", sql.NVarChar(100), info.DesignationName || null)
+        .input("CandidateId", sql.Int, info.CandidateId)
+        .input("CreatedBy", sql.NVarChar(150), createdBy)
+        .query(`
+          INSERT INTO dbo.EmployeeMaster (
+            EmployeeCode, EmployeeName, Mobile, Email, JoiningDate, CompanyId, Designation,
+            CandidateId, IsActive, CreatedBy, CreatedAt
+          )
+          OUTPUT INSERTED.EmployeeId
+          VALUES (
+            @EmployeeCode, @EmployeeName, @Mobile, @Email, @JoiningDate, @CompanyId, @Designation,
+            @CandidateId, 1, @CreatedBy, SYSDATETIME()
+          )
+        `);
+      return insertRes.recordset[0].EmployeeId;
+    } catch (err) {
+      if (/UQ_EmployeeMaster_CandidateId/i.test(err.message || "")) return null; // race: another request created it first
+      if (err.number === 2627 || err.number === 2601) continue; // EmployeeCode collision -- retry with the next serial
+      throw err;
+    }
+  }
+  return null;
+}
+
+// PATCH — confirm/record the actual joining date + remarks (Joining tab).
+// Also auto-creates the Employee Master record for this candidate, so
+// there's no separate manual "add to Employee Master" step afterwards.
 router.patch("/:id/joining", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { ActualDateOfJoining, JoiningRemarks } = req.body;
@@ -228,7 +296,26 @@ router.patch("/:id/joining", allowRoles("admin", "super_admin", "dba"), async (r
         WHERE OfferId = @Id
       `);
     await bumpCacheVersion("offer-letter");
-    res.json({ message: "Joining confirmed successfully" });
+
+    let employeeCreated = false;
+    try {
+      const createdBy = (req.user && (req.user.name || req.user.email)) || null;
+      const newEmployeeId = await autoCreateEmployeeFromOffer(pool, sql, id, createdBy);
+      if (newEmployeeId) {
+        employeeCreated = true;
+        await bumpCacheVersion("employee-master");
+      }
+    } catch (autoErr) {
+      // The joining confirmation itself already succeeded -- log and move on
+      // rather than surfacing a 500 for something the user already saw work.
+      console.error("[offer-letter] auto-create Employee Master error:", autoErr.message);
+    }
+
+    res.json({
+      message: employeeCreated
+        ? "Joining confirmed and Employee Master record created"
+        : "Joining confirmed successfully",
+    });
   } catch (err) {
     console.error("[offer-letter] PATCH joining error:", err.message);
     res.status(500).json({ error: err.message });

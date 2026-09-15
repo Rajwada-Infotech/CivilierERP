@@ -39,31 +39,6 @@ router.get("/options", async (req, res) => {
   }
 });
 
-// GET candidates who are confirmed as Joined on Offer Letter & Joining and
-// don't already have an Employee Master row -- these are the ones eligible
-// to be "promoted" into an employee record from the Add Employee form.
-router.get("/joined-candidates", async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT
-        o.OfferId, o.CandidateId, c.CandidateCode, c.CandidateName, c.Contact, c.Email,
-        o.CompanyId, comp.name AS CompanyName, des.DesignationName,
-        o.ActualDateOfJoining, o.DateOfJoin
-      FROM dbo.OfferLetter o
-      JOIN dbo.CandidateMaster c ON c.CandidateId = o.CandidateId
-      LEFT JOIN dbo.enterprise comp ON comp.id = o.CompanyId
-      LEFT JOIN dbo.DesignationMaster des ON des.Id = o.DesignationId
-      WHERE o.JoiningConfirmed = 1
-        AND NOT EXISTS (SELECT 1 FROM dbo.EmployeeMaster e WHERE e.CandidateId = o.CandidateId)
-      ORDER BY o.ActualDateOfJoining DESC
-    `);
-    res.json(result.recordset);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 function bindEmployeeFields(request, body) {
   return request
     .input("EmployeeCode", sql.NVarChar(30), body.EmployeeCode || null)
