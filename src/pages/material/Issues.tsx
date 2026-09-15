@@ -1,5 +1,6 @@
 import { generateUUID } from "../../utils/cryptoPolyfill";
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -191,6 +192,7 @@ function GodownBadge({
 export default function Issues() {
   const rights = usePageRights("material-issues");
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const importFileInputRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list");
@@ -603,6 +605,17 @@ export default function Issues() {
       setViewingRecord(record);
     }
   };
+
+  // Deep-link support — Linked Documents / Stock drill-down panels navigate
+  // here as /material/issues?view=<IssueId> to open this exact issue.
+  useEffect(() => {
+    const viewId = searchParams.get("view");
+    if (!viewId) return;
+    handleView({ IssueId: Number(viewId) });
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onSave = () => {
     if (!canSave) {
