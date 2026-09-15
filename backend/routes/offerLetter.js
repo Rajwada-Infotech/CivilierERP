@@ -9,17 +9,19 @@ const { getPool, sql } = require("../db");
 
 const SELECT_COLUMNS = `
   SELECT
-    o.OfferId, o.DocNo, o.CandidateId, o.CompanyId, o.FinYearId, o.Salary, o.CandidateAddress,
+    o.OfferId, o.DocNo, o.CandidateId, o.CompanyId, o.FinYearId, o.DesignationId, o.Salary, o.CandidateAddress,
     o.DateOfJoin, o.DocumentDate, o.Remarks, o.JoiningConfirmed, o.ActualDateOfJoining, o.JoiningRemarks,
     o.IsActive, o.CreatedAt, o.UpdatedAt,
     c.CandidateCode, c.CandidateName, c.Contact, c.Email, c.Qualification, c.Experience,
     c.ExpectedSalary, c.CurrentSalary, c.NoticePeriod, c.InterviewStatus AS CandidateInterviewStatus,
     comp.name AS CompanyName,
-    fy.FName AS FinYearName
+    fy.FName AS FinYearName,
+    des.DesignationName AS DesignationName
   FROM dbo.OfferLetter o
   JOIN dbo.CandidateMaster c ON c.CandidateId = o.CandidateId
   LEFT JOIN dbo.enterprise comp ON comp.id = o.CompanyId
   LEFT JOIN dbo.FinYear fy ON fy.FId = o.FinYearId
+  LEFT JOIN dbo.DesignationMaster des ON des.Id = o.DesignationId
 `;
 
 async function nextDocNo(pool, sql) {
@@ -108,7 +110,7 @@ router.get("/", cache("offer-letter", 60), async (req, res) => {
 
 // POST — add offer letter
 router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
-  const { CandidateId, CompanyId, FinYearId, Salary, CandidateAddress, DateOfJoin, DocumentDate, Remarks } = req.body;
+  const { CandidateId, CompanyId, FinYearId, DesignationId, Salary, CandidateAddress, DateOfJoin, DocumentDate, Remarks } = req.body;
   if (!CandidateId) return res.status(400).json({ error: "CandidateId is required" });
   if (!DocumentDate) return res.status(400).json({ error: "DocumentDate is required" });
   const createdBy = req.user?.userId || null;
@@ -124,6 +126,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
           .input("CandidateId", sql.Int, CandidateId)
           .input("CompanyId", sql.Int, CompanyId || null)
           .input("FinYearId", sql.Int, FinYearId || null)
+          .input("DesignationId", sql.Int, DesignationId || null)
           .input("Salary", sql.Decimal(12, 2), Salary ?? null)
           .input("CandidateAddress", sql.NVarChar(500), CandidateAddress || null)
           .input("DateOfJoin", sql.Date, DateOfJoin || null)
@@ -132,12 +135,12 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
           .input("CreatedBy", sql.Int, createdBy)
           .query(`
             INSERT INTO dbo.OfferLetter (
-              DocNo, CandidateId, CompanyId, FinYearId, Salary, CandidateAddress,
+              DocNo, CandidateId, CompanyId, FinYearId, DesignationId, Salary, CandidateAddress,
               DateOfJoin, DocumentDate, Remarks, CreatedBy, CreatedAt
             )
             OUTPUT INSERTED.OfferId
             VALUES (
-              @DocNo, @CandidateId, @CompanyId, @FinYearId, @Salary, @CandidateAddress,
+              @DocNo, @CandidateId, @CompanyId, @FinYearId, @DesignationId, @Salary, @CandidateAddress,
               @DateOfJoin, @DocumentDate, @Remarks, @CreatedBy, SYSUTCDATETIME()
             )
           `);
@@ -162,7 +165,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 // PUT — update offer letter (not DocNo, not joining fields — those go through PATCH /joining)
 router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { id } = req.params;
-  const { CandidateId, CompanyId, FinYearId, Salary, CandidateAddress, DateOfJoin, DocumentDate, Remarks } = req.body;
+  const { CandidateId, CompanyId, FinYearId, DesignationId, Salary, CandidateAddress, DateOfJoin, DocumentDate, Remarks } = req.body;
   if (!CandidateId) return res.status(400).json({ error: "CandidateId is required" });
   if (!DocumentDate) return res.status(400).json({ error: "DocumentDate is required" });
   const updatedBy = req.user?.userId || null;
@@ -174,6 +177,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("CandidateId", sql.Int, CandidateId)
       .input("CompanyId", sql.Int, CompanyId || null)
       .input("FinYearId", sql.Int, FinYearId || null)
+      .input("DesignationId", sql.Int, DesignationId || null)
       .input("Salary", sql.Decimal(12, 2), Salary ?? null)
       .input("CandidateAddress", sql.NVarChar(500), CandidateAddress || null)
       .input("DateOfJoin", sql.Date, DateOfJoin || null)
@@ -182,7 +186,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("UpdatedBy", sql.Int, updatedBy)
       .query(`
         UPDATE dbo.OfferLetter SET
-          CandidateId = @CandidateId, CompanyId = @CompanyId, FinYearId = @FinYearId,
+          CandidateId = @CandidateId, CompanyId = @CompanyId, FinYearId = @FinYearId, DesignationId = @DesignationId,
           Salary = @Salary, CandidateAddress = @CandidateAddress, DateOfJoin = @DateOfJoin,
           DocumentDate = @DocumentDate, Remarks = @Remarks, UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME()
         WHERE OfferId = @Id

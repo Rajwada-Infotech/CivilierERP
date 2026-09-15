@@ -12,6 +12,7 @@ import { safeHtml } from "@/utils/escapeHtml";
 import type { ExportColumn } from "@/lib/export";
 import { getEmployeeCompanyOptions, type EmployeeCompanyOption } from "@/api/employeeMasterApi";
 import { getFinYears } from "@/api/finYearApi";
+import { getDesignations } from "@/api/designationMasterApi";
 import { getCandidates, type CandidateRow } from "@/api/candidateMasterApi";
 import {
   getOfferLetters,
@@ -28,7 +29,7 @@ const labelCls = "block text-[11px] uppercase tracking-widest font-heading text-
 const inputCls = "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
 
 const TEMPLATE_PLACEHOLDERS = [
-  "CandidateName", "CandidateCode", "CandidateAddress", "Company", "FinYear",
+  "CandidateName", "CandidateCode", "CandidateAddress", "Company", "Designation", "FinYear",
   "Salary", "DateOfJoin", "DocumentDate", "DocNo", "Remarks",
 ];
 
@@ -40,6 +41,7 @@ function fillTemplate(template: string, offer: OfferLetterRow): string {
     CandidateCode: offer.CandidateCode || "",
     CandidateAddress: offer.CandidateAddress || "",
     Company: offer.CompanyName || "",
+    Designation: offer.DesignationName || "",
     FinYear: offer.FinYearName || "",
     Salary: offer.Salary != null ? String(offer.Salary) : "",
     DateOfJoin: offer.DateOfJoin ? offer.DateOfJoin.slice(0, 10) : "",
@@ -71,6 +73,7 @@ const offerExportColumns: ExportColumn[] = [
   { header: "Doc No", accessor: "docNo" },
   { header: "Candidate", accessor: "candidateName" },
   { header: "Company", accessor: "companyName" },
+  { header: "Designation", accessor: "designationName" },
   { header: "Fin Year", accessor: "finYearName" },
   { header: "Salary", accessor: "salary" },
   { header: "Date of Join", accessor: "dateOfJoin" },
@@ -204,6 +207,7 @@ interface FormState {
   candidateId: string;
   companyId: string;
   finYearId: string;
+  designationId: string;
   salary: string;
   candidateAddress: string;
   dateOfJoin: string;
@@ -215,6 +219,7 @@ const emptyForm: FormState = {
   candidateId: "",
   companyId: "",
   finYearId: "",
+  designationId: "",
   salary: "",
   candidateAddress: "",
   dateOfJoin: "",
@@ -276,6 +281,7 @@ const OfferLetterJoining: React.FC = () => {
       candidateId: String(row.CandidateId),
       companyId: row.CompanyId ? String(row.CompanyId) : "",
       finYearId: row.FinYearId ? String(row.FinYearId) : "",
+      designationId: row.DesignationId ? String(row.DesignationId) : "",
       salary: row.Salary != null ? String(row.Salary) : "",
       candidateAddress: row.CandidateAddress || "",
       dateOfJoin: row.DateOfJoin ? row.DateOfJoin.slice(0, 10) : "",
@@ -313,6 +319,7 @@ const OfferLetterJoining: React.FC = () => {
       CandidateId: Number(form.candidateId),
       CompanyId: form.companyId ? Number(form.companyId) : null,
       FinYearId: form.finYearId ? Number(form.finYearId) : null,
+      DesignationId: form.designationId ? Number(form.designationId) : null,
       Salary: form.salary !== "" ? Number(form.salary) : null,
       CandidateAddress: form.candidateAddress?.trim() || null,
       DateOfJoin: form.dateOfJoin || null,
@@ -339,6 +346,7 @@ const OfferLetterJoining: React.FC = () => {
     docNo: r.DocNo,
     candidateName: r.CandidateName,
     companyName: r.CompanyName || "-",
+    designationName: r.DesignationName || "-",
     finYearName: r.FinYearName || "-",
     salary: r.Salary ?? "",
     dateOfJoin: r.DateOfJoin ? r.DateOfJoin.slice(0, 10) : "",
@@ -420,7 +428,7 @@ const OfferLetterJoining: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div>
                       <label className={labelCls}>Company</label>
                       <select className={inputCls} value={form.companyId} onChange={(e) => setField("companyId", e.target.value)}>
@@ -429,6 +437,10 @@ const OfferLetterJoining: React.FC = () => {
                           <option key={c.id} value={c.id}>{c.label}</option>
                         ))}
                       </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Designation</label>
+                      <DesignationSelect value={form.designationId} onChange={(v) => setField("designationId", v)} />
                     </div>
                     <div>
                       <label className={labelCls}>Fin Year</label>
@@ -590,6 +602,24 @@ const FinYearSelect: React.FC<{ value: string; onChange: (v: string) => void }> 
       <option value="">Select...</option>
       {options.map((fy) => (
         <option key={fy.FId} value={fy.FId}>{fy.FName}</option>
+      ))}
+    </select>
+  );
+};
+
+// Self-fetching -- same pattern as FinYearSelect above.
+const DesignationSelect: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => {
+  const { data } = useQuery({
+    queryKey: ["designation-master"],
+    queryFn: getDesignations,
+    staleTime: 5 * 60 * 1000,
+  });
+  const options = Array.isArray(data) ? data : [];
+  return (
+    <select className={inputCls} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Select...</option>
+      {options.map((d) => (
+        <option key={d.Id} value={d.Id}>{d.DesignationName}</option>
       ))}
     </select>
   );

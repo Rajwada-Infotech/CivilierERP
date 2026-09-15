@@ -8,6 +8,7 @@ export interface OfferLetterRow {
   CandidateId: number;
   CompanyId: number | null;
   FinYearId: number | null;
+  DesignationId: number | null;
   Salary: number | null;
   CandidateAddress: string | null;
   DateOfJoin: string | null;
@@ -31,12 +32,14 @@ export interface OfferLetterRow {
   CandidateInterviewStatus: string | null;
   CompanyName: string | null;
   FinYearName: string | null;
+  DesignationName: string | null;
 }
 
 export interface OfferLetterPayload {
   CandidateId: number;
   CompanyId: number | null;
   FinYearId: number | null;
+  DesignationId: number | null;
   Salary: number | null;
   CandidateAddress: string | null;
   DateOfJoin: string | null;
