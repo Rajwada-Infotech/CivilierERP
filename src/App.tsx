@@ -124,6 +124,15 @@ const Records = lazy(() => import("./pages/records/Records"));
 const LoanDashboard = lazy(() => import("./pages/loan/LoanDashboard"));
 const LoanSanction = lazy(() => import("./pages/loan/LoanSanction"));
 const MaintenanceDashboard = lazy(() => import("./pages/maintenance/MaintenanceDashboard"));
+const HrPayrollDashboard = lazy(() => import("./pages/hrpayroll/HrPayrollDashboard"));
+const EmployeeMaster = lazy(() => import("./pages/hrpayroll/EmployeeMaster"));
+const DesignationMaster = lazy(() => import("./pages/hrpayroll/DesignationMaster"));
+const CandidateMaster = lazy(() => import("./pages/hrpayroll/CandidateMaster"));
+const ShiftMaster = lazy(() => import("./pages/hrpayroll/ShiftMaster"));
+const GraceTimeMaster = lazy(() => import("./pages/hrpayroll/GraceTimeMaster"));
+const HolidayMaster = lazy(() => import("./pages/hrpayroll/HolidayMaster"));
+const Interview = lazy(() => import("./pages/hrpayroll/Interview"));
+const OfferLetterJoining = lazy(() => import("./pages/hrpayroll/OfferLetterJoining"));
 const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceDirectory"));
 const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/CustomerMaintenanceProfile"));
 const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
@@ -936,6 +945,78 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="maintenance-dashboard">
             <MaintenanceDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll"
+        element={
+          <ProtectedRoute pageKey="hr-payroll-dashboard">
+            <HrPayrollDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/employees"
+        element={
+          <ProtectedRoute pageKey="employee-master">
+            <EmployeeMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/designation-master"
+        element={
+          <ProtectedRoute pageKey="designation-master">
+            <DesignationMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/candidate-master"
+        element={
+          <ProtectedRoute pageKey="candidate-master">
+            <CandidateMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/shift-master"
+        element={
+          <ProtectedRoute pageKey="shift-master">
+            <ShiftMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/grace-time-master"
+        element={
+          <ProtectedRoute pageKey="grace-time-master">
+            <GraceTimeMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/setup/holiday-master"
+        element={
+          <ProtectedRoute pageKey="holiday-master">
+            <HolidayMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/interviews"
+        element={
+          <ProtectedRoute pageKey="interview">
+            <Interview />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/offer-letter-joining"
+        element={
+          <ProtectedRoute pageKey="offer-letter-joining">
+            <OfferLetterJoining />
           </ProtectedRoute>
         }
       />

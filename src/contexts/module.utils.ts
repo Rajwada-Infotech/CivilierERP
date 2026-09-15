@@ -17,6 +17,7 @@ export type Module =
   | "crm"
   | "loan"
   | "maintenance"
+  | "hr-payroll"
   | "admin"
   | null;
 
@@ -35,5 +36,6 @@ export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   crm: "/crm/dashboard",
   loan: "/loan",
   maintenance: "/maintenance",
+  "hr-payroll": "/hr-payroll",
   admin: "/admin/dashboard",
 };

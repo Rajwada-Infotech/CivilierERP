@@ -25,6 +25,7 @@ import {
   TickCircle,
   MoneyRecive,
   Cpu,
+  Profile2User,
 } from "iconsax-react";
 import { Wrench } from "lucide-react";
 import { TimelineIcon } from "@/components/icons/TimelineIcon";
@@ -46,6 +47,8 @@ import { crmNavItems } from "./sidebars/CrmSidebar";
 import { loanNavItems } from "./sidebars/LoanSidebar";
 import { fixedAssetNavItems } from "./sidebars/FixedAssetSidebar";
 import { maintenanceNavItems } from "./sidebars/MaintenanceSidebar";
+
+import { hrPayrollNavItems } from "./sidebars/HrPayrollSidebar";
 import { SidebarNav, NavItem, SubItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar ──────────────────────────────────────────────────────────────
@@ -155,6 +158,13 @@ const MODULE_HEADER: Record<
     color: "#65a30d",
     from: "from-lime-500/30",
     to: "to-lime-500/0",
+  },
+  "hr-payroll": {
+    label: "HR and Payroll",
+    icon: Profile2User,
+    color: "#eab308",
+    from: "from-yellow-500/30",
+    to: "to-yellow-500/0",
   },
   admin: {
     label: "Admin",
@@ -382,6 +392,9 @@ export const AppSidebar = () => {
         break;
       case "maintenance":
         raw = maintenanceNavItems;
+        break;
+      case "hr-payroll":
+        raw = hrPayrollNavItems;
         break;
       case "admin":
         raw = buildAdminNavItems(pendingApprovalCount);
