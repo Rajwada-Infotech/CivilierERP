@@ -1396,6 +1396,37 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
       }
     }
 
+    // Same completeness gate as the brokerage one above, for a CRM Refund
+    // payout — this NewPayment is created with PMode/PBankName deliberately
+    // blank (see crmRefunds.js finance-approve, "finance to complete payment
+    // details") exactly like a brokerage payout, but had no equivalent check
+    // here: a refund could be approved with no payment mode recorded at all.
+    // One CrmRefund has exactly one payout voucher (FinanceNewPaymentId),
+    // so there's no "other submitted tranche" concept to cap against —
+    // just confirm this voucher's own amount hasn't drifted from the
+    // refund's NetAmount.
+    const refundGate = await pool.request().input("PPaymentID", sql.Int, id).query(`
+      SELECT np.PPaymentID, np.PAmount, np.PDate, np.PMode, np.PBankID, np.SourceCrmRefundId,
+             r.NetAmount
+      FROM dbo.NewPayment np
+      LEFT JOIN dbo.CrmRefund r ON r.Id = np.SourceCrmRefundId
+      WHERE np.PPaymentID = @PPaymentID
+    `);
+    const refundRow = refundGate.recordset[0];
+    if (refundRow?.SourceCrmRefundId) {
+      if (!refundRow.PDate || !String(refundRow.PMode || "").trim() || !normalizeBankId(refundRow.PBankID)) {
+        return res.status(400).json({
+          error: "Complete refund payment date, payment mode, and bank before approval.",
+        });
+      }
+      const netAmount = Number(refundRow.NetAmount) || 0;
+      if (netAmount > 0 && Number(refundRow.PAmount || 0) > netAmount + 0.01) {
+        return res.status(400).json({
+          error: `Refund payment exceeds the refund's net amount of ₹${netAmount.toLocaleString("en-IN")}`,
+        });
+      }
+    }
+
     const result = await transition(
       "payments",
       id,

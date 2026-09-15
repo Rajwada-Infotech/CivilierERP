@@ -157,19 +157,33 @@ const BOOKING_SELECT = `
     ) THEN 1 ELSE 0 END AS BIT) AS BankDetailsComplete,
     -- The list's "next step" chip must not offer Agreement before Milestone 1
     -- (Booking Amount) is actually Paid — validateAgreementPreparationPrerequisites
-    -- (crmWorkflowGuards.js) hard-blocks agreement prep on exactly this, and
-    -- under the on-account-hold rule that only happens after On Account
-    -- Adjustment, which itself won't run until 100% of GrandTotal is
-    -- received. Without this, the chip pointed staff at an Agreement page
-    -- that would immediately reject the booking as ineligible.
+    -- (crmWorkflowGuards.js) hard-blocks agreement prep on exactly this.
     (SELECT TOP 1 Status FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Status,
+    -- The real ledger sweep (Status='Paid') only fires automatically once the
+    -- WHOLE booking is funded, but the customer's money for Milestone 1 is
+    -- genuinely in hand the moment on-account covers its own amount — the
+    -- same virtual-coverage check validateAgreementPreparationPrerequisites
+    -- uses, so the chip and the actual gate never disagree.
+    CAST(CASE WHEN EXISTS (
+       SELECT 1 FROM dbo.CrmPaymentMilestone m1 WHERE m1.BookingId = b.Id AND m1.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
+         AND (m1.Status IN ('${CrmStatus.PAID}', 'Waived')
+              OR ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) >= ISNULL(m1.AmountDue, 0))
+     ) THEN 1 ELSE 0 END AS BIT) AS Milestone1VirtuallyCovered,
     ag.Id AS AgreementId, ag.SeniorApprovalStatus, ag.CustomerApprovalStatus,
     ag.AgreementDate, ag.DateApprovalStatus, ag.Status AS AgreementStatus,
     ag.AfsStampDuty, ag.AfsRegistrationFee,
     (SELECT COUNT(*) FROM dbo.CrmPaymentMilestone m WHERE m.BookingId = b.Id AND m.Status = '${CrmStatus.PENDING}') AS PendingMilestoneCount,
     (SELECT ISNULL(SUM(AmountPaid),0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id) AS TotalCleared,
-    (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount,
-    (SELECT ISNULL(SUM(Amount),0) FROM dbo.CrmMoneyReceipt WHERE BookingId = b.Id AND Status IN ('${CrmStatus.PENDING}','${CrmStatus.APPROVED}')) AS MRReceivedTotal
+    -- Every CRM payment now lands in CrmOnAccountPayment first (see
+    -- applyCrmMilestonePaymentApproval / applyCrmOnAccountPaymentApproval in
+    -- crmPayments.js) — this is the single source of truth for "held, not
+    -- yet applied to a milestone." CrmMoneyReceipt (a separate, older
+    -- receipt-document table) used to be added on top of this figure, but
+    -- every approved payment now gets BOTH a CrmMoneyReceipt row AND a
+    -- CrmOnAccountPayment row for the exact same money — adding them
+    -- double-counted every on-account deposit (confirmed: booking 77 showed
+    -- ₹20,000 on-account for a real ₹10,000 deposit).
+    (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount
   FROM dbo.CrmBooking b
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.UnitMaster um   ON um.Id   = b.UnitId

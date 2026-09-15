@@ -183,7 +183,7 @@ function getNextStep(b: any): NextStep {
   // this chip never points staff at an Agreement page that will reject the
   // booking as ineligible. No separate "already has an agreement" carve-out
   // needed: a booking that already has one necessarily cleared this already.
-  if (!b.AgreementId && b.Milestone1Status !== CrmStatus.PAID) {
+  if (!b.AgreementId && b.Milestone1Status !== CrmStatus.PAID && !b.Milestone1VirtuallyCovered) {
     return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
   }
   // Agreement sub-stages: draft → senior approval → customer approval → date negotiation → date approval → executed
@@ -564,8 +564,12 @@ const CrmBooking: React.FC = () => {
         const storedGrand = Number(b.GrandTotal ?? 0);
         const grand = storedGrand > 0 ? storedGrand : (Number(b.TotalValue || 0) + Number(b.UnitGstAmount || 0) + Number(b.ParkingTotal || 0) + Number(b.ExtraChargesTotal || 0));
         const cleared = Number(b.TotalCleared ?? 0);
-        const mrOnAcc = Math.max(0, Number(b.MRReceivedTotal ?? 0) - cleared);
-        const onAcc = mrOnAcc + Number(b.ApprovedOnAccount ?? 0);
+        // ApprovedOnAccount (CrmOnAccountPayment) is the sole source of
+        // truth for "held, not yet applied" — every approved CRM payment
+        // lands there. Adding CrmMoneyReceipt's total on top double-counted
+        // the same money (that table gets a row for the same approved
+        // payment as a separate receipt document).
+        const onAcc = Number(b.ApprovedOnAccount ?? 0);
         const outstanding = Math.max(0, grand - cleared - onAcc);
         const clearedPct = grand > 0 ? Math.min(100, Math.round((cleared / grand) * 100)) : 0;
         const onAccPct = grand > 0 ? Math.min(100 - clearedPct, Math.round((onAcc / grand) * 100)) : 0;

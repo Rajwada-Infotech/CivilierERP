@@ -119,32 +119,11 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
   // gate above: someone without canEdit never sees an Edit button at all.
   const [uiLocked, setUiLocked] = useState(true);
   const locked = !canEdit || uiLocked;
-  // Booking Amount (Milestone 1) must actually be paid before this form —
-  // and the Financing Type declaration on it — can be completed. Mirrors the
-  // same hard gate the backend now enforces in
-  // validateAgreementPreparationPrerequisites (crmWorkflowGuards.js), so
-  // staff see the reason up front instead of a save that silently never
-  // unlocks Agreement prep.
-  const [milestone1Status, setMilestone1Status] = useState<string | null>(null);
-  const [milestone1PendingApproval, setMilestone1PendingApproval] = useState(false);
-  const [milestone1AwaitingAdjustment, setMilestone1AwaitingAdjustment] = useState(false);
-  // On Account Adjustment (crmPayments.js applyOnAccountToMilestone) needs
-  // the on-account pool to cover Milestone 1's OWN balance, not the whole
-  // booking — kept so the checklist below can show the real per-milestone
-  // shortfall instead of implying "go apply it" when nothing's available yet.
-  const [milestone1Balance, setMilestone1Balance] = useState(0);
-  const [onAccountAvailable, setOnAccountAvailable] = useState(0);
-  const bookingAmountPaid = milestone1Status === CrmStatus.PAID;
 
   useQuery({
     queryKey: ["crm-bank-detail", row.BookingId],
     queryFn: async () => {
       const d = await fetchBankDetail(row.BookingId);
-      setMilestone1Status(d?.Milestone1Status ?? null);
-      setMilestone1PendingApproval(!!d?.Milestone1PendingApproval);
-      setMilestone1AwaitingAdjustment(!!d?.Milestone1AwaitingAdjustment);
-      setMilestone1Balance(Number(d?.Milestone1Balance) || 0);
-      setOnAccountAvailable(Number(d?.OnAccountAvailable) || 0);
       setForm(d ? {
         BankName: d.BankName || "", BranchName: d.BranchName || "", AccountNo: d.AccountNo || "",
         IfscCode: d.IfscCode || "", AccountHolderName: d.AccountHolderName || "",
@@ -177,7 +156,6 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
   const handleSave = async () => {
     if (locked) { toast.error("This record is locked — only the assigned salesperson or an admin can edit it"); return; }
-    if (!bookingAmountPaid) { toast.error("Booking Amount (Milestone 1) must be paid before this form can be completed"); return; }
     setTouched(true);
     if (hasErrors) { toast.error("Fix the highlighted fields before saving"); return; }
     setSaving(true);
@@ -204,9 +182,9 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
   const UPPERCASE_FIELDS: (keyof typeof EMPTY_FORM)[] = ["PanNo", "IfscCode"];
 
-  const field = (key: keyof typeof form, label: string, type = "text", required = false) => (
+  const field = (key: keyof typeof form, label: string, type = "text") => (
     <div>
-      <label className="text-xs text-muted-foreground block mb-1">{label}{required && " *"}</label>
+      <label className="text-xs text-muted-foreground block mb-1">{label}</label>
       <input type={type} value={form[key]} readOnly={locked}
         onChange={(e) => {
           if (locked) return;
@@ -227,7 +205,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
             <span className="flex items-center gap-2">
               <Landmark size={16} className="text-primary" /> Bank Details
             </span>
-            {canEdit && uiLocked && bookingAmountPaid && (
+            {canEdit && uiLocked && (
               <button onClick={() => setUiLocked(false)}
                 className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0">
                 <Pencil size={12} /> Edit
@@ -236,47 +214,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
           </DialogTitle>
         </DialogHeader>
 
-        {!bookingAmountPaid ? (
-          // Gate is a 3-step progression (submit -> Finance approve -> apply
-          // On Account to the milestone) — shown as a checklist, not one
-          // line of prose, so staff can see exactly which step they're
-          // stuck on instead of re-reading a message that changes shape
-          // depending on state.
-          (() => {
-            const submitted = milestone1PendingApproval || milestone1AwaitingAdjustment;
-            const approved = milestone1AwaitingAdjustment;
-            const steps: { label: string; done: boolean }[] = [
-              { label: "Payment submitted for Booking Amount", done: submitted },
-              { label: "Approved by Finance", done: approved },
-              { label: "Applied to Milestone 1 (On Account Adjustment)", done: false },
-            ];
-            return (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 space-y-2">
-                <div className="flex items-center gap-2 text-xs font-medium text-amber-800">
-                  <Lock size={13} /> Bank &amp; Financing details unlock once Booking Amount is fully settled
-                </div>
-                <div className="space-y-1 pl-1">
-                  {steps.map((s) => (
-                    <div key={s.label} className={`flex items-center gap-2 text-xs ${s.done ? "text-emerald-700" : "text-muted-foreground"}`}>
-                      {s.done ? <CheckCircle2 size={13} className="shrink-0" /> : <Circle size={13} className="shrink-0" />}
-                      {s.label}
-                    </div>
-                  ))}
-                </div>
-                {!submitted && (
-                  <p className="text-[11px] text-amber-700 pt-0.5 border-t border-amber-200/70">No Booking Amount payment has been submitted yet.</p>
-                )}
-                {approved && (
-                  <p className="text-[11px] text-amber-700 pt-0.5 border-t border-amber-200/70">
-                    {milestone1Balance > 0 && onAccountAvailable < milestone1Balance
-                      ? `Payment is approved and held On Account, but ₹${(milestone1Balance - onAccountAvailable).toLocaleString("en-IN")} more is still needed (₹${onAccountAvailable.toLocaleString("en-IN")} available of the ₹${milestone1Balance.toLocaleString("en-IN")} due) before On Account Adjustment can settle Milestone 1.`
-                      : "Payment is approved and held On Account — go to On Account Adjustment to apply it to Milestone 1."}
-                  </p>
-                )}
-              </div>
-            );
-          })()
-        ) : !canEdit ? (
+        {!canEdit ? (
           <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
             <Lock size={13} /> This record is locked — only the assigned salesperson or an admin can edit it.
           </div>
@@ -312,7 +250,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
           <div className="space-y-1">
             <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-              <span>{filledCount} of {REQUIRED_KEYS.length} required fields captured</span>
+              <span>{filledCount} of {REQUIRED_KEYS.length} fields captured (none mandatory)</span>
               <span className="font-medium text-foreground">{progressPct}%</span>
             </div>
             <div className="h-1.5 rounded-full bg-muted overflow-hidden">
@@ -343,28 +281,28 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
         {/* ── Form sections ── */}
         <SectionCard icon={Landmark} iconClass="bg-sky-500/10 text-sky-600" title="Bank Details">
           <div className="grid grid-cols-2 gap-3">
-            {field("BankName", "Bank Name", "text", true)}
+            {field("BankName", "Bank Name")}
             {field("BranchName", "Branch Name")}
-            {field("AccountNo", "Account Number", "text", true)}
-            {field("IfscCode", "IFSC Code", "text", true)}
-            <div className="col-span-2">{field("AccountHolderName", "Account Holder Name", "text", true)}</div>
+            {field("AccountNo", "Account Number")}
+            {field("IfscCode", "IFSC Code")}
+            <div className="col-span-2">{field("AccountHolderName", "Account Holder Name")}</div>
           </div>
         </SectionCard>
 
         <div className="grid grid-cols-2 gap-4">
           <SectionCard icon={IdCard} iconClass="bg-amber-500/10 text-amber-600" title="Identity">
-            {field("PanNo", "PAN Number", "text", true)}
-            {field("AadhaarNo", "Aadhaar Number", "text", true)}
+            {field("PanNo", "PAN Number")}
+            {field("AadhaarNo", "Aadhaar Number")}
           </SectionCard>
           <SectionCard icon={Briefcase} iconClass="bg-emerald-500/10 text-emerald-600" title="Occupation & Income">
-            {field("Occupation", "Occupation", "text", true)}
+            {field("Occupation", "Occupation")}
             {field("AnnualIncome", "Annual Income (₹)", "number")}
           </SectionCard>
         </div>
 
         <SectionCard icon={CreditCard} iconClass="bg-cyan-500/10 text-cyan-600" title="Financing">
           <div>
-            <label className="text-xs text-muted-foreground block mb-1">How is this purchase being financed? *</label>
+            <label className="text-xs text-muted-foreground block mb-1">How is this purchase being financed?</label>
             <div className="grid grid-cols-2 gap-2">
               {(["SelfFunded", "LoanFinanced"] as const).map((opt) => (
                 <button key={opt} type="button" disabled={locked}
@@ -376,9 +314,6 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
                 </button>
               ))}
             </div>
-            {touched && !form.FinancingType && (
-              <p className="text-[11px] text-rose-500 mt-1">Financing type must be declared</p>
-            )}
           </div>
           {form.FinancingType === "LoanFinanced" && !loanDetail?.HasLoanRecord && (
             <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
@@ -389,7 +324,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
         <div className="flex justify-between items-center pt-3 border-t border-border">
           <span className="text-xs text-muted-foreground">
-            {!canEdit ? "Locked — assigned salesperson or admin only" : uiLocked ? "Locked for viewing" : hasErrors ? "Fix highlighted errors before saving" : missingRequired.length > 0 ? `${missingRequired.length} required field(s) remaining` : "All required fields captured"}
+            {!canEdit ? "Locked — assigned salesperson or admin only" : uiLocked ? "Locked for viewing" : hasErrors ? "Fix highlighted errors before saving" : "No fields are mandatory — save anytime"}
           </span>
           <div className="flex gap-2">
             {locked ? (

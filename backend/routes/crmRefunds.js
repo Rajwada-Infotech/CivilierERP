@@ -491,7 +491,12 @@ router.put("/:id/reject", requirePageRight("crm-refunds", "edit"), async (req, r
 });
 
 // ── PUT /:id/finance-approve — finance tier: spawn the payout NewPayment ──
-router.put("/:id/finance-approve", requirePageRight("crm-refunds", "edit"), async (req, res) => {
+// Also answers /:id/finance/approve — the generic actionPathSuffix shape the
+// Approval Inbox's ApprovalActions component builds (see SUB_GATE_SUFFIX in
+// ApprovalInbox.tsx, same convention as crm-agreement-date/crm-sales-deed-
+// director). Purely additive: the original hyphenated path keeps working
+// unchanged for CrmRefunds.tsx's own inline "Finance Approve" button.
+router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("crm-refunds", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const pool = getPool();
@@ -600,7 +605,9 @@ router.put("/:id/finance-approve", requirePageRight("crm-refunds", "edit"), asyn
 });
 
 // ── PUT /:id/finance-reject — FinancePending -> Pending ─────────────────
-router.put("/:id/finance-reject", requirePageRight("crm-refunds", "edit"), async (req, res) => {
+// Also answers /:id/finance/reject — see the matching comment on
+// /:id/finance-approve above.
+router.put(["/:id/finance-reject", "/:id/finance/reject"], requirePageRight("crm-refunds", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const pool = getPool();
