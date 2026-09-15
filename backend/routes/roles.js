@@ -350,12 +350,13 @@ router.post(
   authMiddleware,
   checkPermission("Rights", "Menu", "CanEdit"),
   async (req, res) => {
+  let transaction;
   try {
     const roleId = parseInt(req.params.roleId);
     const { pagePermissions } = req.body;
 
     const pool = getPool();
-    const transaction = new sql.Transaction(pool);
+    transaction = new sql.Transaction(pool);
     await transaction.begin();
 
     await new sql.Request(transaction)
@@ -364,24 +365,51 @@ router.post(
 
     for (const permission of pagePermissions || []) {
       const mapping = ROLE_RIGHTS_PAGE_MAP[permission.page] || {
-        module: permission.page.replace(/-/g, " "),
-        submodule: permission.page.replace(/-/g, " "),
+        module: String(permission.page ?? "").replace(/-/g, " "),
+        submodule: String(permission.page ?? "").replace(/-/g, " "),
       };
       const actions = permission.actions || [];
-      await new sql.Request(transaction)
-        .input("RoleId", sql.Int, roleId)
-        .input("Module", sql.NVarChar(100), mapping.module)
-        .input("SubModule", sql.NVarChar(100), mapping.submodule)
-        .input("CanView", sql.Bit, actions.includes("view") ? 1 : 0)
-        .input("CanAdd", sql.Bit, actions.includes("create") ? 1 : 0)
-        .input("CanEdit", sql.Bit, actions.includes("edit") ? 1 : 0)
-        .input("CanDelete", sql.Bit, actions.includes("delete") ? 1 : 0)
-        .input("CanPostApproval", sql.Bit, actions.includes("post-approval") ? 1 : 0).query(`
-          INSERT INTO dbo.RoleRights
-            (RoleId, Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPostApproval)
-          VALUES
-            (@RoleId, @Module, @SubModule, @CanView, @CanAdd, @CanEdit, @CanDelete, @CanPostApproval)
-        `);
+
+      // Defensive coercion — a malformed/blank Module or SubModule here
+      // (e.g. from a stale/empty PageKey) is what was crashing the whole
+      // save with a tedious TDS "invalid data length" error on @Module,
+      // taking every other page's rights down with it. Coerce to a safe
+      // non-empty string instead of trusting the mapping blindly, and log
+      // loudly so the source PageDefinitions row can still be found and
+      // fixed properly.
+      const moduleVal = String(mapping.module ?? "").trim().slice(0, 100) || "General";
+      const submoduleVal = String(mapping.submodule ?? "").trim().slice(0, 100) || "General";
+      if (moduleVal === "General" || submoduleVal === "General") {
+        console.warn("SAVE RIGHTS: coerced blank Module/SubModule", {
+          page: permission.page,
+          mapping,
+        });
+      }
+
+      try {
+        await new sql.Request(transaction)
+          .input("RoleId", sql.Int, roleId)
+          .input("Module", sql.NVarChar(100), moduleVal)
+          .input("SubModule", sql.NVarChar(100), submoduleVal)
+          .input("CanView", sql.Bit, actions.includes("view") ? 1 : 0)
+          .input("CanAdd", sql.Bit, actions.includes("create") ? 1 : 0)
+          .input("CanEdit", sql.Bit, actions.includes("edit") ? 1 : 0)
+          .input("CanDelete", sql.Bit, actions.includes("delete") ? 1 : 0)
+          .input("CanPostApproval", sql.Bit, actions.includes("post-approval") ? 1 : 0).query(`
+            INSERT INTO dbo.RoleRights
+              (RoleId, Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPostApproval)
+            VALUES
+              (@RoleId, @Module, @SubModule, @CanView, @CanAdd, @CanEdit, @CanDelete, @CanPostApproval)
+          `);
+      } catch (rowErr) {
+        console.error("SAVE RIGHTS: row insert failed", {
+          page: permission.page,
+          moduleVal,
+          submoduleVal,
+          actions,
+        });
+        throw rowErr;
+      }
     }
 
     await transaction.commit();
@@ -410,6 +438,19 @@ router.post(
     return res.json({ success: true });
   } catch (err) {
     console.error("SAVE RIGHTS ERROR:", err);
+    // The transaction was never rolled back on failure here — on SQL
+    // Server, an unrolled-back Transaction object holds onto its
+    // dedicated pool connection until it's explicitly committed or rolled
+    // back, so a failed save silently leaked one connection from the pool
+    // every time this crashed. Roll back defensively (no-op if the
+    // transaction was never opened, e.g. a failure before `.begin()`).
+    if (transaction) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackErr) {
+        console.error("SAVE RIGHTS: rollback failed", rollbackErr.message);
+      }
+    }
     return res.status(500).json({ error: "Failed to save rights" });
   }
 });
