@@ -1,16 +1,18 @@
 import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { DocumentText1 } from "iconsax-react";
+import { DocumentText1, Printer } from "iconsax-react";
 import { Pencil, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrPayrollShell, HR_PAYROLL_ACCENT } from "@/components/hrpayroll/HrPayrollShell";
 import { ExportMenu } from "@/components/ExportMenu";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { safeHtml, escapeHtml, raw } from "@/utils/escapeHtml";
 import type { ExportColumn } from "@/lib/export";
 import { getEmployeeCompanyOptions, type EmployeeCompanyOption } from "@/api/employeeMasterApi";
 import { getFinYears } from "@/api/finYearApi";
+import { getDesignations } from "@/api/designationMasterApi";
 import { getCandidates, type CandidateRow } from "@/api/candidateMasterApi";
 import {
   getOfferLetters,
@@ -18,38 +20,87 @@ import {
   updateOfferLetter,
   confirmJoining,
   deleteOfferLetter,
+  getOfferLetterTemplate,
+  updateOfferLetterTemplate,
   type OfferLetterRow,
 } from "@/api/offerLetterApi";
 
 const labelCls = "block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 const inputCls = "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
 
-interface FormState {
-  candidateId: string;
-  companyId: string;
-  finYearId: string;
-  salary: string;
-  candidateAddress: string;
-  dateOfJoin: string;
-  documentDate: string;
-  remarks: string;
+const TEMPLATE_PLACEHOLDERS = [
+  "CandidateName", "CandidateCode", "CandidateAddress", "Company", "Designation", "FinYear",
+  "Salary", "DateOfJoin", "DocumentDate", "DocNo", "Remarks",
+];
+
+// Replaces {{Placeholder}} tokens in the letter body with an offer's data —
+// unmatched tokens are left blank rather than surfacing "{{Typo}}" verbatim.
+function fillTemplate(template: string, offer: OfferLetterRow): string {
+  const values: Record<string, string> = {
+    CandidateName: offer.CandidateName || "",
+    CandidateCode: offer.CandidateCode || "",
+    CandidateAddress: offer.CandidateAddress || "",
+    Company: offer.CompanyName || "",
+    Designation: offer.DesignationName || "",
+    FinYear: offer.FinYearName || "",
+    Salary: offer.Salary != null ? String(offer.Salary) : "",
+    DateOfJoin: offer.DateOfJoin ? offer.DateOfJoin.slice(0, 10) : "",
+    DocumentDate: offer.DocumentDate ? offer.DocumentDate.slice(0, 10) : "",
+    DocNo: offer.DocNo || "",
+    Remarks: offer.Remarks || "",
+  };
+  return template.replace(/\{\{(\w+)\}\}/g, (_match, key) => values[key] ?? "");
 }
 
-const emptyForm: FormState = {
-  candidateId: "",
-  companyId: "",
-  finYearId: "",
-  salary: "",
-  candidateAddress: "",
-  dateOfJoin: "",
-  documentDate: "",
-  remarks: "",
-};
+const NEWLINE = String.fromCharCode(10);
+const BLANK_LINE_SPLIT = NEWLINE + NEWLINE;
+
+// Minimal Markdown -> HTML for the letter body: "# Heading" lines become a
+// centered <h1>, "**bold**" spans become <strong>, blank lines separate
+// paragraphs, single newlines within a paragraph become <br/>. Each
+// paragraph's raw text is escaped FIRST, then the **bold** markup is
+// layered on top of the already-escaped text, so candidate/remarks data
+// in the template can't break out of the generated HTML.
+function renderLetterBody(text: string): string {
+  const paragraphs = text.split(BLANK_LINE_SPLIT).map((p) => p.trim()).filter(Boolean);
+  return paragraphs
+    .map((para) => {
+      const trimmed = para.trim();
+      const isHeading = trimmed.indexOf("# ") === 0;
+      const withoutHeadingMark = isHeading ? trimmed.slice(2) : para;
+      const boldPattern = /\*\*(.+?)\*\*/g;
+      const escaped = escapeHtml(withoutHeadingMark).replace(boldPattern, "<strong>$1</strong>");
+      if (isHeading) return "<h1>" + escaped + "</h1>";
+      return "<p>" + escaped.split(NEWLINE).join("<br/>") + "</p>";
+    })
+    .join(NEWLINE);
+}
+
+function openGeneratedLetter(offer: OfferLetterRow, template: string) {
+  const body = fillTemplate(template, offer);
+  const win = window.open("", "_blank", "width=800,height=900");
+  if (!win) {
+    toast.error("Pop-up blocked — please allow pop-ups to generate the letter");
+    return;
+  }
+  win.document.write(safeHtml`<html><head><title>Offer Letter — ${offer.CandidateName}</title>
+    <style>
+      body { font-family: Georgia, serif; padding: 48px; max-width: 760px; margin: 0 auto; color: #1a1a1a; line-height: 1.7; font-size: 14px; }
+      h1 { font-size: 20px; text-align: center; letter-spacing: 1px; margin: 0 0 24px; }
+      p { margin: 0 0 14px; }
+      strong { font-weight: 700; }
+    </style>
+  </head><body>${raw(renderLetterBody(body))}</body></html>`);
+  win.document.close();
+  win.focus();
+  win.print();
+}
 
 const offerExportColumns: ExportColumn[] = [
   { header: "Doc No", accessor: "docNo" },
   { header: "Candidate", accessor: "candidateName" },
   { header: "Company", accessor: "companyName" },
+  { header: "Designation", accessor: "designationName" },
   { header: "Fin Year", accessor: "finYearName" },
   { header: "Salary", accessor: "salary" },
   { header: "Date of Join", accessor: "dateOfJoin" },
@@ -118,6 +169,91 @@ const JoiningRow: React.FC<{
   );
 };
 
+// ── Letter Body tab: edit the {{Placeholder}} template used to generate offers ──
+const LetterBodyTab: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["offer-letter-template"],
+    queryFn: getOfferLetterTemplate,
+    staleTime: 60 * 1000,
+  });
+
+  const [body, setBody] = useState<string | null>(null);
+  const currentBody = body ?? data?.Body ?? "";
+
+  const mutation = useMutation({
+    mutationFn: (next: string) => updateOfferLetterTemplate(next),
+    onSuccess: async () => {
+      toast.success("Letter body saved");
+      await queryClient.invalidateQueries({ queryKey: ["offer-letter-template"] });
+    },
+    onError: (err: any) => toast.error(err?.message || "Failed to save letter body"),
+  });
+
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading letter body...</div>;
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-5 space-y-4 mt-4">
+      <div>
+        <h3 className="font-heading font-semibold text-foreground text-sm">Offer Letter Body</h3>
+        <p className="text-[11px] text-muted-foreground mt-0.5">
+          This text is merged with each offer's data (via the placeholders below) when you click "Generate" on a record.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {TEMPLATE_PLACEHOLDERS.map((p) => (
+          <span key={p} className="text-[11px] font-mono px-2 py-0.5 rounded-full border" style={{ borderColor: `${HR_PAYROLL_ACCENT}33`, color: HR_PAYROLL_ACCENT, backgroundColor: `${HR_PAYROLL_ACCENT}0D` }}>
+            {`{{${p}}}`}
+          </span>
+        ))}
+      </div>
+      <textarea
+        className={`${inputCls} font-mono`}
+        rows={16}
+        value={currentBody}
+        onChange={(e) => setBody(e.target.value)}
+        disabled={!canEdit}
+      />
+      {canEdit && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => mutation.mutate(currentBody)}
+            disabled={mutation.isPending || !currentBody.trim()}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {mutation.isPending ? "Saving…" : "Save Letter Body"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface FormState {
+  candidateId: string;
+  companyId: string;
+  finYearId: string;
+  designationId: string;
+  salary: string;
+  candidateAddress: string;
+  dateOfJoin: string;
+  documentDate: string;
+  remarks: string;
+}
+
+const emptyForm: FormState = {
+  candidateId: "",
+  companyId: "",
+  finYearId: "",
+  designationId: "",
+  salary: "",
+  candidateAddress: "",
+  dateOfJoin: "",
+  documentDate: "",
+  remarks: "",
+};
+
 const OfferLetterJoining: React.FC = () => {
   const rights = usePageRights("offer-letter-joining");
   const queryClient = useQueryClient();
@@ -143,6 +279,12 @@ const OfferLetterJoining: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: templateData } = useQuery({
+    queryKey: ["offer-letter-template"],
+    queryFn: getOfferLetterTemplate,
+    staleTime: 60 * 1000,
+  });
+
   const rows: OfferLetterRow[] = Array.isArray(data) ? data : [];
   const allCandidates: CandidateRow[] = Array.isArray(candidateData) ? candidateData : [];
   const selectedCandidates = allCandidates.filter((c) => c.InterviewStatus === "Selected");
@@ -166,6 +308,7 @@ const OfferLetterJoining: React.FC = () => {
       candidateId: String(row.CandidateId),
       companyId: row.CompanyId ? String(row.CompanyId) : "",
       finYearId: row.FinYearId ? String(row.FinYearId) : "",
+      designationId: row.DesignationId ? String(row.DesignationId) : "",
       salary: row.Salary != null ? String(row.Salary) : "",
       candidateAddress: row.CandidateAddress || "",
       dateOfJoin: row.DateOfJoin ? row.DateOfJoin.slice(0, 10) : "",
@@ -186,6 +329,14 @@ const OfferLetterJoining: React.FC = () => {
     }
   };
 
+  const handleGenerate = (row: OfferLetterRow) => {
+    if (!templateData?.Body) {
+      toast.error("No letter body configured yet — set one in the Letter Body tab");
+      return;
+    }
+    openGeneratedLetter(row, templateData.Body);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.candidateId) return toast.error("Please select a candidate");
@@ -195,6 +346,7 @@ const OfferLetterJoining: React.FC = () => {
       CandidateId: Number(form.candidateId),
       CompanyId: form.companyId ? Number(form.companyId) : null,
       FinYearId: form.finYearId ? Number(form.finYearId) : null,
+      DesignationId: form.designationId ? Number(form.designationId) : null,
       Salary: form.salary !== "" ? Number(form.salary) : null,
       CandidateAddress: form.candidateAddress?.trim() || null,
       DateOfJoin: form.dateOfJoin || null,
@@ -221,6 +373,7 @@ const OfferLetterJoining: React.FC = () => {
     docNo: r.DocNo,
     candidateName: r.CandidateName,
     companyName: r.CompanyName || "-",
+    designationName: r.DesignationName || "-",
     finYearName: r.FinYearName || "-",
     salary: r.Salary ?? "",
     dateOfJoin: r.DateOfJoin ? r.DateOfJoin.slice(0, 10) : "",
@@ -239,6 +392,7 @@ const OfferLetterJoining: React.FC = () => {
           <TabsList>
             <TabsTrigger value="offer">Offer Letter</TabsTrigger>
             <TabsTrigger value="joining">Joining</TabsTrigger>
+            <TabsTrigger value="body">Letter Body</TabsTrigger>
           </TabsList>
 
           {/* ── Offer Letter tab ── */}
@@ -279,8 +433,8 @@ const OfferLetterJoining: React.FC = () => {
                   </div>
 
                   {selectedCandidate && (
-                    <div className="rounded-lg border border-border bg-muted/30 p-4">
-                      <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-foreground/80 pb-2 mb-2 border-b border-border/70">
+                    <div className="rounded-lg border p-4" style={{ borderColor: `${HR_PAYROLL_ACCENT}33`, backgroundColor: `${HR_PAYROLL_ACCENT}0D` }}>
+                      <p className="text-[11px] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `${HR_PAYROLL_ACCENT}33` }}>
                         Candidate Details
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs">
@@ -301,7 +455,7 @@ const OfferLetterJoining: React.FC = () => {
                     </div>
                   )}
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div>
                       <label className={labelCls}>Company</label>
                       <select className={inputCls} value={form.companyId} onChange={(e) => setField("companyId", e.target.value)}>
@@ -310,6 +464,10 @@ const OfferLetterJoining: React.FC = () => {
                           <option key={c.id} value={c.id}>{c.label}</option>
                         ))}
                       </select>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Designation</label>
+                      <DesignationSelect value={form.designationId} onChange={(v) => setField("designationId", v)} />
                     </div>
                     <div>
                       <label className={labelCls}>Fin Year</label>
@@ -388,6 +546,9 @@ const OfferLetterJoining: React.FC = () => {
                           <td className="px-4 py-2.5">{r.DateOfJoin ? r.DateOfJoin.slice(0, 10) : "-"}</td>
                           <td className="px-4 py-2.5 text-right">
                             <div className="inline-flex items-center gap-2">
+                              <button onClick={() => handleGenerate(r)} className="text-muted-foreground hover:text-foreground" title="Generate Offer Letter">
+                                <Printer size={14} />
+                              </button>
                               {rights.canEdit && (
                                 <button onClick={() => handleEdit(r)} className="text-muted-foreground hover:text-foreground" title="Edit">
                                   <Pencil size={14} />
@@ -444,6 +605,11 @@ const OfferLetterJoining: React.FC = () => {
               </div>
             </div>
           </TabsContent>
+
+          {/* ── Letter Body tab ── */}
+          <TabsContent value="body">
+            <LetterBodyTab canEdit={rights.canEdit} />
+          </TabsContent>
         </Tabs>
       </HrPayrollShell>
     </>
@@ -463,6 +629,24 @@ const FinYearSelect: React.FC<{ value: string; onChange: (v: string) => void }> 
       <option value="">Select...</option>
       {options.map((fy) => (
         <option key={fy.FId} value={fy.FId}>{fy.FName}</option>
+      ))}
+    </select>
+  );
+};
+
+// Self-fetching -- same pattern as FinYearSelect above.
+const DesignationSelect: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => {
+  const { data } = useQuery({
+    queryKey: ["designation-master"],
+    queryFn: getDesignations,
+    staleTime: 5 * 60 * 1000,
+  });
+  const options = Array.isArray(data) ? data : [];
+  return (
+    <select className={inputCls} value={value} onChange={(e) => onChange(e.target.value)}>
+      <option value="">Select...</option>
+      {options.map((d) => (
+        <option key={d.Id} value={d.Id}>{d.DesignationName}</option>
       ))}
     </select>
   );
