@@ -28,6 +28,8 @@ export interface EmployeeRow {
   CostCenterId: number | null;
   CostCenterName: string | null;
   CandidateId: number | null;
+  CandidateCode: string | null;
+  CandidateName: string | null;
   BankName: string | null;
   BankAccountNumber: string | null;
   BankIFSC: string | null;

@@ -48,6 +48,8 @@ const mapRow = (r: EmployeeRow): RecordWithId => ({
   costCenterId: r.CostCenterId ? String(r.CostCenterId) : "",
   costCenterName: r.CostCenterName || "-",
   candidateId: r.CandidateId ? String(r.CandidateId) : "",
+  candidateCode: r.CandidateCode || "",
+  candidateName: r.CandidateName || "",
   bankName: r.BankName || "",
   bankAccountNumber: r.BankAccountNumber || "",
   bankIFSC: r.BankIFSC || "",
@@ -232,6 +234,23 @@ export default function EmployeeMaster() {
 
   const fields: FieldDef[] = [
     { name: "sec-basic", label: "Basic Information", type: "section" },
+    {
+      name: "candidateId",
+      label: "Candidate",
+      type: "custom",
+      fullWidth: true,
+      render: (p) =>
+        p.formData.candidateId ? (
+          <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground">
+            {(p.formData.candidateCode as string) || "-"} {(p.formData.candidateName as string) ? `— ${p.formData.candidateName}` : ""}
+            <span className="ml-2 text-[11px] text-muted-foreground">(auto-linked from Offer Letter &amp; Joining)</span>
+          </div>
+        ) : (
+          <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-muted-foreground">
+            Not linked to a candidate — created directly in Employee Master
+          </div>
+        ),
+    },
     { name: "employeeCode", label: "Employee ID / Employee Code", type: "text", required: true, uppercase: true, placeholder: "e.g. EMP-0001" },
     { name: "employeeName", label: "Employee Name", type: "text", required: true, fullWidth: true },
     { name: "companyId", label: "Company", type: "select", asyncOptions: async () => companyOptions },
@@ -290,6 +309,7 @@ export default function EmployeeMaster() {
     { key: "employeeCode", label: "Code" },
     { key: "employeeName", label: "Name" },
     { key: "companyName", label: "Company", hideOnMobile: true, sortable: false },
+    { key: "candidateCode", label: "Candidate", hideOnMobile: true, sortable: false },
     { key: "designation", label: "Designation", hideOnMobile: true },
     { key: "department", label: "Department", hideOnMobile: true },
     { key: "employmentType", label: "Type", hideOnMobile: true },
@@ -300,6 +320,12 @@ export default function EmployeeMaster() {
 
   const columnRenderers: Record<string, (value: unknown, row: RecordWithId) => React.ReactNode> = {
     employeeCode: (value) => <span className="font-mono text-xs font-semibold">{String(value || "-")}</span>,
+    candidateCode: (value, row) =>
+      value ? (
+        <span className="text-xs" title={row.candidateName as string}>{String(value)}</span>
+      ) : (
+        <span className="text-xs text-muted-foreground">-</span>
+      ),
     isActive: (value) => (
       <span
         className={
