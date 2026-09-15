@@ -59,6 +59,8 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  Cell,
+  LabelList,
 } from "recharts";
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
@@ -115,6 +117,23 @@ const compactINR = (n: number) =>
   : n >= 1e3 ? `₹${(n / 1e3).toFixed(1)}K`
   : `₹${Math.round(n)}`;
 
+// Recharts' default auto-tick algorithm, fed a small/skewed dataset (mostly
+// zero with one or two real spikes — exactly what a 7-day activity window
+// often looks like), can produce ticks that round to the same displayed
+// label once passed through a formatter (e.g. two different raw values
+// both showing "30.0L"). Generating clean, evenly-spaced round-number
+// ticks ourselves guarantees every label is genuinely distinct.
+function niceTicks(max: number, count = 4): number[] {
+  if (!(max > 0)) return [0];
+  const rawStep = max / count;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const residual = rawStep / magnitude;
+  const step = (residual > 5 ? 10 : residual > 2 ? 5 : residual > 1 ? 2 : 1) * magnitude;
+  const ticks: number[] = [];
+  for (let v = 0; v <= max + step * 0.5; v += step) ticks.push(Math.round(v));
+  return ticks;
+}
+
 
 // ─── Animated Counter ─────────────────────────────────────────────────────────
 function AnimatedCounter({
@@ -155,20 +174,22 @@ function AnimatedCounter({
 
 // ─── Bento primitives ─────────────────────────────────────────────────────────
 function Bento({
-  children, className = "", title, icon: Icon, accent = "#6366f1", action,
+  children, className = "", title, subtitle, icon: Icon, accent = "#6366f1", action, delay = 0,
 }: {
   children: React.ReactNode;
   className?: string;
   title?: string;
+  subtitle?: string;
   icon?: React.ElementType;
   accent?: string;
   action?: React.ReactNode;
+  delay?: number;
 }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+      transition={{ duration: 0.5, delay, ease: [0.16, 1, 0.3, 1] }}
       className={`relative rounded-2xl border border-border/50 bg-card/60 backdrop-blur-sm overflow-hidden flex flex-col ${className}`}
     >
       <div
@@ -176,7 +197,7 @@ function Bento({
         style={{ background: `linear-gradient(90deg, transparent, ${accent}, transparent)` }}
       />
       {title && (
-        <div className="flex items-center gap-2 px-4 pt-3.5 pb-2.5">
+        <div className="flex items-start gap-2 px-4 pt-3.5 pb-2.5">
           {Icon && (
             <span
               className="w-6 h-6 rounded-lg flex items-center justify-center shrink-0"
@@ -185,10 +206,17 @@ function Bento({
               <Icon size={12} style={{ color: accent }} />
             </span>
           )}
-          <span className="font-heading text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-            {title}
-          </span>
-          {action && <span className="ml-auto">{action}</span>}
+          <div className="min-w-0">
+            <span className="font-heading text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground block">
+              {title}
+            </span>
+            {subtitle && (
+              <span className="text-[10px] text-muted-foreground/45 block mt-0.5 normal-case tracking-normal font-normal">
+                {subtitle}
+              </span>
+            )}
+          </div>
+          {action && <span className="ml-auto shrink-0">{action}</span>}
         </div>
       )}
       <div className="flex-1 min-h-0">{children}</div>
@@ -396,6 +424,115 @@ function CircularGauge({ pct, size = 128, color = "#7c3aed" }: { pct: number; si
         Completed
       </text>
     </svg>
+  );
+}
+
+// ─── Project Network — the "world map" panel. This app has no populated
+// per-project geo-coordinates yet (dbo.enterprise.latitude/longitude exist
+// on the schema but aren't filled in on any project today), so this is a
+// deliberately illustrative network diagram — a central hub (the company)
+// radiating out to each real project — rather than a literal map claiming
+// false geographic precision. Every project gets its own node (no
+// grouping/overflow bucket); only the node LAYOUT (an evenly-spaced fan
+// around the hub, sized down as the count grows) is decorative. Swap in
+// real lat/long-projected positions here once that data actually exists.
+// HARD_CAP exists purely as a defensive ceiling against a pathological
+// project count blowing up the SVG, not a normal product limit.
+const HARD_CAP_NODES = 24;
+
+function ProjectNetworkMap({ projects, total }: { projects: { id: number; name: string; active: boolean }[]; total: number }) {
+  const hub = { x: 360, y: 140 };
+  const radiusX = 260;
+  const radiusY = 95;
+
+  // Active projects lead (they're the ones worth seeing at a glance).
+  const shown = [...projects].sort((a, b) => Number(b.active) - Number(a.active)).slice(0, HARD_CAP_NODES);
+  const overflow = projects.length - shown.length;
+  // More nodes → smaller dots/type so a growing project list stays legible
+  // instead of overlapping.
+  const density = shown.length <= 6 ? 1 : shown.length <= 12 ? 0.8 : 0.6;
+
+  const nodes = shown.map((p, i) => {
+    // Half-circle fan above/around the hub (avoids the caption strip at
+    // the bottom) — angle sweeps from -170° to -10° across however many
+    // nodes there actually are.
+    const t = shown.length <= 1 ? 0.5 : i / (shown.length - 1);
+    const angle = (-170 + t * 160) * (Math.PI / 180);
+    return {
+      ...p,
+      x: hub.x + Math.cos(angle) * radiusX,
+      y: hub.y + Math.sin(angle) * radiusY,
+    };
+  });
+
+  const arcPath = (n: { x: number; y: number }) =>
+    `M ${hub.x} ${hub.y} Q ${(hub.x + n.x) / 2} ${Math.min(hub.y, n.y) - 30} ${n.x} ${n.y}`;
+
+  return (
+    <div className="relative w-full h-[280px] overflow-hidden rounded-xl">
+      <svg viewBox="0 0 720 280" className="w-full h-full" style={{ overflow: "visible" }}>
+        <defs>
+          <pattern id="homeMapGrid" width="24" height="24" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="1" fill="currentColor" className="text-primary/15" />
+          </pattern>
+        </defs>
+        <rect width="720" height="280" fill="url(#homeMapGrid)" />
+
+        {nodes.map((n) => (
+          <path key={`arc-${n.id}`} d={arcPath(n)} fill="none" stroke="#7c3aed" strokeWidth="1.2" strokeDasharray="4 4" opacity={n.active ? 0.4 : 0.18} />
+        ))}
+
+        {/* Traveling pulse — active projects only, so the eye reads "live" as literally the live ones */}
+        {nodes.filter((n) => n.active).map((n, i) => (
+          <circle key={`pulse-${n.id}`} r={2.5 * density} fill="#a78bfa">
+            <animateMotion dur={`${3 + i * 0.6}s`} repeatCount="indefinite" path={arcPath(n)} />
+            <animate attributeName="opacity" values="0;1;0" dur={`${3 + i * 0.6}s`} repeatCount="indefinite" />
+          </circle>
+        ))}
+
+        {nodes.map((n, i) => (
+          <g key={`node-${n.id}`}>
+            <circle cx={n.x} cy={n.y} r={(n.active ? 13 : 9) * density} fill="#7c3aed" opacity={n.active ? 0.12 : 0.06}>
+              {n.active && <animate attributeName="r" values={`${11 * density};${17 * density};${11 * density}`} dur="2.6s" repeatCount="indefinite" begin={`${i * 0.3}s`} />}
+            </circle>
+            <circle cx={n.x} cy={n.y} r={(n.active ? 7 : 5) * density} fill={n.active ? "#a78bfa" : "hsl(var(--muted-foreground))"} stroke={n.active ? "#7c3aed" : "hsl(var(--border))"} strokeWidth="1.5" />
+            <text
+              x={n.x}
+              y={n.y + (n.y > hub.y ? 20 * density + 4 : -14 * density - 4)}
+              textAnchor="middle"
+              className={n.active ? "fill-foreground font-semibold" : "fill-muted-foreground"}
+              style={{ fontSize: 11 * density }}
+            >
+              {n.name.length > 16 ? `${n.name.slice(0, 15)}…` : n.name}
+            </text>
+          </g>
+        ))}
+
+        {/* Hub */}
+        <circle cx={hub.x} cy={hub.y} r="16" fill="#7c3aed" opacity="0.15">
+          <animate attributeName="r" values="14;20;14" dur="2.4s" repeatCount="indefinite" />
+        </circle>
+        <circle cx={hub.x} cy={hub.y} r="9" fill="#7c3aed" stroke="#c4b5fd" strokeWidth="2" />
+      </svg>
+
+      {/* Caption overlay — the only free-floating numbers in this panel */}
+      <div className="absolute bottom-2.5 left-3 right-3 flex items-end justify-between pointer-events-none">
+        <div>
+          <p className="font-heading font-bold text-2xl text-foreground leading-none tabular-nums">
+            <AnimatedCounter target={projects.filter((p) => p.active).length} />
+          </p>
+          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest mt-1">Active Projects</p>
+        </div>
+        <div className="text-right">
+          <p className="font-heading font-bold text-2xl text-muted-foreground/70 leading-none tabular-nums">
+            <AnimatedCounter target={total} />
+          </p>
+          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest mt-1">
+            Total Projects{overflow > 0 ? ` · +${overflow} not shown` : ""}
+          </p>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -701,6 +838,34 @@ export default function HomePage() {
       retry: 2,
     });
 
+  // Real project list for the "Project Network" panel — /api/project-master
+  // has no engineering permission gate (same reason fetchHomeDashboard
+  // itself uses it for the active-project-count fallback), so every role
+  // that reaches Home can resolve real project names for the map's nodes.
+  const { data: projectListData } = useQuery({
+    queryKey: ["home-project-list"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/project-master");
+      if (!res.ok) throw new Error("Failed to fetch project list");
+      return res.json().catch(() => []);
+    },
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    retry: 1,
+  });
+  const projectList: { id: number; name: string; active: boolean }[] = (() => {
+    const raw = Array.isArray(projectListData)
+      ? projectListData
+      : Array.isArray((projectListData as any)?.data)
+        ? (projectListData as any).data
+        : [];
+    return raw.map((p: any) => ({
+      id: p.Id ?? p.id,
+      name: p.Name ?? p.name ?? `Project #${p.Id ?? p.id}`,
+      active: p.IsActive === 1 || p.IsActive === true,
+    }));
+  })();
+
   // Civil Work DPR isn't part of the main home-dashboard aggregator yet —
   // it has its own lightweight stats endpoint, so the tile queries that
   // directly instead of growing the shared backend aggregation.
@@ -859,39 +1024,32 @@ export default function HomePage() {
     padding: "8px 10px",
   } as const;
 
+  // Explicit, clean ticks for both charts — see niceTicks' comment.
+  const countTicks = niceTicks(Math.max(...activitySeries.map((d) => d.count), 1), 4);
+  const amountTicks = niceTicks(Math.max(...activitySeries.map((d) => d.amount), 1), 4);
+
   return (
     <div className="relative min-h-[calc(100vh-3.5rem)] bg-background overflow-hidden font-body">
       <BgGrid />
 
       <div className="relative z-10 w-full px-4 sm:px-6 md:px-8 lg:px-10 xl:px-14 2xl:px-20 py-5 sm:py-6">
-        {/* ── Compact header — full-width, no side rail, so this dashboard
-            stays dense and edge-to-edge instead of the old giant hero. ── */}
+        {/* ── Header — full-width, no side rail. A small utility strip
+            (brand/live/refresh) on top, the greeting back at its original
+            large size on its own line below it. ── */}
         <motion.div
           initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.45 }}
-          className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-6"
+          className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-2"
         >
-          <HardHat size={16} className="text-primary/70 shrink-0" />
-          <h1 className="font-heading font-bold text-lg sm:text-xl text-foreground shrink-0">
-            {greeting}, <span className="bg-gradient-to-r from-primary via-violet-400 to-cyan-400 bg-clip-text text-transparent">{firstName}</span>
-          </h1>
-          <span
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-heading font-semibold uppercase tracking-wider border shrink-0"
-            style={{
-              background: privileged ? "hsl(var(--primary)/0.08)" : "hsl(var(--muted)/0.5)",
-              borderColor: privileged ? "hsl(var(--primary)/0.25)" : "hsl(var(--border))",
-              color: privileged ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
-            }}
-          >
-            {privileged ? <ShieldCheck size={10} /> : <Users size={10} />}
-            {role.replace(/_/g, " ")}
+          <HardHat size={14} className="text-primary/70 shrink-0" />
+          <span className="font-heading text-[10px] font-bold uppercase tracking-[0.24em] text-primary/55 shrink-0">
+            CivilierERP
           </span>
           <span className="relative flex h-1.5 w-1.5 shrink-0">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
           </span>
-          <span className="text-[11px] text-muted-foreground/50 shrink-0">Live</span>
 
           <div className="ml-auto flex items-center gap-2 shrink-0">
             {lastUpdated && (
@@ -911,6 +1069,28 @@ export default function HomePage() {
               />
             </button>
           </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.1 }}
+          className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-10 sm:mb-12"
+        >
+          <h1 className="font-heading font-bold text-4xl sm:text-5xl md:text-[4rem] 2xl:text-[4.5rem] tracking-tight leading-[1.06] text-foreground break-words">
+            {greeting}, <span className="bg-gradient-to-r from-primary via-violet-400 to-cyan-400 bg-clip-text text-transparent">{firstName}.</span>
+          </h1>
+          <span
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-heading font-semibold uppercase tracking-wider border shrink-0"
+            style={{
+              background: privileged ? "hsl(var(--primary)/0.08)" : "hsl(var(--muted)/0.5)",
+              borderColor: privileged ? "hsl(var(--primary)/0.25)" : "hsl(var(--border))",
+              color: privileged ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
+            }}
+          >
+            {privileged ? <ShieldCheck size={10} /> : <Users size={10} />}
+            {role.replace(/_/g, " ")}
+          </span>
         </motion.div>
 
         {isError && (
@@ -936,7 +1116,12 @@ export default function HomePage() {
             <p className="text-xs text-muted-foreground/40 mt-1">Contact your administrator to get module permissions.</p>
           </motion.div>
         ) : (
-          <div className="space-y-4">
+          // key tied to dataUpdatedAt so the whole subtree remounts on every
+          // reload (initial load, manual refresh, or the 5-minute
+          // auto-refetch) — every tile's entrance animation (Bento's own
+          // fade+rise, StatCard's sparkline/counter) replays each time,
+          // not just once on first mount.
+          <div key={dataUpdatedAt || "initial"} className="space-y-4">
             {/* ── Hero stat cards ── */}
             {heroKpis.length > 0 && (
               <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
@@ -958,24 +1143,67 @@ export default function HomePage() {
 
             {/* ── Charts row: activity volume, activity value, WO completion gauge ── */}
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-              <Bento title="Activity This Week" icon={BarChart3} accent="#7c3aed" className="xl:col-span-1 min-h-[240px]">
+              <Bento
+                title="Actions This Week"
+                subtitle="Documents & transactions created, per day, across every module"
+                icon={BarChart3}
+                accent="#7c3aed"
+                className="xl:col-span-1 min-h-[240px]"
+                delay={0.15}
+              >
                 <div className="p-3 h-[210px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={activitySeries} margin={{ top: 8, right: 4, left: -22, bottom: 0 }}>
+                    <BarChart data={activitySeries} margin={{ top: 20, right: 8, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="homeActionsFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#a78bfa" />
+                          <stop offset="100%" stopColor="#6d28d9" />
+                        </linearGradient>
+                      </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
-                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} width={28} />
-                      <Tooltip contentStyle={chartTooltipStyle} cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }} labelStyle={{ color: "hsl(var(--foreground))" }} />
-                      <Bar dataKey="count" name="Actions" radius={[5, 5, 0, 0]} fill="#7c3aed" maxBarSize={28} />
+                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} dy={6} />
+                      <YAxis
+                        domain={[0, countTicks[countTicks.length - 1]]}
+                        ticks={countTicks}
+                        tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                        axisLine={false}
+                        tickLine={false}
+                        allowDecimals={false}
+                        width={30}
+                      />
+                      <Tooltip
+                        contentStyle={chartTooltipStyle}
+                        cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }}
+                        labelStyle={{ color: "hsl(var(--foreground))" }}
+                        formatter={(v: number) => [`${v} action${v === 1 ? "" : "s"}`, "Logged"]}
+                      />
+                      <Bar dataKey="count" name="Actions" radius={[6, 6, 2, 2]} fill="url(#homeActionsFill)" maxBarSize={28}>
+                        {activitySeries.map((d, i) => (
+                          <Cell key={i} opacity={d.count > 0 ? 1 : 0.25} />
+                        ))}
+                        <LabelList
+                          dataKey="count"
+                          position="top"
+                          formatter={(v: number) => (v > 0 ? v : "")}
+                          style={{ fontSize: 10, fill: "hsl(var(--muted-foreground))", fontWeight: 600 }}
+                        />
+                      </Bar>
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               </Bento>
 
-              <Bento title="Transaction Value This Week" icon={LineChart} accent="#06b6d4" className="xl:col-span-1 min-h-[240px]">
+              <Bento
+                title="Transaction Value This Week"
+                subtitle="Rupee value behind those same actions, per day"
+                icon={LineChart}
+                accent="#06b6d4"
+                className="xl:col-span-1 min-h-[240px]"
+                delay={0.2}
+              >
                 <div className="p-3 h-[210px]">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={activitySeries} margin={{ top: 8, right: 4, left: -12, bottom: 0 }}>
+                    <AreaChart data={activitySeries} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="homeValueFill" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.35} />
@@ -983,8 +1211,16 @@ export default function HomePage() {
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
-                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                      <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} tickFormatter={(v) => compactINR(v)} width={44} />
+                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} dy={6} />
+                      <YAxis
+                        domain={[0, amountTicks[amountTicks.length - 1]]}
+                        ticks={amountTicks}
+                        tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                        axisLine={false}
+                        tickLine={false}
+                        tickFormatter={(v) => compactINR(v)}
+                        width={52}
+                      />
                       <Tooltip contentStyle={chartTooltipStyle} formatter={(v: number) => [compactINR(v), "Value"]} labelStyle={{ color: "hsl(var(--foreground))" }} />
                       <Area type="monotone" dataKey="amount" name="Value" stroke="#06b6d4" strokeWidth={2} fill="url(#homeValueFill)" />
                     </AreaChart>
@@ -992,7 +1228,7 @@ export default function HomePage() {
                 </div>
               </Bento>
 
-              <Bento title="Work Order Completion" icon={Hammer} accent="#7c3aed" className="xl:col-span-1 min-h-[240px]">
+              <Bento title="Work Order Completion" icon={Hammer} accent="#7c3aed" className="xl:col-span-1 min-h-[240px]" delay={0.25}>
                 <div className="flex flex-col items-center justify-center gap-4 p-4 h-[210px]">
                   <CircularGauge pct={woCompletionPct} />
                   <div className="w-full space-y-2">
@@ -1012,13 +1248,32 @@ export default function HomePage() {
               </Bento>
             </div>
 
-            {/* ── Needs attention (wide) + remaining key numbers (narrow) ── */}
+            {/* ── Project Network (map-style panel) + remaining key numbers ── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+              <Bento title="Project Network" icon={Building2} accent="#7c3aed" className="lg:col-span-2" delay={0.3}>
+                <ProjectNetworkMap projects={projectList} total={eng?.projects?.total ?? projectList.length} />
+              </Bento>
+
+              <Bento title="More key numbers" icon={Database} accent="#6366f1" delay={0.35}>
+                {restKpis.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-xs text-muted-foreground/40">Nothing else to show.</div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2.5 p-3">
+                    {restKpis.map((k, i) => (
+                      <KpiPill key={k.label} label={k.label} value={k.value} prefix={k.prefix} suffix={k.suffix} color={k.color} icon={k.icon} i={i} />
+                    ))}
+                  </div>
+                )}
+              </Bento>
+            </div>
+
+            {/* ── Needs attention — full width ── */}
+            <div>
               <Bento
                 title={`Needs your attention${attention.length ? ` · ${attention.length}` : ""}`}
                 icon={Bell}
                 accent="#ef4444"
-                className="lg:col-span-2"
+                delay={0.4}
               >
                 {isLoading ? (
                   <div className="px-4 py-6 space-y-3">
@@ -1045,18 +1300,6 @@ export default function HomePage() {
                   </div>
                 )}
               </Bento>
-
-              <Bento title="More key numbers" icon={Database} accent="#6366f1">
-                {restKpis.length === 0 ? (
-                  <div className="px-4 py-10 text-center text-xs text-muted-foreground/40">Nothing else to show.</div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2.5 p-3">
-                    {restKpis.map((k, i) => (
-                      <KpiPill key={k.label} label={k.label} value={k.value} prefix={k.prefix} suffix={k.suffix} color={k.color} icon={k.icon} i={i} />
-                    ))}
-                  </div>
-                )}
-              </Bento>
             </div>
 
             {/* ── Recent Activity — full-width table, universal feed ── */}
@@ -1064,6 +1307,7 @@ export default function HomePage() {
               title="Recent Activity"
               icon={Activity}
               accent="#7c3aed"
+              delay={0.45}
               action={
                 <div className="flex items-center gap-1.5">
                   <span className="relative flex h-1.5 w-1.5">
@@ -1126,7 +1370,7 @@ export default function HomePage() {
 
             {/* ── Approval Inbox (privileged) or My Tasks — full-width table ── */}
             {access.approvals ? (
-              <Bento title="Approval Inbox" icon={FileCheck} accent="#f59e0b">
+              <Bento title="Approval Inbox" icon={FileCheck} accent="#f59e0b" delay={0.5}>
                 {pendingApprovals.length === 0 ? (
                   <div className="px-4 py-12 text-center text-xs text-muted-foreground/40">
                     {isLoading ? "Loading…" : "Nothing waiting on approval."}
@@ -1163,7 +1407,7 @@ export default function HomePage() {
                 )}
               </Bento>
             ) : data?.recentTasks && data.recentTasks.length > 0 ? (
-              <Bento title="My Tasks" icon={ClipboardList} accent="#f59e0b">
+              <Bento title="My Tasks" icon={ClipboardList} accent="#f59e0b" delay={0.5}>
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs min-w-[560px]">
                     <thead>
