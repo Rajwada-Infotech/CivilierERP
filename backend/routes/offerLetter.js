@@ -108,6 +108,38 @@ router.get("/", cache("offer-letter", 60), async (req, res) => {
   }
 });
 
+// GET candidates whose Offer Letter & Joining is confirmed but who don't
+// have an Employee Master record yet -- lets Employee Master's "Add
+// Employee" form offer a manual pick as a fallback to the automatic
+// creation that normally happens the moment joining is confirmed (e.g. if
+// that auto-create failed, or the employee record was later deleted).
+router.get("/unlinked-employees", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        o.OfferId, o.CandidateId, o.CompanyId, o.ActualDateOfJoining, o.CandidateAddress,
+        c.CandidateCode, c.CandidateName, c.Contact, c.Email,
+        comp.name AS CompanyName,
+        des.DesignationName, dept.DepartmentName
+      FROM dbo.OfferLetter o
+      JOIN dbo.CandidateMaster c ON c.CandidateId = o.CandidateId
+      LEFT JOIN dbo.enterprise comp ON comp.id = o.CompanyId
+      LEFT JOIN dbo.DesignationMaster des ON des.Id = o.DesignationId
+      LEFT JOIN dbo.DepartmentMaster dept ON dept.Id = des.DepartmentId
+      WHERE o.JoiningConfirmed = 1
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.EmployeeMaster e WHERE e.CandidateId = o.CandidateId
+        )
+      ORDER BY o.ActualDateOfJoining DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[offer-letter] GET unlinked-employees error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST — add offer letter
 router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { CandidateId, CompanyId, FinYearId, DesignationId, Salary, CandidateAddress, DateOfJoin, DocumentDate, Remarks } = req.body;

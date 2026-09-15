@@ -18,6 +18,7 @@ import {
   type EmployeePayload,
 } from "@/api/employeeMasterApi";
 import { getCostCenterOptions } from "@/api/costCenterApi";
+import { getUnlinkedEmployeeCandidates, type UnlinkedEmployeeCandidate } from "@/api/offerLetterApi";
 
 const EMPLOYMENT_TYPES = ["Permanent", "Probation", "Contract", "Consultant", "Intern"];
 const GENDERS = ["Male", "Female", "Other"];
@@ -189,6 +190,12 @@ export default function EmployeeMaster() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: unlinkedData } = useQuery({
+    queryKey: ["offer-letter-unlinked-employees"],
+    queryFn: getUnlinkedEmployeeCandidates,
+    staleTime: 30 * 1000,
+  });
+
   const rows: EmployeeRow[] = Array.isArray(data) ? data : [];
   const mappedData: RecordWithId[] = rows.map(mapRow);
   const costCenterOptions = (Array.isArray(costCenterData) ? costCenterData : []).map((c) => ({
@@ -199,8 +206,41 @@ export default function EmployeeMaster() {
     value: String(c.id),
     label: c.label,
   }));
+  const unlinkedCandidates: UnlinkedEmployeeCandidate[] = Array.isArray(unlinkedData) ? unlinkedData : [];
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["employee-master"] });
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["employee-master"] });
+    queryClient.invalidateQueries({ queryKey: ["offer-letter-unlinked-employees"] });
+  };
+
+  // Selecting a candidate in the (new-record-only) Candidate dropdown
+  // auto-fills the rest of the form from their Offer Letter & Joining
+  // record, via MasterPage's externalFormPatch mechanism (applied in its
+  // own effect -- safe from the render-order races that come with driving
+  // several field updates off onFormChange's nested setState). Cleared
+  // right after so a later Edit on an unrelated row never gets it merged
+  // in via handleEdit's unconditional externalFormPatch spread.
+  const [pickedCandidateId, setPickedCandidateId] = useState("");
+  const pickedCandidate = unlinkedCandidates.find((c) => String(c.CandidateId) === pickedCandidateId);
+  const candidatePatch = pickedCandidate
+    ? {
+        candidateId: pickedCandidateId,
+        employeeName: pickedCandidate.CandidateName || "",
+        mobile: pickedCandidate.Contact || "",
+        email: pickedCandidate.Email || "",
+        address: pickedCandidate.CandidateAddress || "",
+        companyId: pickedCandidate.CompanyId ? String(pickedCandidate.CompanyId) : "",
+        department: pickedCandidate.DepartmentName || "",
+        designation: pickedCandidate.DesignationName || "",
+        joiningDate: pickedCandidate.ActualDateOfJoining ? pickedCandidate.ActualDateOfJoining.slice(0, 10) : "",
+        candidateCode: pickedCandidate.CandidateCode || "",
+        candidateName: pickedCandidate.CandidateName || "",
+      }
+    : null;
+  const handlePickCandidate = (candidateId: string) => {
+    setPickedCandidateId(candidateId);
+    if (candidateId) setTimeout(() => setPickedCandidateId(""), 0);
+  };
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
@@ -239,17 +279,43 @@ export default function EmployeeMaster() {
       label: "Candidate",
       type: "custom",
       fullWidth: true,
-      render: (p) =>
-        p.formData.candidateId ? (
-          <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground">
-            {(p.formData.candidateCode as string) || "-"} {(p.formData.candidateName as string) ? `— ${p.formData.candidateName}` : ""}
-            <span className="ml-2 text-[11px] text-muted-foreground">(auto-linked from Offer Letter &amp; Joining)</span>
+      render: (p) => {
+        const isExistingRecord = !!p.formData._id;
+        if (isExistingRecord) {
+          return p.formData.candidateId ? (
+            <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground">
+              {(p.formData.candidateCode as string) || "-"} {(p.formData.candidateName as string) ? `— ${p.formData.candidateName}` : ""}
+              <span className="ml-2 text-[11px] text-muted-foreground">(auto-linked from Offer Letter &amp; Joining)</span>
+            </div>
+          ) : (
+            <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-muted-foreground">
+              Not linked to a candidate — created directly in Employee Master
+            </div>
+          );
+        }
+        return (
+          <div>
+            <select
+              value={(p.value as string) || ""}
+              onChange={(e) => {
+                p.onChange(e.target.value);
+                handlePickCandidate(e.target.value);
+              }}
+              className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            >
+              <option value="">— Not linked (fill in manually) —</option>
+              {unlinkedCandidates.map((c) => (
+                <option key={c.CandidateId} value={String(c.CandidateId)}>
+                  {c.CandidateCode} — {c.CandidateName}
+                </option>
+              ))}
+            </select>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Only candidates with a confirmed Offer Letter &amp; Joining who aren't already an employee are listed. Picking one fills in the fields below.
+            </p>
           </div>
-        ) : (
-          <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-muted-foreground">
-            Not linked to a candidate — created directly in Employee Master
-          </div>
-        ),
+        );
+      },
     },
     { name: "employeeCode", label: "Employee ID / Employee Code", type: "text", required: true, uppercase: true, placeholder: "e.g. EMP-0001" },
     { name: "employeeName", label: "Employee Name", type: "text", required: true, fullWidth: true },
@@ -367,6 +433,8 @@ export default function EmployeeMaster() {
           columnRenderers={columnRenderers}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          externalFormPatch={candidatePatch}
+          externalFormPatchKey={pickedCandidateId || null}
           exportConfig={rights.canExport ? {
             title: "Employee Master",
             filename: "employee-master",
