@@ -385,6 +385,8 @@ module.exports = {
   permissionCache,
   userPermissionCache,
   getEffectivePagePermissions,
+  getRolePagePermissions,
+  getCandidatePageKeys,
   userHasPermissionByPage,
   userHasEffectivePageRight,
   resolveAllowPostApproval,
