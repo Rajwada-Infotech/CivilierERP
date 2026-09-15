@@ -77,6 +77,17 @@ const SALT_ROUNDS = 12;
 // endpoint's optional SupplierPassword field.
 const DEFAULT_SUPPLIER_PASSWORD = "123456";
 
+// A Supplier Portal login only ever makes sense for a real Supplier —
+// LHeadType='S' also covers Landlord (Vendor Master's Type field has no
+// dedicated LHeadType/column of its own for Landlord, see
+// SupplierMaster.tsx's lheadTypeForVendorType comment; Vendor gets its own
+// LHeadType='V' and never reaches this check at all). Without the category
+// check here, saving a Landlord silently created portal credentials nobody
+// asked for.
+function isSupplierPortalHead(LHeadType, LHeadCategory) {
+  return LHeadType === "S" && LHeadCategory !== "Landlord";
+}
+
 // ── Auto-generate a unique Supplier Portal login email ─────────────────────
 // Format: <sanitized supplier name>@civilier.in. Collisions (two suppliers
 // with the same/very similar name) get a numeric suffix before the @ —
@@ -394,7 +405,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // so creating a supplier never blocks on picking a password up front.
     // An admin can still set/override it here or change it later via the
     // edit endpoint below. Only validated (min length) when explicitly given.
-    if (LHeadType === "S" && supplierPasswordPlain && supplierPasswordPlain.length < 6) {
+    if (isSupplierPortalHead(LHeadType, LHeadCategory) && supplierPasswordPlain && supplierPasswordPlain.length < 6) {
       return res.status(400).json({
         error: "Supplier password must be at least 6 characters.",
         code: "INVALID_SUPPLIER_PASSWORD",
@@ -471,7 +482,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // suppliers.
     let supplierLoginEmail = null;
     let supplierPasswordHash = null;
-    if (LHeadType === "S") {
+    if (isSupplierPortalHead(LHeadType, LHeadCategory)) {
       supplierLoginEmail = await generateSupplierLoginEmail(pool, LHeadName);
       supplierPasswordHash = await bcrypt.hash(supplierPasswordPlain || DEFAULT_SUPPLIER_PASSWORD, SALT_ROUNDS);
     }
@@ -600,7 +611,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // migrations/260702/157-quotation-l1-supplier-portal.sql. Without this,
     // the supplier's new email/password would be stored but could never
     // actually log in anywhere.
-    if (LHeadType === "S") {
+    if (isSupplierPortalHead(LHeadType, LHeadCategory)) {
       const roleRow = await tx
         .request()
         .query("SELECT TOP 1 RId FROM dbo.Role WHERE LOWER(RName) = 'supplier'");
@@ -633,7 +644,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       message: "Ledger head added successfully",
       LHeadId: newLHeadId,
       ...(supplierLoginEmail ? { SupplierLoginEmail: supplierLoginEmail } : {}),
-      ...(LHeadType === "S" && !supplierPasswordPlain
+      ...(isSupplierPortalHead(LHeadType, LHeadCategory) && !supplierPasswordPlain
         ? { SupplierPasswordDefaulted: true, SupplierDefaultPassword: DEFAULT_SUPPLIER_PASSWORD }
         : {}),
     });
@@ -897,7 +908,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     // Password is optional on edit (only mandatory at creation) — an admin
     // resetting it types a new one; leaving it blank keeps the existing
     // hash untouched on both AccountHeadMaster and the linked dbo.users row.
-    if (LHeadType === "S" && supplierPasswordPlain && supplierPasswordPlain.length < 6) {
+    if (isSupplierPortalHead(LHeadType, LHeadCategory) && supplierPasswordPlain && supplierPasswordPlain.length < 6) {
       return res.status(400).json({
         error: "Supplier password must be at least 6 characters.",
         code: "MISSING_SUPPLIER_PASSWORD",
@@ -968,7 +979,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     }
 
     let newSupplierPasswordHash = null;
-    if (LHeadType === "S" && supplierPasswordPlain) {
+    if (isSupplierPortalHead(LHeadType, LHeadCategory) && supplierPasswordPlain) {
       newSupplierPasswordHash = await bcrypt.hash(supplierPasswordPlain, SALT_ROUNDS);
     }
 
