@@ -8,7 +8,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell, HR_PAYROLL_ACCENT } from "@/components/hrpayroll/HrPayrollShell";
 import { ExportMenu } from "@/components/ExportMenu";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { safeHtml } from "@/utils/escapeHtml";
+import { safeHtml, escapeHtml, raw } from "@/utils/escapeHtml";
 import type { ExportColumn } from "@/lib/export";
 import { getEmployeeCompanyOptions, type EmployeeCompanyOption } from "@/api/employeeMasterApi";
 import { getFinYears } from "@/api/finYearApi";
@@ -52,6 +52,30 @@ function fillTemplate(template: string, offer: OfferLetterRow): string {
   return template.replace(/\{\{(\w+)\}\}/g, (_match, key) => values[key] ?? "");
 }
 
+const NEWLINE = String.fromCharCode(10);
+const BLANK_LINE_SPLIT = NEWLINE + NEWLINE;
+
+// Minimal Markdown -> HTML for the letter body: "# Heading" lines become a
+// centered <h1>, "**bold**" spans become <strong>, blank lines separate
+// paragraphs, single newlines within a paragraph become <br/>. Each
+// paragraph's raw text is escaped FIRST, then the **bold** markup is
+// layered on top of the already-escaped text, so candidate/remarks data
+// in the template can't break out of the generated HTML.
+function renderLetterBody(text: string): string {
+  const paragraphs = text.split(BLANK_LINE_SPLIT).map((p) => p.trim()).filter(Boolean);
+  return paragraphs
+    .map((para) => {
+      const trimmed = para.trim();
+      const isHeading = trimmed.indexOf("# ") === 0;
+      const withoutHeadingMark = isHeading ? trimmed.slice(2) : para;
+      const boldPattern = /\*\*(.+?)\*\*/g;
+      const escaped = escapeHtml(withoutHeadingMark).replace(boldPattern, "<strong>$1</strong>");
+      if (isHeading) return "<h1>" + escaped + "</h1>";
+      return "<p>" + escaped.split(NEWLINE).join("<br/>") + "</p>";
+    })
+    .join(NEWLINE);
+}
+
 function openGeneratedLetter(offer: OfferLetterRow, template: string) {
   const body = fillTemplate(template, offer);
   const win = window.open("", "_blank", "width=800,height=900");
@@ -61,9 +85,12 @@ function openGeneratedLetter(offer: OfferLetterRow, template: string) {
   }
   win.document.write(safeHtml`<html><head><title>Offer Letter — ${offer.CandidateName}</title>
     <style>
-      body { font-family: Georgia, serif; padding: 48px; max-width: 760px; margin: 0 auto; color: #1a1a1a; white-space: pre-wrap; line-height: 1.7; font-size: 14px; }
+      body { font-family: Georgia, serif; padding: 48px; max-width: 760px; margin: 0 auto; color: #1a1a1a; line-height: 1.7; font-size: 14px; }
+      h1 { font-size: 20px; text-align: center; letter-spacing: 1px; margin: 0 0 24px; }
+      p { margin: 0 0 14px; }
+      strong { font-weight: 700; }
     </style>
-  </head><body>${body}</body></html>`);
+  </head><body>${raw(renderLetterBody(body))}</body></html>`);
   win.document.close();
   win.focus();
   win.print();
