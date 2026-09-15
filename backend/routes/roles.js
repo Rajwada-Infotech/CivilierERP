@@ -38,7 +38,17 @@ const ROLE_RIGHTS_PAGE_MAP = {
   boq: { module: "Engineering", submodule: "BOQ" },
   "engineering-boq": { module: "Engineering", submodule: "BOQ" },
   "work-done": { module: "Engineering", submodule: "WorkDone" },
-  "engineering-dashboard": { module: "Engineering", submodule: "WorkDone" },
+  // Was submodule: "WorkDone" — same {Module,SubModule} pair as "work-done"
+  // above, so the two collapsed into one RoleRights row: granting Work
+  // Done always silently also granted the Engineering Dashboard (and vice
+  // versa), with no way to give one without the other. They're genuinely
+  // distinct, separately-checked pages (EngineeringDashboard.tsx only
+  // checks "engineering-dashboard"; WorkOrderMaster/WorkDone pages never
+  // check it) — own submodule so they save as separate rows. Using plain
+  // "Dashboard" here would kebab down to bare "dashboard" as a fallback
+  // candidate in getCandidatePageKeys, colliding with the Home page's own
+  // key — "EngineeringDashboard" avoids that entirely.
+  "engineering-dashboard": { module: "Engineering", submodule: "EngineeringDashboard" },
   dpr: { module: "Engineering", submodule: "DPR" },
   "work-order": { module: "Engineering", submodule: "WorkOrders" },
   "engineering-work-order": { module: "Engineering", submodule: "WorkOrders" },
