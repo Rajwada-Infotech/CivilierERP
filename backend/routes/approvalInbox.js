@@ -90,7 +90,10 @@ router.get("/", async (req, res) => {
           'payments'                           AS Module,
           'Payment'                            AS ModuleLabel,
           CAST(PPaymentID AS NVARCHAR)         AS RecordId,
-          PPaymentName                         AS Reference,
+          -- CRM Refund / Brokerage payouts (SourceCrmRefundId / SourceCrmBrokerageId)
+          -- were showing the generic "CRM Refund"/"CRM Brokerage" name here instead
+          -- of the actual voucher DocNo every other module in this inbox uses.
+          ISNULL(DocNo, PPaymentName)          AS Reference,
           PDate                                AS RecordDate,
           ISNULL(Status, 'Draft')              AS Status,
           CAST(NULL AS NVARCHAR)               AS ContractorName,
@@ -820,6 +823,73 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    // Was missing entirely — CrmRefund already has a real Pending/Approve/
+    // Reject cycle (see crmRefunds.js PUT /:id/approve) using the same
+    // shared approvalService.js transition() every other CRM module here
+    // uses, but never got a branch in this aggregator, so refunds only ever
+    // surfaced via CrmRefunds.tsx's own inline ApprovalActions — invisible
+    // to the centralized cross-module inbox every sibling CRM module
+    // (cancellations, agreements, brokerage, NOC, booking amendments) is in.
+    if (!module || module === "crm-refunds") {
+      queries.push(`
+        SELECT
+          'crm-refunds'                          AS Module,
+          'CRM Refund'                           AS ModuleLabel,
+          CAST(r.Id AS NVARCHAR)                 AS RecordId,
+          r.RefundNo                             AS Reference,
+          r.CreatedAt                            AS RecordDate,
+          r.Status,
+          CAST(NULL AS NVARCHAR)                 AS ContractorName,
+          cu.CustomerName                        AS SupplierName,
+          r.GrossAmount                          AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
+          ISNULL(CAST(ap.name AS NVARCHAR(255)), '') AS ApprovedBy,
+          ISNULL(CAST(r.ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
+          ''                                      AS RejectedBy,
+          ISNULL(CAST(r.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(r.UpdatedAt, r.CreatedAt)        AS LastModified
+        FROM dbo.CrmRefund r
+        JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
+        LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
+        WHERE r.Status = 'Pending'
+      `);
+    }
+
+    // Second, separate approval tier — same gap as crm-refunds above but for
+    // the Finance-side step (PUT /:id/finance-approve in crmRefunds.js),
+    // which only ever ran from CrmRefunds.tsx's own inline "Finance Approve"
+    // button. Kept as its own module (not folded into crm-refunds) because
+    // it's a genuinely different gate — CRM checker vs. Finance — exactly
+    // like crm-agreement-date is split out from crm-agreements.
+    if (!module || module === "crm-refunds-finance") {
+      queries.push(`
+        SELECT
+          'crm-refunds-finance'                  AS Module,
+          'CRM Refund (Finance)'                 AS ModuleLabel,
+          CAST(r.Id AS NVARCHAR)                 AS RecordId,
+          r.RefundNo                             AS Reference,
+          r.CreatedAt                            AS RecordDate,
+          r.Status,
+          CAST(NULL AS NVARCHAR)                 AS ContractorName,
+          cu.CustomerName                        AS SupplierName,
+          r.NetAmount                            AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
+          ISNULL(CAST(ap.name AS NVARCHAR(255)), '') AS ApprovedBy,
+          ISNULL(CAST(r.ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
+          ''                                      AS RejectedBy,
+          ISNULL(CAST(r.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(r.UpdatedAt, r.CreatedAt)        AS LastModified
+        FROM dbo.CrmRefund r
+        JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
+        LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
+        WHERE r.Status = 'FinancePending'
+      `);
+    }
+
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
@@ -868,7 +938,9 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.CrmCancellation    WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.CrmNoc             WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.Contract           WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.DebitNote          WHERE ISNULL(Status,'Draft') = 'Pending' AND is_active = 1)
+        (SELECT COUNT(*) FROM dbo.DebitNote          WHERE ISNULL(Status,'Draft') = 'Pending' AND is_active = 1) +
+        (SELECT COUNT(*) FROM dbo.CrmRefund          WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.CrmRefund          WHERE Status = 'FinancePending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });

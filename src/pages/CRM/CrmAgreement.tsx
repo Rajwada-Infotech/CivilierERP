@@ -1197,10 +1197,10 @@ const CrmAgreement: React.FC = () => {
   const openEdit = () => {
     if (!detail?.agreement) return;
     setEditForm({
-      LegalName: detail.agreement.LegalName || "",
+      LegalName: detail.agreement.LegalName || detail.agreement.ApplicantName || "",
       LegalAddress: detail.agreement.LegalAddress || "",
-      PanNo: detail.agreement.PanNo || "",
-      AadhaarNo: detail.agreement.AadhaarNo || "",
+      PanNo: detail.agreement.PanNo || detail.agreement.CustomerPanNo || "",
+      AadhaarNo: detail.agreement.AadhaarNo || detail.agreement.CustomerAadhaarNo || "",
       RevisionReason: "",
       LegalExecutiveId: detail.agreement.LegalExecutiveId ? String(detail.agreement.LegalExecutiveId) : "",
     });
@@ -1648,9 +1648,16 @@ const CrmAgreement: React.FC = () => {
                   <p className="text-[11px] text-muted-foreground uppercase tracking-wide font-medium">Legal Details</p>
                   <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
                   {[
-                    ["Legal Name",       detail.agreement?.LegalName || "—"],
-                    ["PAN",              detail.agreement?.PanNo || "—"],
-                    ["Aadhaar",          detail.agreement?.AadhaarNo || "—"],
+                    // Fall back to the applicant/customer's already-on-file data
+                    // when the agreement's own (version-stamped) copy hasn't been
+                    // formally set yet — Bank/KYC is no longer required before an
+                    // agreement can exist, so this is the common case, not an edge
+                    // case. The fallback is display-only; it never writes into the
+                    // agreement's own fields, which still require an explicit
+                    // Edit/Revise action.
+                    ["Legal Name",       detail.agreement?.LegalName || detail.agreement?.ApplicantName || "—"],
+                    ["PAN",              detail.agreement?.PanNo || detail.agreement?.CustomerPanNo || "—"],
+                    ["Aadhaar",          detail.agreement?.AadhaarNo || detail.agreement?.CustomerAadhaarNo || "—"],
                   ].map(([k, v]) => (
                     <div key={k}>
                       <span className="text-[11px] text-muted-foreground block">{k}</span>
