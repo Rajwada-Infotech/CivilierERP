@@ -5,7 +5,7 @@ import { DocumentText1 } from "iconsax-react";
 import { Pencil, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
-import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import { HrPayrollShell, HR_PAYROLL_ACCENT } from "@/components/hrpayroll/HrPayrollShell";
 import { ExportMenu } from "@/components/ExportMenu";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import type { ExportColumn } from "@/lib/export";
@@ -279,8 +279,8 @@ const OfferLetterJoining: React.FC = () => {
                   </div>
 
                   {selectedCandidate && (
-                    <div className="rounded-lg border border-border bg-muted/30 p-4">
-                      <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-foreground/80 pb-2 mb-2 border-b border-border/70">
+                    <div className="rounded-lg border p-4" style={{ borderColor: `${HR_PAYROLL_ACCENT}33`, backgroundColor: `${HR_PAYROLL_ACCENT}0D` }}>
+                      <p className="text-[11px] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `${HR_PAYROLL_ACCENT}33` }}>
                         Candidate Details
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs">
