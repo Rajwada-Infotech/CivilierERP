@@ -361,6 +361,7 @@ export default function EmployeeMaster() {
       <HrPayrollShell title="Employee Master" subtitle="Employees, roles, statutory & bank details" icon={Profile2User}>
         <MasterPage
           title="Employee"
+          collapsibleAddForm
           fields={fields}
           columns={columns}
           columnRenderers={columnRenderers}

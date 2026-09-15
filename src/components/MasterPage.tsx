@@ -211,6 +211,14 @@ interface MasterPageProps {
   isDeleteLocked?: (row: RecordWithId) => string | null | undefined;
   /** Form field grid columns at the md breakpoint. Defaults to 2. */
   gridCols?: 2 | 3;
+  /**
+   * When true, the Add form starts collapsed behind a "+ New Entry" button
+   * instead of always being expanded -- useful for forms with many fields
+   * where the record list would otherwise sit far below the fold. Editing
+   * an existing row still opens the form automatically. Defaults to false
+   * (existing always-open behavior, unchanged for every other page).
+   */
+  collapsibleAddForm?: boolean;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -257,6 +265,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   gridCols = 2,
   isRowLocked,
   isDeleteLocked,
+  collapsibleAddForm = false,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -278,6 +287,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   });
   const [viewRow, setViewRow] = useState<RecordWithId | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(!collapsibleAddForm);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
@@ -438,6 +448,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
         setEditingId(null);
         toast.success("Record updated successfully ✓");
         setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
+        if (collapsibleAddForm) setFormOpen(false);
       } catch (err) {
         toast.error(
           err instanceof Error ? err.message : "Failed to save. Please try again.",
@@ -467,6 +478,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             ? result
             : {}),
         });
+        if (collapsibleAddForm) setFormOpen(false);
       } catch (err) {
         toast.error(
           err instanceof Error ? err.message : "Failed to save. Please try again.",
@@ -488,6 +500,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     // as soon as Edit was clicked.
     setForm({ ...row, ...(externalFormPatch ?? {}) });
     setEditingId(id);
+    setFormOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -518,6 +531,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
     setEditingId(null);
     setErrors({});
+    if (collapsibleAddForm) setFormOpen(false);
   };
 
   const defaults = { ...getDefaults(fields), ...(externalFormPatch ?? {}) };
@@ -589,8 +603,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
           e.preventDefault();
         }}
       >
-        {/* Header — title only */}
-        <div className="flex items-center gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
+        {/* Header — title, plus a New Entry toggle for collapsible forms */}
+        <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border bg-muted/20 rounded-t-xl">
           <div>
             <h2 className="font-heading font-semibold text-foreground text-sm">
               {editingId !== null ? `Edit ${title}` : `Add ${title}`}
@@ -598,13 +612,25 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {editingId !== null
                 ? "Modify the details below and save."
-                : fields.some((f) => f.required)
-                  ? <>Fields marked <span className="text-destructive">*</span> are required</>
-                  : "Fill in the details to create a new record."}
+                : !formOpen
+                  ? 'Click "New Entry" to add a record.'
+                  : fields.some((f) => f.required)
+                    ? <>Fields marked <span className="text-destructive">*</span> are required</>
+                    : "Fill in the details to create a new record."}
             </p>
           </div>
+          {collapsibleAddForm && editingId === null && (
+            <button
+              onClick={() => setFormOpen((v) => !v)}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white shadow-sm transition-opacity"
+            >
+              <Plus size={12} />
+              {formOpen ? "Close" : "New Entry"}
+            </button>
+          )}
         </div>
 
+        {(formOpen || editingId !== null) && (<>
         <div className="p-5">
           <div className={`grid grid-cols-1 gap-4 ${gridCols === 3 ? "md:grid-cols-3" : "md:grid-cols-2"}`}>
             {fields.map((field) => {
@@ -818,6 +844,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </button>
           </div>
         </div>
+        </>)}
       </div>}
 
       {/* ── TABLE CARD ── */}
