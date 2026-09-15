@@ -210,7 +210,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         -- Company name (resolved from enterprise table via PCompany text match)
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         -- Project name (resolved from EB → enterprise, or PO → enterprise)
-        COALESCE(ep.name, po_proj.name, np.PProject)       AS PProjectName,
+        COALESCE(ep.name, po_proj.name, np_proj.name, np.PProject) AS PProjectName,
         -- Supplier/contractor name — from the ExpenseBooking resolved chain
         -- when this payment is linked to an invoice, otherwise fall back to
         -- the party (PPartyId) picked directly on a direct/TOD payment.
@@ -323,6 +323,13 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
         ON eb.ESourceType = 'PO' AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
       LEFT JOIN dbo.enterprise po_proj
         ON po_proj.id = po.ProjectId AND po_proj.business_type = 'P'
+      -- Resolve project directly from np.PProject — same "the field itself
+      -- is a raw enterprise id as text" case as np.PCompany/ec above, for a
+      -- payment with no ExpenseBooking/PO linkage at all (CRM-sourced
+      -- payouts: Brokerage, Refund). Without this, PProjectName silently
+      -- fell back to the numeric id text with no company-name-style fix.
+      LEFT JOIN dbo.enterprise np_proj
+        ON np_proj.id = TRY_CAST(np.PProject AS INT) AND np_proj.business_type = 'P'
       -- Resolve supplier: GRN path
       LEFT JOIN dbo.GoodsReceiptNotes grn_eb
         ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
@@ -1773,7 +1780,7 @@ router.get("/:id", async (req, res) => {
       SELECT
         np.*,
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
-        COALESCE(ep.name, po_proj.name, np.PProject)       AS PProjectName,
+        COALESCE(ep.name, po_proj.name, np_proj.name, np.PProject) AS PProjectName,
         COALESCE(
           CASE
             WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
@@ -1817,6 +1824,10 @@ router.get("/:id", async (req, res) => {
         ON eb.ESourceType = 'PO' AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
       LEFT JOIN dbo.enterprise po_proj
         ON po_proj.id = po.ProjectId AND po_proj.business_type = 'P'
+      -- Same direct np.PProject fallback as the list query above, for
+      -- CRM-sourced payouts with no ExpenseBooking/PO linkage.
+      LEFT JOIN dbo.enterprise np_proj
+        ON np_proj.id = TRY_CAST(np.PProject AS INT) AND np_proj.business_type = 'P'
       LEFT JOIN dbo.GoodsReceiptNotes grn_eb
         ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
       LEFT JOIN dbo.AccountHeadMaster grn_sup ON grn_sup.LHeadId = grn_eb.SupplierID

@@ -15,6 +15,11 @@ export interface DbPayment {
   PProject: string | null;
   PProjectName?: string | null;
   PCompany: string | null;
+  // Resolved company name (see newPayment.js: ISNULL(ec.name, np.PCompany)) —
+  // PCompany itself is often just the raw enterprise id as text (set that
+  // way by CRM-sourced payouts like Brokerage/Refund), which never matches
+  // a company dropdown option by label.
+  PCompanyName?: string | null;
   PSupplierName?: string | null;
   PSupplierContact?: string | null;
   PExpenseRef: string | null;
