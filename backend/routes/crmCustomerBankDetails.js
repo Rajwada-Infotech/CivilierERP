@@ -7,6 +7,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { maybeAutoCreateAgreement, requireApprovedBooking, isLegalWorkStarted } = require("../services/crmWorkflowGuards");
+const { isMilestoneOneCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
 const { CRM_APPROVER_ROLES } = require("../services/approvalService");
 
 router.use(authMiddleware);
@@ -126,15 +127,19 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
                WHERE m.BookingId = b.Id AND m.MilestoneNo = (SELECT MIN(MilestoneNo) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id)
                  AND oap.Amount > oap.AppliedAmount
              ) THEN 1 ELSE 0 END AS BIT) AS Milestone1AwaitingAdjustment,
-             -- On Account Adjustment (crmPayments.js applyOnAccountToMilestone)
-             -- needs the on-account pool to cover Milestone 1's OWN balance,
-             -- not the whole booking — surfaced here so the frontend can show
-             -- the real per-milestone shortfall instead of "go apply it".
-             (SELECT TOP 1 AmountDue - ISNULL(AmountPaid,0) FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Balance,
-             ISNULL((SELECT SUM(Amount - ISNULL(AppliedAmount,0)) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS OnAccountAvailable
+             -- The real ledger sweep (Status='Paid') only fires automatically
+             -- once the WHOLE booking is funded (see
+             -- autoApplyOnAccountIfFullyFunded in crmPayments.js) — but this
+             -- form's gate is about "has the customer's money genuinely
+             -- arrived for Milestone 1", which is true the moment on-account
+             -- covers Milestone 1's own amount, so the shortfall shown is
+             -- against that, not the whole booking.
+             (SELECT TOP 1 AmountDue FROM dbo.CrmPaymentMilestone WHERE BookingId = b.Id ORDER BY MilestoneNo) AS Milestone1Due,
+             ISNULL((SELECT SUM(Amount) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id), 0) AS OnAccountAvailable
       FROM dbo.CrmBooking b WHERE b.Id = @bid
     `);
     const bookingExtra = bookingRow.recordset[0] || {};
+    bookingExtra.Milestone1VirtuallyCovered = await isMilestoneOneCoveredByOnAccount(pool, bid);
 
     const result = await pool.request().input("bid", sql.Int, bid).query(`
       SELECT d.*, vu.name AS BookingStageVerifiedByName
@@ -184,40 +189,10 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
 
     if (!(await requireAssignedOrApprover(req, res, pool, { bookingId: bid }))) return;
 
-    // Same gate as the rest of the Welcome-Call-onward workflow
-    // (crmWelcomeCalls.js POST / uses requireApprovedBooking) — Customer
-    // Bank/KYC details are captured as part of that same flow, so this
-    // should require the booking to actually be Approved, not merely still
-    // "active" (which also lets through Pending/Expired).
-    const activeErr = await requireApprovedBooking(pool, bid);
-    if (activeErr) return res.status(400).json({ error: activeErr });
-
-    // The frontend already refuses to save unless Milestone 1 (Booking
-    // Amount) is Paid — bookingAmountPaid check in CrmCustomerBankDetails.tsx
-    // — but that was client-side only. Anyone calling this endpoint directly
-    // (a stale tab, a race between two staff members, a future frontend
-    // change that forgets to re-check) could write KYC data before the
-    // booking amount was actually paid. Mirror the same rule here, server-
-    // side, using the identical Milestone1Status subquery GET already uses.
-    const m1 = await pool.request().input("bid", sql.Int, bid).query(`
-      SELECT TOP 1 Status, AmountDue, AmountPaid FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
-    `);
-    if (m1.recordset[0]?.Status !== CrmStatus.PAID) {
-      // On Account Adjustment (crmPayments.js applyOnAccountToMilestone) needs
-      // the on-account pool to cover Milestone 1's OWN balance, not the whole
-      // booking — same fix as validateAgreementPreparationPrerequisites
-      // (crmWorkflowGuards.js).
-      const m1Row = m1.recordset[0];
-      const m1Balance = m1Row ? Math.max(0, Number(m1Row.AmountDue || 0) - Number(m1Row.AmountPaid || 0)) : 0;
-      const onAccountRow = await pool.request().input("bid", sql.Int, bid).query(`
-        SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) AS AvailableOnAccount FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
-      `);
-      const availableOnAccount = Number(onAccountRow.recordset[0]?.AvailableOnAccount) || 0;
-      const error = m1Balance > 0 && availableOnAccount < m1Balance
-        ? `Booking Amount (Milestone 1) must be paid before Bank/KYC details can be saved — ₹${Math.round((m1Balance - availableOnAccount) * 100) / 100} still needed (₹${availableOnAccount} available On Account of the ₹${m1Balance} due)`
-        : "Booking Amount (Milestone 1) must be paid before Bank/KYC details can be saved — the customer's payment is showing under On Account; apply it to this milestone via On Account Adjustment";
-      return res.status(400).json({ error });
-    }
+    // No workflow gates here (business decision 2026-09-15): Bank/KYC
+    // details can be captured at any time regardless of booking-approval or
+    // payment status. Only requireAssignedOrApprover (who may edit) still
+    // applies — that's an access-control check, not a workflow gate.
 
     // Financing Type (Self-funded / Loan-financed) lives on CrmBooking, not
     // CrmCustomerBankDetail — it's a simple declaration, not sensitive KYC

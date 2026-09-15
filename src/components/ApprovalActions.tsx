@@ -96,6 +96,15 @@ interface ApprovalActionsProps {
    *  fallback below is skipped and only approverRoles can unlock the
    *  buttons, mirroring the backend gate exactly. */
   restricted?: boolean;
+  /** Extra source statuses (beyond Rejected/Issued/Partially Received) that
+   *  should show the Submit button. Every module using this component
+   *  auto-submits a Draft record the moment it's created, so a lingering
+   *  Draft normally never happens — except CRM Refund's cancellation-
+   *  triggered auto-create, which deliberately leaves a real Draft the
+   *  backend's own /:id/submit route accepts but this component's default
+   *  showSubmit logic didn't know about, leaving that row with no action at
+   *  all. Additive and opt-in so every other caller is unaffected. */
+  extraSubmitStatuses?: string[];
 }
 
 export function ApprovalActions({
@@ -109,6 +118,7 @@ export function ApprovalActions({
   actionPathSuffix,
   reviewInstead,
   restricted = false,
+  extraSubmitStatuses = [],
 }: ApprovalActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -211,7 +221,8 @@ export function ApprovalActions({
   const showSubmit =
     status === "Rejected" ||
     status === "Issued" ||
-    status === "Partially Received";
+    status === "Partially Received" ||
+    (!!status && extraSubmitStatuses.includes(status));
   const showApproveReject = !submitOnly && status === "Pending" && approver;
 
   if (!showSubmit && !showApproveReject) return null;

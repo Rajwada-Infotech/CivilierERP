@@ -80,7 +80,14 @@ const AGR_SELECT = `
     -- Completed before mark-registered will succeed (see the matching gate
     -- in PUT /:id/mark-registered). Surfaced so the frontend can show/hide
     -- the "Mark Registered" action instead of only failing after the click.
-    (SELECT TOP 1 Status FROM dbo.CrmAfsRegistry WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsRegistryStatus
+    (SELECT TOP 1 Status FROM dbo.CrmAfsRegistry WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsRegistryStatus,
+    -- Bank/KYC details are no longer required before Agreement prep (business
+    -- decision 2026-09-15), so an agreement can now exist with its own
+    -- LegalName/PanNo/AadhaarNo still blank — never formally set/revised yet.
+    -- These are surfaced as live fallbacks (not written into the agreement's
+    -- own, deliberately version-stamped fields) so the Overview never shows
+    -- an outright "—" for data the customer's already on file with.
+    bd.PanNo AS CustomerPanNo, bd.AadhaarNo AS CustomerAadhaarNo
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -88,6 +95,7 @@ const AGR_SELECT = `
   LEFT JOIN dbo.Users cu     ON cu.id = ag.CreatedBy
   LEFT JOIN dbo.Users le     ON le.id = ag.LegalExecutiveId
   LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = a.CustomerId
+  LEFT JOIN dbo.CrmCustomerBankDetail bd ON bd.BookingId = ag.BookingId
 `;
 
 // Shared lock check — nothing here previously checked whether the Booking

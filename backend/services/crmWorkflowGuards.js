@@ -2,18 +2,7 @@ const { sql } = require("../db");
 const { getNextDocNumber } = require("./docNumber");
 const { emitNotification } = require("./notify");
 const { generateInvoicePdf } = require("./invoicePdf");
-
-// AnnualIncome is deliberately excluded — the source spec lists income as
-// "if applicable", unlike every other field here which is a hard blocker.
-const REQUIRED_CUSTOMER_DETAIL_FIELDS = [
-  ["BankName", "Bank name"],
-  ["AccountNo", "Account number"],
-  ["IfscCode", "IFSC code"],
-  ["AccountHolderName", "account holder name"],
-  ["PanNo", "PAN number"],
-  ["AadhaarNo", "Aadhaar number"],
-  ["Occupation", "occupation"],
-];
+const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
 
 function hasValue(value) {
   return value !== null && value !== undefined && String(value).trim() !== "";
@@ -179,22 +168,9 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
     errors.push("Welcome call must be completed with outcome Welcomed");
   }
 
-  const detail = await pool.request().input("bid", sql.Int, bookingId).query(`
-    SELECT TOP 1 *
-    FROM dbo.CrmCustomerBankDetail
-    WHERE BookingId = @bid
-  `);
-  const customerDetails = detail.recordset[0];
-  if (!customerDetails) {
-    errors.push("Customer bank, PAN, and Aadhaar details are required");
-  } else {
-    const missing = REQUIRED_CUSTOMER_DETAIL_FIELDS
-      .filter(([field]) => !hasValue(customerDetails[field]))
-      .map(([, label]) => label);
-    if (missing.length) {
-      errors.push(`Missing customer details: ${missing.join(", ")}`);
-    }
-  }
+  // Bank/KYC fields (bank details, PAN, Aadhaar, occupation) are never
+  // mandatory (business decision 2026-09-15) — Agreement prep no longer
+  // requires a CrmCustomerBankDetail row to exist or be filled in.
 
   // Real money in hand, not just an auto-synced receipt that's assumed to
   // have landed — the auto-sync at booking creation (crmEntityCreation.js)
@@ -203,32 +179,30 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   const milestone1 = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT TOP 1 Id, AmountDue, AmountPaid, Status FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid ORDER BY MilestoneNo
   `);
-  if (!milestone1.recordset.length || milestone1.recordset[0].Status !== "Paid") {
-    // On Account Adjustment (crmPayments.js applyOnAccountToMilestone) needs
-    // the on-account pool to cover THIS milestone's own balance — not the
-    // whole booking — so check against that, not GrandTotal, or this would
-    // wrongly tell staff to wait on money that's already enough to unblock
-    // Milestone 1 specifically.
-    const m1 = milestone1.recordset[0];
-    const m1Balance = m1 ? Math.max(0, Number(m1.AmountDue || 0) - Number(m1.AmountPaid || 0)) : 0;
-    const onAccountRow = await pool.request().input("bid", sql.Int, bookingId).query(`
-      SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)), 0) AS AvailableOnAccount FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+  // Real ledger settlement (Status='Paid') only happens via the automatic
+  // full-booking sweep (autoApplyOnAccountIfFullyFunded in crmPayments.js) —
+  // money sits on-account, untouched, until the WHOLE booking is funded.
+  // But this gate is about workflow eligibility, not accounting: the
+  // customer's money is genuinely, verifiably in hand the moment on-account
+  // covers Milestone 1's own amount, so Agreement prep unlocks on that
+  // virtual coverage rather than waiting for the (possibly much later)
+  // full-booking auto-sweep to physically mark it Paid.
+  if (!milestone1.recordset.length || (milestone1.recordset[0].Status !== "Paid" && !(await isMilestoneOneCoveredByOnAccount(pool, bookingId)))) {
+    const totalsRow = await pool.request().input("bid", sql.Int, bookingId).query(`
+      SELECT ISNULL(SUM(Amount), 0) AS TotalReceived FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
     `);
-    const availableOnAccount = Number(onAccountRow.recordset[0]?.AvailableOnAccount) || 0;
-    if (m1Balance > 0 && availableOnAccount < m1Balance) {
-      const shortfall = Math.round((m1Balance - availableOnAccount) * 100) / 100;
-      errors.push(`Booking Amount (Milestone 1) must be fully paid before agreement preparation — ₹${shortfall.toLocaleString("en-IN")} is still needed (₹${availableOnAccount.toLocaleString("en-IN")} available On Account of the ₹${m1Balance.toLocaleString("en-IN")} due)`);
+    const totalReceived = Number(totalsRow.recordset[0]?.TotalReceived) || 0;
+    const m1Due = Number(milestone1.recordset[0]?.AmountDue) || 0;
+    if (m1Due > 0 && totalReceived < m1Due) {
+      const shortfall = Math.round((m1Due - totalReceived) * 100) / 100;
+      errors.push(`Booking Amount (Milestone 1) must be paid before agreement preparation — ₹${shortfall.toLocaleString("en-IN")} more is needed (₹${totalReceived.toLocaleString("en-IN")} received on-account of the ₹${m1Due.toLocaleString("en-IN")} due)`);
     } else {
-      errors.push("Booking Amount (Milestone 1) must be fully paid before agreement preparation — the customer's payment is showing under On Account; apply it to this milestone via On Account Adjustment");
+      errors.push("Booking Amount (Milestone 1) must be paid before agreement preparation — a data inconsistency is blocking this; contact support");
     }
   }
 
-  // Financing Type must be explicitly declared (Self-funded / Loan-financed)
-  // — without this, an empty CrmLoanDetail row is permanently ambiguous
-  // (declared self-funded vs. simply never filled in).
-  if (!hasValue(booking.FinancingType)) {
-    errors.push("Financing type (self-funded or loan-financed) must be declared");
-  }
+  // FinancingType is also a Bank/KYC-form field and, per the same decision,
+  // is not mandatory for Agreement prep either.
 
   return { ok: errors.length === 0, errors, booking };
 }
@@ -1111,9 +1085,9 @@ async function maybeAutoCreateBrokerage(pool, bookingId, actorUserId) {
         .input("cb",    sql.Int,           actorUserId || null)
         .query(`
           INSERT INTO dbo.CrmBrokerageMaster
-            (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, TrancheLabel, UnlockGate, IsLocked, Status, Notes, CreatedBy, CreatedAt)
+            (BookingId, BrokerId, BrokerName, BrokerContact, RateType, RateValue, ComputedAmount, NetPayable, TrancheLabel, UnlockGate, IsLocked, Status, Notes, CreatedBy, CreatedAt)
           OUTPUT INSERTED.Id
-          VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @tranche, @gate, @lock, 'Pending', @notes, @cb, SYSDATETIME())
+          VALUES (@bid, @brid, @name, @con, @rt, @rv, @camt, @camt, @tranche, @gate, @lock, 'Pending', @notes, @cb, SYSDATETIME())
         `);
       ids.push(result.recordset[0].Id);
     }
