@@ -136,8 +136,16 @@ const PERMISSION_PAGE_KEYS = {
   // this page could never resolve back to the key the live page checks.
   "admin:documenttype": ["document-type", "typeofdoc", "type-of-doc"],
   "engineering:boq": ["boq"],
-  "engineering:dashboard": ["engineering-dashboard"],
-  "engineering:workdone": ["engineering-dashboard", "work-done"],
+  // Matches roles.js's ROLE_RIGHTS_PAGE_MAP submodule "EngineeringDashboard"
+  // (not plain "Dashboard" — that would kebab down to bare "dashboard" as a
+  // fallback candidate here, colliding with the Home page's own key).
+  "engineering:engineeringdashboard": ["engineering-dashboard"],
+  // Was ["engineering-dashboard", "work-done"] — "engineering-dashboard"
+  // now saves under its own SubModule ("Dashboard", see roles.js's
+  // ROLE_RIGHTS_PAGE_MAP), so it no longer belongs in the WorkDone bundle.
+  // Leaving it here would still leak Engineering Dashboard access to any
+  // *existing* RoleRights row saved under the old WorkDone pairing.
+  "engineering:workdone": ["work-done"],
   "engineering:workorders": ["work-order", "engineering-work-order"],
   "finance:brs": ["brs"],
   "finance:dashboard": ["finance-dashboard"],
