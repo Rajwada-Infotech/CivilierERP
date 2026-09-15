@@ -14,8 +14,10 @@ import {
   updateEmployee,
   deleteEmployee,
   getEmployeeCompanyOptions,
+  getJoinedCandidates,
   type EmployeeRow,
   type EmployeePayload,
+  type JoinedCandidateRow,
 } from "@/api/employeeMasterApi";
 import { getCostCenterOptions } from "@/api/costCenterApi";
 
@@ -47,6 +49,7 @@ const mapRow = (r: EmployeeRow): RecordWithId => ({
   gradeLevel: r.GradeLevel || "",
   costCenterId: r.CostCenterId ? String(r.CostCenterId) : "",
   costCenterName: r.CostCenterName || "-",
+  candidateId: r.CandidateId ? String(r.CandidateId) : "",
   bankName: r.BankName || "",
   bankAccountNumber: r.BankAccountNumber || "",
   bankIFSC: r.BankIFSC || "",
@@ -83,6 +86,7 @@ const toPayload = (form: Record<string, unknown>): EmployeePayload => ({
   EmploymentType: (form.employmentType as string) || null,
   GradeLevel: (form.gradeLevel as string) || null,
   CostCenterId: form.costCenterId ? Number(form.costCenterId) : null,
+  CandidateId: form.candidateId ? Number(form.candidateId) : null,
   BankName: (form.bankName as string) || null,
   BankAccountNumber: (form.bankAccountNumber as string) || null,
   BankIFSC: (form.bankIFSC as string) || null,
@@ -185,6 +189,14 @@ export default function EmployeeMaster() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: joinedData } = useQuery({
+    queryKey: ["employee-master-joined-candidates"],
+    queryFn: getJoinedCandidates,
+    staleTime: 30 * 1000,
+  });
+
+  const [joinedPick, setJoinedPick] = useState("");
+
   const rows: EmployeeRow[] = Array.isArray(data) ? data : [];
   const mappedData: RecordWithId[] = rows.map(mapRow);
   const costCenterOptions = (Array.isArray(costCenterData) ? costCenterData : []).map((c) => ({
@@ -196,6 +208,20 @@ export default function EmployeeMaster() {
     label: c.label,
   }));
 
+  const joinedCandidates: JoinedCandidateRow[] = Array.isArray(joinedData) ? joinedData : [];
+  const pickedJoined = joinedCandidates.find((j) => String(j.OfferId) === joinedPick) || null;
+  const joinedPatch = pickedJoined
+    ? {
+        candidateId: String(pickedJoined.CandidateId),
+        employeeName: pickedJoined.CandidateName,
+        mobile: pickedJoined.Contact || "",
+        email: pickedJoined.Email || "",
+        companyId: pickedJoined.CompanyId ? String(pickedJoined.CompanyId) : "",
+        designation: pickedJoined.DesignationName || "",
+        joiningDate: (pickedJoined.ActualDateOfJoining || pickedJoined.DateOfJoin || "").slice(0, 10),
+      }
+    : null;
+
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["employee-master"] });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
@@ -203,7 +229,9 @@ export default function EmployeeMaster() {
       try {
         await addEmployee(toPayload(event.record));
         toast.success("Employee added");
+        setJoinedPick("");
         await refresh();
+        await queryClient.invalidateQueries({ queryKey: ["employee-master-joined-candidates"] });
       } catch (err: any) {
         toast.error("Save failed: " + (err?.message || "Unknown error"));
       }
@@ -230,6 +258,26 @@ export default function EmployeeMaster() {
 
   const fields: FieldDef[] = [
     { name: "sec-basic", label: "Basic Information", type: "section" },
+    {
+      name: "candidateId",
+      label: "Candidate *",
+      type: "custom",
+      fullWidth: true,
+      render: () => (
+        <select
+          className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
+          value={joinedPick}
+          onChange={(e) => setJoinedPick(e.target.value)}
+        >
+          <option value="">Select a joined candidate...</option>
+          {joinedCandidates.map((j) => (
+            <option key={j.OfferId} value={j.OfferId}>
+              {j.CandidateCode} — {j.CandidateName}
+            </option>
+          ))}
+        </select>
+      ),
+    },
     { name: "employeeCode", label: "Employee ID / Employee Code", type: "text", required: true, uppercase: true, placeholder: "e.g. EMP-0001" },
     { name: "employeeName", label: "Employee Name", type: "text", required: true, fullWidth: true },
     { name: "companyId", label: "Company", type: "select", asyncOptions: async () => companyOptions },
@@ -338,6 +386,8 @@ export default function EmployeeMaster() {
           columnRenderers={columnRenderers}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          externalFormPatch={joinedPatch}
+          externalFormPatchKey={joinedPick || null}
           exportConfig={rights.canExport ? {
             title: "Employee Master",
             filename: "employee-master",

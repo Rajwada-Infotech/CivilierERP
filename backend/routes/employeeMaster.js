@@ -9,7 +9,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
-const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
+const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.CandidateId, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
 
 router.get("/", cache("employee-master", 300), async (req, res) => {
   try {
@@ -39,6 +39,31 @@ router.get("/options", async (req, res) => {
   }
 });
 
+// GET candidates who are confirmed as Joined on Offer Letter & Joining and
+// don't already have an Employee Master row -- these are the ones eligible
+// to be "promoted" into an employee record from the Add Employee form.
+router.get("/joined-candidates", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        o.OfferId, o.CandidateId, c.CandidateCode, c.CandidateName, c.Contact, c.Email,
+        o.CompanyId, comp.name AS CompanyName, des.DesignationName,
+        o.ActualDateOfJoining, o.DateOfJoin
+      FROM dbo.OfferLetter o
+      JOIN dbo.CandidateMaster c ON c.CandidateId = o.CandidateId
+      LEFT JOIN dbo.enterprise comp ON comp.id = o.CompanyId
+      LEFT JOIN dbo.DesignationMaster des ON des.Id = o.DesignationId
+      WHERE o.JoiningConfirmed = 1
+        AND NOT EXISTS (SELECT 1 FROM dbo.EmployeeMaster e WHERE e.CandidateId = o.CandidateId)
+      ORDER BY o.ActualDateOfJoining DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 function bindEmployeeFields(request, body) {
   return request
     .input("EmployeeCode", sql.NVarChar(30), body.EmployeeCode || null)
@@ -61,6 +86,7 @@ function bindEmployeeFields(request, body) {
     .input("EmploymentType", sql.NVarChar(30), body.EmploymentType || null)
     .input("GradeLevel", sql.NVarChar(50), body.GradeLevel || null)
     .input("CostCenterId", sql.Int, body.CostCenterId || null)
+    .input("CandidateId", sql.Int, body.CandidateId || null)
     .input("BankName", sql.NVarChar(150), body.BankName || null)
     .input("BankAccountNumber", sql.NVarChar(40), body.BankAccountNumber || null)
     .input("BankIFSC", sql.NVarChar(20), body.BankIFSC || null)
@@ -91,21 +117,25 @@ router.post("/", requirePageRight("employee-master", "create"), async (req, res)
         "EmployeeCode, EmployeeName, PhotoBase64, DateOfBirth, Gender, Mobile, Email, Address, " +
         "EmergencyContactName, EmergencyContactPhone, JoiningDate, ConfirmationDate, CompanyId, " +
         "Department, Designation, BranchLocation, ReportingManagerId, EmploymentType, GradeLevel, " +
-        "CostCenterId, BankName, BankAccountNumber, BankIFSC, PAN, Aadhaar, UAN, ESICNumber, PFNumber, " +
+        "CostCenterId, CandidateId, BankName, BankAccountNumber, BankIFSC, PAN, Aadhaar, UAN, ESICNumber, PFNumber, " +
         "NomineeName, NomineeRelationship, NomineeContact, IsActive, CreatedBy, CreatedAt" +
         ") OUTPUT INSERTED.EmployeeId VALUES (" +
         "@EmployeeCode, @EmployeeName, @PhotoBase64, @DateOfBirth, @Gender, @Mobile, @Email, @Address, " +
         "@EmergencyContactName, @EmergencyContactPhone, @JoiningDate, @ConfirmationDate, @CompanyId, " +
         "@Department, @Designation, @BranchLocation, @ReportingManagerId, @EmploymentType, @GradeLevel, " +
-        "@CostCenterId, @BankName, @BankAccountNumber, @BankIFSC, @PAN, @Aadhaar, @UAN, @ESICNumber, @PFNumber, " +
+        "@CostCenterId, @CandidateId, @BankName, @BankAccountNumber, @BankIFSC, @PAN, @Aadhaar, @UAN, @ESICNumber, @PFNumber, " +
         "@NomineeName, @NomineeRelationship, @NomineeContact, @IsActive, @CreatedBy, SYSDATETIME())"
       );
     const newId = result.recordset[0].EmployeeId;
     await bumpCacheVersion("employee-master");
     res.json({ message: "Employee added", id: newId });
   } catch (err) {
-    if (err.number === 2627 || err.number === 2601)
+    if (err.number === 2627 || err.number === 2601) {
+      if (/UQ_EmployeeMaster_CandidateId/i.test(err.message || "")) {
+        return res.status(409).json({ error: "This candidate has already been added as an employee" });
+      }
       return res.status(409).json({ error: "An employee with this Employee Code already exists" });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -133,7 +163,7 @@ router.put("/:id", requirePageRight("employee-master", "edit"), async (req, res)
         "JoiningDate = @JoiningDate, ConfirmationDate = @ConfirmationDate, CompanyId = @CompanyId, " +
         "Department = @Department, Designation = @Designation, BranchLocation = @BranchLocation, " +
         "ReportingManagerId = @ReportingManagerId, EmploymentType = @EmploymentType, GradeLevel = @GradeLevel, " +
-        "CostCenterId = @CostCenterId, BankName = @BankName, BankAccountNumber = @BankAccountNumber, BankIFSC = @BankIFSC, " +
+        "CostCenterId = @CostCenterId, CandidateId = @CandidateId, BankName = @BankName, BankAccountNumber = @BankAccountNumber, BankIFSC = @BankIFSC, " +
         "PAN = @PAN, Aadhaar = @Aadhaar, UAN = @UAN, ESICNumber = @ESICNumber, PFNumber = @PFNumber, " +
         "NomineeName = @NomineeName, NomineeRelationship = @NomineeRelationship, NomineeContact = @NomineeContact, " +
         "IsActive = @IsActive, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME() " +
@@ -142,8 +172,12 @@ router.put("/:id", requirePageRight("employee-master", "edit"), async (req, res)
     await bumpCacheVersion("employee-master");
     res.json({ message: "Employee updated" });
   } catch (err) {
-    if (err.number === 2627 || err.number === 2601)
+    if (err.number === 2627 || err.number === 2601) {
+      if (/UQ_EmployeeMaster_CandidateId/i.test(err.message || "")) {
+        return res.status(409).json({ error: "This candidate has already been added as an employee" });
+      }
       return res.status(409).json({ error: "An employee with this Employee Code already exists" });
+    }
     res.status(500).json({ error: err.message });
   }
 });

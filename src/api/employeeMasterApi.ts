@@ -27,6 +27,7 @@ export interface EmployeeRow {
   GradeLevel: string | null;
   CostCenterId: number | null;
   CostCenterName: string | null;
+  CandidateId: number | null;
   BankName: string | null;
   BankAccountNumber: string | null;
   BankIFSC: string | null;
@@ -67,6 +68,7 @@ export interface EmployeePayload {
   EmploymentType?: string | null;
   GradeLevel?: string | null;
   CostCenterId?: number | null;
+  CandidateId?: number | null;
   BankName?: string | null;
   BankAccountNumber?: string | null;
   BankIFSC?: string | null;
@@ -169,5 +171,27 @@ export interface EmployeeCompanyOption {
 // Master already use for their Company pickers.
 export const getEmployeeCompanyOptions = async (): Promise<EmployeeCompanyOption[]> => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
+  return handle(res);
+};
+
+export interface JoinedCandidateRow {
+  OfferId: number;
+  CandidateId: number;
+  CandidateCode: string;
+  CandidateName: string;
+  Contact: string | null;
+  Email: string | null;
+  CompanyId: number | null;
+  CompanyName: string | null;
+  DesignationName: string | null;
+  ActualDateOfJoining: string | null;
+  DateOfJoin: string | null;
+}
+
+// Candidates confirmed as Joined on Offer Letter & Joining who don't
+// already have an Employee Master row -- eligible to be "promoted" into
+// an employee record via the Add Employee form's quick-start picker.
+export const getJoinedCandidates = async (): Promise<JoinedCandidateRow[]> => {
+  const res = await fetchWithAuth(`${BASE}/joined-candidates`);
   return handle(res);
 };
