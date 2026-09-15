@@ -108,6 +108,8 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
 
     const from = req.query.from ? String(req.query.from) : null;
     const to = req.query.to ? String(req.query.to) : null;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
 
     const openingRes = await pool.request().input("Id", sql.Int, headId).query(`
       SELECT ${OPENING_ADJ_SQL} AS OpeningAdj FROM dbo.AccountHeadMaster ahm WHERE ahm.LHeadId = @Id
@@ -118,7 +120,9 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
       .request()
       .input("Id", sql.Int, headId)
       .input("From", sql.Date, from || null)
-      .input("To", sql.Date, to || null).query(`
+      .input("To", sql.Date, to || null)
+      .input("CompanyId", sql.Int, companyId)
+      .input("ProjectId", sql.Int, projectId).query(`
       SELECT
         ISNULL(SUM(gle.DebitAmount), 0) - ISNULL(SUM(gle.CreditAmount), 0) AS AllTimeNet,
         ISNULL(SUM(CASE WHEN @From IS NOT NULL AND gle.VoucherDate < @From
@@ -138,6 +142,8 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
       FROM dbo.GeneralLedgerEntry gle
       WHERE gle.LHeadId = @Id AND gle.IsReversed = 0
         AND gle.SourceType NOT IN ('GRN', 'GRNPosting', 'OnAccountAdjustment')
+        AND (@CompanyId IS NULL OR gle.CompanyId = @CompanyId)
+        AND (@ProjectId IS NULL OR gle.ProjectId = @ProjectId)
     `);
 
     const row = result.recordset[0] || {};
@@ -146,7 +152,7 @@ router.get("/:headId/summary", requirePageRight("vendor-ledger", "view"), async 
     // GeneralLedgerEntry leg — merge their own contribution the same way
     // the transactions list does, instead of the old flat, always-included
     // AccountHeadMaster.OnAccountBalance (see OPENING_ADJ_SQL's comment).
-    const oaRows = await fetchOnAccountRows(pool, headId);
+    const oaRows = await fetchOnAccountRows(pool, headId, companyId, projectId);
     const oaAllTimeNet = onAccountNet(oaRows);
     const oaPreWindowNet = from ? onAccountNet(oaRows, from) : 0;
     const oaPeriodRows = oaRows.filter((r) => {
@@ -203,12 +209,18 @@ const ON_ACCOUNT_PARTY_TYPES = ["Supplier", "Vendor", "Contractor"];
 // Credit without changing any balance. The application itself is an
 // internal bookkeeping move, not a transaction the vendor's passbook needs
 // to itemize.
-async function fetchOnAccountRows(pool, headId) {
-  const result = await pool.request().input("Id", sql.Int, headId).query(`
+async function fetchOnAccountRows(pool, headId, companyId, projectId) {
+  const result = await pool
+    .request()
+    .input("Id", sql.Int, headId)
+    .input("CompanyId", sql.Int, companyId ?? null)
+    .input("ProjectId", sql.Int, projectId ?? null).query(`
     SELECT OAId, PartyId, TxnDate, TxnType, Amount, RefType, RefDocNo, Notes, CompanyId, ProjectId
     FROM dbo.OnAccountLedger
     WHERE PartyId = @Id AND PartyType IN ('${ON_ACCOUNT_PARTY_TYPES.join("','")}')
       AND TxnType = 'CREDIT'
+      AND (@CompanyId IS NULL OR CompanyId = @CompanyId)
+      AND (@ProjectId IS NULL OR ProjectId = @ProjectId)
   `);
   return result.recordset;
 }
@@ -260,6 +272,8 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
 
     const from = req.query.from ? String(req.query.from) : null;
     const to = req.query.to ? String(req.query.to) : null;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     // This route pulls every matching GL row for the head unconditionally
     // (no SQL-level TOP below) — `limit` only slices the already-fetched,
     // already-sorted array just before responding, so raising it costs
@@ -270,7 +284,9 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
     const openingResult = await pool
       .request()
       .input("Id", sql.Int, headId)
-      .input("From", sql.Date, from || null).query(`
+      .input("From", sql.Date, from || null)
+      .input("CompanyId", sql.Int, companyId)
+      .input("ProjectId", sql.Int, projectId).query(`
       SELECT ${OPENING_ADJ_SQL}
            + ISNULL((
                SELECT SUM(g.DebitAmount) - SUM(g.CreditAmount)
@@ -278,6 +294,8 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
                WHERE g.LHeadId = @Id AND g.IsReversed = 0
                  AND g.SourceType NOT IN ('GRN', 'GRNPosting', 'OnAccountAdjustment')
                  AND @From IS NOT NULL AND g.VoucherDate < @From
+                 AND (@CompanyId IS NULL OR g.CompanyId = @CompanyId)
+                 AND (@ProjectId IS NULL OR g.ProjectId = @ProjectId)
              ), 0) AS WindowOpening
       FROM dbo.AccountHeadMaster ahm
       WHERE ahm.LHeadId = @Id
@@ -288,7 +306,9 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
       .request()
       .input("Id", sql.Int, headId)
       .input("From", sql.Date, from || null)
-      .input("To", sql.Date, to || null).query(`
+      .input("To", sql.Date, to || null)
+      .input("CompanyId", sql.Int, companyId)
+      .input("ProjectId", sql.Int, projectId).query(`
       SELECT
         gle.EntryId, gle.VoucherNo, gle.VoucherDate, gle.DebitAmount, gle.CreditAmount,
         gle.Narration, gle.SourceType, gle.SourceId, gle.CompanyId, gle.ProjectId, gle.CostCenterId,
@@ -326,12 +346,14 @@ router.get("/:headId/transactions", requirePageRight("vendor-ledger", "view"), a
         AND gle.SourceType NOT IN ('GRN', 'GRNPosting', 'OnAccountAdjustment')
         AND (@From IS NULL OR gle.VoucherDate >= @From)
         AND (@To IS NULL OR gle.VoucherDate <= @To)
+        AND (@CompanyId IS NULL OR gle.CompanyId = @CompanyId)
+        AND (@ProjectId IS NULL OR gle.ProjectId = @ProjectId)
     `);
 
     // dbo.OnAccountLedger has no IsReversed/window-scoped balance column —
     // pulled whole per party (a handful of rows at most) and split in JS
     // instead of a second parameterized date-range query.
-    const allOaRows = await fetchOnAccountRows(pool, headId);
+    const allOaRows = await fetchOnAccountRows(pool, headId, companyId, projectId);
     if (from) {
       windowOpening = Math.round((windowOpening + onAccountNet(allOaRows, from)) * 100) / 100;
     }
@@ -381,6 +403,8 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
     const pool = getPool();
     const from = req.query.from ? String(req.query.from) : null;
     const to = req.query.to ? String(req.query.to) : null;
+    const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
+    const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
     // Unlike /:headId/transactions, this query does have a SQL-level TOP
     // below (it scans every party at once), so the ceiling stays bounded —
     // raised from 2000 to 10000 to cover realistic export sizes without an
@@ -392,7 +416,9 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
       .request()
       .input("Limit", sql.Int, limit)
       .input("From", sql.Date, from || null)
-      .input("To", sql.Date, to || null).query(`
+      .input("To", sql.Date, to || null)
+      .input("CompanyId", sql.Int, companyId)
+      .input("ProjectId", sql.Int, projectId).query(`
       SELECT TOP (@Limit)
         gle.EntryId, gle.VoucherNo, gle.VoucherDate, gle.DebitAmount, gle.CreditAmount,
         gle.Narration, gle.SourceType, gle.SourceId, gle.CompanyId, gle.ProjectId, gle.CostCenterId,
@@ -426,6 +452,8 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
         AND gle.SourceType NOT IN ('GRN', 'GRNPosting', 'OnAccountAdjustment')
         AND (@From IS NULL OR gle.VoucherDate >= @From)
         AND (@To IS NULL OR gle.VoucherDate <= @To)
+        AND (@CompanyId IS NULL OR gle.CompanyId = @CompanyId)
+        AND (@ProjectId IS NULL OR gle.ProjectId = @ProjectId)
     `);
 
     // Same OnAccountLedger merge as /:headId/transactions, just across every
@@ -434,7 +462,9 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
     const oaResult = await pool
       .request()
       .input("From", sql.Date, from || null)
-      .input("To", sql.Date, to || null).query(`
+      .input("To", sql.Date, to || null)
+      .input("CompanyId", sql.Int, companyId)
+      .input("ProjectId", sql.Int, projectId).query(`
       SELECT oal.OAId, oal.PartyId, oal.TxnDate, oal.TxnType, oal.Amount, oal.RefType, oal.RefDocNo, oal.Notes,
              oal.CompanyId, oal.ProjectId,
              ISNULL(ahm.DisplayName, ahm.LHeadName) AS PartyName, ahm.LHeadType AS PartyType
@@ -444,6 +474,8 @@ router.get("/all-transactions", requirePageRight("vendor-ledger", "view"), async
         AND oal.TxnType = 'CREDIT'
         AND (@From IS NULL OR oal.TxnDate >= @From)
         AND (@To IS NULL OR oal.TxnDate <= @To)
+        AND (@CompanyId IS NULL OR oal.CompanyId = @CompanyId)
+        AND (@ProjectId IS NULL OR oal.ProjectId = @ProjectId)
     `);
 
     const merged = [
