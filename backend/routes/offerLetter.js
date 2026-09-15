@@ -218,12 +218,13 @@ async function nextEmployeeCode(pool, sql) {
 async function autoCreateEmployeeFromOffer(pool, sql, offerId, createdBy) {
   const offerRes = await pool.request().input("Id", sql.Int, offerId).query(`
     SELECT
-      o.CandidateId, o.CompanyId, o.ActualDateOfJoining,
+      o.CandidateId, o.CompanyId, o.ActualDateOfJoining, o.CandidateAddress,
       c.CandidateName, c.Contact, c.Email,
-      des.DesignationName
+      des.DesignationName, dept.DepartmentName
     FROM dbo.OfferLetter o
     JOIN dbo.CandidateMaster c ON c.CandidateId = o.CandidateId
     LEFT JOIN dbo.DesignationMaster des ON des.Id = o.DesignationId
+    LEFT JOIN dbo.DepartmentMaster dept ON dept.Id = des.DepartmentId
     WHERE o.OfferId = @Id
   `);
   const info = offerRes.recordset[0];
@@ -242,19 +243,21 @@ async function autoCreateEmployeeFromOffer(pool, sql, offerId, createdBy) {
         .input("EmployeeName", sql.NVarChar(150), info.CandidateName)
         .input("Mobile", sql.NVarChar(20), info.Contact || null)
         .input("Email", sql.NVarChar(150), info.Email || null)
+        .input("Address", sql.NVarChar(500), info.CandidateAddress || null)
         .input("JoiningDate", sql.Date, info.ActualDateOfJoining)
         .input("CompanyId", sql.Int, info.CompanyId || null)
+        .input("Department", sql.NVarChar(100), info.DepartmentName || null)
         .input("Designation", sql.NVarChar(100), info.DesignationName || null)
         .input("CandidateId", sql.Int, info.CandidateId)
         .input("CreatedBy", sql.NVarChar(150), createdBy)
         .query(`
           INSERT INTO dbo.EmployeeMaster (
-            EmployeeCode, EmployeeName, Mobile, Email, JoiningDate, CompanyId, Designation,
+            EmployeeCode, EmployeeName, Mobile, Email, Address, JoiningDate, CompanyId, Department, Designation,
             CandidateId, IsActive, CreatedBy, CreatedAt
           )
           OUTPUT INSERTED.EmployeeId
           VALUES (
-            @EmployeeCode, @EmployeeName, @Mobile, @Email, @JoiningDate, @CompanyId, @Designation,
+            @EmployeeCode, @EmployeeName, @Mobile, @Email, @Address, @JoiningDate, @CompanyId, @Department, @Designation,
             @CandidateId, 1, @CreatedBy, SYSDATETIME()
           )
         `);
