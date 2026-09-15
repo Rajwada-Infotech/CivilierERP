@@ -49,6 +49,17 @@ import {
   type SalesSummaryData,
 } from "@/api/homeDashboardApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+} from "recharts";
 
 // ─── Role helpers ─────────────────────────────────────────────────────────────
 // These mirror the logic in TopNavbar / auth.utils so the home page
@@ -139,32 +150,6 @@ function AnimatedCounter({
       {count.toLocaleString("en-IN")}
       {suffix}
     </span>
-  );
-}
-
-// ─── Section label ────────────────────────────────────────────────────────────
-function SectionLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-2.5 mb-5">
-      <motion.div
-        className="w-1 h-3.5 rounded-full bg-primary/70"
-        animate={{ scaleY: [1, 1.3, 1] }}
-        transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-        style={{ originY: 0.5 }}
-      />
-      <span className="font-heading text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
-        {children}
-      </span>
-      {/* level-bubble accent */}
-      <div className="flex-1 h-px bg-border/40 ml-2 relative max-w-[120px] hidden sm:block">
-        <motion.div
-          className="absolute top-1/2 -translate-y-1/2 w-1.5 h-1.5 rounded-full bg-primary/40"
-          animate={{ left: ["0%", "100%", "0%"] }}
-          transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-          style={{ marginLeft: -3 }}
-        />
-      </div>
-    </div>
   );
 }
 
@@ -322,6 +307,95 @@ function LiveRow({ item, onGo }: { item: LiveActivityItem; onGo: (h: string) => 
         {t && <span className="text-[9.5px] text-muted-foreground/35 font-mono tabular-nums">{t}</span>}
       </div>
     </button>
+  );
+}
+
+// ─── Stat card — hero KPI tile with a small trend sparkline ─────────────────
+function StatCard({
+  icon: Icon, label, value, prefix = "", suffix = "", color, sparkline, i,
+}: {
+  icon: React.ElementType;
+  label: string;
+  value: number | string | null;
+  prefix?: string;
+  suffix?: string;
+  color: string;
+  sparkline: number[];
+  i: number;
+}) {
+  const max = Math.max(...sparkline, 1);
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, delay: 0.06 * i, ease: [0.16, 1, 0.3, 1] }}
+      className="relative rounded-2xl border border-border/50 bg-card/60 backdrop-blur-sm p-4 flex flex-col gap-4 overflow-hidden"
+    >
+      <div
+        className="absolute inset-x-0 top-0 h-px opacity-60"
+        style={{ background: `linear-gradient(90deg, transparent, ${color}, transparent)` }}
+      />
+      <div className="flex items-center justify-between">
+        <span
+          className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: `${color}18`, border: `1px solid ${color}30` }}
+        >
+          <Icon size={16} style={{ color }} />
+        </span>
+        {/* 7-day trend — same activity series the charts below plot */}
+        <div className="flex items-end gap-[3px] h-7">
+          {sparkline.map((v, idx) => (
+            <div
+              key={idx}
+              className="w-1.5 rounded-full transition-all"
+              style={{
+                height: `${Math.max(12, (v / max) * 100)}%`,
+                background: idx >= sparkline.length - 2 ? color : `${color}35`,
+              }}
+            />
+          ))}
+        </div>
+      </div>
+      <div>
+        <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground/55 mb-1 truncate">
+          {label}
+        </p>
+        <p className="font-heading font-bold text-[1.65rem] leading-none tabular-nums" style={{ color }}>
+          {value == null ? (
+            <span className="animate-pulse inline-block h-7 w-20 bg-muted rounded" />
+          ) : typeof value === "number" ? (
+            <AnimatedCounter target={value} prefix={prefix} suffix={suffix} duration={1.2} />
+          ) : (
+            `${prefix}${value}${suffix}`
+          )}
+        </p>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── Circular gauge — the one genuinely percentage-shaped hero metric ───────
+function CircularGauge({ pct, size = 128, color = "#7c3aed" }: { pct: number; size?: number; color?: string }) {
+  const stroke = 10;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="hsl(var(--muted))" strokeWidth={stroke} />
+      <motion.circle
+        cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+        strokeLinecap="round" strokeDasharray={c} transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        initial={{ strokeDashoffset: c }}
+        animate={{ strokeDashoffset: c * (1 - pct / 100) }}
+        transition={{ duration: 1.3, delay: 0.3, ease: "easeOut" }}
+      />
+      <text x="50%" y="47%" textAnchor="middle" dominantBaseline="middle" className="fill-foreground font-heading font-bold" style={{ fontSize: size * 0.22 }}>
+        {pct}%
+      </text>
+      <text x="50%" y="66%" textAnchor="middle" dominantBaseline="middle" className="fill-muted-foreground" style={{ fontSize: size * 0.075, letterSpacing: "0.05em", textTransform: "uppercase" }}>
+        Completed
+      </text>
+    </svg>
   );
 }
 
@@ -740,152 +814,116 @@ export default function HomePage() {
 
   const feedItems: LiveActivityItem[] = liveFeed?.items ?? [];
 
+  // ── Last-7-days activity series — bucketed from the same universal feed
+  // the "Live activity" list already renders, so the bar/area charts show
+  // genuinely real counts/values instead of an invented time series.
+  const dayKey = (d: Date) => d.toISOString().slice(0, 10);
+  const last7Days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date();
+    d.setDate(d.getDate() - (6 - i));
+    d.setHours(0, 0, 0, 0);
+    return d;
+  });
+  const byDay = new Map<string, { count: number; amount: number }>();
+  last7Days.forEach((d) => byDay.set(dayKey(d), { count: 0, amount: 0 }));
+  feedItems.forEach((it) => {
+    const k = dayKey(new Date(it.At));
+    const bucket = byDay.get(k);
+    if (bucket) {
+      bucket.count += 1;
+      bucket.amount += it.Amount ?? 0;
+    }
+  });
+  const activitySeries = last7Days.map((d) => {
+    const b = byDay.get(dayKey(d))!;
+    return { day: d.toLocaleDateString("en-IN", { weekday: "short" }), count: b.count, amount: Math.round(b.amount) };
+  });
+
+  // ── Work Order completion — the one genuinely percentage-shaped metric
+  // available, given the hero gauge (mirrors "Profit Analysis" in the
+  // reference layout).
+  const woTotal = eng?.workOrders?.total ?? 0;
+  const woOpen = eng?.workOrders?.open ?? 0;
+  const woCompletionPct = woTotal > 0 ? Math.round(((woTotal - woOpen) / woTotal) * 100) : 0;
+
   // Always show at least something
   const hasAnyAccess = Object.values(access).some(Boolean);
+
+  const heroKpis = kpis.slice(0, 4);
+  const restKpis = kpis.slice(4);
+  const chartTooltipStyle = {
+    background: "hsl(var(--card))",
+    border: "1px solid hsl(var(--border))",
+    borderRadius: 10,
+    fontSize: 11,
+    padding: "8px 10px",
+  } as const;
 
   return (
     <div className="relative min-h-[calc(100vh-3.5rem)] bg-background overflow-hidden font-body">
       <BgGrid />
 
-      <div className="relative z-10 w-full px-4 sm:px-6 md:px-8 lg:px-12 xl:px-16 2xl:px-24 py-6 sm:py-8 lg:py-10">
-        {/* ── Hero ── */}
-        <div className="mb-8 sm:mb-11">
-          <motion.div
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.45 }}
-            className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-5"
+      <div className="relative z-10 w-full px-4 sm:px-6 md:px-8 lg:px-10 xl:px-14 2xl:px-20 py-5 sm:py-6">
+        {/* ── Compact header — full-width, no side rail, so this dashboard
+            stays dense and edge-to-edge instead of the old giant hero. ── */}
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.45 }}
+          className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-6"
+        >
+          <HardHat size={16} className="text-primary/70 shrink-0" />
+          <h1 className="font-heading font-bold text-lg sm:text-xl text-foreground shrink-0">
+            {greeting}, <span className="bg-gradient-to-r from-primary via-violet-400 to-cyan-400 bg-clip-text text-transparent">{firstName}</span>
+          </h1>
+          <span
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-heading font-semibold uppercase tracking-wider border shrink-0"
+            style={{
+              background: privileged ? "hsl(var(--primary)/0.08)" : "hsl(var(--muted)/0.5)",
+              borderColor: privileged ? "hsl(var(--primary)/0.25)" : "hsl(var(--border))",
+              color: privileged ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
+            }}
           >
-            <motion.div
-              animate={{ rotate: [0, 12, -6, 0] }}
-              transition={{ duration: 3.5, repeat: Infinity, repeatDelay: 7 }}
-              className="shrink-0"
-            >
-              <HardHat size={14} className="text-primary/70" />
-            </motion.div>
-            <span className="font-heading text-[10px] font-bold uppercase tracking-[0.24em] text-primary/55 shrink-0">
-              CivilierERP
-            </span>
-            <span className="relative flex h-1.5 w-1.5 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
-            </span>
-            <div className="ml-auto flex items-center gap-2 shrink-0">
-              {lastUpdated && (
-                <span className="text-[10px] text-muted-foreground/35 font-mono tabular-nums hidden sm:inline">
-                  {lastUpdated}
-                </span>
-              )}
-              <button
-                onClick={() => refetch()}
-                disabled={isFetching}
-                className="group p-1.5 rounded-lg hover:bg-muted/50 transition-all duration-200 active:scale-90 disabled:opacity-40"
-                title="Refresh"
-              >
-                <RefreshCw
-                  size={12}
-                  className={`text-muted-foreground/40 transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`}
-                />
-              </button>
-            </div>
-          </motion.div>
+            {privileged ? <ShieldCheck size={10} /> : <Users size={10} />}
+            {role.replace(/_/g, " ")}
+          </span>
+          <span className="relative flex h-1.5 w-1.5 shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+          </span>
+          <span className="text-[11px] text-muted-foreground/50 shrink-0">Live</span>
 
-          <motion.h1
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.9, delay: 0.07, ease: [0.16, 1, 0.3, 1] }}
-            className="font-heading font-bold text-4xl sm:text-5xl md:text-[4rem] 2xl:text-[4.5rem] tracking-tight leading-[1.06] text-foreground mb-3 break-words"
-          >
-            {greeting},{" "}
-            <motion.span
-              className="inline-block bg-gradient-to-r from-primary via-violet-400 to-cyan-400 bg-clip-text text-transparent"
-              initial={{ opacity: 0, x: -14 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{
-                duration: 0.85,
-                delay: 0.2,
-                ease: [0.16, 1, 0.3, 1],
-              }}
-            >
-              {firstName}.
-            </motion.span>
-          </motion.h1>
-
-          <motion.p
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.32 }}
-            className="text-muted-foreground text-base max-w-md leading-relaxed"
-          >
-            {privileged
-              ? "Everything live across procurement, finance, engineering and sales — in one place."
-              : role === "engineer"
-                ? "Your engineering, follow-up and ticket workspace — live and in one place."
-                : "Your workspace overview — all your accessible modules in one place."}
-          </motion.p>
-
-          {/* Role badge */}
-          <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.5, delay: 0.4 }}
-            className="mt-3"
-          >
-            <span
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-heading font-semibold uppercase tracking-wider border"
-              style={{
-                background: privileged
-                  ? "hsl(var(--primary)/0.08)"
-                  : "hsl(var(--muted)/0.5)",
-                borderColor: privileged
-                  ? "hsl(var(--primary)/0.25)"
-                  : "hsl(var(--border))",
-                color: privileged
-                  ? "hsl(var(--primary))"
-                  : "hsl(var(--muted-foreground))",
-              }}
-            >
-              {privileged ? <ShieldCheck size={10} /> : <Users size={10} />}
-              {role.replace(/_/g, " ")}
-            </span>
-          </motion.div>
-
-          <motion.div
-            initial={{ scaleX: 0, opacity: 0 }}
-            animate={{ scaleX: 1, opacity: 1 }}
-            transition={{ duration: 1.1, delay: 0.5, ease: [0.16, 1, 0.3, 1] }}
-            style={{ originX: 0 }}
-            className="mt-7 flex items-center gap-3"
-          >
-            <div className="flex-1 max-w-[280px] h-px bg-gradient-to-r from-primary/40 via-primary/15 to-transparent" />
-            <div className="flex items-center gap-[3px]">
-              {Array.from({ length: 12 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="w-px bg-primary/30 rounded-full"
-                  style={{
-                    height: i % 4 === 0 ? "10px" : i % 2 === 0 ? "6px" : "4px",
-                  }}
-                />
-              ))}
-            </div>
-          </motion.div>
-
-          {isError && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="mt-4 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive max-w-sm"
-            >
-              <AlertCircle size={13} className="shrink-0" />
-              <span className="text-xs">
-                Could not reach the server — showing cached data.
+          <div className="ml-auto flex items-center gap-2 shrink-0">
+            {lastUpdated && (
+              <span className="text-[10px] text-muted-foreground/35 font-mono tabular-nums hidden sm:inline">
+                Updated {lastUpdated}
               </span>
-            </motion.div>
-          )}
-        </div>
+            )}
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="group p-1.5 rounded-lg hover:bg-muted/50 transition-all duration-200 active:scale-90 disabled:opacity-40"
+              title="Refresh"
+            >
+              <RefreshCw
+                size={13}
+                className={`text-muted-foreground/40 transition-transform duration-500 ${isFetching ? "animate-spin" : "group-hover:rotate-180"}`}
+              />
+            </button>
+          </div>
+        </motion.div>
 
-        <section className="mb-10">
+        {isError && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-5 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive max-w-sm"
+          >
+            <AlertCircle size={13} className="shrink-0" />
+            <span className="text-xs">Could not reach the server — showing cached data.</span>
+          </motion.div>
+        )}
+
         {!hasAnyAccess ? (
           <motion.div
             initial={{ opacity: 0, y: 16 }}
@@ -898,10 +936,90 @@ export default function HomePage() {
             <p className="text-xs text-muted-foreground/40 mt-1">Contact your administrator to get module permissions.</p>
           </motion.div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-            {/* Left column: attention + KPIs */}
-            <div className="lg:col-span-2 space-y-4">
-              <Bento title={`Needs your attention${attention.length ? ` · ${attention.length}` : ""}`} icon={Bell} accent="#ef4444">
+          <div className="space-y-4">
+            {/* ── Hero stat cards ── */}
+            {heroKpis.length > 0 && (
+              <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+                {heroKpis.map((k, i) => (
+                  <StatCard
+                    key={k.label}
+                    icon={k.icon}
+                    label={k.label}
+                    value={k.value}
+                    prefix={k.prefix}
+                    suffix={k.suffix}
+                    color={k.color}
+                    sparkline={activitySeries.map((d) => d.count)}
+                    i={i}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* ── Charts row: activity volume, activity value, WO completion gauge ── */}
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+              <Bento title="Activity This Week" icon={BarChart3} accent="#7c3aed" className="xl:col-span-1 min-h-[240px]">
+                <div className="p-3 h-[210px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={activitySeries} margin={{ top: 8, right: 4, left: -22, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} allowDecimals={false} width={28} />
+                      <Tooltip contentStyle={chartTooltipStyle} cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }} labelStyle={{ color: "hsl(var(--foreground))" }} />
+                      <Bar dataKey="count" name="Actions" radius={[5, 5, 0, 0]} fill="#7c3aed" maxBarSize={28} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </Bento>
+
+              <Bento title="Transaction Value This Week" icon={LineChart} accent="#06b6d4" className="xl:col-span-1 min-h-[240px]">
+                <div className="p-3 h-[210px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <AreaChart data={activitySeries} margin={{ top: 8, right: 4, left: -12, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="homeValueFill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.35} />
+                          <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.4} vertical={false} />
+                      <XAxis dataKey="day" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                      <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} tickFormatter={(v) => compactINR(v)} width={44} />
+                      <Tooltip contentStyle={chartTooltipStyle} formatter={(v: number) => [compactINR(v), "Value"]} labelStyle={{ color: "hsl(var(--foreground))" }} />
+                      <Area type="monotone" dataKey="amount" name="Value" stroke="#06b6d4" strokeWidth={2} fill="url(#homeValueFill)" />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </div>
+              </Bento>
+
+              <Bento title="Work Order Completion" icon={Hammer} accent="#7c3aed" className="xl:col-span-1 min-h-[240px]">
+                <div className="flex flex-col items-center justify-center gap-4 p-4 h-[210px]">
+                  <CircularGauge pct={woCompletionPct} />
+                  <div className="w-full space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-muted-foreground">Completed</span>
+                      <span className="font-heading font-semibold tabular-nums text-foreground">{(woTotal - woOpen).toLocaleString("en-IN")}</span>
+                    </div>
+                    <div className="h-1 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${woCompletionPct}%` }} />
+                    </div>
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-muted-foreground">Open</span>
+                      <span className="font-heading font-semibold tabular-nums text-foreground">{woOpen.toLocaleString("en-IN")}</span>
+                    </div>
+                  </div>
+                </div>
+              </Bento>
+            </div>
+
+            {/* ── Needs attention (wide) + remaining key numbers (narrow) ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+              <Bento
+                title={`Needs your attention${attention.length ? ` · ${attention.length}` : ""}`}
+                icon={Bell}
+                accent="#ef4444"
+                className="lg:col-span-2"
+              >
                 {isLoading ? (
                   <div className="px-4 py-6 space-y-3">
                     {Array.from({ length: 4 }).map((_, i) => (
@@ -920,7 +1038,7 @@ export default function HomePage() {
                     <p className="text-[11px] text-muted-foreground/50">Nothing needs your action right now.</p>
                   </div>
                 ) : (
-                  <div className="max-h-[420px] overflow-y-auto">
+                  <div className="max-h-[280px] overflow-y-auto">
                     {attention.slice(0, 10).map((a, i) => (
                       <AttentionRow key={a.label} a={a} i={i} onGo={navigate} />
                     ))}
@@ -928,22 +1046,24 @@ export default function HomePage() {
                 )}
               </Bento>
 
-              <div>
-                <SectionLabel>Key numbers</SectionLabel>
-                <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
-                  {kpis.map((k, i) => (
-                    <KpiPill key={k.label} label={k.label} value={k.value} prefix={k.prefix} suffix={k.suffix} color={k.color} icon={k.icon} i={i} />
-                  ))}
-                </div>
-              </div>
+              <Bento title="More key numbers" icon={Database} accent="#6366f1">
+                {restKpis.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-xs text-muted-foreground/40">Nothing else to show.</div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2.5 p-3">
+                    {restKpis.map((k, i) => (
+                      <KpiPill key={k.label} label={k.label} value={k.value} prefix={k.prefix} suffix={k.suffix} color={k.color} icon={k.icon} i={i} />
+                    ))}
+                  </div>
+                )}
+              </Bento>
             </div>
 
-            {/* Right column: live activity */}
+            {/* ── Recent Activity — full-width table, universal feed ── */}
             <Bento
-              title="Live activity"
+              title="Recent Activity"
               icon={Activity}
-              accent="#6366f1"
-              className="lg:sticky lg:top-4"
+              accent="#7c3aed"
               action={
                 <div className="flex items-center gap-1.5">
                   <span className="relative flex h-1.5 w-1.5">
@@ -961,30 +1081,122 @@ export default function HomePage() {
                   {isLoading ? "Loading activity…" : "No recent activity."}
                 </div>
               ) : (
-                // Capped to a fixed height on mobile — it's the SECOND item
-                // in the grid there (grid-cols-1 below lg), stacked under
-                // the attention/KPI column, so tying it to 100vh like the
-                // desktop sticky-sidebar layout does would make it as tall
-                // as the whole viewport on top of everything already above
-                // it. Only ties to viewport height once it's actually a
-                // sticky side column (lg+).
-                <div className="max-h-[360px] lg:max-h-[calc(100vh-11rem)] min-h-[240px] lg:min-h-[300px] overflow-y-auto">
-                  {feedItems.map((it, i) => (
-                    <LiveRow key={`${it.Kind}-${it.DocNo ?? i}-${it.At}`} item={it} onGo={navigate} />
-                  ))}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs min-w-[640px]">
+                    <thead>
+                      <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[10px] font-heading">
+                        <th className="text-left px-4 py-2.5 font-semibold">Module</th>
+                        <th className="text-left px-3 py-2.5 font-semibold">Item</th>
+                        <th className="text-left px-3 py-2.5 font-semibold">By</th>
+                        <th className="text-right px-3 py-2.5 font-semibold">Amount</th>
+                        <th className="text-right px-4 py-2.5 font-semibold">When</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/25">
+                      {feedItems.slice(0, 8).map((it, i) => {
+                        const m = moduleMeta(it.Module);
+                        return (
+                          <tr
+                            key={`${it.Kind}-${it.DocNo ?? i}-${it.At}`}
+                            onClick={() => navigate(it.Href)}
+                            className="cursor-pointer hover:bg-muted/25 transition-colors"
+                          >
+                            <td className="px-4 py-2.5 whitespace-nowrap">
+                              <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium" style={{ background: `${m.color}16`, color: m.color }}>
+                                <m.icon size={10} /> {m.label}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 max-w-[280px]">
+                              <p className="font-semibold text-foreground truncate">{it.Title}</p>
+                              {it.Subtitle && <p className="text-[10px] text-muted-foreground/50 truncate">{it.Subtitle}</p>}
+                            </td>
+                            <td className="px-3 py-2.5 text-muted-foreground truncate max-w-[140px]">{it.Actor ?? "—"}</td>
+                            <td className="px-3 py-2.5 text-right tabular-nums font-heading font-semibold" style={{ color: it.Amount ? m.color : undefined }}>
+                              {it.Amount != null && it.Amount > 0 ? compactINR(it.Amount) : "—"}
+                            </td>
+                            <td className="px-4 py-2.5 text-right text-muted-foreground/50 font-mono tabular-nums whitespace-nowrap">{relTime(it.At)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </Bento>
+
+            {/* ── Approval Inbox (privileged) or My Tasks — full-width table ── */}
+            {access.approvals ? (
+              <Bento title="Approval Inbox" icon={FileCheck} accent="#f59e0b">
+                {pendingApprovals.length === 0 ? (
+                  <div className="px-4 py-12 text-center text-xs text-muted-foreground/40">
+                    {isLoading ? "Loading…" : "Nothing waiting on approval."}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs min-w-[640px]">
+                      <thead>
+                        <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[10px] font-heading">
+                          <th className="text-left px-4 py-2.5 font-semibold">Module</th>
+                          <th className="text-left px-3 py-2.5 font-semibold">Reference</th>
+                          <th className="text-left px-3 py-2.5 font-semibold">Date</th>
+                          <th className="text-left px-3 py-2.5 font-semibold">Status</th>
+                          <th className="text-right px-4 py-2.5 font-semibold">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/25">
+                        {pendingApprovals.slice(0, 8).map((a, i) => (
+                          <tr key={`${a.Module}-${a.RecordId}-${i}`} onClick={() => navigate("/admin/approval/inbox")} className="cursor-pointer hover:bg-muted/25 transition-colors">
+                            <td className="px-4 py-2.5 whitespace-nowrap text-foreground font-medium">{a.ModuleLabel}</td>
+                            <td className="px-3 py-2.5 font-mono text-muted-foreground">{a.Reference}</td>
+                            <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap">{a.RecordDate ? new Date(a.RecordDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}</td>
+                            <td className="px-3 py-2.5">
+                              <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/12 text-amber-600">{a.Status}</span>
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums font-heading font-semibold text-foreground">
+                              {a.Amount != null ? compactINR(a.Amount) : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </Bento>
+            ) : data?.recentTasks && data.recentTasks.length > 0 ? (
+              <Bento title="My Tasks" icon={ClipboardList} accent="#f59e0b">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs min-w-[560px]">
+                    <thead>
+                      <tr className="border-b border-border/40 text-muted-foreground/60 uppercase tracking-wide text-[10px] font-heading">
+                        <th className="text-left px-4 py-2.5 font-semibold">Task</th>
+                        <th className="text-left px-3 py-2.5 font-semibold">Priority</th>
+                        <th className="text-left px-3 py-2.5 font-semibold">Status</th>
+                        <th className="text-right px-4 py-2.5 font-semibold">Due</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/25">
+                      {data.recentTasks.slice(0, 8).map((t) => (
+                        <tr key={t.id} className="hover:bg-muted/25 transition-colors">
+                          <td className="px-4 py-2.5 text-foreground font-medium max-w-[280px] truncate">{t.title}</td>
+                          <td className="px-3 py-2.5 text-muted-foreground">{t.priority}</td>
+                          <td className="px-3 py-2.5 text-muted-foreground">{t.status}</td>
+                          <td className="px-4 py-2.5 text-right text-muted-foreground whitespace-nowrap">{t.dueDate ? new Date(t.dueDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) : "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Bento>
+            ) : null}
           </div>
         )}
-        </section>
 
         {/* Footer */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 1.4 }}
-          className="mt-10 flex flex-col items-center gap-1.5"
+          transition={{ delay: 1.2 }}
+          className="mt-8 flex flex-col items-center gap-1.5"
         >
           <div className="flex items-center gap-3 text-muted-foreground/25 text-[10px] font-heading tracking-widest uppercase">
             <div className="w-10 h-px bg-border/40" />

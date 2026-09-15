@@ -118,10 +118,13 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
     [navCollapsed],
   );
 
-  // Strip = 76px, NavPanel = 200px, total = 276px
+  // Strip = 76px, NavPanel = 200px, total = 276px. Home renders full-width
+  // with no side rail at all — neither the module strip nor the nav panel
+  // — so it isn't squeezed into the same left gutter every module page
+  // uses; TopNavbar (fixed, full-width) is its only chrome.
   const STRIP_W = 76;
   const NAV_W = 200;
-  const mainML = isMobile
+  const mainML = isMobile || isHome
     ? 0
     : hideNavPanel
       ? STRIP_W
@@ -138,7 +141,9 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
 
             {!isMobile && (
               <>
-                {/* ── Module strip — always visible on desktop ── */}
+                {/* ── Module strip — visible on every desktop page except
+                    Home, which renders full-width with no side rail. ── */}
+                {!isHome && (
                 <motion.div
                   key="module-strip"
                   initial={{ x: -STRIP_W, opacity: 0 }}
@@ -156,6 +161,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                 >
                   <ModuleStrip />
                 </motion.div>
+                )}
 
                 {/* ── Nav panel — only on module pages, not home.
                     Stays mounted across collapse/expand toggles (only the
