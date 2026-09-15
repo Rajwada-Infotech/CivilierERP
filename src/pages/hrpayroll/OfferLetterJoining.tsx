@@ -1,13 +1,14 @@
 import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { DocumentText1 } from "iconsax-react";
+import { DocumentText1, Printer } from "iconsax-react";
 import { Pencil, Trash2, X } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell, HR_PAYROLL_ACCENT } from "@/components/hrpayroll/HrPayrollShell";
 import { ExportMenu } from "@/components/ExportMenu";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { safeHtml } from "@/utils/escapeHtml";
 import type { ExportColumn } from "@/lib/export";
 import { getEmployeeCompanyOptions, type EmployeeCompanyOption } from "@/api/employeeMasterApi";
 import { getFinYears } from "@/api/finYearApi";
@@ -18,33 +19,53 @@ import {
   updateOfferLetter,
   confirmJoining,
   deleteOfferLetter,
+  getOfferLetterTemplate,
+  updateOfferLetterTemplate,
   type OfferLetterRow,
 } from "@/api/offerLetterApi";
 
 const labelCls = "block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 const inputCls = "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
 
-interface FormState {
-  candidateId: string;
-  companyId: string;
-  finYearId: string;
-  salary: string;
-  candidateAddress: string;
-  dateOfJoin: string;
-  documentDate: string;
-  remarks: string;
+const TEMPLATE_PLACEHOLDERS = [
+  "CandidateName", "CandidateCode", "CandidateAddress", "Company", "FinYear",
+  "Salary", "DateOfJoin", "DocumentDate", "DocNo", "Remarks",
+];
+
+// Replaces {{Placeholder}} tokens in the letter body with an offer's data —
+// unmatched tokens are left blank rather than surfacing "{{Typo}}" verbatim.
+function fillTemplate(template: string, offer: OfferLetterRow): string {
+  const values: Record<string, string> = {
+    CandidateName: offer.CandidateName || "",
+    CandidateCode: offer.CandidateCode || "",
+    CandidateAddress: offer.CandidateAddress || "",
+    Company: offer.CompanyName || "",
+    FinYear: offer.FinYearName || "",
+    Salary: offer.Salary != null ? String(offer.Salary) : "",
+    DateOfJoin: offer.DateOfJoin ? offer.DateOfJoin.slice(0, 10) : "",
+    DocumentDate: offer.DocumentDate ? offer.DocumentDate.slice(0, 10) : "",
+    DocNo: offer.DocNo || "",
+    Remarks: offer.Remarks || "",
+  };
+  return template.replace(/\{\{(\w+)\}\}/g, (_match, key) => values[key] ?? "");
 }
 
-const emptyForm: FormState = {
-  candidateId: "",
-  companyId: "",
-  finYearId: "",
-  salary: "",
-  candidateAddress: "",
-  dateOfJoin: "",
-  documentDate: "",
-  remarks: "",
-};
+function openGeneratedLetter(offer: OfferLetterRow, template: string) {
+  const body = fillTemplate(template, offer);
+  const win = window.open("", "_blank", "width=800,height=900");
+  if (!win) {
+    toast.error("Pop-up blocked — please allow pop-ups to generate the letter");
+    return;
+  }
+  win.document.write(safeHtml`<html><head><title>Offer Letter — ${offer.CandidateName}</title>
+    <style>
+      body { font-family: Georgia, serif; padding: 48px; max-width: 760px; margin: 0 auto; color: #1a1a1a; white-space: pre-wrap; line-height: 1.7; font-size: 14px; }
+    </style>
+  </head><body>${body}</body></html>`);
+  win.document.close();
+  win.focus();
+  win.print();
+}
 
 const offerExportColumns: ExportColumn[] = [
   { header: "Doc No", accessor: "docNo" },
@@ -118,6 +139,89 @@ const JoiningRow: React.FC<{
   );
 };
 
+// ── Letter Body tab: edit the {{Placeholder}} template used to generate offers ──
+const LetterBodyTab: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
+  const queryClient = useQueryClient();
+  const { data, isLoading } = useQuery({
+    queryKey: ["offer-letter-template"],
+    queryFn: getOfferLetterTemplate,
+    staleTime: 60 * 1000,
+  });
+
+  const [body, setBody] = useState<string | null>(null);
+  const currentBody = body ?? data?.Body ?? "";
+
+  const mutation = useMutation({
+    mutationFn: (next: string) => updateOfferLetterTemplate(next),
+    onSuccess: async () => {
+      toast.success("Letter body saved");
+      await queryClient.invalidateQueries({ queryKey: ["offer-letter-template"] });
+    },
+    onError: (err: any) => toast.error(err?.message || "Failed to save letter body"),
+  });
+
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading letter body...</div>;
+
+  return (
+    <div className="bg-card border border-border rounded-xl p-5 space-y-4 mt-4">
+      <div>
+        <h3 className="font-heading font-semibold text-foreground text-sm">Offer Letter Body</h3>
+        <p className="text-[11px] text-muted-foreground mt-0.5">
+          This text is merged with each offer's data (via the placeholders below) when you click "Generate" on a record.
+        </p>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {TEMPLATE_PLACEHOLDERS.map((p) => (
+          <span key={p} className="text-[11px] font-mono px-2 py-0.5 rounded-full border" style={{ borderColor: `${HR_PAYROLL_ACCENT}33`, color: HR_PAYROLL_ACCENT, backgroundColor: `${HR_PAYROLL_ACCENT}0D` }}>
+            {`{{${p}}}`}
+          </span>
+        ))}
+      </div>
+      <textarea
+        className={`${inputCls} font-mono`}
+        rows={16}
+        value={currentBody}
+        onChange={(e) => setBody(e.target.value)}
+        disabled={!canEdit}
+      />
+      {canEdit && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            onClick={() => mutation.mutate(currentBody)}
+            disabled={mutation.isPending || !currentBody.trim()}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {mutation.isPending ? "Saving…" : "Save Letter Body"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface FormState {
+  candidateId: string;
+  companyId: string;
+  finYearId: string;
+  salary: string;
+  candidateAddress: string;
+  dateOfJoin: string;
+  documentDate: string;
+  remarks: string;
+}
+
+const emptyForm: FormState = {
+  candidateId: "",
+  companyId: "",
+  finYearId: "",
+  salary: "",
+  candidateAddress: "",
+  dateOfJoin: "",
+  documentDate: "",
+  remarks: "",
+};
+
 const OfferLetterJoining: React.FC = () => {
   const rights = usePageRights("offer-letter-joining");
   const queryClient = useQueryClient();
@@ -141,6 +245,12 @@ const OfferLetterJoining: React.FC = () => {
     queryKey: ["employee-company-options"],
     queryFn: getEmployeeCompanyOptions,
     staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: templateData } = useQuery({
+    queryKey: ["offer-letter-template"],
+    queryFn: getOfferLetterTemplate,
+    staleTime: 60 * 1000,
   });
 
   const rows: OfferLetterRow[] = Array.isArray(data) ? data : [];
@@ -184,6 +294,14 @@ const OfferLetterJoining: React.FC = () => {
     } catch (err: any) {
       toast.error(err?.message || "Delete failed");
     }
+  };
+
+  const handleGenerate = (row: OfferLetterRow) => {
+    if (!templateData?.Body) {
+      toast.error("No letter body configured yet — set one in the Letter Body tab");
+      return;
+    }
+    openGeneratedLetter(row, templateData.Body);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -239,6 +357,7 @@ const OfferLetterJoining: React.FC = () => {
           <TabsList>
             <TabsTrigger value="offer">Offer Letter</TabsTrigger>
             <TabsTrigger value="joining">Joining</TabsTrigger>
+            <TabsTrigger value="body">Letter Body</TabsTrigger>
           </TabsList>
 
           {/* ── Offer Letter tab ── */}
@@ -388,6 +507,9 @@ const OfferLetterJoining: React.FC = () => {
                           <td className="px-4 py-2.5">{r.DateOfJoin ? r.DateOfJoin.slice(0, 10) : "-"}</td>
                           <td className="px-4 py-2.5 text-right">
                             <div className="inline-flex items-center gap-2">
+                              <button onClick={() => handleGenerate(r)} className="text-muted-foreground hover:text-foreground" title="Generate Offer Letter">
+                                <Printer size={14} />
+                              </button>
                               {rights.canEdit && (
                                 <button onClick={() => handleEdit(r)} className="text-muted-foreground hover:text-foreground" title="Edit">
                                   <Pencil size={14} />
@@ -443,6 +565,11 @@ const OfferLetterJoining: React.FC = () => {
                 </table>
               </div>
             </div>
+          </TabsContent>
+
+          {/* ── Letter Body tab ── */}
+          <TabsContent value="body">
+            <LetterBodyTab canEdit={rights.canEdit} />
           </TabsContent>
         </Tabs>
       </HrPayrollShell>

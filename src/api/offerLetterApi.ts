@@ -86,3 +86,17 @@ export const deleteOfferLetter = async (id: number) => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   return handle<{ message: string }>(res);
 };
+
+export const getOfferLetterTemplate = async (): Promise<{ TemplateId: number; Body: string }> => {
+  const res = await fetchWithAuth(`${BASE}/template`);
+  return handle(res);
+};
+
+export const updateOfferLetterTemplate = async (body: string) => {
+  const res = await fetchWithAuth(`${BASE}/template`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ Body: body }),
+  });
+  return handle<{ message: string }>(res);
+};

@@ -31,6 +31,69 @@ async function nextDocNo(pool, sql) {
   return `OFR-${String(next).padStart(5, "0")}`;
 }
 
+const DEFAULT_TEMPLATE_BODY = `Dear {{CandidateName}},
+
+We are pleased to offer you the position at {{Company}}.
+
+Your annual salary will be {{Salary}} and your proposed date of joining is {{DateOfJoin}}.
+
+Address on file: {{CandidateAddress}}
+
+This offer is issued as document {{DocNo}} dated {{DocumentDate}}, for financial year {{FinYear}}.
+
+We look forward to welcoming you to the team.
+
+Regards,
+{{Company}}`;
+
+// GET the single offer-letter body template -- registered before the
+// "/:id" routes below so Express doesn't try to parse "template" as an id.
+router.get("/template", async (req, res) => {
+  try {
+    const pool = getPool();
+    let result = await pool.request().query("SELECT TOP 1 TemplateId, Body FROM dbo.OfferLetterTemplate ORDER BY TemplateId");
+    if (!result.recordset.length) {
+      await pool.request().input("Body", sql.NVarChar(sql.MAX), DEFAULT_TEMPLATE_BODY)
+        .query("INSERT INTO dbo.OfferLetterTemplate (Body) VALUES (@Body)");
+      result = await pool.request().query("SELECT TOP 1 TemplateId, Body FROM dbo.OfferLetterTemplate ORDER BY TemplateId");
+    }
+    res.json(result.recordset[0]);
+  } catch (err) {
+    console.error("[offer-letter] GET template error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT -- update the offer-letter body template
+router.put("/template", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  const { Body } = req.body;
+  if (!Body?.trim()) return res.status(400).json({ error: "Body is required" });
+  const updatedBy = req.user?.userId || null;
+  try {
+    const pool = getPool();
+    const existing = await pool.request().query("SELECT TOP 1 TemplateId FROM dbo.OfferLetterTemplate ORDER BY TemplateId");
+    if (existing.recordset.length) {
+      await pool
+        .request()
+        .input("Id", sql.Int, existing.recordset[0].TemplateId)
+        .input("Body", sql.NVarChar(sql.MAX), Body)
+        .input("UpdatedBy", sql.Int, updatedBy)
+        .query("UPDATE dbo.OfferLetterTemplate SET Body = @Body, UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME() WHERE TemplateId = @Id");
+    } else {
+      await pool
+        .request()
+        .input("Body", sql.NVarChar(sql.MAX), Body)
+        .input("UpdatedBy", sql.Int, updatedBy)
+        .query("INSERT INTO dbo.OfferLetterTemplate (Body, UpdatedBy, UpdatedAt) VALUES (@Body, @UpdatedBy, SYSUTCDATETIME())");
+    }
+    await bumpCacheVersion("offer-letter-template");
+    res.json({ message: "Template updated successfully" });
+  } catch (err) {
+    console.error("[offer-letter] PUT template error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET all offer letters
 router.get("/", cache("offer-letter", 60), async (req, res) => {
   try {
