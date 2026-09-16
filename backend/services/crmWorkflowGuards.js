@@ -4,10 +4,6 @@ const { emitNotification } = require("./notify");
 const { generateInvoicePdf } = require("./invoicePdf");
 const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
 
-function hasValue(value) {
-  return value !== null && value !== undefined && String(value).trim() !== "";
-}
-
 // Server-side backstop for "a cancelled booking must be released from every
 // workflow action, not just hidden from dropdowns" — a stale client-side
 // list, a deep link, or a direct API call could otherwise still reach a
@@ -151,17 +147,17 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   if (!booking.UnitId) {
     errors.push("Booking must be linked to a Unit Master unit");
   }
-  if (!hasValue(booking.Email)) {
-    errors.push("Applicant email is required for customer portal login");
-  }
-  // Mobile is no longer required here (business decision) — it used to be
-  // mandatory purely because it doubled as the portal login's initial
-  // password. A mobile-less customer now simply never gets a portal
-  // account provisioned (see ensurePortalUser in crmPortalProvision.js,
-  // which already checks `if (!row.Mobile)` and returns a clean
-  // "cannot provision portal login" result instead of failing) — the same
-  // way they already can't receive SMS notifications. That's a narrower,
-  // more accurate consequence than blocking the entire Agreement.
+  // Neither Email nor Mobile is required here any more (business decision).
+  // Both used to be mandatory purely because they double as the portal
+  // login's username (Email) and initial password (Mobile). A customer
+  // missing either now simply never gets a portal account provisioned —
+  // ensurePortalUser in crmPortalProvision.js already checks both
+  // (`if (!row.Mobile)` / `if (!row.Email)`) and returns a clean
+  // "cannot provision portal login" result instead of failing — the same
+  // way they already can't receive SMS/email notifications without one.
+  // That's a narrower, more accurate consequence than blocking the entire
+  // Agreement over a field that has nothing to do with the legal contract
+  // itself.
 
   const welcome = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT TOP 1 Id
