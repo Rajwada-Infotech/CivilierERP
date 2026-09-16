@@ -570,7 +570,7 @@ export default function ProjectMaster() {
   const [viewTarget, setViewTarget] = useState<Project | null>(null);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<
-    "general" | "location" | "compliance" | "timeline" | "financial"
+    "general" | "location" | "compliance" | "timeline"
   >("general");
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [cascadeTarget, setCascadeTarget] = useState<{ Id: number; Name: string } | null>(null);
@@ -933,13 +933,7 @@ export default function ProjectMaster() {
     </div>
   );
 
-  const TABS = [
-    "general",
-    "location",
-    "compliance",
-    "timeline",
-    "financial",
-  ] as const;
+  const TABS = ["general", "location", "compliance", "timeline"] as const;
 
   return (
     <>
@@ -1119,6 +1113,7 @@ export default function ProjectMaster() {
                   {fi("Project Name", "name", "text", "", false, true)}
                   {fi("Short Name", "shortName")}
                   {se("Type", "type", projectTypes)}
+                  {se("Currency", "currency", currencies)}
 
                   {/* Enterprise Dropdown */}
                   <div>
@@ -1413,13 +1408,6 @@ export default function ProjectMaster() {
                   {se("Status", "status", statuses)}
                   {se("Priority", "priority", priorities)}
                   {fi("Team Size", "teamSize", "number")}
-                </div>
-              )}
-
-              {/* ── Financial ── */}
-              {activeTab === "financial" && (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {se("Currency", "currency", currencies)}
                 </div>
               )}
             </div>
