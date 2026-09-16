@@ -747,8 +747,50 @@ async function syncLegalMilestoneStep(pool, bookingId, step, actorUserId) {
  * still-incomplete step — is correct regardless of completion order, and
  * is idempotent/safe to call after every single step update (manual or
  * auto-synced).
+ *
+ * Before computing CurrentStep, this also backfills any earlier step that
+ * got skipped over. Two of the 8 steps' own trigger events can genuinely
+ * never fire even on a booking that sails all the way to FinalExecution:
+ *   - DocCollection's trigger (Identity Proof Verified) is deliberately
+ *     NOT mandatory — see maybeAutoCreateAgreement()'s own comment: "the
+ *     real gate ... is the actual Sale Agreement paper ... not this KYC
+ *     document." Plenty of real agreements never collect/verify it.
+ *   - LegalReview's trigger only fired on a later (re)assignment PUT, not
+ *     when LegalExecutiveId was supplied directly at Agreement creation —
+ *     a real gap, separately closed in crmAgreements.js POST /, but this
+ *     still needs to self-heal any tracker that was already caught by it.
+ * Either way, once a LATER step in the sequence is genuinely Completed, an
+ * EARLIER one still sitting Pending cannot mean "not yet happened" — it can
+ * only mean its own auto-sync trigger was skipped or missed. Left alone,
+ * that permanently freezes CurrentStep at the first such gap, showing e.g.
+ * "Document Collection pending" on a booking whose Agreement is already
+ * fully Registered. Closing the gap here — the single place CurrentStep is
+ * (re)computed — fixes every existing stuck tracker the next time anything
+ * touches it, and stops new ones from ever freezing the same way.
  */
 async function recomputeLegalMilestoneCurrentStep(pool, legalMilestoneId) {
+  const stepStatusCols = LEGAL_MILESTONE_STEPS.map((s) => `${s}Status`).join(", ");
+  const cur = await pool.request().input("id", sql.Int, legalMilestoneId)
+    .query(`SELECT ${stepStatusCols} FROM dbo.CrmLegalMilestone WHERE Id = @id`);
+  const row = cur.recordset[0];
+  if (row) {
+    const lastDoneIdx = LEGAL_MILESTONE_STEPS.reduce(
+      (acc, s, i) => (row[`${s}Status`] === "Completed" ? i : acc), -1
+    );
+    const toBackfill = LEGAL_MILESTONE_STEPS
+      .slice(0, lastDoneIdx)
+      .filter((s) => row[`${s}Status`] !== "Completed");
+    if (toBackfill.length) {
+      const setClauses = toBackfill.map((s) =>
+        `${s}Done = ISNULL(${s}Done, CAST(SYSDATETIME() AS DATE)), ` +
+        `${s}Status = 'Completed', ` +
+        `${s}Notes = ISNULL(${s}Notes, 'Auto-completed — a later step was already done, so this one must have happened too')`
+      ).join(", ");
+      await pool.request().input("id", sql.Int, legalMilestoneId)
+        .query(`UPDATE dbo.CrmLegalMilestone SET ${setClauses} WHERE Id = @id`);
+    }
+  }
+
   const caseWhens = LEGAL_MILESTONE_STEPS
     .map((step, i) => `WHEN ${step}Status <> 'Completed' THEN ${i + 1}`)
     .join("\n        ");
