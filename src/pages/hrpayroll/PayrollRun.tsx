@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { Calculator, Lock1, Eye } from "iconsax-react";
+import { Trash2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
@@ -13,6 +14,7 @@ import {
   createPayrollRun,
   processPayrollRun,
   lockPayrollRun,
+  deletePayrollRun,
   type PayrollRunStatus,
 } from "@/api/payrollRunApi";
 
@@ -60,6 +62,7 @@ const PayrollRun: React.FC = () => {
   const [periodYear, setPeriodYear] = useState(now.getFullYear());
   const [selectedRunId, setSelectedRunId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["payroll-run"] });
 
@@ -109,6 +112,22 @@ const PayrollRun: React.FC = () => {
       await refetchDetail();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to lock payroll run");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    setBusy(true);
+    try {
+      const res = await deletePayrollRun(id);
+      toast.success(res?.message || "Payroll run deleted");
+      setDeleteConfirmId(null);
+      if (selectedRunId === id) setSelectedRunId(null);
+      await refresh();
+    } catch (err) {
+      setDeleteConfirmId(null);
+      toast.error(err instanceof Error ? err.message : "Failed to delete payroll run");
     } finally {
       setBusy(false);
     }
@@ -180,6 +199,9 @@ const PayrollRun: React.FC = () => {
                         <td className="px-4 py-2.5">{statusBadge(r.Status)}</td>
                         <td className="px-4 py-2.5">
                           <div className="flex items-center justify-end gap-1.5">
+                            <button onClick={(e) => { e.stopPropagation(); setSelectedRunId(r.PayrollRunId); }} title="View Records" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
+                              <Eye size={14} />
+                            </button>
                             {rights.canEdit && r.Status !== "Locked" && (
                               <button onClick={(e) => { e.stopPropagation(); handleProcess(r.PayrollRunId); }} disabled={busy} title="Process" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground disabled:opacity-40">
                                 <Calculator size={14} />
@@ -189,6 +211,18 @@ const PayrollRun: React.FC = () => {
                               <button onClick={(e) => { e.stopPropagation(); handleLock(r.PayrollRunId); }} disabled={busy} title="Lock" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-emerald-600 disabled:opacity-40">
                                 <Lock1 size={14} />
                               </button>
+                            )}
+                            {rights.canDelete && (
+                              deleteConfirmId === r.PayrollRunId ? (
+                                <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                                  <button onClick={() => handleDelete(r.PayrollRunId)} disabled={busy} className="px-2 py-1 rounded text-[11px] font-medium bg-destructive text-destructive-foreground disabled:opacity-40">Confirm</button>
+                                  <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 rounded text-[11px] font-medium border border-border">Cancel</button>
+                                </div>
+                              ) : (
+                                <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(r.PayrollRunId); }} title="Delete" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-destructive">
+                                  <Trash2 size={14} />
+                                </button>
+                              )
                             )}
                           </div>
                         </td>

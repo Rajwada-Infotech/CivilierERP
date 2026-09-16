@@ -300,4 +300,27 @@ router.get("/:id/employee/:employeeId/payslip", async (req, res) => {
   }
 });
 
+// DELETE -- removes the whole run (and its per-employee snapshot + lines,
+// cascading via the FK) regardless of Status, including Locked. Deleting a
+// run is a distinct operation from mutating one: it doesn't touch any
+// other run's frozen data, so it doesn't undermine the immutability
+// guarantee Locked status gives already-issued payslips elsewhere.
+router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const existing = await pool.request().input("Id", sql.Int, id)
+      .query("SELECT PeriodMonth, PeriodYear FROM dbo.PayrollRun WHERE PayrollRunId = @Id");
+    if (!existing.recordset.length) return res.status(404).json({ error: "Payroll run not found" });
+
+    await pool.request().input("Id", sql.Int, id).query("DELETE FROM dbo.PayrollRun WHERE PayrollRunId = @Id");
+    const { PeriodMonth, PeriodYear } = existing.recordset[0];
+    res.json({ message: `Payroll run for ${PeriodMonth}/${PeriodYear} deleted successfully` });
+  } catch (err) {
+    console.error("[payroll-run] DELETE error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

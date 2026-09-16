@@ -104,3 +104,8 @@ export const getPayslip = async (runId: number, employeeId: number): Promise<Pay
   const res = await fetchWithAuth(`${BASE}/${runId}/employee/${employeeId}/payslip`);
   return handle(res);
 };
+
+export const deletePayrollRun = async (id: number) => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  return handle<{ message: string }>(res);
+};
