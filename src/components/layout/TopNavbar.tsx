@@ -268,6 +268,12 @@ const financeSetupItems = [
     color: "text-lime-500",
     pageKey: "payment-reason-master",
   },
+];
+
+// Customer Master lives here, not under Finance — a customer is who a Sale
+// Order/Invoice is raised against, so it belongs with the pages that
+// actually use it.
+const salesSetupItems = [
   {
     icon: Users,
     label: "Customer Master",
@@ -1108,6 +1114,13 @@ export const TopNavbar = () => {
         items: filterSetupItems(financeSetupItems),
         label: "Finance",
         colorStyle: makeColorStyle("finance"),
+        available: true,
+      };
+    if (activeModule === "sales")
+      return {
+        items: filterSetupItems(salesSetupItems),
+        label: "Sales",
+        colorStyle: makeColorStyle("sales"),
         available: true,
       };
     if (activeModule === "sales-automation")
