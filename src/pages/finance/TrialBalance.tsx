@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, Fragment } from "react";
+import { useNavigate } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
@@ -796,6 +797,7 @@ function DateField({
 
 export default function TrialBalance() {
   const rights = usePageRights("trial-balance");
+  const navigate = useNavigate();
   // ── filter mode ───────────────────────────────────────────────────────────
   const [filterMode, setFilterMode] = useState<FilterMode>("fy");
 
@@ -1016,16 +1018,37 @@ export default function TrialBalance() {
     [drillNode, filterMode, from, to, asOn, selCompany, selProject, selCostCenter],
   );
 
-  // Level 3 — show the exact GL leg the user clicked. Every field needed is
-  // already on the row (see backend/routes/trialBalance.js's transactions
-  // mapping) — no fetch, no navigating away to the source document's own
-  // editable form (Invoice/GRN/JV/Payment). This used to jump straight to
-  // that document's ?view= deep link per SourceType, which answers "what is
-  // this document" rather than "what did this specific entry post" — the
-  // whole point of drilling into an account.
+  // Level 3 — open the source document's own real view (the same rich
+  // detail dialog its own page already renders for ?view=<id> — GRN.tsx,
+  // JournalVoucher.tsx, Payment.tsx, etc. all already support this deep
+  // link), not a generic GL-leg summary. A generic card answers "what did
+  // this entry post" but strips every field that isn't a GL column — the
+  // full ledger table, status, narration, linked documents — which is
+  // usually exactly what someone drilling into an account is after.
+  //
+  // Only source types with a page confirmed to support ?view= are routed
+  // this way; anything else still falls back to the GL-leg card below so a
+  // click never silently does nothing.
+  const SOURCE_TYPE_ROUTES: Record<string, string> = {
+    journalvoucher: "/journal-voucher",
+    newpayment: "/payments",
+    receivedpayment: "/received-payments",
+    expensebooking: "/material/expense-booking",
+    invoiceposting: "/material/expense-booking",
+    grn: "/material/grn",
+    grnposting: "/material/grn",
+  };
+
   const openSourceEntry = useCallback((t: TBTransaction) => {
+    const st = (t.sourceType ?? "").toLowerCase();
+    const route = SOURCE_TYPE_ROUTES[st];
+    const id = st === "newpayment" ? (t.payment?.id ?? t.sourceId) : t.sourceId;
+    if (route && id) {
+      navigate(`${route}?view=${id}`);
+      return;
+    }
     setGlEntryDetail(t);
-  }, []);
+  }, [navigate]);
 
   // ── export/refresh disabled? ──────────────────────────────────────────────
   const notReady =
