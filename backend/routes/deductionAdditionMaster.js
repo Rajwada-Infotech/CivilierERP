@@ -14,7 +14,7 @@ const uniqueViolationMessage = (err) =>
     : "A deduction/addition with this name already exists";
 
 const SELECT_COLUMNS = `
-  SELECT d.Id, d.Name, d.Code, d.LedgerId,
+  SELECT d.Id, d.Name, d.Code, d.Type, d.LedgerId,
          ISNULL(ahm.DisplayName, ahm.LHeadName) AS LedgerName,
          d.IsActive, d.CreatedAt, d.UpdatedAt
   FROM dbo.DeductionAdditionMaster d
@@ -35,9 +35,12 @@ router.get("/", cache("deduction-addition-master", 300), async (req, res) => {
 
 // POST — add deduction/addition
 router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
-  const { Name, Code, LedgerId, IsActive } = req.body;
+  const { Name, Code, Type, LedgerId, IsActive } = req.body;
   if (!Name?.trim()) return res.status(400).json({ error: "Name is required" });
   if (!Code?.trim()) return res.status(400).json({ error: "Code is required" });
+  if (Type !== "Deduction" && Type !== "Addition") {
+    return res.status(400).json({ error: "Type must be Deduction or Addition" });
+  }
   const createdBy = req.user?.userId || null;
   try {
     const pool = getPool();
@@ -45,12 +48,13 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .request()
       .input("Name", sql.NVarChar(150), Name.trim())
       .input("Code", sql.NVarChar(30), Code.trim())
+      .input("Type", sql.NVarChar(20), Type)
       .input("LedgerId", sql.Int, LedgerId || null)
       .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
       .query(`
-        INSERT INTO dbo.DeductionAdditionMaster (Name, Code, LedgerId, IsActive, CreatedBy, CreatedAt)
-        VALUES (@Name, @Code, @LedgerId, @IsActive, @CreatedBy, SYSUTCDATETIME())
+        INSERT INTO dbo.DeductionAdditionMaster (Name, Code, Type, LedgerId, IsActive, CreatedBy, CreatedAt)
+        VALUES (@Name, @Code, @Type, @LedgerId, @IsActive, @CreatedBy, SYSUTCDATETIME())
       `);
     await bumpCacheVersion("deduction-addition-master");
     res.json({ message: "Deduction/Addition added successfully" });
@@ -66,9 +70,12 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 // PUT — update deduction/addition
 router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { id } = req.params;
-  const { Name, Code, LedgerId, IsActive } = req.body;
+  const { Name, Code, Type, LedgerId, IsActive } = req.body;
   if (!Name?.trim()) return res.status(400).json({ error: "Name is required" });
   if (!Code?.trim()) return res.status(400).json({ error: "Code is required" });
+  if (Type !== "Deduction" && Type !== "Addition") {
+    return res.status(400).json({ error: "Type must be Deduction or Addition" });
+  }
   const updatedBy = req.user?.userId || null;
   try {
     const pool = getPool();
@@ -77,12 +84,13 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("Id", sql.Int, parseInt(id))
       .input("Name", sql.NVarChar(150), Name.trim())
       .input("Code", sql.NVarChar(30), Code.trim())
+      .input("Type", sql.NVarChar(20), Type)
       .input("LedgerId", sql.Int, LedgerId || null)
       .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
       .input("UpdatedBy", sql.Int, updatedBy)
       .query(`
         UPDATE dbo.DeductionAdditionMaster SET
-          Name = @Name, Code = @Code, LedgerId = @LedgerId,
+          Name = @Name, Code = @Code, Type = @Type, LedgerId = @LedgerId,
           IsActive = @IsActive, UpdatedBy = @UpdatedBy, UpdatedAt = SYSUTCDATETIME()
         WHERE Id = @Id
       `);

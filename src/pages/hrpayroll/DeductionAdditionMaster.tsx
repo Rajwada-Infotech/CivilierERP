@@ -26,6 +26,7 @@ const mapRow = (r: DeductionAdditionRow): RecordWithId => ({
   _id: String(r.Id),
   name: r.Name,
   code: r.Code,
+  type: r.Type,
   ledgerId: r.LedgerId ? String(r.LedgerId) : "",
   ledgerName: r.LedgerName || "-",
   isActive: Boolean(r.IsActive),
@@ -34,6 +35,7 @@ const mapRow = (r: DeductionAdditionRow): RecordWithId => ({
 const columns: ColumnDef[] = [
   { key: "name", label: "Name" },
   { key: "code", label: "Code" },
+  { key: "type", label: "Type" },
   { key: "ledgerName", label: "General Ledger", sortable: false },
   { key: "isActive", label: "Status" },
 ];
@@ -41,6 +43,7 @@ const columns: ColumnDef[] = [
 const exportColumns: ExportColumn[] = [
   { header: "Name", accessor: "name" },
   { header: "Code", accessor: "code" },
+  { header: "Type", accessor: "type" },
   { header: "General Ledger", accessor: "ledgerName" },
   { header: "Status", accessor: "isActive" },
 ];
@@ -66,6 +69,13 @@ const DeductionAdditionMaster: React.FC = () => {
     { name: "name", label: "Name", type: "text", required: true },
     { name: "code", label: "Code", type: "text", required: true, uppercase: true },
     {
+      name: "type",
+      label: "Deduction and Addition",
+      type: "select",
+      required: true,
+      options: ["Deduction", "Addition"],
+    },
+    {
       name: "ledgerId",
       label: "General Ledger",
       type: "select",
@@ -83,6 +93,7 @@ const DeductionAdditionMaster: React.FC = () => {
   const toPayload = (r: Record<string, any>) => ({
     Name: r.name?.trim() || "",
     Code: r.code?.trim() || "",
+    Type: r.type === "Addition" ? "Addition" : "Deduction",
     LedgerId: r.ledgerId ? Number(r.ledgerId) : null,
     IsActive: r.isActive !== false,
   });
@@ -135,6 +146,7 @@ const DeductionAdditionMaster: React.FC = () => {
             fields: [
               { key: "name", label: "Name" },
               { key: "code", label: "Code" },
+              { key: "type", label: "Type" },
               { key: "ledgerName", label: "General Ledger" },
               { key: "isActive", label: "Status" },
             ],

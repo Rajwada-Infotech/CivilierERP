@@ -2,10 +2,13 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/deduction-addition-master";
 
+export type DeductionAdditionType = "Deduction" | "Addition";
+
 export interface DeductionAdditionRow {
   Id: number;
   Name: string;
   Code: string;
+  Type: DeductionAdditionType;
   LedgerId: number | null;
   LedgerName: string | null;
   IsActive: boolean;
@@ -16,6 +19,7 @@ export interface DeductionAdditionRow {
 export interface DeductionAdditionPayload {
   Name: string;
   Code: string;
+  Type: DeductionAdditionType;
   LedgerId: number | null;
   IsActive?: boolean;
 }
