@@ -166,8 +166,12 @@ export function DataTable<TData extends RowData>({
 
   return (
     <div className={className}>
-      {/* ── Search bar ── */}
-      {searchable && (
+      {/* ── Search bar / export toolbar ──
+          Shown whenever either the built-in search or an export button is
+          wanted — searchable=false pages (which run their own page-level
+          search) still need this row rendered so exportConfig's ExportMenu
+          isn't silently dropped. */}
+      {(searchable || exportConfig) && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60">
           <p className="text-[11px] font-body text-muted-foreground">
             {loading
@@ -187,19 +191,21 @@ export function DataTable<TData extends RowData>({
                 disabled={loading || data.length === 0}
               />
             )}
-            <div className="relative flex-1 sm:flex-none">
-              <Search
-                size={13}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-              <input
-                type="text"
-                value={globalFilter}
-                onChange={(e) => setGlobalFilter(e.target.value)}
-                placeholder={searchPlaceholder}
-                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 w-full sm:w-44"
-              />
-            </div>
+            {searchable && (
+              <div className="relative flex-1 sm:flex-none">
+                <Search
+                  size={13}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <input
+                  type="text"
+                  value={globalFilter}
+                  onChange={(e) => setGlobalFilter(e.target.value)}
+                  placeholder={searchPlaceholder}
+                  className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/30 w-full sm:w-44"
+                />
+              </div>
+            )}
           </div>
         </div>
       )}

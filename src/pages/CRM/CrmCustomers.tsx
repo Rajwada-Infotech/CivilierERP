@@ -16,6 +16,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 
 const API = "/api/crm/customers";
 const SA_LEADS_API = "/api/sa/leads";
@@ -38,8 +40,8 @@ interface CustomerListFilters {
   projectId: string;
   blockId: string;
 }
-async function fetchCustomersList(filters: CustomerListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+async function fetchCustomersList(filters: CustomerListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (filters.search) params.set("search", filters.search);
   if (filters.companyId) params.set("companyId", filters.companyId);
   if (filters.projectId) params.set("projectId", filters.projectId);
@@ -656,6 +658,22 @@ const CrmCustomers: React.FC = () => {
 
   const { canDelete } = usePageRights("crm-customers");
 
+  const exportColumns: ExportColumn[] = [
+    { header: "Customer No", accessor: "CustomerNo" },
+    { header: "Name", accessor: "CustomerName" },
+    { header: "Mobile", accessor: "Mobile" },
+    { header: "PAN", accessor: "PanNo" },
+    { header: "Address", accessor: (r) => [r.PermanentCity, r.PermanentState].filter(Boolean).join(", ") },
+    { header: "Co-Applicant", accessor: "CoApplicantName" },
+    { header: "Applications", accessor: "ApplicationCount" },
+    { header: "Registered", accessor: (r) => (r.CreatedAt ? String(r.CreatedAt).slice(0, 10) : "") },
+  ];
+
+  const fetchAllCustomersForExport = async () => {
+    const { rows } = await fetchCustomersList(listFilters, 1, Math.max(total, PAGE_SIZE));
+    return rows as Record<string, unknown>[];
+  };
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Customers"]} />
@@ -664,6 +682,13 @@ const CrmCustomers: React.FC = () => {
       subtitle="The master identity record every Application is built on — name, KYC, address, co-applicant"
       action={
         <div className="flex items-center gap-2">
+          <ExportMenu
+            data={filtered as unknown as Record<string, unknown>[]}
+            fetchData={fetchAllCustomersForExport}
+            columns={exportColumns}
+            title="CRM Customers"
+            filename="crm-customers"
+          />
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={() => navigate("/masters/customers")}
             title="Every CRM customer auto-creates/syncs a matching ledger head here for Finance/GL"

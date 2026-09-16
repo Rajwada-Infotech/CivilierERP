@@ -46,6 +46,8 @@ import {
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 
 // Matches the real LHeadType convention used everywhere else account heads
 // are created (see CustomerMaster/ContractorMaster/SupplierMaster/
@@ -400,6 +402,20 @@ export default function JournalVoucher() {
     draft:    vouchers.filter((v) => v.Status === "Draft").length,
   }), [vouchers]);
 
+  const exportColumns: ExportColumn[] = useMemo(() => [
+    { header: "JV No", accessor: (r) => (r as unknown as JournalVoucherSummary).JVNo || `JV-${(r as unknown as JournalVoucherSummary).JVID}` },
+    { header: "Date", accessor: (r) => fmtDate((r as unknown as JournalVoucherSummary).JVDate) },
+    { header: "Company", accessor: (r) => (r as unknown as JournalVoucherSummary).CompanyName || "" },
+    { header: "Project", accessor: (r) => (r as unknown as JournalVoucherSummary).ProjectName || "" },
+    { header: "Narration", accessor: (r) => (r as unknown as JournalVoucherSummary).Narration || "" },
+    { header: "Amount", accessor: (r) => (r as unknown as JournalVoucherSummary).TotalAmount || 0 },
+    { header: "Status", accessor: (r) => (r as unknown as JournalVoucherSummary).Status || "" },
+    { header: "GL", accessor: (r) => {
+        const v = r as unknown as JournalVoucherSummary;
+        return v.Status !== "Approved" ? "--" : v.PostedToGL ? "Posted" : "Not posted";
+      } },
+  ], []);
+
   // Filtered list
   const filtered = useMemo(() => {
     if (!search.trim()) return vouchers;
@@ -421,6 +437,13 @@ export default function JournalVoucher() {
         icon={Scale}
         action={
           <div className="flex items-center gap-2">
+            <ExportMenu
+              data={filtered as unknown as Record<string, unknown>[]}
+              columns={exportColumns}
+              title="Journal Voucher"
+              filename="journal-voucher"
+              disabled={loading}
+            />
             <button
               onClick={load}
               disabled={loading}
