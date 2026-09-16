@@ -2748,8 +2748,8 @@ const ReportTable: React.FC<{
       style={{ borderTopWidth: 2, borderTopColor: report.color }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/10">
-        <div className="flex items-center gap-2.5">
+      <div className="flex items-center justify-between flex-wrap gap-y-2 px-4 py-3 border-b border-border bg-muted/10">
+        <div className="flex items-center gap-2.5 flex-wrap gap-y-2">
           <button
             onClick={onClose}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -2772,7 +2772,7 @@ const ReportTable: React.FC<{
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap gap-y-2">
           {!isVendorLedger && (
           <button
             onClick={load}
