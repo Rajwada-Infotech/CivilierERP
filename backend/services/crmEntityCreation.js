@@ -176,6 +176,18 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .query("SELECT CustomerName, Mobile, AltMobile, Email FROM dbo.CrmCustomer WHERE Id = @cid AND IsActive = 1");
     if (!cr.recordset.length) throw new CrmCreationError("Selected customer does not exist");
     customerRow = cr.recordset[0];
+    // CrmApplication.Mobile is NOT NULL — a customer record with a blank
+    // Mobile (e.g. a corrupted/legacy row created before Mobile was
+    // mandatory, or one imported without it) would otherwise reach the
+    // INSERT below and fail with a raw, cryptic SQL constraint error
+    // ("Cannot insert the value NULL into column 'Mobile'...") instead of
+    // pointing staff at the actual, fixable problem: this customer's own
+    // record is missing a mobile number.
+    if (!customerRow.Mobile?.trim() && !b.Mobile?.trim() && !prefill.Mobile?.trim()) {
+      throw new CrmCreationError(
+        `${customerRow.CustomerName || "This customer"} has no mobile number on file — add one on the Customers page before creating an application.`
+      );
+    }
   } else {
     const name = b.ApplicantName?.trim() || prefill.CustomerName;
     const mobile = b.Mobile?.trim() || prefill.Mobile;
