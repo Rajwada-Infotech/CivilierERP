@@ -6,7 +6,15 @@ const { getPool } = require("../db");
 const { redisGet, redisSet } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 
-router.use(checkPermissionForMethod("Material", "Dashboard"));
+// SubModule is "MaterialDashboard", not the bare "Dashboard" — checkPermission's
+// RoleRights lookup is an exact Module/SubModule match with no translation,
+// but getCandidatePageKeys() (used when *saving*/reading the "material-dashboard"
+// page-key grant via Menu Rights) always adds kebab(subModule) as a fallback
+// candidate no matter what. A bare "Dashboard" SubModule would make that
+// fallback resolve to the literal page key "dashboard" — silently also
+// granting the unrelated Home Dashboard to anyone given Material Dashboard
+// access. Same collision class fixed for Engineering Dashboard earlier.
+router.use(checkPermissionForMethod("Material", "MaterialDashboard"));
 
 router.get("/", async (req, res) => {
   try {
