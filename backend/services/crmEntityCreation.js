@@ -173,9 +173,27 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   let customerRow = null;
   if (customerId) {
     const cr = await pool.request().input("cid", sql.Int, customerId)
-      .query("SELECT CustomerName, Mobile, AltMobile, Email FROM dbo.CrmCustomer WHERE Id = @cid AND IsActive = 1");
+      .query("SELECT CustomerNo, CustomerName, Mobile, AltMobile, Email FROM dbo.CrmCustomer WHERE Id = @cid AND IsActive = 1");
     if (!cr.recordset.length) throw new CrmCreationError("Selected customer does not exist");
     customerRow = cr.recordset[0];
+    // CrmApplication.ApplicantName and .Mobile are both NOT NULL, but
+    // neither is actually required server-side when a CrmCustomer is
+    // created (crmCustomers.js POST / accepts a blank CustomerName or
+    // Mobile — both just fall back to null) — so a customer record missing
+    // either would otherwise reach the INSERT below and fail with a raw,
+    // cryptic SQL constraint error ("Cannot insert the value NULL into
+    // column 'Mobile'/'ApplicantName'...") instead of pointing staff at the
+    // actual, fixable problem: this customer's own record is incomplete.
+    if (!customerRow.CustomerName?.trim() && !b.ApplicantName?.trim() && !prefill.CustomerName?.trim()) {
+      throw new CrmCreationError(
+        `Customer ${customerRow.CustomerNo || customerId} has no name on file — add one on the Customers page before creating an application.`
+      );
+    }
+    if (!customerRow.Mobile?.trim() && !b.Mobile?.trim() && !prefill.Mobile?.trim()) {
+      throw new CrmCreationError(
+        `${customerRow.CustomerName || "This customer"} has no mobile number on file — add one on the Customers page before creating an application.`
+      );
+    }
   } else {
     const name = b.ApplicantName?.trim() || prefill.CustomerName;
     const mobile = b.Mobile?.trim() || prefill.Mobile;
@@ -248,6 +266,21 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     paymentPlanId: b.PaymentPlanId || null,
   });
 
+  // Last-line defense: CrmApplication.ApplicantName/.Mobile are both NOT
+  // NULL, but every upstream source (an existing Customer, a Lead's own
+  // prefill, or the raw request body) can independently end up blank —
+  // the two branches above already guard the "existing Customer selected"
+  // case with a specific, actionable message, but the Lead-only path (no
+  // CustomerId, a Lead whose own Mobile happens to be blank) reaches here
+  // unguarded. Checking the actual final values right before the INSERT,
+  // once, covers every path instead of duplicating the same check per
+  // branch — and turns what would otherwise be a raw SQL constraint error
+  // into a real one.
+  const finalName = customerRow?.CustomerName || b.ApplicantName?.trim() || prefill.CustomerName;
+  const finalMobile = customerRow?.Mobile || b.Mobile?.trim() || prefill.Mobile;
+  if (!finalName?.trim()) throw new CrmCreationError("Applicant name is required — this booking's customer/lead record has no name on file");
+  if (!finalMobile?.trim()) throw new CrmCreationError("Applicant mobile is required — this booking's customer/lead record has no mobile number on file");
+
   const appNo = await getNextDocNumber(pool, "APP", "APP");
   let result;
   try {
@@ -255,8 +288,8 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("no",   sql.NVarChar(30),  appNo)
       .input("lid",  sql.Int,           b.LeadId   ? parseInt(b.LeadId)   : null)
       .input("custid", sql.Int,         customerId)
-      .input("name", sql.NVarChar(200), customerRow?.CustomerName || b.ApplicantName?.trim() || prefill.CustomerName)
-      .input("mob",  sql.NVarChar(20),  customerRow?.Mobile || b.Mobile?.trim() || prefill.Mobile)
+      .input("name", sql.NVarChar(200), finalName)
+      .input("mob",  sql.NVarChar(20),  finalMobile)
       .input("alt",  sql.NVarChar(20),  customerRow?.AltMobile || b.AltMobile || prefill.AltMobile || null)
       .input("em",   sql.NVarChar(200), customerRow?.Email     || b.Email     || prefill.Email     || null)
       .input("pid",  sql.Int,           b.ProjectId ? parseInt(b.ProjectId) : null)
