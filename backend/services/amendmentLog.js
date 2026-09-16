@@ -16,6 +16,7 @@ const DOC_TYPES = {
   "expense-booking": { module: "finance", label: "Invoice (Expense Booking)" },
   payment: { module: "finance", label: "Payment" },
   "received-payment": { module: "finance", label: "Received Payment" },
+  "journal-voucher": { module: "finance", label: "Journal Voucher" },
   "material-request": { module: "material", label: "Material Request" },
   "purchase-order": { module: "material", label: "Purchase Order" },
   "vehicle-in-out": { module: "material", label: "Vehicle In/Out" },
