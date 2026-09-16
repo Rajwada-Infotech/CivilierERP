@@ -15,6 +15,7 @@ export const hrPayrollNavItems: NavItem[] = [
       { label: "Salary Structure", path: "/hr-payroll/setup/salary-structure", pageKey: "salary-structure" },
       { label: "Attendance / Leave / Overtime", path: "/hr-payroll/attendance-leave-overtime", pageKey: "attendance-leave-overtime" },
       { label: "Salary Calculation", path: "/hr-payroll/salary-calculation", pageKey: "salary-calculation" },
+      { label: "Incentive", path: "/hr-payroll/incentive", pageKey: "incentive" },
       { label: "Payroll Run", path: "/hr-payroll/payroll-run", pageKey: "payroll-run" },
     ],
   },

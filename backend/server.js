@@ -174,6 +174,7 @@ const ALL_ROUTES = [
   { path: "/api/attendance-record", file: "./routes/attendanceRecord" },
   { path: "/api/leave-record", file: "./routes/leaveRecord" },
   { path: "/api/overtime-record", file: "./routes/overtimeRecord" },
+  { path: "/api/incentive-record", file: "./routes/incentiveRecord" },
   { path: "/api/interviews", file: "./routes/interview" },
   { path: "/api/offer-letter", file: "./routes/offerLetter" },
   { path: "/api/payment-terms", file: "./routes/vendorPaymentTerm" },
