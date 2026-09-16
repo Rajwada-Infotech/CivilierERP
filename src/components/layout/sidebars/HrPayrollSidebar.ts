@@ -13,6 +13,7 @@ export const hrPayrollNavItems: NavItem[] = [
     children: [
       { label: "Employee Master", path: "/hr-payroll/employees", pageKey: "employee-master" },
       { label: "Salary Structure", path: "/hr-payroll/setup/salary-structure", pageKey: "salary-structure" },
+      { label: "Attendance / Leave / Overtime", path: "/hr-payroll/attendance-leave-overtime", pageKey: "attendance-leave-overtime" },
       { label: "Payroll Run", path: "/hr-payroll/payroll-run", pageKey: "payroll-run" },
     ],
   },
