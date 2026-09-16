@@ -20,6 +20,7 @@ import {
   updateDeductionAddition,
   deleteDeductionAddition,
   type DeductionAdditionRow,
+  type DeductionAdditionPayload,
 } from "@/api/deductionAdditionMasterApi";
 
 const mapRow = (r: DeductionAdditionRow): RecordWithId => ({
@@ -90,7 +91,7 @@ const DeductionAdditionMaster: React.FC = () => {
     { name: "isActive", label: "Status", type: "toggle", defaultValue: true },
   ];
 
-  const toPayload = (r: Record<string, any>) => ({
+  const toPayload = (r: Record<string, any>): DeductionAdditionPayload => ({
     Name: r.name?.trim() || "",
     Code: r.code?.trim() || "",
     Type: r.type === "Addition" ? "Addition" : "Deduction",

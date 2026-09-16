@@ -353,6 +353,13 @@ const hrPayrollSetupItems = [
     color: "text-yellow-500",
     pageKey: "deduction-addition-master",
   },
+  {
+    icon: UserSquare,
+    label: "Salary Structure",
+    path: "/hr-payroll/setup/salary-structure",
+    color: "text-yellow-500",
+    pageKey: "salary-structure",
+  },
 ];
 
 const materialSetupItems = [
