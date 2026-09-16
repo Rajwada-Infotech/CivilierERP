@@ -94,6 +94,14 @@ const ROLE_RIGHTS_PAGE_MAP = {
   grns: { module: "Material", submodule: "GRN" },
   "purchase-orders": { module: "Material", submodule: "PurchaseOrders" },
   "vehicle-in-out": { module: "Material", submodule: "VehicleInOut" },
+  // Must match routes/materialDashboard.js's own
+  // checkPermissionForMethod("Material", "MaterialDashboard") exactly - that
+  // middleware does a raw RoleRights.Module/SubModule lookup with no
+  // page-key translation. Without this explicit entry, the naive fallback
+  // would save Module=SubModule="material dashboard" (one merged lowercase
+  // string), which never matches - Material Dashboard's route guard would
+  // pass (page-key system) but its data endpoint would still 403.
+  "material-dashboard": { module: "Material", submodule: "MaterialDashboard" },
   "menu-rights": { module: "Rights", submodule: "Menu" },
   admin_menu_rights: { module: "Rights", submodule: "Menu" },
   // Was { module: "Rights", submodule: "Menu" } — collided with menu-rights/

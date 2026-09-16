@@ -165,6 +165,10 @@ const PERMISSION_PAGE_KEYS = {
   "followup:salesdeed": ["followup-sales-deed"],
   "followup:unitselections": ["followup-unit-selections"],
   "material:grn": ["grn-master", "grns"],
+  // Matches roles.js's ROLE_RIGHTS_PAGE_MAP submodule "MaterialDashboard"
+  // (not plain "Dashboard" — same bare-"dashboard"-fallback collision with
+  // the Home page's own key already fixed for Engineering Dashboard).
+  "material:materialdashboard": ["material-dashboard"],
   "material:purchaseorders": ["purchase-orders"],
   "rights:menu": ["menu-rights", "admin_menu_rights"],
   "rights:rolemaster": ["roles"],
