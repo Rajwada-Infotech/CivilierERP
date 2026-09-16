@@ -427,108 +427,155 @@ function CircularGauge({ pct, size = 128, color = "#7c3aed" }: { pct: number; si
   );
 }
 
-// ─── Project Network — the "world map" panel. This app has no populated
-// per-project geo-coordinates yet (dbo.enterprise.latitude/longitude exist
-// on the schema but aren't filled in on any project today), so this is a
-// deliberately illustrative network diagram — a central hub (the company)
-// radiating out to each real project — rather than a literal map claiming
-// false geographic precision. Every project gets its own node (no
-// grouping/overflow bucket); only the node LAYOUT (an evenly-spaced fan
-// around the hub, sized down as the count grows) is decorative. Swap in
-// real lat/long-projected positions here once that data actually exists.
-// HARD_CAP exists purely as a defensive ceiling against a pathological
-// project count blowing up the SVG, not a normal product limit.
+// ─── Project Network — an orbital diagram, not a literal map. This app has
+// no populated per-project geo-coordinates yet (dbo.enterprise.latitude/
+// longitude exist on the schema but aren't filled in on any project
+// today), so this stays deliberately illustrative: a central hub (the
+// company) with every real project arranged evenly around it on a full
+// 360° ring — rather than a literal map claiming false geographic
+// precision, or a lopsided half-arc that leaves half the panel empty.
+// Every project gets its own node (no grouping/overflow bucket); only the
+// ring LAYOUT is decorative. Swap in real lat/long-projected positions
+// here once that data actually exists. HARD_CAP exists purely as a
+// defensive ceiling against a pathological project count blowing up the
+// SVG, not a normal product limit.
 const HARD_CAP_NODES = 24;
+const NETWORK_ACCENT = "#7c3aed"; // matches this panel's own Bento accent
 
 function ProjectNetworkMap({ projects, total }: { projects: { id: number; name: string; active: boolean }[]; total: number }) {
-  const hub = { x: 360, y: 140 };
-  const radiusX = 260;
-  const radiusY = 95;
+  const VB_W = 720;
+  const VB_H = 300;
+  const hub = { x: VB_W / 2, y: VB_H / 2 };
+  const radiusX = 225;
+  const radiusY = 108;
 
   // Active projects lead (they're the ones worth seeing at a glance).
   const shown = [...projects].sort((a, b) => Number(b.active) - Number(a.active)).slice(0, HARD_CAP_NODES);
   const overflow = projects.length - shown.length;
-  // More nodes → smaller dots/type so a growing project list stays legible
+  const activeCount = projects.filter((p) => p.active).length;
+  const n = shown.length;
+  // More nodes → smaller chips so a growing project list stays legible
   // instead of overlapping.
-  const density = shown.length <= 6 ? 1 : shown.length <= 12 ? 0.8 : 0.6;
+  const density = n <= 6 ? 1 : n <= 12 ? 0.8 : 0.6;
+  const fontSize = 11 * density;
+  const dotR = 3 * density;
+  const padX = 9 * density;
+  const padY = 6 * density;
+  const gap = 5 * density;
+  const charW = fontSize * 0.56;
 
   const nodes = shown.map((p, i) => {
-    // Half-circle fan above/around the hub (avoids the caption strip at
-    // the bottom) — angle sweeps from -170° to -10° across however many
-    // nodes there actually are.
-    const t = shown.length <= 1 ? 0.5 : i / (shown.length - 1);
-    const angle = (-170 + t * 160) * (Math.PI / 180);
-    return {
-      ...p,
-      x: hub.x + Math.cos(angle) * radiusX,
-      y: hub.y + Math.sin(angle) * radiusY,
-    };
+    // Half-step rotation offset so small counts land on diagonals instead of
+    // the exact N/E/S/W cross — reads as placed, not just plotted.
+    const startDeg = n <= 1 ? -90 : -90 + 360 / n / 2;
+    const angle = (startDeg + (i / n) * 360) * (Math.PI / 180);
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const cx = hub.x + cos * radiusX;
+    const cy = hub.y + sin * radiusY;
+    const label = p.name.length > 18 ? `${p.name.slice(0, 17)}…` : p.name;
+    const pillW = padX * 2 + dotR * 2 + gap + label.length * charW;
+    const pillH = fontSize + padY * 2;
+    // Each chip hangs off the side of the hub it's facing, never centered
+    // on the orbit point — keeps the connecting line arriving at an edge.
+    const side: 1 | -1 = cos >= 0 ? 1 : -1;
+    const pillX = side === 1 ? cx : cx - pillW;
+    const pillY = cy - pillH / 2;
+    return { ...p, label, pillX, pillY, pillW, pillH, lineEndX: side === 1 ? pillX : pillX + pillW, lineEndY: cy };
   });
 
-  const arcPath = (n: { x: number; y: number }) =>
-    `M ${hub.x} ${hub.y} Q ${(hub.x + n.x) / 2} ${Math.min(hub.y, n.y) - 30} ${n.x} ${n.y}`;
-
   return (
-    <div className="relative w-full h-[280px] overflow-hidden rounded-xl">
-      <svg viewBox="0 0 720 280" className="w-full h-full" style={{ overflow: "visible" }}>
-        <defs>
-          <pattern id="homeMapGrid" width="24" height="24" patternUnits="userSpaceOnUse">
-            <circle cx="1" cy="1" r="1" fill="currentColor" className="text-primary/15" />
-          </pattern>
-        </defs>
-        <rect width="720" height="280" fill="url(#homeMapGrid)" />
+    <div className="flex flex-col h-[320px]">
+      <div className="relative flex-1 min-h-0 overflow-hidden">
+        <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="w-full h-full" style={{ overflow: "visible" }}>
+          <defs>
+            <radialGradient id="homeMapGlow" cx="50%" cy="50%" r="65%">
+              <stop offset="0%" stopColor={NETWORK_ACCENT} stopOpacity="0.16" />
+              <stop offset="100%" stopColor={NETWORK_ACCENT} stopOpacity="0" />
+            </radialGradient>
+            {nodes.map((n) => (
+              <linearGradient key={`grad-${n.id}`} id={`spoke-${n.id}`} x1={hub.x} y1={hub.y} x2={n.lineEndX} y2={n.lineEndY} gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor={NETWORK_ACCENT} stopOpacity={n.active ? 0.65 : 0.3} />
+                <stop offset="100%" stopColor={NETWORK_ACCENT} stopOpacity={n.active ? 0.25 : 0.12} />
+              </linearGradient>
+            ))}
+          </defs>
+          <rect x={0} y={0} width={VB_W} height={VB_H} fill="url(#homeMapGlow)" />
+          <ellipse cx={hub.x} cy={hub.y} rx={radiusX} ry={radiusY} fill="none" stroke={NETWORK_ACCENT} strokeWidth="1" strokeDasharray="1 5" strokeLinecap="round" opacity="0.25" />
 
-        {nodes.map((n) => (
-          <path key={`arc-${n.id}`} d={arcPath(n)} fill="none" stroke="#7c3aed" strokeWidth="1.2" strokeDasharray="4 4" opacity={n.active ? 0.4 : 0.18} />
-        ))}
-
-        {/* Traveling pulse — active projects only, so the eye reads "live" as literally the live ones */}
-        {nodes.filter((n) => n.active).map((n, i) => (
-          <circle key={`pulse-${n.id}`} r={2.5 * density} fill="#a78bfa">
-            <animateMotion dur={`${3 + i * 0.6}s`} repeatCount="indefinite" path={arcPath(n)} />
-            <animate attributeName="opacity" values="0;1;0" dur={`${3 + i * 0.6}s`} repeatCount="indefinite" />
+          {/* Slow dashed ring — a quiet "live" cue that never dominates the frame the way a filled sweep would. */}
+          <circle cx={hub.x} cy={hub.y} r="22" fill="none" stroke={NETWORK_ACCENT} strokeWidth="1" strokeDasharray="3 5" opacity="0.35">
+            <animateTransform attributeName="transform" type="rotate" from={`0 ${hub.x} ${hub.y}`} to={`360 ${hub.x} ${hub.y}`} dur="14s" repeatCount="indefinite" />
           </circle>
-        ))}
 
-        {nodes.map((n, i) => (
-          <g key={`node-${n.id}`}>
-            <circle cx={n.x} cy={n.y} r={(n.active ? 13 : 9) * density} fill="#7c3aed" opacity={n.active ? 0.12 : 0.06}>
-              {n.active && <animate attributeName="r" values={`${11 * density};${17 * density};${11 * density}`} dur="2.6s" repeatCount="indefinite" begin={`${i * 0.3}s`} />}
+          {/* Spokes reach the chip's near edge, not its center, so the line reads as arriving rather than stabbing through the label. */}
+          {nodes.map((n) => (
+            <line key={`spoke-${n.id}`} x1={hub.x} y1={hub.y} x2={n.lineEndX} y2={n.lineEndY} stroke={`url(#spoke-${n.id})`} strokeWidth={n.active ? 1.5 : 1} />
+          ))}
+
+          {/* Traveling pulse — active projects only, so the motion reads "live" as literally the live ones. */}
+          {nodes.filter((n) => n.active).map((n, i) => (
+            <circle key={`pulse-${n.id}`} r={2.5 * density} fill="#c4b5fd">
+              <animateMotion dur={`${2.4 + i * 0.5}s`} repeatCount="indefinite" path={`M ${hub.x} ${hub.y} L ${n.lineEndX} ${n.lineEndY}`} />
+              <animate attributeName="opacity" values="0;1;1;0" dur={`${2.4 + i * 0.5}s`} repeatCount="indefinite" />
             </circle>
-            <circle cx={n.x} cy={n.y} r={(n.active ? 7 : 5) * density} fill={n.active ? "#a78bfa" : "hsl(var(--muted-foreground))"} stroke={n.active ? "#7c3aed" : "hsl(var(--border))"} strokeWidth="1.5" />
-            <text
-              x={n.x}
-              y={n.y + (n.y > hub.y ? 20 * density + 4 : -14 * density - 4)}
-              textAnchor="middle"
-              className={n.active ? "fill-foreground font-semibold" : "fill-muted-foreground"}
-              style={{ fontSize: 11 * density }}
-            >
-              {n.name.length > 16 ? `${n.name.slice(0, 15)}…` : n.name}
-            </text>
-          </g>
-        ))}
+          ))}
 
-        {/* Hub */}
-        <circle cx={hub.x} cy={hub.y} r="16" fill="#7c3aed" opacity="0.15">
-          <animate attributeName="r" values="14;20;14" dur="2.4s" repeatCount="indefinite" />
-        </circle>
-        <circle cx={hub.x} cy={hub.y} r="9" fill="#7c3aed" stroke="#c4b5fd" strokeWidth="2" />
-      </svg>
+          {/* Each project is a real chip — status dot + name — not a bare point, so the diagram carries weight even with only a few projects. */}
+          {nodes.map((n) => (
+            <g key={`node-${n.id}`}>
+              <rect
+                x={n.pillX} y={n.pillY} width={n.pillW} height={n.pillH} rx={n.pillH / 2}
+                fill={n.active ? "#7c3aed22" : "hsl(var(--muted-foreground) / 0.08)"}
+                stroke={n.active ? `${NETWORK_ACCENT}80` : "hsl(var(--border))"}
+                strokeWidth="1"
+              />
+              <circle cx={n.pillX + padX + dotR} cy={n.pillY + n.pillH / 2} r={dotR} fill={n.active ? "#a78bfa" : "hsl(var(--muted-foreground))"} />
+              {n.active && (
+                <circle cx={n.pillX + padX + dotR} cy={n.pillY + n.pillH / 2} r={dotR + 2.5} fill="none" stroke={NETWORK_ACCENT} strokeWidth="1" opacity="0.5" />
+              )}
+              <text
+                x={n.pillX + padX + dotR * 2 + gap}
+                y={n.pillY + n.pillH / 2 + fontSize * 0.36}
+                className={`font-heading tracking-wide ${n.active ? "fill-foreground font-semibold" : "fill-muted-foreground/70 font-medium"}`}
+                style={{ fontSize }}
+              >
+                {n.label}
+              </text>
+            </g>
+          ))}
 
-      {/* Caption overlay — the only free-floating numbers in this panel */}
-      <div className="absolute bottom-2.5 left-3 right-3 flex items-end justify-between pointer-events-none">
-        <div>
-          <p className="font-heading font-bold text-2xl text-foreground leading-none tabular-nums">
-            <AnimatedCounter target={projects.filter((p) => p.active).length} />
+          {/* Hub — carries the total project count, so the center has a purpose beyond decoration. */}
+          <circle cx={hub.x} cy={hub.y} r="20" fill={NETWORK_ACCENT} opacity="0.12">
+            <animate attributeName="r" values="20;27;20" dur="2.4s" repeatCount="indefinite" />
+          </circle>
+          <circle cx={hub.x} cy={hub.y} r="17" fill={NETWORK_ACCENT} />
+          <circle cx={hub.x} cy={hub.y} r="17" fill="none" stroke="#c4b5fd" strokeWidth="1.5" />
+          <text x={hub.x} y={hub.y + 4.5} textAnchor="middle" fill="#fff" fontWeight="800" style={{ fontSize: total > 99 ? 11 : 14 }}>
+            {total}
+          </text>
+        </svg>
+      </div>
+
+      {/* Footer bar — a proper divider strip, not numbers floating over the diagram. */}
+      <div className="flex items-center justify-between gap-4 px-4 py-2.5 border-t border-border/40 shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="relative flex h-2 w-2 shrink-0">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-50" style={{ background: "#a78bfa" }} />
+            <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: "#a78bfa" }} />
+          </span>
+          <p className="font-heading font-bold text-lg text-foreground leading-none tabular-nums">
+            <AnimatedCounter target={activeCount} />
           </p>
-          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest mt-1">Active Projects</p>
+          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">Active</p>
         </div>
-        <div className="text-right">
-          <p className="font-heading font-bold text-2xl text-muted-foreground/70 leading-none tabular-nums">
+        <div className="flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full shrink-0 border border-border" />
+          <p className="font-heading font-bold text-lg text-muted-foreground/70 leading-none tabular-nums">
             <AnimatedCounter target={total} />
           </p>
-          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest mt-1">
-            Total Projects{overflow > 0 ? ` · +${overflow} not shown` : ""}
+          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">
+            Total{overflow > 0 ? ` · +${overflow} not shown` : ""}
           </p>
         </div>
       </div>
