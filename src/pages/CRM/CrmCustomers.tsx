@@ -192,8 +192,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
 
   const handleSave = async () => {
     if (!form.CustomerName?.trim()) { toast.error("Customer Name is required"); return; }
-    if (!form.Mobile?.trim()) { toast.error("Mobile is required"); return; }
-    if (!/^\d{10}$/.test(form.Mobile.trim())) {
+    if (form.Mobile?.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
       toast.error("Mobile must be exactly 10 digits"); return;
     }
     if (form.PanNo?.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
@@ -267,7 +266,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
             <div className="grid grid-cols-3 gap-2.5">
               {[
                 { key: "CustomerName", label: "Customer Name", type: "text", required: true },
-                { key: "Mobile", label: "Mobile", type: "text", required: true },
+                { key: "Mobile", label: "Mobile", type: "text" },
                 { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                 { key: "Email", label: "Email", type: "email" },
                 { key: "PanNo", label: "PAN Number", type: "text" },
@@ -459,8 +458,7 @@ const CrmCustomers: React.FC = () => {
 
   const handleCreate = async () => {
     if (!form.CustomerName.trim()) { toast.error("Customer Name is required"); return; }
-    if (!form.Mobile.trim()) { toast.error("Mobile is required"); return; }
-    if (!/^\d{10}$/.test(form.Mobile.trim())) {
+    if (form.Mobile.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
       toast.error("Mobile must be exactly 10 digits"); return;
     }
     if (form.AltMobile.trim() && !/^\d{10}$/.test(form.AltMobile.trim())) {
@@ -733,7 +731,7 @@ const CrmCustomers: React.FC = () => {
               <div className="grid grid-cols-3 gap-2.5">
                 {[
                   { key: "CustomerName", label: "Customer Name", type: "text", required: true },
-                  { key: "Mobile", label: "Mobile", type: "text", required: true },
+                  { key: "Mobile", label: "Mobile", type: "text" },
                   { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                   { key: "Email", label: "Email", type: "email" },
                   { key: "PanNo", label: "PAN Number", type: "text" },
