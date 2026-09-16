@@ -68,6 +68,9 @@ interface Project {
   // jv
   jvEnabled: boolean;
   jvCompanyName: string;
+  // additional companies tagged to this project, beyond the primary one
+  multiCompanyEnabled: boolean;
+  multiCompanyIds: string[];
   // rest
   teamSize: string;
   startDate: string;
@@ -131,6 +134,8 @@ const emptyProject: Project = {
   tradeLicenseNo: "",
   jvEnabled: false,
   jvCompanyName: "",
+  multiCompanyEnabled: false,
+  multiCompanyIds: [],
   teamSize: "",
   startDate: "",
   endDate: "",
@@ -168,6 +173,10 @@ function rowToForm(row: any): Project {
     tradeLicenseNo: row.CompanyTradeLicenseNo ?? "",
     jvEnabled: !!row.JvEnabled,
     jvCompanyName: row.JvCompanyName ?? "",
+    multiCompanyEnabled: !!row.MultiCompanyEnabled,
+    multiCompanyIds: row.MultiCompanyIds
+      ? String(row.MultiCompanyIds).split(",").filter(Boolean)
+      : [],
     teamSize: row.TeamSize != null ? String(row.TeamSize) : "",
     startDate: row.StartDate ? row.StartDate.slice(0, 10) : "",
     endDate: row.EndDate ? row.EndDate.slice(0, 10) : "",
@@ -706,6 +715,11 @@ export default function ProjectMaster() {
         // jv
         jvEnabled: form.jvEnabled,
         jvCompanyName: form.jvEnabled ? form.jvCompanyName || null : null,
+        // additional tagged companies
+        multiCompanyEnabled: form.multiCompanyEnabled,
+        multiCompanyIds: form.multiCompanyEnabled
+          ? form.multiCompanyIds.map((id) => parseInt(id, 10))
+          : [],
         // rest
         teamSize: form.teamSize,
         startDate: form.startDate || null,
@@ -1302,6 +1316,100 @@ export default function ProjectMaster() {
                           placeholder="Enter JV partner or company name"
                           className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 transition-all"
                         />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Multi-Company tagging toggle */}
+                  <div className="col-span-full border border-border rounded-lg p-4 bg-muted/10 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() =>
+                          setForm((p) => ({
+                            ...p,
+                            multiCompanyEnabled: !p.multiCompanyEnabled,
+                            multiCompanyIds: !p.multiCompanyEnabled
+                              ? p.multiCompanyIds
+                              : [],
+                          }))
+                        }
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        {form.multiCompanyEnabled ? (
+                          <ToggleRight size={24} className="text-blue-500" />
+                        ) : (
+                          <ToggleLeft
+                            size={24}
+                            className="text-muted-foreground"
+                          />
+                        )}
+                        <span
+                          className={
+                            form.multiCompanyEnabled
+                              ? "text-blue-600 font-medium"
+                              : "text-muted-foreground"
+                          }
+                        >
+                          Tag Additional Companies
+                        </span>
+                      </button>
+                      {form.multiCompanyEnabled &&
+                        form.multiCompanyIds.length > 0 && (
+                          <span className="px-2 py-0.5 rounded-full text-xs bg-blue-500/10 text-blue-600 font-medium">
+                            {form.multiCompanyIds.length} tagged
+                          </span>
+                        )}
+                    </div>
+
+                    {form.multiCompanyEnabled && (
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-2">
+                          Companies (besides the primary Company above)
+                        </label>
+                        {(companies as any[]).filter(
+                          (c) => String(c.Id ?? c.id) !== form.companyId,
+                        ).length === 0 ? (
+                          <p className="text-xs text-muted-foreground">
+                            No other companies available to tag.
+                          </p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
+                            {(companies as any[])
+                              .filter(
+                                (c) =>
+                                  String(c.Id ?? c.id) !== form.companyId,
+                              )
+                              .map((c) => {
+                                const id = String(c.Id ?? c.id);
+                                const name = c.Name ?? c.name ?? "";
+                                const checked =
+                                  form.multiCompanyIds.includes(id);
+                                return (
+                                  <button
+                                    key={id}
+                                    type="button"
+                                    onClick={() =>
+                                      setForm((p) => ({
+                                        ...p,
+                                        multiCompanyIds: checked
+                                          ? p.multiCompanyIds.filter(
+                                              (x) => x !== id,
+                                            )
+                                          : [...p.multiCompanyIds, id],
+                                      }))
+                                    }
+                                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                                      checked
+                                        ? "bg-blue-500/10 border-blue-500/40 text-blue-600"
+                                        : "border-border text-muted-foreground hover:bg-muted"
+                                    }`}
+                                  >
+                                    {name}
+                                  </button>
+                                );
+                              })}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
