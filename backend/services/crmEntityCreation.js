@@ -42,10 +42,15 @@ class CrmCreationError extends Error {
 // lookup when a live Customer already exists for that Mobile — never
 // creates a second identity for the same phone number.
 async function findOrCreateCustomer(pool, { name, mobile, altMobile, email, leadId }, actorUserId) {
-  if (!mobile) return null;
-  const existing = await pool.request().input("mob", sql.NVarChar(20), mobile)
-    .query("SELECT Id FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
-  if (existing.recordset.length) return existing.recordset[0].Id;
+  // Mobile is optional now (business decision) — without one there's simply
+  // no phone number to dedupe against, so this just skips straight to
+  // creating a new Customer instead of returning null and leaving the
+  // caller's Application unlinked from any Customer record at all.
+  if (mobile) {
+    const existing = await pool.request().input("mob", sql.NVarChar(20), mobile)
+      .query("SELECT Id FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
+    if (existing.recordset.length) return existing.recordset[0].Id;
+  }
 
   const normalizedEmail = normalizeEmail(email);
   if (normalizedEmail) {
@@ -140,8 +145,11 @@ async function appendLeadHandoffNotes(pool, leadId, lead, existingNotes) {
 // filtering, since this is the single shared creation path both the human-
 // filed form and any future caller go through.
 async function createCrmApplicationRecord(pool, b, actorUserId) {
-  if (!b.CustomerId && !b.LeadId && (!b.ApplicantName?.trim() || !b.Mobile?.trim()))
-    throw new CrmCreationError("Either CustomerId, LeadId, or ApplicantName and Mobile are required");
+  // Mobile is no longer mandatory (business decision) — a raw walk-in
+  // creation (no CustomerId, no LeadId) still needs SOME way to identify
+  // who the applicant is, so ApplicantName alone is the minimum.
+  if (!b.CustomerId && !b.LeadId && !b.ApplicantName?.trim())
+    throw new CrmCreationError("Either CustomerId, LeadId, or ApplicantName is required");
   if (b.Source && !SOURCE_TYPES.includes(b.Source))
     throw new CrmCreationError(`Invalid Source. Must be one of: ${SOURCE_TYPES.join(", ")}`);
 
@@ -176,22 +184,16 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .query("SELECT CustomerNo, CustomerName, Mobile, AltMobile, Email FROM dbo.CrmCustomer WHERE Id = @cid AND IsActive = 1");
     if (!cr.recordset.length) throw new CrmCreationError("Selected customer does not exist");
     customerRow = cr.recordset[0];
-    // CrmApplication.ApplicantName and .Mobile are both NOT NULL, but
-    // neither is actually required server-side when a CrmCustomer is
-    // created (crmCustomers.js POST / accepts a blank CustomerName or
-    // Mobile — both just fall back to null) — so a customer record missing
-    // either would otherwise reach the INSERT below and fail with a raw,
-    // cryptic SQL constraint error ("Cannot insert the value NULL into
-    // column 'Mobile'/'ApplicantName'...") instead of pointing staff at the
-    // actual, fixable problem: this customer's own record is incomplete.
+    // CrmApplication.ApplicantName is NOT NULL, and Customer Name is still
+    // mandatory on the Customers form — so a customer missing it can only
+    // mean a pre-existing legacy/corrupted record. Mobile is deliberately
+    // NOT checked here any more: it's an optional field end-to-end now
+    // (CrmCustomer.Mobile and CrmApplication.Mobile are both nullable —
+    // see migration 445), so a customer with no mobile is normal, expected
+    // data, not something to block on.
     if (!customerRow.CustomerName?.trim() && !b.ApplicantName?.trim() && !prefill.CustomerName?.trim()) {
       throw new CrmCreationError(
         `Customer ${customerRow.CustomerNo || customerId} has no name on file — add one on the Customers page before creating an application.`
-      );
-    }
-    if (!customerRow.Mobile?.trim() && !b.Mobile?.trim() && !prefill.Mobile?.trim()) {
-      throw new CrmCreationError(
-        `${customerRow.CustomerName || "This customer"} has no mobile number on file — add one on the Customers page before creating an application.`
       );
     }
   } else {
@@ -266,20 +268,18 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     paymentPlanId: b.PaymentPlanId || null,
   });
 
-  // Last-line defense: CrmApplication.ApplicantName/.Mobile are both NOT
-  // NULL, but every upstream source (an existing Customer, a Lead's own
-  // prefill, or the raw request body) can independently end up blank —
-  // the two branches above already guard the "existing Customer selected"
-  // case with a specific, actionable message, but the Lead-only path (no
-  // CustomerId, a Lead whose own Mobile happens to be blank) reaches here
-  // unguarded. Checking the actual final values right before the INSERT,
-  // once, covers every path instead of duplicating the same check per
-  // branch — and turns what would otherwise be a raw SQL constraint error
-  // into a real one.
+  // Last-line defense: CrmApplication.ApplicantName is NOT NULL, but every
+  // upstream source (an existing Customer, a Lead's own prefill, or the raw
+  // request body) can independently end up blank — the branch above already
+  // guards the "existing Customer selected" case with a specific message,
+  // but the Lead-only path (no CustomerId, a Lead whose own name is
+  // somehow blank) reaches here unguarded. Checking the actual final value
+  // right before the INSERT, once, covers every path instead of duplicating
+  // the same check per branch. Mobile is deliberately NOT checked here —
+  // it's optional end-to-end now (see migration 445).
   const finalName = customerRow?.CustomerName || b.ApplicantName?.trim() || prefill.CustomerName;
-  const finalMobile = customerRow?.Mobile || b.Mobile?.trim() || prefill.Mobile;
+  const finalMobile = customerRow?.Mobile || b.Mobile?.trim() || prefill.Mobile || null;
   if (!finalName?.trim()) throw new CrmCreationError("Applicant name is required — this booking's customer/lead record has no name on file");
-  if (!finalMobile?.trim()) throw new CrmCreationError("Applicant mobile is required — this booking's customer/lead record has no mobile number on file");
 
   const appNo = await getNextDocNumber(pool, "APP", "APP");
   let result;
