@@ -13,6 +13,8 @@ const uniqueViolationMessage = (err) =>
     ? "A deduction/addition with this code already exists"
     : "A deduction/addition with this name already exists";
 
+const COMPONENT_TYPES = ["Earning", "Deduction", "Employer Contribution", "Informational"];
+
 const SELECT_COLUMNS = `
   SELECT d.Id, d.Name, d.Code, d.Type, d.LedgerId,
          ISNULL(ahm.DisplayName, ahm.LHeadName) AS LedgerName,
@@ -38,8 +40,8 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
   const { Name, Code, Type, LedgerId, IsActive } = req.body;
   if (!Name?.trim()) return res.status(400).json({ error: "Name is required" });
   if (!Code?.trim()) return res.status(400).json({ error: "Code is required" });
-  if (Type !== "Deduction" && Type !== "Addition") {
-    return res.status(400).json({ error: "Type must be Deduction or Addition" });
+  if (!COMPONENT_TYPES.includes(Type)) {
+    return res.status(400).json({ error: `Type must be one of: ${COMPONENT_TYPES.join(", ")}` });
   }
   const createdBy = req.user?.userId || null;
   try {
@@ -48,7 +50,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .request()
       .input("Name", sql.NVarChar(150), Name.trim())
       .input("Code", sql.NVarChar(30), Code.trim())
-      .input("Type", sql.NVarChar(20), Type)
+      .input("Type", sql.NVarChar(30), Type)
       .input("LedgerId", sql.Int, LedgerId || null)
       .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
@@ -73,8 +75,8 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   const { Name, Code, Type, LedgerId, IsActive } = req.body;
   if (!Name?.trim()) return res.status(400).json({ error: "Name is required" });
   if (!Code?.trim()) return res.status(400).json({ error: "Code is required" });
-  if (Type !== "Deduction" && Type !== "Addition") {
-    return res.status(400).json({ error: "Type must be Deduction or Addition" });
+  if (!COMPONENT_TYPES.includes(Type)) {
+    return res.status(400).json({ error: `Type must be one of: ${COMPONENT_TYPES.join(", ")}` });
   }
   const updatedBy = req.user?.userId || null;
   try {
@@ -84,7 +86,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("Id", sql.Int, parseInt(id))
       .input("Name", sql.NVarChar(150), Name.trim())
       .input("Code", sql.NVarChar(30), Code.trim())
-      .input("Type", sql.NVarChar(20), Type)
+      .input("Type", sql.NVarChar(30), Type)
       .input("LedgerId", sql.Int, LedgerId || null)
       .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
       .input("UpdatedBy", sql.Int, updatedBy)

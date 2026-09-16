@@ -8,8 +8,10 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { pickStructureVersion, calculateStructure } = require("../lib/formulaEngine");
+const salaryStructureRoutes = require("./salaryStructure");
 
-const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.CandidateId, cand.CandidateCode AS CandidateCode, cand.CandidateName AS CandidateName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
+const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.CandidateId, cand.CandidateCode AS CandidateCode, cand.CandidateName AS CandidateName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.CTCAmount, e.CTCFrequency, e.SalaryStructureCode, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
 
 router.get("/", cache("employee-master", 300), async (req, res) => {
   try {
@@ -74,6 +76,9 @@ function bindEmployeeFields(request, body) {
     .input("NomineeName", sql.NVarChar(150), body.NomineeName || null)
     .input("NomineeRelationship", sql.NVarChar(50), body.NomineeRelationship || null)
     .input("NomineeContact", sql.NVarChar(20), body.NomineeContact || null)
+    .input("CTCAmount", sql.Decimal(18, 2), body.CTCAmount === "" || body.CTCAmount == null ? null : Number(body.CTCAmount))
+    .input("CTCFrequency", sql.NVarChar(10), body.CTCFrequency || null)
+    .input("SalaryStructureCode", sql.NVarChar(30), body.SalaryStructureCode || null)
     .input("IsActive", sql.Bit, body.IsActive !== false ? 1 : 0);
 }
 
@@ -94,13 +99,13 @@ router.post("/", requirePageRight("employee-master", "create"), async (req, res)
         "EmergencyContactName, EmergencyContactPhone, JoiningDate, ConfirmationDate, CompanyId, " +
         "Department, Designation, BranchLocation, ReportingManagerId, EmploymentType, GradeLevel, " +
         "CostCenterId, CandidateId, BankName, BankAccountNumber, BankIFSC, PAN, Aadhaar, UAN, ESICNumber, PFNumber, " +
-        "NomineeName, NomineeRelationship, NomineeContact, IsActive, CreatedBy, CreatedAt" +
+        "NomineeName, NomineeRelationship, NomineeContact, CTCAmount, CTCFrequency, SalaryStructureCode, IsActive, CreatedBy, CreatedAt" +
         ") OUTPUT INSERTED.EmployeeId VALUES (" +
         "@EmployeeCode, @EmployeeName, @PhotoBase64, @DateOfBirth, @Gender, @Mobile, @Email, @Address, " +
         "@EmergencyContactName, @EmergencyContactPhone, @JoiningDate, @ConfirmationDate, @CompanyId, " +
         "@Department, @Designation, @BranchLocation, @ReportingManagerId, @EmploymentType, @GradeLevel, " +
         "@CostCenterId, @CandidateId, @BankName, @BankAccountNumber, @BankIFSC, @PAN, @Aadhaar, @UAN, @ESICNumber, @PFNumber, " +
-        "@NomineeName, @NomineeRelationship, @NomineeContact, @IsActive, @CreatedBy, SYSDATETIME())"
+        "@NomineeName, @NomineeRelationship, @NomineeContact, @CTCAmount, @CTCFrequency, @SalaryStructureCode, @IsActive, @CreatedBy, SYSDATETIME())"
       );
     const newId = result.recordset[0].EmployeeId;
     await bumpCacheVersion("employee-master");
@@ -142,6 +147,7 @@ router.put("/:id", requirePageRight("employee-master", "edit"), async (req, res)
         "CostCenterId = @CostCenterId, CandidateId = @CandidateId, BankName = @BankName, BankAccountNumber = @BankAccountNumber, BankIFSC = @BankIFSC, " +
         "PAN = @PAN, Aadhaar = @Aadhaar, UAN = @UAN, ESICNumber = @ESICNumber, PFNumber = @PFNumber, " +
         "NomineeName = @NomineeName, NomineeRelationship = @NomineeRelationship, NomineeContact = @NomineeContact, " +
+        "CTCAmount = @CTCAmount, CTCFrequency = @CTCFrequency, SalaryStructureCode = @SalaryStructureCode, " +
         "IsActive = @IsActive, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME() " +
         "WHERE EmployeeId = @EmployeeId"
       );
@@ -253,6 +259,55 @@ router.delete("/document/:attachId", requirePageRight("employee-master", "edit")
     await bumpCacheVersion("employee-master");
     res.json({ message: "Document removed" });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET the calculated salary breakup for one employee, using their own
+// CTC + the Salary Structure version applicable on `asOfDate` (default
+// today) -- spec 6's ad-hoc "Employee Salary Details", no payroll run
+// required. Reuses the exact same formula engine Payroll Run uses.
+router.get("/:id/salary-breakup", requirePageRight("employee-master", "view"), async (req, res) => {
+  const employeeId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(employeeId)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const empRes = await pool.request().input("Id", sql.Int, employeeId)
+      .query("SELECT EmployeeId, EmployeeName, CTCAmount, CTCFrequency, SalaryStructureCode FROM dbo.EmployeeMaster WHERE EmployeeId = @Id");
+    const emp = empRes.recordset[0];
+    if (!emp) return res.status(404).json({ error: "Employee not found" });
+    if (emp.CTCAmount == null || !emp.CTCFrequency) {
+      return res.status(400).json({ error: "Employee does not have a CTC configured" });
+    }
+    if (!emp.SalaryStructureCode) {
+      return res.status(400).json({ error: "Employee does not have a Salary Structure assigned" });
+    }
+
+    const asOfDate = req.query.asOfDate ? new Date(String(req.query.asOfDate)) : new Date();
+    const versionsRes = await pool.request().input("Code", sql.NVarChar(30), emp.SalaryStructureCode)
+      .query(`${salaryStructureRoutes.HEADER_SELECT} WHERE s.Code = @Code`);
+    const structure = pickStructureVersion(versionsRes.recordset, asOfDate);
+    if (!structure) {
+      return res.status(400).json({
+        error: `No active Salary Structure version found for code "${emp.SalaryStructureCode}" as of ${asOfDate.toISOString().slice(0, 10)}`,
+      });
+    }
+
+    const linesRes = await pool.request().input("Id", sql.Int, structure.SalaryStructureId)
+      .query(`${salaryStructureRoutes.LINES_SELECT} WHERE l.SalaryStructureId = @Id ORDER BY l.Sequence, l.LineId`);
+    const { engineLines } = await salaryStructureRoutes.buildEngineLines(pool, linesRes.recordset);
+
+    const result = calculateStructure(engineLines, Number(emp.CTCAmount), emp.CTCFrequency, structure.CTCFrequency);
+    res.json({
+      EmployeeId: emp.EmployeeId,
+      EmployeeName: emp.EmployeeName,
+      SalaryStructureId: structure.SalaryStructureId,
+      SalaryStructureName: structure.Name,
+      SalaryStructureVersion: structure.Version,
+      ...result,
+    });
+  } catch (err) {
+    console.error("[employee-master] GET /salary-breakup error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

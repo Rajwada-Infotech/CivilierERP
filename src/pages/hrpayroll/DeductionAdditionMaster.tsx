@@ -21,7 +21,10 @@ import {
   deleteDeductionAddition,
   type DeductionAdditionRow,
   type DeductionAdditionPayload,
+  type DeductionAdditionType,
 } from "@/api/deductionAdditionMasterApi";
+
+const COMPONENT_TYPES: DeductionAdditionType[] = ["Earning", "Deduction", "Employer Contribution", "Informational"];
 
 const mapRow = (r: DeductionAdditionRow): RecordWithId => ({
   _id: String(r.Id),
@@ -71,10 +74,10 @@ const DeductionAdditionMaster: React.FC = () => {
     { name: "code", label: "Code", type: "text", required: true, uppercase: true },
     {
       name: "type",
-      label: "Deduction and Addition",
+      label: "Component Type",
       type: "select",
       required: true,
-      options: ["Deduction", "Addition"],
+      options: COMPONENT_TYPES,
     },
     {
       name: "ledgerId",
@@ -94,7 +97,7 @@ const DeductionAdditionMaster: React.FC = () => {
   const toPayload = (r: Record<string, any>): DeductionAdditionPayload => ({
     Name: r.name?.trim() || "",
     Code: r.code?.trim() || "",
-    Type: r.type === "Addition" ? "Addition" : "Deduction",
+    Type: (COMPONENT_TYPES as string[]).includes(r.type) ? (r.type as DeductionAdditionType) : "Earning",
     LedgerId: r.ledgerId ? Number(r.ledgerId) : null,
     IsActive: r.isActive !== false,
   });

@@ -133,6 +133,8 @@ const GraceTimeMaster = lazy(() => import("./pages/hrpayroll/GraceTimeMaster"));
 const HolidayMaster = lazy(() => import("./pages/hrpayroll/HolidayMaster"));
 const DeductionAdditionMaster = lazy(() => import("./pages/hrpayroll/DeductionAdditionMaster"));
 const SalaryStructure = lazy(() => import("./pages/hrpayroll/SalaryStructure"));
+const PayrollRun = lazy(() => import("./pages/hrpayroll/PayrollRun"));
+const Payslip = lazy(() => import("./pages/hrpayroll/Payslip"));
 const Interview = lazy(() => import("./pages/hrpayroll/Interview"));
 const OfferLetterJoining = lazy(() => import("./pages/hrpayroll/OfferLetterJoining"));
 const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceDirectory"));
@@ -1011,6 +1013,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="salary-structure">
             <SalaryStructure />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/payroll-run"
+        element={
+          <ProtectedRoute pageKey="payroll-run">
+            <PayrollRun />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/payroll-run/:runId/payslip/:employeeId"
+        element={
+          <ProtectedRoute pageKey="payroll-run">
+            <Payslip />
           </ProtectedRoute>
         }
       />

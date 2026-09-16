@@ -2,7 +2,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/deduction-addition-master";
 
-export type DeductionAdditionType = "Deduction" | "Addition";
+export type DeductionAdditionType = "Earning" | "Deduction" | "Employer Contribution" | "Informational";
 
 export interface DeductionAdditionRow {
   Id: number;

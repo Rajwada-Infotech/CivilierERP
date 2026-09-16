@@ -14,11 +14,15 @@ import {
   updateEmployee,
   deleteEmployee,
   getEmployeeCompanyOptions,
+  getEmployeeSalaryBreakup,
   type EmployeeRow,
   type EmployeePayload,
+  type SalaryBreakupResult,
 } from "@/api/employeeMasterApi";
 import { getCostCenterOptions } from "@/api/costCenterApi";
 import { getUnlinkedEmployeeCandidates, type UnlinkedEmployeeCandidate } from "@/api/offerLetterApi";
+import { getSalaryStructureFamilies } from "@/api/salaryStructureApi";
+import { Wallet3 } from "iconsax-react";
 
 const EMPLOYMENT_TYPES = ["Permanent", "Probation", "Contract", "Consultant", "Intern"];
 const GENDERS = ["Male", "Female", "Other"];
@@ -62,6 +66,9 @@ const mapRow = (r: EmployeeRow): RecordWithId => ({
   nomineeName: r.NomineeName || "",
   nomineeRelationship: r.NomineeRelationship || "",
   nomineeContact: r.NomineeContact || "",
+  ctcAmount: r.CTCAmount == null ? "" : String(r.CTCAmount),
+  ctcFrequency: r.CTCFrequency || "",
+  salaryStructureCode: r.SalaryStructureCode || "",
   isActive: r.IsActive,
   documentCount: r.DocumentCount || 0,
 });
@@ -99,6 +106,9 @@ const toPayload = (form: Record<string, unknown>): EmployeePayload => ({
   NomineeName: (form.nomineeName as string) || null,
   NomineeRelationship: (form.nomineeRelationship as string) || null,
   NomineeContact: (form.nomineeContact as string) || null,
+  CTCAmount: form.ctcAmount ? Number(form.ctcAmount) : null,
+  CTCFrequency: (form.ctcFrequency as "Annual" | "Monthly") || null,
+  SalaryStructureCode: (form.salaryStructureCode as string) || null,
   IsActive: form.isActive !== false,
 });
 
@@ -167,10 +177,100 @@ const PhotoField: React.FC<{
   );
 };
 
+// Spec 6's "Employee Salary Details" -- read-only calculated breakup for
+// one employee, using their own CTC + assigned Salary Structure. Same
+// modal pattern as EmployeeDocumentsModal.
+const SalaryBreakupModal: React.FC<{
+  employeeId: number;
+  employeeName: string;
+  onClose: () => void;
+}> = ({ employeeId, employeeName, onClose }) => {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["employee-salary-breakup", employeeId],
+    queryFn: () => getEmployeeSalaryBreakup(employeeId),
+  });
+  const result = data as SalaryBreakupResult | undefined;
+
+  return (
+    <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-xl shadow-lg w-full max-w-2xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div>
+            <h3 className="font-heading font-semibold text-foreground text-sm">Salary Details</h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">{employeeName}</p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-sm">✕</button>
+        </div>
+        <div className="p-5">
+          {isLoading && <p className="text-sm text-muted-foreground">Loading...</p>}
+          {error && <p className="text-sm text-destructive">{(error as Error).message || "Failed to load salary breakup"}</p>}
+          {result && !result.valid && (
+            <div className="space-y-1">
+              {result.errors.map((e, i) => (
+                <p key={i} className="text-sm text-destructive">{e.message}</p>
+              ))}
+            </div>
+          )}
+          {result && result.valid && result.totals && (
+            <div className="space-y-3">
+              <p className="text-[11px] text-muted-foreground">
+                Structure: {result.SalaryStructureName} (v{result.SalaryStructureVersion})
+              </p>
+              <div className="rounded-lg border border-border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/30 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                      <th className="text-left px-3 py-2">Salary Head</th>
+                      <th className="text-left px-3 py-2">Type</th>
+                      <th className="text-left px-3 py-2">Calculation</th>
+                      <th className="text-right px-3 py-2">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {result.lines.map((l) => (
+                      <tr key={l.DeductionAdditionId}>
+                        <td className="px-3 py-2 font-medium">{l.HeadName}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{l.HeadType}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{l.Calculation}</td>
+                        <td className="px-3 py-2 text-right font-mono">₹{l.Amount.toLocaleString("en-IN")}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-muted/20 font-semibold">
+                      <td className="px-3 py-2" colSpan={3}>Gross Salary</td>
+                      <td className="px-3 py-2 text-right font-mono">₹{result.totals.GrossSalary.toLocaleString("en-IN")}</td>
+                    </tr>
+                    <tr className="font-semibold">
+                      <td className="px-3 py-2" colSpan={3}>Total Employee Deduction</td>
+                      <td className="px-3 py-2 text-right font-mono">₹{result.totals.TotalEmployeeDeduction.toLocaleString("en-IN")}</td>
+                    </tr>
+                    <tr className="font-semibold">
+                      <td className="px-3 py-2" colSpan={3}>Net Salary</td>
+                      <td className="px-3 py-2 text-right font-mono">₹{result.totals.NetSalary.toLocaleString("en-IN")}</td>
+                    </tr>
+                    <tr className="font-semibold">
+                      <td className="px-3 py-2" colSpan={3}>Employer Contribution</td>
+                      <td className="px-3 py-2 text-right font-mono">₹{result.totals.TotalEmployerContribution.toLocaleString("en-IN")}</td>
+                    </tr>
+                    <tr className="bg-primary/10 font-bold">
+                      <td className="px-3 py-2" colSpan={3}>Total CTC</td>
+                      <td className="px-3 py-2 text-right font-mono">₹{result.totals.TotalCTC.toLocaleString("en-IN")}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 export default function EmployeeMaster() {
   const rights = usePageRights("employee-master");
   const queryClient = useQueryClient();
   const [docsFor, setDocsFor] = useState<{ id: number; name: string } | null>(null);
+  const [breakupFor, setBreakupFor] = useState<{ id: number; name: string } | null>(null);
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["employee-master"],
@@ -351,6 +451,19 @@ export default function EmployeeMaster() {
     { name: "gradeLevel", label: "Grade / Level", type: "text" },
     { name: "costCenterId", label: "Cost Centre", type: "select", asyncOptions: async () => costCenterOptions },
 
+    { name: "sec-payroll", label: "Payroll", type: "section" },
+    { name: "ctcAmount", label: "CTC Amount", type: "number" },
+    { name: "ctcFrequency", label: "CTC Frequency", type: "select", options: ["Annual", "Monthly"] },
+    {
+      name: "salaryStructureCode",
+      label: "Salary Structure",
+      type: "select",
+      asyncOptions: async () => {
+        const list = await getSalaryStructureFamilies();
+        return (Array.isArray(list) ? list : []).map((s) => ({ value: s.Code, label: s.Name }));
+      },
+    },
+
     { name: "sec-bank", label: "Bank Details", type: "section" },
     { name: "bankName", label: "Bank Name", type: "text" },
     { name: "bankAccountNumber", label: "Account Number", type: "text" },
@@ -381,6 +494,7 @@ export default function EmployeeMaster() {
     { key: "employmentType", label: "Type", hideOnMobile: true },
     { key: "reportingManagerName", label: "Reporting To", hideOnMobile: true, sortable: false },
     { key: "documents", label: "Documents", sortable: false },
+    { key: "salaryBreakup", label: "Salary", sortable: false },
     { key: "isActive", label: "Status" },
   ];
 
@@ -416,6 +530,18 @@ export default function EmployeeMaster() {
         <FileText size={12} /> {Number(row.documentCount || 0)}
       </button>
     ),
+    salaryBreakup: (_value, row) =>
+      row.ctcAmount && row.salaryStructureCode ? (
+        <button
+          type="button"
+          onClick={() => setBreakupFor({ id: Number(row._id), name: (row.employeeName as string) || "" })}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[11px] font-medium text-foreground hover:bg-muted transition-colors"
+        >
+          <Wallet3 size={12} /> View
+        </button>
+      ) : (
+        <span className="text-[11px] text-muted-foreground">No CTC</span>
+      ),
   };
 
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>;
@@ -466,6 +592,13 @@ export default function EmployeeMaster() {
             setDocsFor(null);
             refresh();
           }}
+        />
+      )}
+      {breakupFor && (
+        <SalaryBreakupModal
+          employeeId={breakupFor.id}
+          employeeName={breakupFor.name}
+          onClose={() => setBreakupFor(null)}
         />
       )}
     </>

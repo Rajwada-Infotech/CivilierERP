@@ -41,6 +41,9 @@ export interface EmployeeRow {
   NomineeName: string | null;
   NomineeRelationship: string | null;
   NomineeContact: string | null;
+  CTCAmount: number | null;
+  CTCFrequency: "Annual" | "Monthly" | null;
+  SalaryStructureCode: string | null;
   IsActive: boolean;
   DocumentCount: number;
   CreatedBy: string | null;
@@ -82,6 +85,9 @@ export interface EmployeePayload {
   NomineeName?: string | null;
   NomineeRelationship?: string | null;
   NomineeContact?: string | null;
+  CTCAmount?: number | null;
+  CTCFrequency?: "Annual" | "Monthly" | null;
+  SalaryStructureCode?: string | null;
   IsActive?: boolean;
 }
 
@@ -173,5 +179,45 @@ export interface EmployeeCompanyOption {
 // Master already use for their Company pickers.
 export const getEmployeeCompanyOptions = async (): Promise<EmployeeCompanyOption[]> => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
+  return handle(res);
+};
+
+export interface SalaryBreakupLine {
+  DeductionAdditionId: number;
+  HeadCode: string;
+  HeadName: string;
+  HeadType: string;
+  Calculation: string;
+  Amount: number;
+}
+
+export interface SalaryBreakupTotals {
+  AnnualCTC: number;
+  MonthlyCTC: number;
+  GrossSalary: number;
+  TotalEmployeeDeduction: number;
+  NetSalary: number;
+  TotalEmployerContribution: number;
+  TotalCTC: number;
+}
+
+export interface SalaryBreakupResult {
+  EmployeeId: number;
+  EmployeeName: string;
+  SalaryStructureId: number;
+  SalaryStructureName: string;
+  SalaryStructureVersion: number;
+  valid: boolean;
+  errors: { message: string }[];
+  lines: SalaryBreakupLine[];
+  totals: SalaryBreakupTotals | null;
+}
+
+// Spec 6's "Employee Salary Details" -- ad-hoc calculated breakup for one
+// employee using their own CTC + assigned Salary Structure, no payroll
+// run required.
+export const getEmployeeSalaryBreakup = async (employeeId: number, asOfDate?: string): Promise<SalaryBreakupResult> => {
+  const qs = asOfDate ? `?asOfDate=${encodeURIComponent(asOfDate)}` : "";
+  const res = await fetchWithAuth(`${BASE}/${employeeId}/salary-breakup${qs}`);
   return handle(res);
 };
