@@ -35,6 +35,9 @@ function validateLines(lines) {
     if (!Number.isFinite(headId) || headId <= 0) return "Each line needs a Deduction/Addition head";
     if (seen.has(headId)) return "The same Deduction/Addition head cannot be added twice";
     seen.add(headId);
+    const hasPercentage = line.Percentage !== "" && line.Percentage != null;
+    const hasAmount = line.Amount !== "" && line.Amount != null;
+    if (!hasPercentage && !hasAmount) return "Each line needs either a Percentage or an Amount";
   }
   return null;
 }

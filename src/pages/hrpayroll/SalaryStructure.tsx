@@ -95,7 +95,7 @@ const SalaryStructure: React.FC = () => {
     header.name.trim() !== "" &&
     header.code.trim() !== "" &&
     lines.length > 0 &&
-    lines.every((l) => l.deductionAdditionId !== "");
+    lines.every((l) => l.deductionAdditionId !== "" && (l.percentage.trim() !== "" || l.amount.trim() !== ""));
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -220,6 +220,9 @@ const SalaryStructure: React.FC = () => {
                       <Add size={14} /> Add Row
                     </button>
                   </div>
+                  <p className="text-[11px] text-muted-foreground mb-2">
+                    Give either a Percentage or an Amount for each line.
+                  </p>
 
                   <div className="rounded-lg border border-border overflow-hidden">
                     <div className="grid grid-cols-12 gap-2 px-3 py-2 bg-muted/30 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
