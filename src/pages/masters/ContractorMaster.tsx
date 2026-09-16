@@ -189,7 +189,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
   {
     header: "Group",
-    accessor: (r) => (r.LBelongsTo != null ? String(r.LBelongsTo) : "—"),
+    accessor: (r) => (r.GroupName as string) || "—",
   },
   { header: "Address", accessor: "LHeadAddress" },
   {
