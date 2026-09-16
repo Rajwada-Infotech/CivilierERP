@@ -290,6 +290,15 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     const pool = getPool();
     const b = req.body;
 
+    // Server-side requiredness for the two fields CrmApplication later
+    // depends on being non-blank (see createCrmApplicationRecord in
+    // crmEntityCreation.js) — the frontend already enforces this, but
+    // relying on that alone left this endpoint creating customers with a
+    // blank name/mobile whenever it was hit directly, which then crashed
+    // Application creation downstream with a raw SQL NOT NULL error.
+    if (!b.CustomerName?.trim()) return res.status(400).json({ error: "Customer Name is required" });
+    if (!b.Mobile?.trim()) return res.status(400).json({ error: "Mobile is required" });
+
     if (b.Mobile?.trim()) {
       const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())
         .query("SELECT Id, CustomerNo, CustomerName FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
