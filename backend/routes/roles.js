@@ -330,7 +330,7 @@ router.get("/:roleId/rights", authMiddleware, async (req, res) => {
     const result = await pool
       .request()
       .input("RoleId", sql.Int, parseInt(req.params.roleId)).query(`
-        SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPostApproval
+        SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPrint, CanExport, CanPostApproval
         FROM dbo.RoleRights WHERE RoleId = @RoleId
       `);
 
@@ -343,6 +343,8 @@ router.get("/:roleId/rights", authMiddleware, async (req, res) => {
       if (Number(row.CanAdd) === 1) actions.push("create");
       if (Number(row.CanEdit) === 1) actions.push("edit");
       if (Number(row.CanDelete) === 1) actions.push("delete");
+      if (Number(row.CanPrint) === 1) actions.push("print");
+      if (Number(row.CanExport) === 1) actions.push("export");
       if (Number(row.CanPostApproval) === 1) actions.push("post-approval");
       return { page, actions };
     });
@@ -405,11 +407,13 @@ router.post(
           .input("CanAdd", sql.Bit, actions.includes("create") ? 1 : 0)
           .input("CanEdit", sql.Bit, actions.includes("edit") ? 1 : 0)
           .input("CanDelete", sql.Bit, actions.includes("delete") ? 1 : 0)
+          .input("CanPrint", sql.Bit, actions.includes("print") ? 1 : 0)
+          .input("CanExport", sql.Bit, actions.includes("export") ? 1 : 0)
           .input("CanPostApproval", sql.Bit, actions.includes("post-approval") ? 1 : 0).query(`
             INSERT INTO dbo.RoleRights
-              (RoleId, Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPostApproval)
+              (RoleId, Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPrint, CanExport, CanPostApproval)
             VALUES
-              (@RoleId, @Module, @SubModule, @CanView, @CanAdd, @CanEdit, @CanDelete, @CanPostApproval)
+              (@RoleId, @Module, @SubModule, @CanView, @CanAdd, @CanEdit, @CanDelete, @CanPrint, @CanExport, @CanPostApproval)
           `);
       } catch (rowErr) {
         console.error("SAVE RIGHTS: row insert failed", {
