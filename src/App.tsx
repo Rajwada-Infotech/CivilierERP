@@ -136,6 +136,7 @@ const SalaryStructure = lazy(() => import("./pages/hrpayroll/SalaryStructure"));
 const PayrollRun = lazy(() => import("./pages/hrpayroll/PayrollRun"));
 const Payslip = lazy(() => import("./pages/hrpayroll/Payslip"));
 const AttendanceLeaveOvertime = lazy(() => import("./pages/hrpayroll/AttendanceLeaveOvertime"));
+const SalaryCalculation = lazy(() => import("./pages/hrpayroll/SalaryCalculation"));
 const Interview = lazy(() => import("./pages/hrpayroll/Interview"));
 const OfferLetterJoining = lazy(() => import("./pages/hrpayroll/OfferLetterJoining"));
 const MaintenanceDirectory = lazy(() => import("./pages/maintenance/MaintenanceDirectory"));
@@ -1038,6 +1039,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="attendance-leave-overtime">
             <AttendanceLeaveOvertime />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/hr-payroll/salary-calculation"
+        element={
+          <ProtectedRoute pageKey="salary-calculation">
+            <SalaryCalculation />
           </ProtectedRoute>
         }
       />
