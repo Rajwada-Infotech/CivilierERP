@@ -115,6 +115,11 @@ export const updateJournalVoucher = async (id: number, payload: JournalVoucherPa
   return handleResponse(res);
 };
 
+export const deleteJournalVoucher = async (id: number) => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  return handleResponse(res);
+};
+
 export const approveJournalVoucher = async (id: number, note?: string) => {
   const res = await fetchWithAuth(`${BASE}/${id}/approve`, {
     method: "PUT",

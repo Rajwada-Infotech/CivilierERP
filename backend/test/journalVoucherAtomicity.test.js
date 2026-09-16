@@ -43,11 +43,14 @@ jest.mock("../redis", () => ({
   permissionCache: { get: jest.fn(async () => null) },
 }));
 
-// Auto-submit (Draft -> Pending) is a separate concern from the atomicity
-// fix under test here.
+// Auto-submit (Draft -> Pending) and the Approved-edit-reopens-for-approval
+// flow are separate concerns from the atomicity fix under test here —
+// getRecordStatus mocked to "Draft" so PUT /:id's wasApproved branch (GL
+// reversal, amendment logging) never engages in these tests.
 jest.mock("../services/approvalService", () => ({
   transition: jest.fn(async () => {}),
   guardEdit: jest.fn(async () => {}),
+  getRecordStatus: jest.fn(async () => "Draft"),
 }));
 
 let txSpy;
