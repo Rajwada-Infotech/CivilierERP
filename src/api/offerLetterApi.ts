@@ -8,6 +8,7 @@ export interface OfferLetterRow {
   CandidateId: number;
   CompanyId: number | null;
   FinYearId: number | null;
+  DesignationId: number | null;
   Salary: number | null;
   CandidateAddress: string | null;
   DateOfJoin: string | null;
@@ -31,12 +32,29 @@ export interface OfferLetterRow {
   CandidateInterviewStatus: string | null;
   CompanyName: string | null;
   FinYearName: string | null;
+  DesignationName: string | null;
+}
+
+export interface UnlinkedEmployeeCandidate {
+  OfferId: number;
+  CandidateId: number;
+  CompanyId: number | null;
+  ActualDateOfJoining: string | null;
+  CandidateAddress: string | null;
+  CandidateCode: string;
+  CandidateName: string;
+  Contact: string | null;
+  Email: string | null;
+  CompanyName: string | null;
+  DesignationName: string | null;
+  DepartmentName: string | null;
 }
 
 export interface OfferLetterPayload {
   CandidateId: number;
   CompanyId: number | null;
   FinYearId: number | null;
+  DesignationId: number | null;
   Salary: number | null;
   CandidateAddress: string | null;
   DateOfJoin: string | null;
@@ -52,6 +70,15 @@ async function handle<T = unknown>(res: Response): Promise<T> {
 
 export const getOfferLetters = async (): Promise<OfferLetterRow[]> => {
   const res = await fetchWithAuth(BASE);
+  return handle(res);
+};
+
+// Candidates whose Offer Letter & Joining is confirmed but who don't have
+// an Employee Master record yet -- used to offer a manual pick as a
+// fallback to the automatic creation that normally fires the moment
+// joining is confirmed.
+export const getUnlinkedEmployeeCandidates = async (): Promise<UnlinkedEmployeeCandidate[]> => {
+  const res = await fetchWithAuth(`${BASE}/unlinked-employees`);
   return handle(res);
 };
 
@@ -84,5 +111,19 @@ export const confirmJoining = async (id: number, actualDateOfJoining: string, jo
 
 export const deleteOfferLetter = async (id: number) => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  return handle<{ message: string }>(res);
+};
+
+export const getOfferLetterTemplate = async (): Promise<{ TemplateId: number; Body: string }> => {
+  const res = await fetchWithAuth(`${BASE}/template`);
+  return handle(res);
+};
+
+export const updateOfferLetterTemplate = async (body: string) => {
+  const res = await fetchWithAuth(`${BASE}/template`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ Body: body }),
+  });
   return handle<{ message: string }>(res);
 };
