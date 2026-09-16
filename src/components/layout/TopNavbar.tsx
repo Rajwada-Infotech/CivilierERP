@@ -346,6 +346,13 @@ const hrPayrollSetupItems = [
     color: "text-yellow-500",
     pageKey: "holiday-master",
   },
+  {
+    icon: UserSquare,
+    label: "Deduction and Addition Master",
+    path: "/hr-payroll/setup/deduction-addition-master",
+    color: "text-yellow-500",
+    pageKey: "deduction-addition-master",
+  },
 ];
 
 const materialSetupItems = [
