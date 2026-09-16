@@ -1,8 +1,8 @@
 import { Profile2User, UserSquare, MoneyRecive } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
-// New module - Employee Master is the first real page; Payroll Run and
-// Attendance land under their respective sections as they are built.
+// New module - Employee Master is the first real page; Attendance lands
+// under its own section as it is built.
 export const hrPayrollNavItems: NavItem[] = [
   { label: "Dashboard", icon: Profile2User, path: "/hr-payroll", isDashboard: true },
 
@@ -12,6 +12,8 @@ export const hrPayrollNavItems: NavItem[] = [
     icon: MoneyRecive,
     children: [
       { label: "Employee Master", path: "/hr-payroll/employees", pageKey: "employee-master" },
+      { label: "Salary Structure", path: "/hr-payroll/setup/salary-structure", pageKey: "salary-structure" },
+      { label: "Payroll Run", path: "/hr-payroll/payroll-run", pageKey: "payroll-run" },
     ],
   },
 

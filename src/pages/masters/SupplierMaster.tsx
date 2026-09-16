@@ -218,10 +218,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Category", accessor: "supplierCategory" },
   {
     header: "Group",
-    accessor: (r) => {
-      // resolved in display — raw value is AGId
-      return r.LBelongsTo != null ? String(r.LBelongsTo) : "—";
-    },
+    accessor: (r) => (r.GroupName as string) || "—",
   },
   { header: "Address", accessor: "LHeadAddress" },
   {
