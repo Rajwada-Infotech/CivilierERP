@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import {
   getProjects,
   createProject,
@@ -814,6 +816,20 @@ export default function ProjectMaster() {
       (p.Code ?? "").toLowerCase().includes(search.toLowerCase()),
   );
 
+  const exportColumns: ExportColumn[] = useMemo(
+    () => [
+      { header: "Code", accessor: "Code" },
+      { header: "Project Name", accessor: "Name" },
+      { header: "Enterprise", accessor: "EnterpriseName" },
+      { header: "Company", accessor: "CompanyName" },
+      { header: "Type", accessor: "Type" },
+      { header: "Status", accessor: "Status" },
+      { header: "JV Enabled", accessor: (r: any) => (r.JvEnabled ? "Yes" : "No") },
+      { header: "Active", accessor: (r: any) => (r.IsActive ? "Active" : "Inactive") },
+    ],
+    [],
+  );
+
   const openNew = () => {
     setForm({ ...emptyProject });
     setImagePreview("");
@@ -964,6 +980,13 @@ export default function ProjectMaster() {
               <span className="text-xs text-muted-foreground">
                 {filtered.length} project{filtered.length !== 1 ? "s" : ""}
               </span>
+              <ExportMenu
+                data={filtered as unknown as Record<string, unknown>[]}
+                columns={exportColumns}
+                title="Project Master"
+                filename="project-master"
+                disabled={!rights.canExport || filtered.length === 0}
+              />
             </div>
             {isLoading ? (
               <div className="flex justify-center py-16">

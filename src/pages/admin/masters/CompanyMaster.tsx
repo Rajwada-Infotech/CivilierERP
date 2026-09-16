@@ -22,6 +22,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { useLookup } from "@/hooks/useLookup";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -677,6 +679,20 @@ export default function CompanyMaster() {
       (c.City ?? "").toLowerCase().includes(search.toLowerCase()),
   );
 
+  const exportColumns: ExportColumn[] = useMemo(
+    () => [
+      { header: "Code", accessor: "Code" },
+      { header: "Company Name", accessor: "Name" },
+      { header: "Enterprise", accessor: "belongs_to" },
+      { header: "Type", accessor: "Type" },
+      { header: "Industry", accessor: "Industry" },
+      { header: "City", accessor: "City" },
+      { header: "GST Status", accessor: "GSTType" },
+      { header: "Status", accessor: (r: any) => (r.IsActive ? "Active" : "Inactive") },
+    ],
+    [],
+  );
+
   const openNew = () => {
     setForm({ ...empty });
     setEditId(null);
@@ -877,6 +893,13 @@ export default function CompanyMaster() {
               <span className="text-xs text-muted-foreground">
                 {filtered.length} compan{filtered.length !== 1 ? "ies" : "y"}
               </span>
+              <ExportMenu
+                data={filtered as unknown as Record<string, unknown>[]}
+                columns={exportColumns}
+                title="Company Master"
+                filename="company-master"
+                disabled={!rights.canExport || filtered.length === 0}
+              />
             </div>
             {isLoading ? (
               <div className="flex justify-center py-16">
