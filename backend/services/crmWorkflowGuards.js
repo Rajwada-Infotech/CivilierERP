@@ -154,9 +154,14 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   if (!hasValue(booking.Email)) {
     errors.push("Applicant email is required for customer portal login");
   }
-  if (!hasValue(booking.Mobile)) {
-    errors.push("Applicant mobile number is required as the initial portal password");
-  }
+  // Mobile is no longer required here (business decision) — it used to be
+  // mandatory purely because it doubled as the portal login's initial
+  // password. A mobile-less customer now simply never gets a portal
+  // account provisioned (see ensurePortalUser in crmPortalProvision.js,
+  // which already checks `if (!row.Mobile)` and returns a clean
+  // "cannot provision portal login" result instead of failing) — the same
+  // way they already can't receive SMS notifications. That's a narrower,
+  // more accurate consequence than blocking the entire Agreement.
 
   const welcome = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT TOP 1 Id

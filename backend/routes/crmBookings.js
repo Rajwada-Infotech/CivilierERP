@@ -2267,6 +2267,18 @@ router.post("/:id/provision-portal", requirePageRight("crm-bookings", "edit"), a
     }
     const { ensurePortalUser } = require("../services/crmPortalProvision");
     const result = await ensurePortalUser(pool, ApplicationId);
+    // ensurePortalUser signals a real failure (e.g. no mobile on file — now
+    // a normal, expected state since Mobile is optional) via
+    // { created: false, error } — but { created: false, id } is ALSO the
+    // legitimate idempotent "portal already exists" case, so the check has
+    // to be specifically on `error`, not on `created`. This route always
+    // returned 200 { success: true, ... } regardless of which one it was,
+    // so the frontend's `if (!r.ok)` check never fired and staff saw a
+    // false "provisioned successfully" toast for a customer whose portal
+    // was never actually created.
+    if (result.error) {
+      return res.status(400).json({ error: result.error });
+    }
     res.json({ success: true, ...result });
   } catch (e) {
     console.error("[crm-bookings] POST /:id/provision-portal error:", e.message);
