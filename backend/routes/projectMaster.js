@@ -132,6 +132,40 @@ async function ensureProjectLedgerHeads(pool, projectId, projectName, address, c
   await bumpCacheVersion("account-head-master");
 }
 
+// ── Sync a project's tagged additional companies ───────────────────────────────
+// The primary company_id stays untouched — this only replaces the
+// ProjectCompanies rows and the multi_company_enabled flag. Disabling the
+// toggle clears any previously tagged companies rather than just hiding
+// them, so a re-enable starts from a clean slate.
+async function syncProjectCompanies(pool, projectId, enabled, companyIds) {
+  await pool
+    .request()
+    .input("id", sql.Int, projectId)
+    .input("enabled", sql.Bit, enabled ? 1 : 0)
+    .query("UPDATE dbo.enterprise SET multi_company_enabled=@enabled WHERE id=@id");
+
+  await pool
+    .request()
+    .input("pid", sql.Int, projectId)
+    .query("DELETE FROM dbo.ProjectCompanies WHERE ProjectId=@pid");
+
+  if (!enabled || !Array.isArray(companyIds) || companyIds.length === 0) return;
+
+  const seen = new Set();
+  for (const raw of companyIds) {
+    const cid = parseInt(raw, 10);
+    if (!Number.isInteger(cid) || cid === projectId || seen.has(cid)) continue;
+    seen.add(cid);
+    await pool
+      .request()
+      .input("pid", sql.Int, projectId)
+      .input("cid", sql.Int, cid)
+      .query(
+        "INSERT INTO dbo.ProjectCompanies (ProjectId, CompanyId) VALUES (@pid, @cid)",
+      );
+  }
+}
+
 // ── GET all projects ──────────────────────────────────────────────────────────
 router.get("/", cache("project-master", 60, { shared: true }), async (req, res) => {
   try {
@@ -170,6 +204,9 @@ router.get("/", cache("project-master", 60, { shared: true }), async (req, res) 
         c.trade_license         AS CompanyTradeLicenseNo,
         ISNULL(p.jv_enabled, 0) AS JvEnabled,
         p.jv_company_name       AS JvCompanyName,
+        ISNULL(p.multi_company_enabled, 0) AS MultiCompanyEnabled,
+        (SELECT STRING_AGG(CAST(pc.CompanyId AS NVARCHAR(20)), ',')
+           FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = p.id) AS MultiCompanyIds,
         p.date_of_entry         AS CreatedAt
       FROM dbo.enterprise p WITH (NOLOCK)
       LEFT JOIN dbo.enterprise e WITH (NOLOCK) ON e.id = p.enterprise_id
@@ -351,6 +388,26 @@ router.post("/", adminOnly, async (req, res) => {
       );
     }
 
+    // Tag additional companies, if the form enabled it
+    try {
+      const projectRow = await pool
+        .request()
+        .input("name", sql.NVarChar(255), f.name || null)
+        .input("btype", sql.NVarChar(10), "P")
+        .query(
+          "SELECT TOP 1 id FROM dbo.enterprise WHERE name=@name AND business_type=@btype ORDER BY id DESC",
+        );
+      const newProjectId = projectRow.recordset[0]?.id;
+      if (newProjectId) {
+        await syncProjectCompanies(pool, newProjectId, !!f.multiCompanyEnabled, f.multiCompanyIds);
+      }
+    } catch (multiCompanyErr) {
+      console.warn(
+        "[projectMaster] Multi-company tagging failed:",
+        multiCompanyErr.message,
+      );
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -458,6 +515,16 @@ router.put("/:id", adminOnly, async (req, res) => {
       );
     }
 
+    // Tag additional companies, if the form enabled it
+    try {
+      await syncProjectCompanies(pool, parseInt(req.params.id, 10), !!f.multiCompanyEnabled, f.multiCompanyIds);
+    } catch (multiCompanyErr) {
+      console.warn(
+        "[projectMaster] Multi-company tagging failed:",
+        multiCompanyErr.message,
+      );
+    }
+
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -536,7 +603,16 @@ router.delete("/:id", adminOnly, async (req, res) => {
       });
     }
 
-    // 4. Safe to delete
+    // 4. Safe to delete — clear any multi-company tag rows referencing this
+    // project (either direction: as the tagged project, or as one of the
+    // additional companies tagged on some other project) before the FK'd
+    // enterprise row itself goes.
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(
+        "DELETE FROM dbo.ProjectCompanies WHERE ProjectId=@id OR CompanyId=@id",
+      );
     await pool
       .request()
       .input("id", sql.Int, id)
@@ -606,6 +682,12 @@ router.delete("/:id/cascade", async (req, res) => {
     // The project's own AccountHeadMaster ledger heads and TypeOfDoc rows
     // are intentionally left in place (see projectCascadeDelete.js) — only
     // the enterprise row itself is removed here, after everything under it.
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(
+        "DELETE FROM dbo.ProjectCompanies WHERE ProjectId=@id OR CompanyId=@id",
+      );
     await pool
       .request()
       .input("id", sql.Int, id)
