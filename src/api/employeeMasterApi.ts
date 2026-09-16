@@ -27,6 +27,9 @@ export interface EmployeeRow {
   GradeLevel: string | null;
   CostCenterId: number | null;
   CostCenterName: string | null;
+  CandidateId: number | null;
+  CandidateCode: string | null;
+  CandidateName: string | null;
   BankName: string | null;
   BankAccountNumber: string | null;
   BankIFSC: string | null;
@@ -67,6 +70,7 @@ export interface EmployeePayload {
   EmploymentType?: string | null;
   GradeLevel?: string | null;
   CostCenterId?: number | null;
+  CandidateId?: number | null;
   BankName?: string | null;
   BankAccountNumber?: string | null;
   BankIFSC?: string | null;

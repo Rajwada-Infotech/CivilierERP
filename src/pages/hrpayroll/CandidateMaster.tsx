@@ -79,13 +79,98 @@ const InterviewResultSelect: React.FC<{ candidateId: number; value: string }> = 
   );
 };
 
-function fileToBase64(file: File): Promise<string> {
+// ---- Resume storage: gzip-compress client-side before saving ---------------
+// A stored resume string is either:
+//  - the legacy plain data URI ("data:<mime>;base64,...") from before this
+//    compression logic existed, or from a file gzip couldn't shrink, or
+//  - "CZGZ1:<mime>|<base64-of-gzip-bytes>" when compression actually helped.
+// Comparing compressed-vs-original size means a resume is never stored
+// larger than the file the user picked.
+const GZIP_MARKER = "CZGZ1:";
+
+function fileToDataUri(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+}
+
+async function readAllChunks(readable: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = readable.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      total += value.length;
+    }
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function compressFileForStorage(file: File): Promise<string> {
+  const mimeType = file.type || "application/octet-stream";
+  if (typeof CompressionStream === "undefined") {
+    return fileToDataUri(file);
+  }
+  try {
+    const original = new Uint8Array(await file.arrayBuffer());
+    const cs = new CompressionStream("gzip");
+    const writer = cs.writable.getWriter();
+    writer.write(original as BufferSource);
+    writer.close();
+    const compressed = await readAllChunks(cs.readable);
+    if (compressed.length < original.length) {
+      return `${GZIP_MARKER}${mimeType}|${bytesToBase64(compressed)}`;
+    }
+  } catch {
+    // fall through to the uncompressed data URI below
+  }
+  return fileToDataUri(file);
+}
+
+// Resolves a stored resume string into a URL the browser can open/download
+// -- decompressing first when it's in the gzip-marker format, or using a
+// legacy plain data URI as-is.
+async function resolveResumeUrl(stored: string): Promise<string> {
+  if (!stored.startsWith(GZIP_MARKER)) return stored;
+  const rest = stored.slice(GZIP_MARKER.length);
+  const sep = rest.indexOf("|");
+  const mimeType = rest.slice(0, sep);
+  const base64 = rest.slice(sep + 1);
+  const ds = new DecompressionStream("gzip");
+  const writer = ds.writable.getWriter();
+  writer.write(base64ToBytes(base64) as BufferSource);
+  writer.close();
+  const original = await readAllChunks(ds.readable);
+  const blob = new Blob([original as BlobPart], { type: mimeType });
+  return URL.createObjectURL(blob);
 }
 
 // Read-only display for the server-generated Candidate ID (CAND-00001
@@ -105,27 +190,43 @@ const CandidateIdField: React.FC<{
   />
 );
 
-// Resume upload for the "custom" FieldDef slot — stores a data URI + the
-// original filename directly on the candidate record (same approach as
-// Employee Master's Photo field), no separate attachment table needed for
-// a single resume per candidate.
+// Resume upload for the "custom" FieldDef slot — stores a gzip-compressed
+// (when smaller) blob + the original filename directly on the candidate
+// record (same approach as Employee Master's Photo field), no separate
+// attachment table needed for a single resume per candidate.
 const ResumeField: React.FC<{
   value: unknown;
   onChange: (v: unknown) => void;
 }> = ({ value, onChange }) => {
-  const resume = (value as { name: string; dataUri: string } | null) || null;
+  const resume = (value as { name: string; stored: string } | null) || null;
   const inputId = "candidate-resume-input";
+  const [opening, setOpening] = React.useState(false);
+
+  const handleOpen = async () => {
+    if (!resume) return;
+    setOpening(true);
+    try {
+      const url = await resolveResumeUrl(resume.stored);
+      window.open(url, "_blank", "noreferrer");
+      if (url.startsWith("blob:")) setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch {
+      toast.error("Failed to open resume");
+    } finally {
+      setOpening(false);
+    }
+  };
+
   return (
     <div className="flex items-center gap-3">
       {resume ? (
-        <a
-          href={resume.dataUri}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-muted transition-colors max-w-[220px] truncate"
+        <button
+          type="button"
+          onClick={handleOpen}
+          disabled={opening}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-muted transition-colors max-w-[220px] disabled:opacity-50"
         >
-          <DocumentText size={13} className="shrink-0" /> <span className="truncate">{resume.name}</span>
-        </a>
+          <DocumentText size={13} className="shrink-0" /> <span className="truncate">{opening ? "Opening…" : resume.name}</span>
+        </button>
       ) : (
         <span className="text-xs text-muted-foreground">No resume uploaded</span>
       )}
@@ -156,8 +257,8 @@ const ResumeField: React.FC<{
             toast.error("Resume must be under 5 MB");
             return;
           }
-          const dataUri = await fileToBase64(file);
-          onChange({ name: file.name, dataUri });
+          const stored = await compressFileForStorage(file);
+          onChange({ name: file.name, stored });
           e.target.value = "";
         }}
       />
@@ -176,14 +277,14 @@ const mapRow = (r: CandidateRow): RecordWithId => ({
   expectedSalary: r.ExpectedSalary ?? "",
   currentSalary: r.CurrentSalary ?? "",
   noticePeriod: r.NoticePeriod || "",
-  resume: r.ResumeBase64 ? { name: r.ResumeFileName || "resume", dataUri: r.ResumeBase64 } : null,
+  resume: r.ResumeBase64 ? { name: r.ResumeFileName || "resume", stored: r.ResumeBase64 } : null,
   interviewStatus: r.InterviewStatus || "",
   remarks: r.Remarks || "",
   isActive: Boolean(r.IsActive),
 });
 
 const toPayload = (r: Record<string, any>) => {
-  const resume = r.resume as { name: string; dataUri: string } | null;
+  const resume = r.resume as { name: string; stored: string } | null;
   return {
     CandidateCode: r.candidateCode?.trim() || "",
     CandidateName: r.candidateName?.trim() || "",
@@ -195,7 +296,7 @@ const toPayload = (r: Record<string, any>) => {
     CurrentSalary: r.currentSalary !== "" && r.currentSalary != null ? Number(r.currentSalary) : null,
     NoticePeriod: r.noticePeriod?.trim() || null,
     ResumeFileName: resume?.name || null,
-    ResumeBase64: resume?.dataUri || null,
+    ResumeBase64: resume?.stored || null,
     InterviewStatus: r.interviewStatus || null,
     Remarks: r.remarks?.trim() || null,
     IsActive: r.isActive !== false,
