@@ -833,8 +833,8 @@ export default function HomePage() {
         access.engineering,
       ],
       queryFn: () => fetchHomeDashboard(isAdmin, access),
-      staleTime: 2 * 60 * 1000,
-      refetchInterval: 5 * 60 * 1000,
+      staleTime: 5 * 60 * 1000,      // 5 min — aggregate stats don't need sub-2-min freshness
+      refetchInterval: 10 * 60 * 1000, // 10 min background poll
       retry: 2,
     });
 
