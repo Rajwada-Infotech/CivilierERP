@@ -183,7 +183,18 @@ const BOOKING_SELECT = `
     -- CrmOnAccountPayment row for the exact same money — adding them
     -- double-counted every on-account deposit (confirmed: booking 77 showed
     -- ₹20,000 on-account for a real ₹10,000 deposit).
-    (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount
+    (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount,
+    -- Post-agreement lifecycle flags — mirror GET /:id/lifecycle's own gates
+    -- exactly (agRegistered/sdDone/hoDone/regDone/mutDone there) so this
+    -- list's "next step" chip stops falsely declaring "All Steps Complete"
+    -- the moment payments+agreement clear, when NOC/Handover/Sale Deed/
+    -- Registry/Mutation haven't even started yet.
+    CAST(CASE WHEN ag.Status = '${CrmStatus.REGISTERED}' THEN 1 ELSE 0 END AS BIT) AS AgreementRegistered,
+    CAST(CASE WHEN lastNoc.LastNocStatus = 'Issued' THEN 1 ELSE 0 END AS BIT) AS NocIssued,
+    CAST(CASE WHEN ho.HandoverStatus = 'Completed' THEN 1 ELSE 0 END AS BIT) AS HandoverDone,
+    CAST(CASE WHEN sd.DirectorApprovalStatus = '${CrmStatus.APPROVED}' THEN 1 ELSE 0 END AS BIT) AS SalesDeedDone,
+    CAST(CASE WHEN reg.RegistryStatus = 'Completed' THEN 1 ELSE 0 END AS BIT) AS RegistryDone,
+    CAST(CASE WHEN mut.MutationStatus = 'Approved' THEN 1 ELSE 0 END AS BIT) AS MutationDone
   FROM dbo.CrmBooking b
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.UnitMaster um   ON um.Id   = b.UnitId
@@ -201,10 +212,26 @@ const BOOKING_SELECT = `
     WHERE BookingId = b.Id ORDER BY CreatedAt DESC
   ) ag
   OUTER APPLY (
-    SELECT TOP 1 Status AS DeedStatus
+    SELECT TOP 1 Status AS DeedStatus, DirectorApprovalStatus
     FROM dbo.CrmSalesDeed
     WHERE BookingId = b.Id ORDER BY CreatedAt DESC
   ) sd
+  -- Same "last non-Rejected NOC, else resolve by loan financing" logic as
+  -- resolveNocType() in crmWorkflowGuards.js — kept in sync deliberately so
+  -- this chip and the real NOC-type gate never disagree.
+  OUTER APPLY (
+    SELECT TOP 1 NocType AS LastNocType, Status AS LastNocStatus
+    FROM dbo.CrmNoc WHERE BookingId = b.Id AND Status <> 'Rejected' ORDER BY CreatedAt DESC
+  ) lastNoc
+  OUTER APPLY (
+    SELECT TOP 1 Status AS HandoverStatus FROM dbo.CrmHandover WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+  ) ho
+  OUTER APPLY (
+    SELECT TOP 1 Status AS RegistryStatus FROM dbo.CrmRegistry WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+  ) reg
+  OUTER APPLY (
+    SELECT TOP 1 Status AS MutationStatus FROM dbo.CrmMutation WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+  ) mut
 `;
 
 // GET / — all bookings. By default, Cancelled/Rejected bookings are

@@ -938,7 +938,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
   const [wcTab, setWcTab] = useState<WcTab>("Overview");
 
   const { data: users = [] } = useQuery({ queryKey: ["sa-users"], queryFn: fetchUsers, staleTime: 5 * 60_000 });
-  const { data: checklist, refetch: refetchChecklist } = useQuery({
+  const { refetch: refetchChecklist } = useQuery({
     queryKey: ["crm-welcome-checklist", booking.BookingId],
     queryFn: () => fetchChecklist(booking.BookingId),
   });
@@ -1883,44 +1883,6 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
               </div>
             </div>
 
-            {/* Booking Readiness — horizontal strip now that there's actual
-                room, same tri-state logic as before: "blank" (never
-                touched), "progress" (started but not yet clean/complete —
-                amber), "done" (green — genuinely finished, e.g. the
-                customer was actually Welcomed, not just called). */}
-            {checklist && (
-              <div className="rounded-xl border border-border p-3.5">
-                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">Booking Readiness</h4>
-                <div className="flex flex-wrap gap-x-5 gap-y-2">
-                  {(() => {
-                    const hasNoc = checklist.noc.length > 0;
-                    const nocIssued = checklist.noc.some((n: any) => n.Status === "Issued");
-                    const steps: { label: string; state: "blank" | "progress" | "done" }[] = [
-                      { label: "Welcome Call", state: checklist.welcomeCall.done ? "done" : checklist.welcomeCall.called ? "progress" : "blank" },
-                      { label: "Documents Verified", state:
-                        checklist.documents.total === 0 ? "blank"
-                        : checklist.documents.verified === checklist.documents.total ? "done" : "progress" },
-                      { label: "Co-Applicant Added", state: checklist.coApplicants.count > 0 ? "done" : "blank" },
-                      { label: "Bank Details", state: checklist.bankDetails.complete ? "done" : checklist.bankDetails.started ? "progress" : "blank" },
-                      { label: "NOC Issued", state: nocIssued ? "done" : hasNoc ? "progress" : "blank" },
-                      { label: "Agreement", state: checklist.agreement?.Status === CrmStatus.EXECUTED ? "done" : checklist.agreement ? "progress" : "blank" },
-                    ];
-                    return steps.map((s) => (
-                      <div key={s.label} className="flex items-center gap-1.5 text-xs">
-                        <span className={`flex items-center justify-center w-4 h-4 rounded-full shrink-0 ${
-                          s.state === "done" ? "bg-emerald-500 text-white"
-                          : s.state === "progress" ? "bg-amber-400 text-white"
-                          : "border border-border text-transparent"
-                        }`}>
-                          {s.state === "done" && <Check size={10} />}
-                        </span>
-                        <span className={s.state === "done" ? "text-foreground" : s.state === "progress" ? "text-amber-600" : "text-muted-foreground"}>{s.label}</span>
-                      </div>
-                    ));
-                  })()}
-                </div>
-              </div>
-            )}
         </div>
         )}
 
