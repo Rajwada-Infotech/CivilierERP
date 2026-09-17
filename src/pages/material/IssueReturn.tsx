@@ -133,27 +133,17 @@ export default function IssueReturn() {
   const saveMut = useMutation({
     mutationFn: (payload: any) =>
       editId
-        ? apiFetch(`${API}/${editId}`, { method: "PUT", body: JSON.stringify(payload) })
+        ? apiFetch<{ resubmitted?: boolean }>(`${API}/${editId}`, { method: "PUT", body: JSON.stringify(payload) })
         : apiFetch(API, { method: "POST", body: JSON.stringify(payload) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["issue-returns"] }); toast.success(editId ? "Updated" : "Created"); setView("list"); setEditId(null); setForm(emptyForm()); },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const submitMut = useMutation({
-    mutationFn: (id: number) => apiFetch(`${API}/${id}/submit`, { method: "PUT" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["issue-returns"] }); toast.success("Submitted for approval"); },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const approveMut = useMutation({
-    mutationFn: (id: number) => apiFetch(`${API}/${id}/approve`, { method: "PUT" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["issue-returns"] }); toast.success("Approved"); },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const rejectMut = useMutation({
-    mutationFn: (id: number) => apiFetch(`${API}/${id}/reject`, { method: "PUT" }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["issue-returns"] }); toast.success("Rejected"); },
+    onSuccess: (res: any) => {
+      qc.invalidateQueries({ queryKey: ["issue-returns"] });
+      toast.success(
+        res?.resubmitted
+          ? "Updated and re-submitted for approval"
+          : editId ? "Updated" : "Created and submitted for approval",
+      );
+      setView("list"); setEditId(null); setForm(emptyForm());
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -242,18 +232,11 @@ export default function IssueReturn() {
       cell: ({ row: { original: r } }) => (
         <div className="flex items-center justify-end gap-1">
           <button className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors" title="View" onClick={() => openDetail(r)}><Eye size={14} /></button>
-          {(r.Status === "Draft" || r.Status === "Approved") && rights.canEdit && <button className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/10 transition-colors" title="Edit" onClick={() => openEdit(r)}><Edit3 size={14} /></button>}
-          {r.Status === "Draft" && rights.canEdit && (
-            <button className="p-1.5 rounded-lg text-emerald-400 hover:bg-emerald-500/10 transition-colors" title="Submit for approval" onClick={() => submitMut.mutate(r.ReturnId)}>
-              <CheckCircle2 size={14} />
-            </button>
-          )}
-          {r.Status === "Pending" && rights.canEdit && (
-            <>
-              <button className="p-1.5 rounded-lg text-emerald-400 hover:bg-emerald-500/10 transition-colors" title="Approve" onClick={() => approveMut.mutate(r.ReturnId)}><CheckCircle2 size={14} /></button>
-              <button className="p-1.5 rounded-lg text-red-400 hover:bg-red-500/10 transition-colors" title="Reject" onClick={() => rejectMut.mutate(r.ReturnId)}><X size={14} /></button>
-            </>
-          )}
+          {/* Approve/Reject live only in the centralized Approval Inbox, same
+              as Material Request/PO/GRN — this list never shows them.
+              Submit is automatic on create; editing a Rejected return
+              re-submits it on save (see saveMut), so no manual button either. */}
+          {(r.Status === "Draft" || r.Status === "Approved" || r.Status === "Rejected") && rights.canEdit && <button className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/10 transition-colors" title={r.Status === "Rejected" ? "Edit and re-submit for approval" : "Edit"} onClick={() => openEdit(r)}><Edit3 size={14} /></button>}
           {["Draft", "Rejected"].includes(r.Status) && rights.canDelete && (
             <button className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors" title="Delete" onClick={() => { if (confirm("Delete this return?")) deleteMut.mutate(r.ReturnId); }}>
               <Trash2 size={14} />
@@ -572,20 +555,15 @@ export default function IssueReturn() {
                   <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Issue Return</p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
-                  {(detailRecord.Status === "Draft" || detailRecord.Status === "Approved") && rights.canEdit && (
+                  {/* Approve/Reject live only in the centralized Approval
+                      Inbox. Submit is automatic on create; editing a
+                      Rejected return re-submits it on save (see saveMut). */}
+                  {(detailRecord.Status === "Draft" || detailRecord.Status === "Approved" || detailRecord.Status === "Rejected") && rights.canEdit && (
                     <button
                       onClick={() => { setDetailRecord(null); openEdit(detailRecord); }}
                       className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm"
                     >
-                      <Edit3 size={13} /><span className="hidden sm:inline">Edit</span>
-                    </button>
-                  )}
-                  {detailRecord.Status === "Draft" && rights.canEdit && (
-                    <button
-                      onClick={() => { submitMut.mutate(detailRecord.ReturnId); setDetailRecord(null); }}
-                      className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-blue-500 to-violet-500 shadow-sm"
-                    >
-                      <CheckCircle2 size={13} /><span className="hidden sm:inline">Submit</span>
+                      <Edit3 size={13} /><span className="hidden sm:inline">{detailRecord.Status === "Rejected" ? "Edit & Re-submit" : "Edit"}</span>
                     </button>
                   )}
                   <button onClick={() => setDetailRecord(null)} className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground">

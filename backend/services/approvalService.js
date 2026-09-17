@@ -59,6 +59,11 @@ const MODULE_MAP = {
     pk: "IssueId",
     status: "Status",
   },
+  "material-issue-return": {
+    table: "dbo.MaterialIssueReturn",
+    pk: "ReturnId",
+    status: "Status",
+  },
   "sale-orders": {
     table: "dbo.SaleOrders",
     pk: "SaleOrderID",
@@ -260,6 +265,7 @@ const WORKFLOW_ID_MAP = {
   payments: "NewPayment",
   "material-requests": "MaterialRequests",
   "material-issues": "MaterialIssues",
+  "material-issue-return": "MaterialIssueReturn",
   "sale-orders": "SaleOrder",
   "vehicle-in-out": "VehicleInOut",
   "stock-transfers": "StockTransfer",
@@ -407,6 +413,27 @@ async function getApprovedLevelCount(tableName, recordId, executor = null) {
 }
 
 /**
+ * Every level-satisfaction check below is scoped to the CURRENT submission
+ * cycle only — rows at or after the most recent Level=0 'Pending' marker for
+ * this record. Without this, resubmitting a Rejected document (edit → save →
+ * re-submit) would have old approvals from BEFORE the rejection still count:
+ * a document rejected at level 2 after level 1 was already approved would,
+ * on resubmission, skip straight back to level 2 instead of genuinely
+ * restarting at level 1 — the edited version was never re-reviewed by level
+ * 1's approvers at all. transition()'s "Pending" branch always writes a
+ * fresh Level=0 marker on every Draft/Rejected → Pending submit, so this
+ * cutoff exists for every record that's ever gone through this engine; a
+ * record with no marker at all (pre-dates it) falls back to no cutoff so
+ * old history still counts, matching prior behavior.
+ */
+function currentCycleCutoffSql(tableName, recordId) {
+  return `ISNULL((
+    SELECT MAX(ActionAt) FROM dbo.ApprovalAuditLog
+    WHERE TableName = @TableName AND RecordId = @RecordId AND Level = 0 AND ActionStatus = 'Pending'
+  ), '1900-01-01')`;
+}
+
+/**
  * Whether a single level is fully satisfied, given its mode:
  *  - "all": every userId in levelDef.userIds has its own distinct Approved
  *    entry at this level. Requires at least one userId to mean anything —
@@ -418,6 +445,7 @@ async function getApprovedLevelCount(tableName, recordId, executor = null) {
  */
 async function isLevelSatisfied(tableName, recordId, level, levelDef, executor = null) {
   const exec = executor || getPool();
+  const cutoff = currentCycleCutoffSql(tableName, recordId);
   if (levelDef?.mode === "all" && Array.isArray(levelDef.userIds) && levelDef.userIds.length > 0) {
     const result = await exec
       .request()
@@ -427,6 +455,7 @@ async function isLevelSatisfied(tableName, recordId, level, levelDef, executor =
         SELECT DISTINCT UserId FROM dbo.ApprovalAuditLog
         WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level
           AND ActionStatus = 'Approved' AND UserId IS NOT NULL
+          AND ActionAt >= ${cutoff}
       `);
     const approvedUserIds = new Set(result.recordset.map((r) => r.UserId));
     return levelDef.userIds.every((uid) => approvedUserIds.has(uid));
@@ -438,6 +467,7 @@ async function isLevelSatisfied(tableName, recordId, level, levelDef, executor =
     .input("Level", sql.Int, level).query(`
       SELECT TOP 1 1 AS found FROM dbo.ApprovalAuditLog
       WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level AND ActionStatus = 'Approved'
+        AND ActionAt >= ${cutoff}
     `);
   return result.recordset.length > 0;
 }

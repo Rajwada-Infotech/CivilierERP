@@ -502,6 +502,32 @@ function buildInboxQueries(module) {
       `);
     }
 
+    if (!module || module === "material-issue-return") {
+      queries.push(`
+        SELECT
+          'material-issue-return'                                        AS Module,
+          'Material Issue Return'                                        AS ModuleLabel,
+          CAST(ir.ReturnId AS NVARCHAR)                                   AS RecordId,
+          ISNULL(ir.DocNo, CONCAT('IRN#', CAST(ir.ReturnId AS NVARCHAR))) AS Reference,
+          ir.ReturnDate                                                   AS RecordDate,
+          ISNULL(ir.Status, 'Pending')                                    AS Status,
+          CAST(NULL AS NVARCHAR)                                         AS ContractorName,
+          ISNULL(mi.DocNo, ISNULL(p.name, ir.Reason))                    AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))                                     AS Amount,
+          ${NULL_EXTRA}
+          CAST(ir.CreatedBy AS NVARCHAR(255))                             AS CreatedBy,
+          ''                                                              AS ApprovedBy,
+          ''                                                              AS ApprovedAt,
+          ''                                                              AS RejectedBy,
+          ''                                                              AS RejectionNote,
+          ISNULL(ir.UpdatedAt, ir.CreatedAt)                             AS LastModified
+        FROM dbo.MaterialIssueReturn ir
+        LEFT JOIN dbo.MaterialIssues mi ON mi.IssueId = ir.IssueId
+        LEFT JOIN dbo.enterprise p ON p.id = ir.ProjectId
+        WHERE ISNULL(ir.Status, 'Pending') = 'Pending'
+      `);
+    }
+
     if (!module || module === "sale-orders") {
       queries.push(`
         SELECT

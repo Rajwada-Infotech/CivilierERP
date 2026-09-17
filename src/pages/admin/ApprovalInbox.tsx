@@ -152,6 +152,13 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/material-issues",
     label: "Material Issues",
   },
+  "material-issue-return": {
+    icon: Undo2,
+    color: "text-lime-500 bg-lime-500/10",
+    navPath: "/material/issue-return",
+    apiEndpoint: "/api/material-issue-return",
+    label: "Material Issue Returns",
+  },
   "sale-orders": {
     icon: ShoppingCart,
     color: "text-fuchsia-500 bg-fuchsia-500/10",
@@ -323,6 +330,7 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
   "expense-booking": "ExpenseBooking",
   payments: "NewPayment",
   "material-issues": "MaterialIssues",
+  "material-issue-return": "MaterialIssueReturn",
   "material-requests": "MaterialRequests",
   boq: "BOQ",
   "work-done": "WorkDone",
