@@ -71,9 +71,9 @@ const MODULE_OPTIONS = [
   },
   {
     id: "Expenses",
-    label: "Expense Booking",
+    label: "Invoice",
     icon: "🧾",
-    desc: "Staff expense claims",
+    desc: "Before an invoice is booked",
   },
   {
     id: "WorkOrderHeader",
@@ -251,7 +251,6 @@ const MODULE_GROUPS = [
       "PurchaseOrders",
       "MaterialIssues",
       "MaterialRequests",
-      "Expenses",
       "InterCompanyTransfer",
       "VehicleInOut",
       "debit-note",
@@ -267,7 +266,7 @@ const MODULE_GROUPS = [
     id: "finance",
     label: "Finance",
     icon: "💰",
-    modules: ["NewPayment", "JournalVoucher", "FundTransfer", "Contract"],
+    modules: ["NewPayment", "Expenses", "JournalVoucher", "FundTransfer", "Contract"],
   },
   {
     id: "sales",
