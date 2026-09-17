@@ -20,12 +20,22 @@ router.get("/dropdown", async (req, res) => {
       ORDER BY name
     `);
 
+    // company_ids includes the project's primary company plus every company
+    // it's tagged to via dbo.ProjectCompanies (migration 451) — a project
+    // can be authorized to transact against more than one company without
+    // changing which company actually owns it. Was previously just the
+    // single company_id re-cast to text; CrmCompanyProjectBlockFilter now
+    // checks membership in this list rather than exact equality.
     const projects = await pool.request().query(`
       SELECT
           p.id,
           p.name,
           p.company_id,
-          CAST(p.company_id AS NVARCHAR(20)) AS company_ids
+          CONCAT(
+            CAST(p.company_id AS NVARCHAR(20)),
+            ISNULL(',' + (SELECT STRING_AGG(CAST(pc.CompanyId AS NVARCHAR(20)), ',')
+                          FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = p.id), '')
+          ) AS company_ids
         FROM dbo.enterprise p
         WHERE p.business_type = 'P' AND ISNULL(p.discontinue, 0) = 0
         ORDER BY p.name

@@ -26,9 +26,10 @@ const DOC_TYPES = {
   boq: { module: "engineering", label: "BOQ" },
   "work-order": { module: "engineering", label: "Work Order" },
   "work-done": { module: "engineering", label: "Work Done" },
+  "project-master": { module: "admin", label: "Project" },
 };
 
-const MODULES = ["finance", "material", "engineering"];
+const MODULES = ["finance", "material", "engineering", "admin"];
 
 function docTypesForModule(module) {
   return Object.keys(DOC_TYPES).filter((k) => DOC_TYPES[k].module === module);

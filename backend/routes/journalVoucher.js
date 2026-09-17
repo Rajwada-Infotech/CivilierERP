@@ -15,6 +15,7 @@ const { transition, guardEdit, getRecordStatus } = require("../services/approval
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { postJournalVoucherApproval, hasPosting, reversePostingBySource } = require("../services/generalLedger");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -268,6 +269,11 @@ router.post("/", authenticateToken, requirePageRight("journal-voucher", "create"
     if (!JVDate) return res.status(400).json({ error: "JVDate is required." });
     const linesError = validateLines(lines);
     if (linesError) return res.status(400).json({ error: linesError });
+    try {
+      await assertProjectVisibleToCompany(pool, ProjectId, CompanyId);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
 
     const dtId = await resolveDocTypeId(pool, sql, "JV");
     const finalDocNo = await lockNextDocNumber(pool, sql, {
@@ -386,6 +392,11 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
     if (!JVDate) return res.status(400).json({ error: "JVDate is required." });
     const linesError = validateLines(lines);
     if (linesError) return res.status(400).json({ error: linesError });
+    try {
+      await assertProjectVisibleToCompany(pool, ProjectId, CompanyId);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
 
     // Editing rewrites every line (delete-all, re-insert) — a line a
     // Payment already references via NewPayment.JVLineId (FK_NewPayment_
