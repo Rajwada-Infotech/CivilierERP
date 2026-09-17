@@ -481,18 +481,32 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   if (!bookingRow) return null;
 
   const deedNo = await getNextDocNumber(pool, "DEED", "DEED");
-  const result = await pool.request()
-    .input("no",   sql.NVarChar(30), deedNo)
-    .input("bid",  sql.Int, bookingId)
-    .input("agid", sql.Int, agreement.recordset[0].Id)
-    .input("note", sql.NVarChar(sql.MAX), "Auto-created — handover completed and AFS registered")
-    .input("cb",   sql.Int, actorUserId || null)
-    .query(`
-      INSERT INTO dbo.CrmSalesDeed (DeedNo, BookingId, AgreementId, Status, Notes, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id
-      VALUES (@no, @bid, @agid, 'Draft', @note, @cb, SYSDATETIME())
-    `);
-  const deedId = result.recordset[0].Id;
+  let deedId;
+  try {
+    const result = await pool.request()
+      .input("no",   sql.NVarChar(30), deedNo)
+      .input("bid",  sql.Int, bookingId)
+      .input("agid", sql.Int, agreement.recordset[0].Id)
+      .input("note", sql.NVarChar(sql.MAX), "Auto-created — handover completed and AFS registered")
+      .input("cb",   sql.Int, actorUserId || null)
+      .query(`
+        INSERT INTO dbo.CrmSalesDeed (DeedNo, BookingId, AgreementId, Status, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @agid, 'Draft', @note, @cb, SYSDATETIME())
+      `);
+    deedId = result.recordset[0].Id;
+  } catch (e) {
+    // Same race guard as every sibling maybeAutoCreate* in this file
+    // (maybeAutoCreateAgreement, maybeAutoCreateLegalMilestone) — this one
+    // was missing it. Two near-simultaneous triggers (Handover completion
+    // and the milestone-settlement holdover call, see comment above) can
+    // both pass the `existing` check above before either INSERTs; the
+    // UNIQUE constraint on CrmSalesDeed.BookingId still prevents an actual
+    // duplicate row, but without this catch the loser surfaced as a raw,
+    // unhandled 500 instead of a clean no-op.
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) return null;
+    throw e;
+  }
 
   if (bookingRow.AssignedTo) {
     await emitNotification(pool, bookingRow.AssignedTo, "crm_sales_deed_ready",
