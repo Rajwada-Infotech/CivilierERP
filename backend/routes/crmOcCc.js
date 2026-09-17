@@ -5,6 +5,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
+const { rollupBookingTotals } = require("./crmParking");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -125,6 +126,30 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
         "  OUTPUT INSERTED.Id" +
         "  VALUES (@pid, @proj, @bid, @bname, @ct, @st, @ad, @rd, @cno, @isb, @rem, @cb, SYSDATETIME())"
       );
+    // Same retroactive recalc as PUT /:id — a cert can be created already
+    // Received (staff recording a certificate that's been in hand for a
+    // while), and any pre-existing booking in scope needs its GST
+    // reassessed immediately, not left stale until some unrelated edit.
+    if ((b.Status || "Applied") === "Received") {
+      const affected = await pool.request()
+        .input("pid", sql.Int, parseInt(b.ProjectId))
+        .input("bid", sql.Int, blockId)
+        .query(`
+          SELECT bk.Id FROM dbo.CrmBooking bk
+          LEFT JOIN dbo.UnitMaster um ON um.Id = bk.UnitId
+          WHERE bk.ProjectId = @pid AND bk.IsActive = 1
+            AND bk.Status NOT IN ('Cancelled','Rejected')
+            AND (@bid IS NULL OR um.BlockId = @bid)
+        `);
+      for (const row of affected.recordset) {
+        try {
+          await rollupBookingTotals(pool, row.Id);
+        } catch (gstErr) {
+          console.error(`[crm-oc-cc] GST recalc failed for booking ${row.Id}:`, gstErr.message);
+        }
+      }
+    }
+
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
     // DB-level unique constraint violation (migration 412) — belt-and-suspenders.
@@ -143,8 +168,9 @@ router.put("/:id", requirePageRight("crm-oc-cc", "edit"), async (req, res) => {
     const id = parseInt(req.params.id, 10);
     const b = req.body;
 
-    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Id FROM dbo.CrmOccupancyCertificate WHERE Id = @id");
+    const cur = await pool.request().input("id", sql.Int, id).query("SELECT Id, ProjectId, BlockId, Status FROM dbo.CrmOccupancyCertificate WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "OC/CC record not found" });
+    const wasReceived = cur.recordset[0].Status === "Received";
 
     if (b.CertType && !["OC", "CC", "OC+CC"].includes(b.CertType))
       return res.status(400).json({ error: "CertType must be OC, CC, or OC+CC" });
@@ -174,6 +200,41 @@ router.put("/:id", requirePageRight("crm-oc-cc", "edit"), async (req, res) => {
         "  UpdatedAt       = SYSDATETIME()" +
         "  WHERE Id = @id"
       );
+
+    // Becoming Received (or an already-Received cert's ReceivedDate moving)
+    // can newly satisfy the GST-exemption payment-timing check (Schedule III
+    // Entry 5 — see checkGstExemption in crmGst.js) for bookings that
+    // already exist. Nothing else re-runs recalculateBookingGst for them —
+    // it only fires on booking creation or a Unit/Parking/Extra-Charge edit
+    // — so without this, a booking priced before its cert cleared would
+    // silently keep charging tax forever, contradicting the whole point of
+    // this feature. Scoped exactly like buildSelect()'s BookingCount above:
+    // this block's bookings if BlockId is set, the whole project otherwise.
+    const becameReceived = b.Status === "Received" || (wasReceived && b.ReceivedDate);
+    if (becameReceived) {
+      const { ProjectId, BlockId } = cur.recordset[0];
+      const affected = await pool.request()
+        .input("pid", sql.Int, ProjectId)
+        .input("bid", sql.Int, BlockId)
+        .query(`
+          SELECT b.Id FROM dbo.CrmBooking b
+          LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+          WHERE b.ProjectId = @pid AND b.IsActive = 1
+            AND b.Status NOT IN ('Cancelled','Rejected')
+            AND (@bid IS NULL OR um.BlockId = @bid)
+        `);
+      for (const row of affected.recordset) {
+        try {
+          await rollupBookingTotals(pool, row.Id);
+        } catch (gstErr) {
+          // One booking's recalc failing (e.g. a data quirk on a single old
+          // record) shouldn't roll back the certificate update itself or
+          // block every other booking in the batch from getting recalced.
+          console.error(`[crm-oc-cc] GST recalc failed for booking ${row.Id}:`, gstErr.message);
+        }
+      }
+    }
+
     res.json({ success: true });
   } catch (e) {
     console.error("[crm-oc-cc] PUT error:", e.message);

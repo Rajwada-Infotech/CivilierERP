@@ -115,6 +115,24 @@ jobs:
           test -f release/docker-compose.yml
           test -f release/backend/server.js
 
+      - name: Stamp build info
+        # git archive strips .git entirely, so nothing in the extracted tree
+        # can ever say which commit it actually came from — this is exactly
+        # what let a stale box pass every "deploy succeeded" check while
+        # serving old code with no way to tell. Bake the real commit + build
+        # time into both halves of the app so a deploy can VERIFY what
+        # actually landed instead of trusting a clean exit code:
+        #   - public/version.json -> Vite copies public/ verbatim into
+        #     dist/, so this becomes GET /version.json on the live frontend.
+        #   - backend/build-info.json -> read by GET /health (see health.js).
+        run: |
+          COMMIT="${{ github.sha }}"
+          BUILT_AT="$(date -u +%FT%TZ)"
+          INFO=$(printf '{"commit":"%s","ref":"%s","runNumber":"%s","builtAt":"%s"}' \
+            "$COMMIT" "${{ github.ref_name }}" "${{ github.run_number }}" "$BUILT_AT")
+          echo "$INFO" | tee release/public/version.json
+          echo "$INFO" | tee release/backend/build-info.json
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
