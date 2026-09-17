@@ -209,7 +209,7 @@ router.put("/:id/approve", requirePageRight("stock-transfers", "edit"), async (r
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   const pool = getPool();
   try {
-    const result = await transition("stock-transfers", id, "Approved", req.user?.email, req.user?.role);
+    const result = await transition("stock-transfers", id, "Approved", req.user?.email, req.user?.role, null, req.user?.userId ?? req.user?.id ?? null);
 
     // Only once the record is genuinely fully approved (transition() itself
     // is the authority on this — it already accounts for multi-level and
@@ -319,7 +319,7 @@ router.put("/:id/reject", requirePageRight("stock-transfers", "edit"), async (re
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   try {
     const { note } = req.body || {};
-    const result = await transition("stock-transfers", id, "Rejected", req.user?.email, req.user?.role, note || null);
+    const result = await transition("stock-transfers", id, "Rejected", req.user?.email, req.user?.role, note || null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("stock-transfers");
     res.json({ message: "Stock transfer rejected", ...result });
   } catch (err) {

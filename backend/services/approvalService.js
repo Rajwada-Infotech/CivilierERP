@@ -907,4 +907,12 @@ module.exports = {
   // source of truth for what each module's identity/status column is.
   MODULE_MAP,
   GL_POSTERS,
+  // Exported for approvalInbox.js's per-record visibility filter — it needs
+  // the exact same "which level, who's allowed" resolution transition()
+  // itself uses, not a second, potentially drifting reimplementation.
+  WORKFLOW_ID_MAP,
+  MODULE_APPROVER_ROLE_OVERRIDES,
+  APPROVER_ROLES,
+  resolveCurrentLevel,
+  isLevelSatisfied,
 };

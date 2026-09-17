@@ -3958,6 +3958,8 @@ router.put("/:id/approve", requirePageRight("expense-booking", "edit"), async (r
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
 
     // Initialize EBillStatus/ETotalPaid/ERemainingAmount the moment the
@@ -4003,6 +4005,7 @@ router.put(
         userEmail,
         req.user?.role,
         note || null,
+        req.user?.userId ?? req.user?.id ?? null,
       );
       await bumpCacheVersion("expense-booking");
       await bumpCacheVersion("expense-booking-options");

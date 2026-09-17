@@ -473,7 +473,7 @@ router.put("/:id/approve", authenticateToken, requirePageRight("fund-transfer", 
 
     let transitionResult = {};
     if (!alreadyApproved) {
-      transitionResult = await transition("fund-transfer", id, "Approved", user, req.user?.role, req.body?.note);
+      transitionResult = await transition("fund-transfer", id, "Approved", user, req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
     }
 
     if (alreadyApproved) {
@@ -521,7 +521,7 @@ router.put("/:id/reject", authenticateToken, requirePageRight("fund-transfer", "
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const result = await transition("fund-transfer", id, "Rejected", user, req.user?.role, req.body?.note);
+    const result = await transition("fund-transfer", id, "Rejected", user, req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("fund-transfer");
     res.json({ message: "Fund Transfer rejected", ...result });
   } catch (err) {

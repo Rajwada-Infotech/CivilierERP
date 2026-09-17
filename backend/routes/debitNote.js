@@ -518,7 +518,7 @@ router.put("/:id/approve", requirePageRight("debit-note", "edit"), async (req, r
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
-    const result = await transition("debit-note", id, "Approved", userEmail(req), req.user?.role);
+    const result = await transition("debit-note", id, "Approved", userEmail(req), req.user?.role, null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("debit-note");
     res.json({ message: "Debit note approved", ...result });
   } catch (err) {
@@ -532,7 +532,7 @@ router.put("/:id/reject", requirePageRight("debit-note", "edit"), async (req, re
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const { note } = req.body;
-    const result = await transition("debit-note", id, "Rejected", userEmail(req), req.user?.role, note || null);
+    const result = await transition("debit-note", id, "Rejected", userEmail(req), req.user?.role, note || null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("debit-note");
     res.json({ message: "Debit note rejected", ...result });
   } catch (err) {

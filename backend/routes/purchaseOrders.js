@@ -1426,6 +1426,8 @@ router.put("/:id/approve", requirePageRight("purchase-orders", "edit"), async (r
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order approved", ...result });
@@ -1450,6 +1452,7 @@ router.put("/:id/reject", requirePageRight("purchase-orders", "edit"), async (re
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order rejected", ...result });
