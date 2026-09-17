@@ -345,12 +345,6 @@ const CustomerMaster: React.FC = () => {
 
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [page, setPage] = useState(1);
-  const LIMIT = 10;
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, filterStatus]);
 
   // ── Remote data ────────────────────────────────────────────────────────────
   const {
@@ -584,9 +578,6 @@ const CustomerMaster: React.FC = () => {
       return matchSearch && matchStatus;
     });
   }, [customers, search, filterStatus]);
-
-  const totalPages = Math.max(Math.ceil(filtered.length / LIMIT), 1);
-  const paginated = filtered.slice((page - 1) * LIMIT, page * LIMIT);
 
   // ── Shared CSS ─────────────────────────────────────────────────────────────
   const inputCls =
@@ -1002,10 +993,12 @@ const CustomerMaster: React.FC = () => {
           {/* Table */}
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden [&_th:last-child]:text-left [&_td:last-child]:text-left">
             <DataTable
-              data={paginated}
+              data={filtered}
               columns={columns}
               loading={isLoading}
-              searchPlaceholder="Search customers..."
+              searchable={false}
+              paginated={true}
+              defaultPageSize={10}
               getRowId={(row) => String(row.LHeadId)}
               emptyMessage={
                 isError
@@ -1023,29 +1016,6 @@ const CustomerMaster: React.FC = () => {
                 row.original.LHeadId === editingId ? "bg-primary/5" : ""
               }
             />
-          </div>
-
-          {/* Pagination */}
-          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-            <span className="text-xs text-muted-foreground">
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page <= 1}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                disabled={page >= totalPages}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
           </div>
         </div>
       </div>
