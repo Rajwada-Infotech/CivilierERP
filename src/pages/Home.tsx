@@ -427,137 +427,52 @@ function CircularGauge({ pct, size = 128, color = "#7c3aed" }: { pct: number; si
   );
 }
 
-// ─── Project Network — an orbital diagram, not a literal map. This app has
-// no populated per-project geo-coordinates yet (dbo.enterprise.latitude/
-// longitude exist on the schema but aren't filled in on any project
-// today), so this stays deliberately illustrative: a central hub (the
-// company) with every real project arranged evenly around it on a full
-// 360° ring — rather than a literal map claiming false geographic
-// precision, or a lopsided half-arc that leaves half the panel empty.
-// Every project gets its own node (no grouping/overflow bucket); only the
-// ring LAYOUT is decorative. Swap in real lat/long-projected positions
-// here once that data actually exists. HARD_CAP exists purely as a
-// defensive ceiling against a pathological project count blowing up the
-// SVG, not a normal product limit.
-const HARD_CAP_NODES = 24;
-const NETWORK_ACCENT = "#7c3aed"; // matches this panel's own Bento accent
-
+// ─── Project Network — a card grid, not a spatial diagram. An orbital/map
+// layout was tried here twice and rejected both times: with only a
+// handful of real projects, spreading a few points across a wide fixed
+// canvas always reads as empty no matter how the nodes themselves are
+// styled. A grid sizes itself to its content instead — few projects make
+// a short grid, many make a longer (scrollable) one, and it never has to
+// spread thin data across space it doesn't have.
 function ProjectNetworkMap({ projects, total }: { projects: { id: number; name: string; active: boolean }[]; total: number }) {
-  const VB_W = 720;
-  const VB_H = 300;
-  const hub = { x: VB_W / 2, y: VB_H / 2 };
-  const radiusX = 225;
-  const radiusY = 108;
-
   // Active projects lead (they're the ones worth seeing at a glance).
-  const shown = [...projects].sort((a, b) => Number(b.active) - Number(a.active)).slice(0, HARD_CAP_NODES);
-  const overflow = projects.length - shown.length;
+  const shown = [...projects].sort((a, b) => Number(b.active) - Number(a.active));
   const activeCount = projects.filter((p) => p.active).length;
-  const n = shown.length;
-  // More nodes → smaller chips so a growing project list stays legible
-  // instead of overlapping.
-  const density = n <= 6 ? 1 : n <= 12 ? 0.8 : 0.6;
-  const fontSize = 11 * density;
-  const dotR = 3 * density;
-  const padX = 9 * density;
-  const padY = 6 * density;
-  const gap = 5 * density;
-  const charW = fontSize * 0.56;
-
-  const nodes = shown.map((p, i) => {
-    // Half-step rotation offset so small counts land on diagonals instead of
-    // the exact N/E/S/W cross — reads as placed, not just plotted.
-    const startDeg = n <= 1 ? -90 : -90 + 360 / n / 2;
-    const angle = (startDeg + (i / n) * 360) * (Math.PI / 180);
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-    const cx = hub.x + cos * radiusX;
-    const cy = hub.y + sin * radiusY;
-    const label = p.name.length > 18 ? `${p.name.slice(0, 17)}…` : p.name;
-    const pillW = padX * 2 + dotR * 2 + gap + label.length * charW;
-    const pillH = fontSize + padY * 2;
-    // Each chip hangs off the side of the hub it's facing, never centered
-    // on the orbit point — keeps the connecting line arriving at an edge.
-    const side: 1 | -1 = cos >= 0 ? 1 : -1;
-    const pillX = side === 1 ? cx : cx - pillW;
-    const pillY = cy - pillH / 2;
-    return { ...p, label, pillX, pillY, pillW, pillH, lineEndX: side === 1 ? pillX : pillX + pillW, lineEndY: cy };
-  });
 
   return (
-    <div className="flex flex-col h-[320px]">
-      <div className="relative flex-1 min-h-0 overflow-hidden">
-        <svg viewBox={`0 0 ${VB_W} ${VB_H}`} className="w-full h-full" style={{ overflow: "visible" }}>
-          <defs>
-            <radialGradient id="homeMapGlow" cx="50%" cy="50%" r="65%">
-              <stop offset="0%" stopColor={NETWORK_ACCENT} stopOpacity="0.16" />
-              <stop offset="100%" stopColor={NETWORK_ACCENT} stopOpacity="0" />
-            </radialGradient>
-            {nodes.map((n) => (
-              <linearGradient key={`grad-${n.id}`} id={`spoke-${n.id}`} x1={hub.x} y1={hub.y} x2={n.lineEndX} y2={n.lineEndY} gradientUnits="userSpaceOnUse">
-                <stop offset="0%" stopColor={NETWORK_ACCENT} stopOpacity={n.active ? 0.65 : 0.3} />
-                <stop offset="100%" stopColor={NETWORK_ACCENT} stopOpacity={n.active ? 0.25 : 0.12} />
-              </linearGradient>
-            ))}
-          </defs>
-          <rect x={0} y={0} width={VB_W} height={VB_H} fill="url(#homeMapGlow)" />
-          <ellipse cx={hub.x} cy={hub.y} rx={radiusX} ry={radiusY} fill="none" stroke={NETWORK_ACCENT} strokeWidth="1" strokeDasharray="1 5" strokeLinecap="round" opacity="0.25" />
-
-          {/* Slow dashed ring — a quiet "live" cue that never dominates the frame the way a filled sweep would. */}
-          <circle cx={hub.x} cy={hub.y} r="22" fill="none" stroke={NETWORK_ACCENT} strokeWidth="1" strokeDasharray="3 5" opacity="0.35">
-            <animateTransform attributeName="transform" type="rotate" from={`0 ${hub.x} ${hub.y}`} to={`360 ${hub.x} ${hub.y}`} dur="14s" repeatCount="indefinite" />
-          </circle>
-
-          {/* Spokes reach the chip's near edge, not its center, so the line reads as arriving rather than stabbing through the label. */}
-          {nodes.map((n) => (
-            <line key={`spoke-${n.id}`} x1={hub.x} y1={hub.y} x2={n.lineEndX} y2={n.lineEndY} stroke={`url(#spoke-${n.id})`} strokeWidth={n.active ? 1.5 : 1} />
-          ))}
-
-          {/* Traveling pulse — active projects only, so the motion reads "live" as literally the live ones. */}
-          {nodes.filter((n) => n.active).map((n, i) => (
-            <circle key={`pulse-${n.id}`} r={2.5 * density} fill="#c4b5fd">
-              <animateMotion dur={`${2.4 + i * 0.5}s`} repeatCount="indefinite" path={`M ${hub.x} ${hub.y} L ${n.lineEndX} ${n.lineEndY}`} />
-              <animate attributeName="opacity" values="0;1;1;0" dur={`${2.4 + i * 0.5}s`} repeatCount="indefinite" />
-            </circle>
-          ))}
-
-          {/* Each project is a real chip — status dot + name — not a bare point, so the diagram carries weight even with only a few projects. */}
-          {nodes.map((n) => (
-            <g key={`node-${n.id}`}>
-              <rect
-                x={n.pillX} y={n.pillY} width={n.pillW} height={n.pillH} rx={n.pillH / 2}
-                fill={n.active ? "#7c3aed22" : "hsl(var(--muted-foreground) / 0.08)"}
-                stroke={n.active ? `${NETWORK_ACCENT}80` : "hsl(var(--border))"}
-                strokeWidth="1"
+    <div className="flex flex-col">
+      {shown.length === 0 ? (
+        <div className="px-4 py-10 text-center text-xs text-muted-foreground">
+          No projects yet
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-2 p-3 max-h-[280px] overflow-y-auto">
+          {shown.map((p) => (
+            <div
+              key={p.id}
+              title={p.name}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 min-w-0 transition-colors ${
+                p.active
+                  ? "border-primary/30 bg-primary/[0.06]"
+                  : "border-border bg-muted/20"
+              }`}
+            >
+              <span
+                className={`h-2 w-2 rounded-full shrink-0 ${p.active ? "bg-violet-500" : "bg-muted-foreground/40"}`}
               />
-              <circle cx={n.pillX + padX + dotR} cy={n.pillY + n.pillH / 2} r={dotR} fill={n.active ? "#a78bfa" : "hsl(var(--muted-foreground))"} />
-              {n.active && (
-                <circle cx={n.pillX + padX + dotR} cy={n.pillY + n.pillH / 2} r={dotR + 2.5} fill="none" stroke={NETWORK_ACCENT} strokeWidth="1" opacity="0.5" />
-              )}
-              <text
-                x={n.pillX + padX + dotR * 2 + gap}
-                y={n.pillY + n.pillH / 2 + fontSize * 0.36}
-                className={`font-heading tracking-wide ${n.active ? "fill-foreground font-semibold" : "fill-muted-foreground/70 font-medium"}`}
-                style={{ fontSize }}
+              <span
+                className={`font-heading text-xs truncate ${
+                  p.active ? "font-semibold text-foreground" : "font-medium text-muted-foreground"
+                }`}
               >
-                {n.label}
-              </text>
-            </g>
+                {p.name}
+              </span>
+            </div>
           ))}
+        </div>
+      )}
 
-          {/* Hub — carries the total project count, so the center has a purpose beyond decoration. */}
-          <circle cx={hub.x} cy={hub.y} r="20" fill={NETWORK_ACCENT} opacity="0.12">
-            <animate attributeName="r" values="20;27;20" dur="2.4s" repeatCount="indefinite" />
-          </circle>
-          <circle cx={hub.x} cy={hub.y} r="17" fill={NETWORK_ACCENT} />
-          <circle cx={hub.x} cy={hub.y} r="17" fill="none" stroke="#c4b5fd" strokeWidth="1.5" />
-          <text x={hub.x} y={hub.y + 4.5} textAnchor="middle" fill="#fff" fontWeight="800" style={{ fontSize: total > 99 ? 11 : 14 }}>
-            {total}
-          </text>
-        </svg>
-      </div>
-
-      {/* Footer bar — a proper divider strip, not numbers floating over the diagram. */}
+      {/* Footer bar — a proper divider strip, not numbers floating over the grid. */}
       <div className="flex items-center justify-between gap-4 px-4 py-2.5 border-t border-border/40 shrink-0">
         <div className="flex items-center gap-2">
           <span className="relative flex h-2 w-2 shrink-0">
@@ -574,9 +489,7 @@ function ProjectNetworkMap({ projects, total }: { projects: { id: number; name: 
           <p className="font-heading font-bold text-lg text-muted-foreground/70 leading-none tabular-nums">
             <AnimatedCounter target={total} />
           </p>
-          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">
-            Total{overflow > 0 ? ` · +${overflow} not shown` : ""}
-          </p>
+          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">Total</p>
         </div>
       </div>
     </div>
