@@ -15,7 +15,7 @@ async function getItemOptionalCols(pool) {
   const result = await pool.request().query(`
     SELECT name FROM sys.columns
     WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group')
-      AND name IN (N'M_UOM', N'default_supplier_id', N'M_GLHeadId', N'M_CostCenterId', N'M_DayOfSupplies', N'M_DaysOfSupply')
+      AND name IN (N'M_UOM', N'default_supplier_id', N'M_GLHeadId', N'M_CostCenterId', N'M_DaysOfSupply')
   `);
   const names = new Set(result.recordset.map((r) => r.name));
   return {
@@ -23,7 +23,6 @@ async function getItemOptionalCols(pool) {
     hasDS: names.has("default_supplier_id"),
     hasGL: names.has("M_GLHeadId"),
     hasCC: names.has("M_CostCenterId"),
-    hasDOS: names.has("M_DayOfSupplies"),
     hasDOS2: names.has("M_DaysOfSupply"),
   };
 }
@@ -32,7 +31,7 @@ async function getItemOptionalCols(pool) {
 router.get("/", cache("item-master", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const { hasUOM, hasDS, hasGL, hasCC, hasDOS, hasDOS2 } = await getItemOptionalCols(pool);
+    const { hasUOM, hasDS, hasGL, hasCC, hasDOS2 } = await getItemOptionalCols(pool);
 
     const result = await pool.request().query(`
       SELECT
@@ -63,7 +62,6 @@ router.get("/", cache("item-master", 300), async (req, res) => {
         ${hasGL ? "gl.LHeadName AS GLHeadName," : "NULL AS GLHeadName,"}
         ${hasCC ? "item.M_CostCenterId," : "NULL AS M_CostCenterId,"}
         ${hasCC ? "cc.Name AS CostCenterName," : "NULL AS CostCenterName,"}
-        ${hasDOS ? "item.M_DayOfSupplies," : "NULL AS M_DayOfSupplies,"}
         ${hasDOS2 ? "item.M_DaysOfSupply" : "NULL AS M_DaysOfSupply"}
       FROM dbo.Item_Master_Group item
       LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = item.Parent_Id
@@ -115,7 +113,7 @@ router.get("/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const pool = getPool();
-    const { hasUOM, hasGL, hasCC, hasDOS, hasDOS2 } = await getItemOptionalCols(pool);
+    const { hasUOM, hasGL, hasCC, hasDOS2 } = await getItemOptionalCols(pool);
 
     const result = await pool.request().input("M_Id", sql.UniqueIdentifier, id)
       .query(`
@@ -147,7 +145,6 @@ router.get("/:id", async (req, res) => {
           ${hasGL ? "gl.LHeadName AS GLHeadName," : "NULL AS GLHeadName,"}
           ${hasCC ? "item.M_CostCenterId," : "NULL AS M_CostCenterId,"}
           ${hasCC ? "cc.Name AS CostCenterName," : "NULL AS CostCenterName,"}
-          ${hasDOS ? "item.M_DayOfSupplies," : "NULL AS M_DayOfSupplies,"}
           ${hasDOS2 ? "item.M_DaysOfSupply" : "NULL AS M_DaysOfSupply"}
         FROM dbo.Item_Master_Group item
         LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = item.Parent_Id
@@ -184,7 +181,6 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
     default_supplier_id,
     M_GLHeadId,
     M_CostCenterId,
-    M_DayOfSupplies,
     M_DaysOfSupply,
   } = req.body;
 
@@ -196,7 +192,7 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
 
   try {
     const pool = getPool();
-    const { hasUOM, hasDS, hasGL, hasCC, hasDOS, hasDOS2 } = await getItemOptionalCols(pool);
+    const { hasUOM, hasDS, hasGL, hasCC, hasDOS2 } = await getItemOptionalCols(pool);
 
     const req2 = pool
       .request()
@@ -226,8 +222,6 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
       req2.input("M_GLHeadId", sql.Int, M_GLHeadId ? parseInt(M_GLHeadId, 10) : null);
     if (hasCC)
       req2.input("M_CostCenterId", sql.Int, M_CostCenterId ? parseInt(M_CostCenterId, 10) : null);
-    if (hasDOS)
-      req2.input("M_DayOfSupplies", sql.Int, M_DayOfSupplies != null && M_DayOfSupplies !== "" ? parseInt(M_DayOfSupplies, 10) : null);
     if (hasDOS2)
       req2.input("M_DaysOfSupply", sql.Int, M_DaysOfSupply != null && M_DaysOfSupply !== "" ? parseInt(M_DaysOfSupply, 10) : null);
 
@@ -242,7 +236,6 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
         ${hasDS ? "default_supplier_id," : ""}
         ${hasGL ? "M_GLHeadId," : ""}
         ${hasCC ? "M_CostCenterId," : ""}
-        ${hasDOS ? "M_DayOfSupplies," : ""}
         ${hasDOS2 ? "M_DaysOfSupply," : ""}
         M_CreatedBy, M_CreatedDate, Parent_Id
       )
@@ -257,7 +250,6 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
         ${hasDS ? "@default_supplier_id," : ""}
         ${hasGL ? "@M_GLHeadId," : ""}
         ${hasCC ? "@M_CostCenterId," : ""}
-        ${hasDOS ? "@M_DayOfSupplies," : ""}
         ${hasDOS2 ? "@M_DaysOfSupply," : ""}
         @M_CreatedBy, @M_CreatedDate, @Parent_Id
       )
@@ -297,7 +289,6 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
     default_supplier_id,
     M_GLHeadId,
     M_CostCenterId,
-    M_DayOfSupplies,
     M_DaysOfSupply,
   } = req.body;
 
@@ -337,8 +328,6 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
       req2.input("M_GLHeadId", sql.Int, M_GLHeadId ? parseInt(M_GLHeadId, 10) : null);
     if (hasCC)
       req2.input("M_CostCenterId", sql.Int, M_CostCenterId ? parseInt(M_CostCenterId, 10) : null);
-    if (hasDOS)
-      req2.input("M_DayOfSupplies", sql.Int, M_DayOfSupplies != null && M_DayOfSupplies !== "" ? parseInt(M_DayOfSupplies, 10) : null);
     if (hasDOS2)
       req2.input("M_DaysOfSupply", sql.Int, M_DaysOfSupply != null && M_DaysOfSupply !== "" ? parseInt(M_DaysOfSupply, 10) : null);
 
@@ -359,7 +348,6 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
         ${hasDS ? "default_supplier_id = @default_supplier_id," : ""}
         ${hasGL ? "M_GLHeadId = @M_GLHeadId," : ""}
         ${hasCC ? "M_CostCenterId = @M_CostCenterId," : ""}
-        ${hasDOS ? "M_DayOfSupplies = @M_DayOfSupplies," : ""}
         ${hasDOS2 ? "M_DaysOfSupply = @M_DaysOfSupply," : ""}
         M_UpdatedBy    = @M_UpdatedBy,
         UpdatedAt      = @UpdatedAt,
