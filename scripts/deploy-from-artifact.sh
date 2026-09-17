@@ -102,24 +102,69 @@ docker compose --profile build run --rm frontend-build
 docker compose up -d redis backend nginx
 
 echo "Waiting for $HEALTH_URL"
+HEALTH_OK=0
 for attempt in {1..30}; do
   if curl -fsS "$HEALTH_URL" >/dev/null; then
-    docker compose ps
-    echo "Deploy complete."
-    if [[ -d "$PREVIOUS_DIR" ]]; then
-      echo "Previous release kept at $PREVIOUS_DIR — to roll back if needed, run:"
-      echo "  $ROLLBACK_HINT"
-    fi
-    exit 0
+    HEALTH_OK=1
+    break
   fi
   sleep 2
 done
 
+if [[ "$HEALTH_OK" -ne 1 ]]; then
+  docker compose ps
+  docker compose logs --tail=80 backend
+  echo "Deploy failed: health check did not pass." >&2
+  if [[ -d "$PREVIOUS_DIR" ]]; then
+    echo "Previous release is still at $PREVIOUS_DIR — to roll back, run:" >&2
+    echo "  $ROLLBACK_HINT" >&2
+  fi
+  exit 1
+fi
+
+# ── 4. Verify what's actually LIVE matches what was just extracted ──────────
+# A clean "docker compose up" and a passing health check both proved true
+# once, on this exact repo, while the box kept serving a build from hours
+# earlier — every step reported success and nothing ever caught it. Health
+# only proves the process is alive; it says nothing about which commit is
+# running. Compare the commit baked into this archive (build-info.json,
+# stamped by CI's "Stamp build info" step, absent only if this artifact
+# predates that change) against what the live site actually serves.
+extract_field() { grep -o "\"$1\":\"[^\"]*\"" "$2" 2>/dev/null | head -1 | cut -d'"' -f4; }
+
+BACKEND_INFO_FILE="$APP_DIR/backend/build-info.json"
+if [[ -f "$BACKEND_INFO_FILE" ]]; then
+  EXPECTED_COMMIT="$(extract_field commit "$BACKEND_INFO_FILE")"
+  LIVE_BACKEND_JSON="$(curl -fsS "http://localhost/health" 2>/dev/null || true)"
+  LIVE_BACKEND_COMMIT="$(echo "$LIVE_BACKEND_JSON" | grep -o '"commit":"[^"]*"' | head -1 | cut -d'"' -f4)"
+  LIVE_FRONTEND_JSON="$(curl -fsS "http://localhost/version.json" 2>/dev/null || true)"
+  LIVE_FRONTEND_COMMIT="$(echo "$LIVE_FRONTEND_JSON" | grep -o '"commit":"[^"]*"' | head -1 | cut -d'"' -f4)"
+
+  echo "Expected commit (from this artifact): $EXPECTED_COMMIT"
+  echo "Live backend  /health       commit:   ${LIVE_BACKEND_COMMIT:-<missing>}"
+  echo "Live frontend /version.json commit:   ${LIVE_FRONTEND_COMMIT:-<missing>}"
+
+  if [[ -z "$EXPECTED_COMMIT" ]]; then
+    echo "WARNING: this artifact has no commit stamp — skipping the live-version check (rebuild via a current CI run to get this safety net)." >&2
+  elif [[ "$LIVE_BACKEND_COMMIT" != "$EXPECTED_COMMIT" || "$LIVE_FRONTEND_COMMIT" != "$EXPECTED_COMMIT" ]]; then
+    echo "DEPLOY VERIFICATION FAILED: the live site is NOT serving the commit that was just deployed." >&2
+    echo "This means the deploy silently failed to take effect — do not treat this as a successful release." >&2
+    if [[ -d "$PREVIOUS_DIR" ]]; then
+      echo "Previous release is at $PREVIOUS_DIR — to roll back, run:" >&2
+      echo "  $ROLLBACK_HINT" >&2
+    fi
+    exit 1
+  else
+    echo "Verified: live backend and frontend both match the deployed commit ($EXPECTED_COMMIT)."
+  fi
+else
+  echo "WARNING: no build-info.json in this artifact — it predates the version-stamping change, so the live commit could not be verified. Rebuild via a current CI run to get this safety net." >&2
+fi
+
 docker compose ps
-docker compose logs --tail=80 backend
-echo "Deploy failed: health check did not pass." >&2
+echo "Deploy complete."
 if [[ -d "$PREVIOUS_DIR" ]]; then
-  echo "Previous release is still at $PREVIOUS_DIR — to roll back, run:" >&2
-  echo "  $ROLLBACK_HINT" >&2
+  echo "Previous release kept at $PREVIOUS_DIR — to roll back if needed, run:"
+  echo "  $ROLLBACK_HINT"
 fi
 exit 1
