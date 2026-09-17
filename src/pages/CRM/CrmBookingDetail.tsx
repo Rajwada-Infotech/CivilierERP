@@ -1527,7 +1527,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                       yet," which would leave TotalValue/GrandTotal blank too. */}
                   {!booking.HsnCode && Number(booking.TotalValue) > 0 && (
                     <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-2.5 py-1.5 mb-1">
-                      <CheckCircle2 size={12} className="shrink-0" />
+                      <Check size={12} className="shrink-0" />
                       GST Exempt — Schedule III (entire consideration received after OC/CC)
                     </div>
                   )}
