@@ -993,7 +993,7 @@ const CrmBooking: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>
-                      Deposited To{bankOptions.length > 0 ? " *" : ""}
+                      Deposited To
                     </label>
                     <Select value={form.DepositBankId || undefined} onValueChange={(v) => setForm((f) => ({ ...f, DepositBankId: v }))}>
                       <SelectTrigger className={inputCls}>
