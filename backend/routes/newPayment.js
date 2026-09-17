@@ -1057,6 +1057,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const pool = getPool();
     const beforeSnapshot = await snapshotRow(pool, "dbo.NewPayment", "PPaymentID", id);
     const wasApproved = beforeSnapshot?.Status === "Approved";
+    const wasRejected = beforeSnapshot?.Status === "Rejected";
 
     // A cancelled payment's GL posting was already reversed and the invoice
     // recomputed on that assumption (see routes/chequeCancellation.js) —
@@ -1240,7 +1241,29 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       }
     }
 
-    res.json({ message: "Payment updated successfully" });
+    // A corrected, previously-Rejected payment goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("payments", id, "Pending", userEmail, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[payments] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Payment updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: resubmitted ? "Payment updated and re-submitted for approval" : "Payment updated successfully",
+      resubmitted,
+    });
   } catch (err) {
     if (
       (err.number === 2601 || err.number === 2627) &&
@@ -1440,6 +1463,8 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
 
     // Sync EMI installment if this payment is for an EMI ref
@@ -1756,6 +1781,7 @@ router.put("/:id/reject", requirePageRight("new-payment", "edit"), async (req, r
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await Promise.all([
       bumpCacheVersion("new-payment"),

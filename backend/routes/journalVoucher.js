@@ -367,11 +367,14 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
     let wasApproved = false;
+    let wasRejected = false;
     let beforeSnapshot = null;
     try {
       const allowPostApproval = await resolveAllowPostApproval(req, "journal-voucher");
       await guardEdit("journal-voucher", id, { allowPostApproval });
-      wasApproved = (await getRecordStatus("journal-voucher", id)) === "Approved";
+      const currentStatus = await getRecordStatus("journal-voucher", id);
+      wasApproved = currentStatus === "Approved";
+      wasRejected = currentStatus === "Rejected";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(pool, "dbo.JournalVoucher", "JVID", id);
       }
@@ -487,11 +490,33 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
       }
     }
 
+    // A corrected, previously-Rejected voucher goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("journal-voucher", id, "Pending", user, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[journal-voucher] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Journal Voucher updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
     res.json({
       message: wasApproved
         ? "Journal Voucher updated — previous GL posting reversed, sent back for approval"
-        : "Journal Voucher updated",
+        : resubmitted
+          ? "Journal Voucher updated and re-submitted for approval"
+          : "Journal Voucher updated",
       reopenedForApproval: wasApproved,
+      resubmitted,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -583,6 +608,7 @@ router.put("/:id/approve", authenticateToken, requirePageRight("journal-voucher"
     if (!alreadyApproved) {
       transitionResult = await transition(
         "journal-voucher", id, "Approved", user, req.user?.role, req.body?.note,
+        req.user?.userId ?? req.user?.id ?? null,
       );
     }
 
@@ -613,7 +639,7 @@ router.put("/:id/reject", authenticateToken, requirePageRight("journal-voucher",
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const result = await transition("journal-voucher", id, "Rejected", user, req.user?.role, req.body?.note);
+    const result = await transition("journal-voucher", id, "Rejected", user, req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("journal-voucher");
     res.json({ message: "Journal Voucher rejected", ...result });
   } catch (err) {

@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml } from "@/utils/escapeHtml";
+import { printStatusLabel } from "@/utils/printStatus";
 import {
   MasterPage,
   FieldDef,
@@ -745,7 +746,7 @@ const DebitNoteMaster: React.FC = () => {
             { header: "Project", accessor: "project" },
             { header: "Debit Amount", accessor: "debitAmount" },
             { header: "Created By", accessor: "createdBy" },
-            { header: "Status", accessor: "approvalStatus" },
+            { header: "Status", accessor: (r) => printStatusLabel(String(r.approvalStatus ?? "Draft")) },
           ],
         } : undefined}
         viewConfig={{
@@ -777,7 +778,7 @@ const DebitNoteMaster: React.FC = () => {
               <tr><td>Project</td><td>${row.project || "—"}</td></tr>
               <tr><td>Debit Amount</td><td>${formatINR(row.debitAmount as number)}</td></tr>
               <tr><td>Remarks</td><td>${row.reason || "—"}</td></tr>
-              <tr><td>Status</td><td>${row.status === false ? "Cancelled" : String(row.approvalStatus ?? "Draft")}</td></tr>
+              <tr><td>Status</td><td>${row.status === false ? "Cancelled" : printStatusLabel(String(row.approvalStatus ?? "Draft"))}</td></tr>
             </table>
             </body></html>
           `);

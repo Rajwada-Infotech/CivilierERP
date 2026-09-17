@@ -814,6 +814,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     const pool = getPool();
     const beforeSnapshot = await snapshotRow(pool, "dbo.VehicleInOut", "VehicleInOutID", id);
     const wasApproved = beforeSnapshot?.Status === "Approved";
+    const wasRejected = beforeSnapshot?.Status === "Rejected";
 
     // Validate before writing anything — excludeVehicleInOutId=id so this
     // record's own previously-saved quantities don't count against its
@@ -883,7 +884,27 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
       }
     }
 
-    res.json({ success: true });
+    // A corrected, previously-Rejected record goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("vehicle-in-out", id, "Pending", email, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[vehicle-in-out] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          success: true,
+          message: "Updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({ success: true, resubmitted });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -931,6 +952,8 @@ router.put("/:id/approve", requirePageRight("vehicle-in-out", "edit"), async (re
       "Approved",
       req.user?.email || email,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(CACHE_KEY);
     res.json({ message: "Vehicle In/Out approved", ...result });
@@ -958,6 +981,7 @@ router.put("/:id/reject", requirePageRight("vehicle-in-out", "edit"), async (req
       req.user?.email || email,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(CACHE_KEY);
     res.json({ message: "Vehicle In/Out rejected", ...result });

@@ -447,7 +447,13 @@ const CrmBooking: React.FC = () => {
   const handleSave = async () => {
     if (!form.ApplicationId) { toast.error("Please select an Application"); return; }
     if (!form.UnitId)  { toast.error("A unit must be selected from Unit Master"); return; }
-    if (bankOptions.length > 0 && !form.DepositBankId) { toast.error("Select which company bank this booking's token payment landed in"); return; }
+    // DepositBankId/DepositBankName were never persisted or read anywhere in
+    // the actual booking-creation path (createCrmBookingRecord in
+    // crmEntityCreation.js) — CrmBooking has no such columns at all. This
+    // block required staff to pick a value that was then silently
+    // discarded end-to-end. The real deposit-bank concept lives at the
+    // Payment/Receipt level (crmPayments.js), recorded when the token
+    // payment is actually receipted, not at booking creation.
     setSaving(true);
     try {
       const bankName = form.DepositBankId
@@ -987,7 +993,7 @@ const CrmBooking: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>
-                      Deposited To{bankOptions.length > 0 ? " *" : ""}
+                      Deposited To
                     </label>
                     <Select value={form.DepositBankId || undefined} onValueChange={(v) => setForm((f) => ({ ...f, DepositBankId: v }))}>
                       <SelectTrigger className={inputCls}>

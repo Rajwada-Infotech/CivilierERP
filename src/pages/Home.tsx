@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { motion, useInView } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
@@ -427,69 +427,861 @@ function CircularGauge({ pct, size = 128, color = "#7c3aed" }: { pct: number; si
   );
 }
 
-// ─── Project Network — a card grid, not a spatial diagram. An orbital/map
-// layout was tried here twice and rejected both times: with only a
-// handful of real projects, spreading a few points across a wide fixed
-// canvas always reads as empty no matter how the nodes themselves are
-// styled. A grid sizes itself to its content instead — few projects make
-// a short grid, many make a longer (scrollable) one, and it never has to
-// spread thin data across space it doesn't have.
-function ProjectNetworkMap({ projects, total }: { projects: { id: number; name: string; active: boolean }[]; total: number }) {
-  // Active projects lead (they're the ones worth seeing at a glance).
-  const shown = [...projects].sort((a, b) => Number(b.active) - Number(a.active));
+// ─── Project Network ──────────────────────────────────────────────────────────
+// A force-directed map of the real company → project structure.
+//
+// Two earlier orbital/map attempts were rejected here for reading as empty,
+// and both failed the same way: they scattered project dots alone across a
+// fixed, wide canvas. Both causes are addressed:
+//
+//  1. The graph carries real edges. Every project links to its owning company,
+//     plus dashed links to any co-owning companies (MultiCompanyIds), so even
+//     a handful of projects renders as a connected structure rather than loose
+//     points — edges, not dot count, are what make a graph read as a network.
+//  2. The viewBox is fitted to the laid-out nodes' own bounding box (clamped to
+//     a floor so a 2-node graph doesn't balloon), so the canvas always hugs its
+//     content instead of stretching thin data across space it doesn't have.
+//
+// Layout is a deterministic force simulation solved once per dataset — stable
+// positions, no rAF loop, no re-layout on hover/filter/zoom.
+
+type ProjectNode = {
+  id: number;
+  name: string;
+  active: boolean;
+  code?: string | null;
+  companyId?: number | null;
+  company?: string | null;
+  type?: string | null;
+  teamSize?: number;
+  startDate?: string | null;
+  coCompanyIds?: number[];
+};
+
+// Hues borrowed from the reference palette, lifted to stay legible on both a
+// light and a dark card surface (the panel is theme-aware; only these accents
+// are fixed).
+const NET = {
+  active: "#2DD4BF",
+  idle: "#7C8598",
+  jv: "#C9AE4E",
+  company: "#5B8DB8",
+};
+
+type NetNode = {
+  key: string;
+  kind: "company" | "project";
+  label: string;
+  r: number;
+  active: boolean;
+  jv: boolean;
+  count: number;
+  activeCount: number;
+  project?: ProjectNode;
+  x: number;
+  y: number;
+};
+type NetLink = { a: string; b: string; jv: boolean };
+
+const netShort = (s: string, n = 15) =>
+  s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s;
+
+// Half the horizontal room a node's caption needs, in layout units. Captions
+// are wide and short, so the separation test below is elliptical: without it
+// two discs can sit clear of each other while their labels still overlap.
+// Caption budget. A narrow canvas can't seat full-length uppercase hub names
+// side by side — without trimming them the fit below just keeps expanding to
+// make room and shrinks the whole graph instead.
+const netLabelSpec = (boxW: number) =>
+  boxW < 520
+    ? { coChars: 10, prChars: 9, coPx: 9, prPx: 8 }
+    : { coChars: 16, prChars: 14, coPx: 10, prPx: 9 };
+
+const netLabelHalf = (n: NetNode) => {
+  const chars = Math.min(n.label.length, n.kind === "company" ? 16 : 14);
+  return Math.max(n.r, (chars * (n.kind === "company" ? 3.2 : 2.7)) / 2);
+};
+
+function buildProjectNetwork(projects: ProjectNode[]) {
+  const nodes: NetNode[] = [];
+  const links: NetLink[] = [];
+  if (projects.length === 0) return { nodes, links };
+
+  // ── Company hubs ───────────────────────────────────────────────────────────
+  const companies = new Map<string, { name: string; count: number; active: number }>();
+  const companyKey = (id: number | null | undefined) =>
+    id != null ? `c${id}` : "c_none";
+
+  projects.forEach((p) => {
+    const key = companyKey(p.companyId);
+    const entry = companies.get(key) ?? {
+      name: p.company || "Unassigned",
+      count: 0,
+      active: 0,
+    };
+    entry.count += 1;
+    if (p.active) entry.active += 1;
+    if (p.company) entry.name = p.company;
+    companies.set(key, entry);
+  });
+
+  const maxCount = Math.max(...[...companies.values()].map((c) => c.count), 1);
+  companies.forEach((c, key) => {
+    nodes.push({
+      key,
+      kind: "company",
+      label: c.name,
+      r: 11 + (c.count / maxCount) * 6,
+      active: c.active > 0,
+      jv: false,
+      count: c.count,
+      activeCount: c.active,
+      x: 0,
+      y: 0,
+    });
+  });
+
+  // ── Project nodes, sized by team size ──────────────────────────────────────
+  const maxTeam = Math.max(...projects.map((p) => p.teamSize ?? 0), 1);
+  projects.forEach((p) => {
+    const key = `p${p.id}`;
+    const co = (p.coCompanyIds ?? []).filter((id) => id !== p.companyId);
+    nodes.push({
+      key,
+      kind: "project",
+      label: p.name,
+      r: 6 + ((p.teamSize ?? 0) / maxTeam) * 5,
+      active: p.active,
+      jv: co.length > 0,
+      count: p.teamSize ?? 0,
+      activeCount: 0,
+      project: p,
+      x: 0,
+      y: 0,
+    });
+    links.push({ a: key, b: companyKey(p.companyId), jv: false });
+    co.forEach((id) => {
+      if (companies.has(companyKey(id))) {
+        links.push({ a: key, b: companyKey(id), jv: true });
+      }
+    });
+  });
+
+  layoutProjectNetwork(nodes, links);
+  return { nodes, links };
+}
+
+// Deterministic force solve — golden-angle seeding, then repulsion + collision,
+// link springs and a light centering pull, annealed over a fixed iteration
+// count. Same input always yields the same map.
+function layoutProjectNetwork(nodes: NetNode[], links: NetLink[]) {
+  const byKey = new Map(nodes.map((n) => [n.key, n]));
+  const N = nodes.length;
+
+  nodes.forEach((n, i) => {
+    const ang = i * 2.3999632297;
+    const ring = n.kind === "company" ? 30 : 84 + (i % 3) * 18;
+    n.x = Math.cos(ang) * ring;
+    n.y = Math.sin(ang) * ring;
+  });
+
+  const ITER = 420;
+  for (let step = 0; step < ITER; step++) {
+    const alpha = Math.pow(1 - step / ITER, 1.4);
+
+    for (let i = 0; i < N; i++) {
+      for (let j = i + 1; j < N; j++) {
+        const a = nodes[i];
+        const b = nodes[j];
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let d2 = dx * dx + dy * dy;
+        if (d2 < 0.01) {
+          dx = i % 2 ? 0.7 : -0.7;
+          dy = j % 2 ? 0.7 : -0.7;
+          d2 = dx * dx + dy * dy;
+        }
+        const d = Math.sqrt(d2);
+        const ux = dx / d;
+        const uy = dy / d;
+
+        const bothHubs = a.kind === "company" && b.kind === "company";
+        const charge =
+          (bothHubs ? 9000 : a.kind === "company" || b.kind === "company" ? 2600 : 1500) /
+          d2;
+        const push = Math.min(charge, 18) * alpha;
+        a.x -= ux * push;
+        a.y -= uy * push;
+        b.x += ux * push;
+        b.y += uy * push;
+
+        // Elliptical, label-aware separation — wide berth horizontally (where
+        // captions live), tighter vertically. Runs at full strength regardless
+        // of anneal state so nothing ever ends up overlapping.
+        // Hubs claim far wider territory than leaf nodes so each company's
+        // cluster stays legibly separate instead of stacking in the middle.
+        const needX = netLabelHalf(a) + netLabelHalf(b) + (bothHubs ? 150 : 14);
+        const needY = a.r + b.r + (bothHubs ? 95 : 24);
+        const ex = dx / needX;
+        const ey = dy / needY;
+        const e = Math.hypot(ex, ey);
+        if (e < 1 && e > 1e-6) {
+          const fix = (1 - e) * 0.5;
+          const sx = (ex / e) * needX * fix;
+          const sy = (ey / e) * needY * fix;
+          a.x -= sx;
+          a.y -= sy;
+          b.x += sx;
+          b.y += sy;
+        }
+      }
+    }
+
+    for (const l of links) {
+      const a = byKey.get(l.a);
+      const b = byKey.get(l.b);
+      if (!a || !b) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const d = Math.hypot(dx, dy) || 0.001;
+      const ideal = (l.jv ? 138 : 72) + a.r + b.r;
+      const k = (d - ideal) * (l.jv ? 0.03 : 0.08) * alpha;
+      const ux = dx / d;
+      const uy = dy / d;
+      a.x += ux * k;
+      a.y += uy * k;
+      b.x -= ux * k;
+      b.y -= uy * k;
+    }
+
+    // Anisotropic centering: a weaker horizontal pull than vertical lets the
+    // graph settle into a wide ellipse roughly matching the panel's aspect,
+    // so it fills the canvas instead of balling up with dead space either side.
+    for (const n of nodes) {
+      n.x -= n.x * 0.006 * alpha;
+      n.y -= n.y * 0.021 * alpha;
+    }
+  }
+}
+
+function ProjectNetworkMap({
+  projects,
+  total,
+}: {
+  projects: ProjectNode[];
+  total: number;
+}) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const [hovered, setHovered] = useState<string | null>(null);
+  const [lens, setLens] = useState<"all" | "active" | "idle">("all");
+  const [zoom, setZoom] = useState(1);
+
+  // The viewBox is fitted to the graph, so a unit is not a pixel — and the
+  // ratio changes with the data. Measuring the canvas lets captions and
+  // strokes be specified in real pixels and stay legible at any graph size,
+  // while node radii stay in layout units so a small graph still fills space.
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 520, h: 290 });
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      if (width > 0 && height > 0) setBox({ w: width, h: height });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // Layout is solved once per dataset. Filtering and zoom are presentation
+  // only — they never re-solve, so nodes never jump under the cursor.
+  const { nodes, links } = useMemo(
+    () => buildProjectNetwork(projects),
+    [projects],
+  );
+
+  const byKey = useMemo(
+    () => Object.fromEntries(nodes.map((n) => [n.key, n])),
+    [nodes],
+  );
+
+  // Fit the viewBox to the content's own bounds, with a floor so a very small
+  // graph scales up sanely instead of rendering as giant discs.
+  const view = useMemo(() => {
+    if (nodes.length === 0) return { x: -180, y: -120, w: 360, h: 240 };
+    const MIN_W = 340;
+    const MIN_H = 230;
+
+    const grow = (
+      seed: { minX: number; maxX: number; minY: number; maxY: number },
+      u: number,
+    ) => {
+      // Captions render at a size derived from `unit`, so how much room they
+      // need in layout units depends on the fit itself. Solved in two passes:
+      // discs first, then re-grown to cover the captions at that fit. Without
+      // this the outermost labels clip off the edge on a narrow canvas.
+      let { minX, maxX, minY, maxY } = seed;
+      const spec = netLabelSpec(box.w);
+      for (const n of nodes) {
+        const isCo = n.kind === "company";
+        const fs = (isCo ? spec.coPx : spec.prPx) * u;
+        const chars = netShort(n.label, isCo ? spec.coChars : spec.prChars).length;
+        const halfW = (chars * fs * (isCo ? 0.58 : 0.5)) / 2;
+        minX = Math.min(minX, n.x - halfW);
+        maxX = Math.max(maxX, n.x + halfW);
+        maxY = Math.max(maxY, n.y + n.r + 11 * u + fs);
+      }
+      return { minX, maxX, minY, maxY };
+    };
+
+    const discs = {
+      minX: Math.min(...nodes.map((n) => n.x - n.r)),
+      maxX: Math.max(...nodes.map((n) => n.x + n.r)),
+      minY: Math.min(...nodes.map((n) => n.y - n.r)),
+      maxY: Math.max(...nodes.map((n) => n.y + n.r)),
+    };
+
+    const fit = (b: typeof discs) => {
+      const pad = 16;
+      let minX = b.minX - pad;
+      let maxX = b.maxX + pad;
+      let minY = b.minY - pad;
+      let maxY = b.maxY + pad;
+      const w = maxX - minX;
+      const h = maxY - minY;
+      if (w < MIN_W) {
+        const g = (MIN_W - w) / 2;
+        minX -= g;
+        maxX += g;
+      }
+      if (h < MIN_H) {
+        const g = (MIN_H - h) / 2;
+        minY -= g;
+        maxY += g;
+      }
+      return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+    };
+
+    // Fit → measure → refit. Each pass feeds the previous fit's scale back in;
+    // three is comfortably past the point it stops moving.
+    let v = fit(discs);
+    for (let i = 0; i < 3; i++) {
+      const u = 1 / Math.max(Math.min(box.w / v.w, box.h / v.h), 1e-6);
+      v = fit(grow(discs, u));
+    }
+    return v;
+  }, [nodes, box]);
+
+  // Layout units per rendered CSS pixel (preserveAspectRatio="meet" fits the
+  // smaller axis, and the zoom transform multiplies it). Anything sized with
+  // this keeps a constant on-screen size no matter how the graph is fitted.
+  const unit = useMemo(() => {
+    const scale = Math.min(box.w / view.w, box.h / view.h) * zoom;
+    return scale > 0 ? 1 / scale : 1;
+  }, [box, view, zoom]);
+
+  const labelSpec = netLabelSpec(box.w);
+  const focus = hovered ?? selected;
+
+  // Everything one hop from the focused node stays lit; the rest recedes.
+  const lit = useMemo(() => {
+    if (!focus) return null;
+    const s = new Set<string>([focus]);
+    links.forEach((l) => {
+      if (l.a === focus) s.add(l.b);
+      if (l.b === focus) s.add(l.a);
+    });
+    return s;
+  }, [focus, links]);
+
+  const dimmedByLens = (n: NetNode) => {
+    if (lens === "all" || n.kind === "company") return false;
+    return lens === "active" ? !n.active : n.active;
+  };
+  const nodeDim = (n: NetNode) =>
+    dimmedByLens(n) || (lit ? !lit.has(n.key) : false);
+
+  const nodeFill = (n: NetNode) =>
+    n.kind === "company"
+      ? NET.company
+      : n.jv
+        ? NET.jv
+        : n.active
+          ? NET.active
+          : NET.idle;
+
   const activeCount = projects.filter((p) => p.active).length;
+  const companyCount = nodes.filter((n) => n.kind === "company").length;
+  const sel = selected ? byKey[selected] : null;
+
+  const hubs = useMemo(
+    () =>
+      nodes
+        .filter((n) => n.kind === "company")
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 3),
+    [nodes],
+  );
+  const hubMax = Math.max(...hubs.map((h) => h.count), 1);
+
+  const cx = view.x + view.w / 2;
+  const cy = view.y + view.h / 2;
+
+  if (projects.length === 0) {
+    return (
+      <div className="flex flex-col">
+        <div className="px-4 py-12 text-center text-xs text-muted-foreground">
+          No projects yet
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col">
-      {shown.length === 0 ? (
-        <div className="px-4 py-10 text-center text-xs text-muted-foreground">
-          No projects yet
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-2 p-3 max-h-[280px] overflow-y-auto">
-          {shown.map((p) => (
-            <div
-              key={p.id}
-              title={p.name}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2.5 min-w-0 transition-colors ${
-                p.active
-                  ? "border-primary/30 bg-primary/[0.06]"
-                  : "border-border bg-muted/20"
+      <style>{`
+        @keyframes netFloat { 0%,100%{transform:translate(0,0)} 50%{transform:translate(0,-3px)} }
+        @keyframes netDash  { to { stroke-dashoffset: calc(var(--net-dash, 8) * -2) } }
+        .net-float { animation-name:netFloat; animation-iteration-count:infinite; animation-timing-function:ease-in-out }
+        .net-flow  { animation:netDash .9s linear infinite }
+        @media (prefers-reduced-motion: reduce) {
+          .net-float, .net-flow { animation: none }
+        }
+      `}</style>
+
+      {/* ── Lens pills + zoom ─────────────────────────────────────────────── */}
+      <div className="flex items-center gap-2 flex-wrap px-3 pb-2.5">
+        <div className="flex items-center gap-0.5 rounded-lg border border-border/60 bg-muted/30 p-0.5">
+          {(["all", "active", "idle"] as const).map((k) => (
+            <button
+              key={k}
+              onClick={() => setLens(k)}
+              className={`px-2.5 py-1 rounded-[7px] text-[10px] font-heading font-semibold uppercase tracking-wider transition-colors ${
+                lens === k
+                  ? "bg-card text-foreground shadow-sm"
+                  : "text-muted-foreground/60 hover:text-muted-foreground"
               }`}
             >
-              <span
-                className={`h-2 w-2 rounded-full shrink-0 ${p.active ? "bg-violet-500" : "bg-muted-foreground/40"}`}
-              />
-              <span
-                className={`font-heading text-xs truncate ${
-                  p.active ? "font-semibold text-foreground" : "font-medium text-muted-foreground"
-                }`}
-              >
-                {p.name}
-              </span>
-            </div>
+              {k === "idle" ? "Dormant" : k}
+            </button>
           ))}
         </div>
-      )}
 
-      {/* Footer bar — a proper divider strip, not numbers floating over the grid. */}
+        <div className="ml-auto flex items-center gap-1">
+          {[
+            { label: "−", fn: () => setZoom((z) => Math.max(0.7, z - 0.2)) },
+            { label: "+", fn: () => setZoom((z) => Math.min(2, z + 0.2)) },
+          ].map((b) => (
+            <button
+              key={b.label}
+              onClick={b.fn}
+              className="w-6 h-6 rounded-full border border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground hover:border-border transition-colors text-xs leading-none flex items-center justify-center"
+            >
+              {b.label}
+            </button>
+          ))}
+          <button
+            onClick={() => {
+              setZoom(1);
+              setSelected(null);
+            }}
+            className="px-2 h-6 rounded-full border border-border/60 bg-muted/30 text-[9px] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 hover:text-foreground transition-colors"
+          >
+            Reset
+          </button>
+        </div>
+      </div>
+
+      <div className="flex border-t border-border/40 min-h-0">
+        {/* ── Map ─────────────────────────────────────────────────────────── */}
+        <div ref={canvasRef} className="relative flex-1 min-w-0">
+          {/* Depth wash — subtle, token-driven so it reads in both themes. */}
+          <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_50%_40%,hsl(var(--primary)/0.07),transparent_70%)]" />
+
+          <svg
+            viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+            preserveAspectRatio="xMidYMid meet"
+            className="relative w-full h-[265px] sm:h-[310px] select-none"
+            onClick={() => setSelected(null)}
+          >
+            <defs>
+              <filter id="netGlow" x="-70%" y="-70%" width="240%" height="240%">
+                <feGaussianBlur stdDeviation="4" result="b" />
+                <feMerge>
+                  <feMergeNode in="b" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            <g
+              transform={`translate(${cx} ${cy}) scale(${zoom}) translate(${-cx} ${-cy})`}
+              style={{ transition: "transform .35s cubic-bezier(.16,1,.3,1)" }}
+            >
+              {/* Links behind nodes. The group handles the mount fade so each
+                  line's own opacity stays free for instant hover response —
+                  and so framer never takes over stroke-dasharray, which the
+                  dashed co-ownership links and the flow animation both use. */}
+              <motion.g
+                strokeLinecap="round"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 0.15, duration: 0.7, ease: "easeOut" }}
+              >
+                {links.map((l, i) => {
+                  const a = byKey[l.a];
+                  const b = byKey[l.b];
+                  if (!a || !b) return null;
+                  const hot = focus === l.a || focus === l.b;
+                  const dim = lit ? !hot : false;
+                  return (
+                    <line
+                      key={`${l.a}-${l.b}-${i}`}
+                      x1={a.x}
+                      y1={a.y}
+                      x2={b.x}
+                      y2={b.y}
+                      stroke={hot ? (l.jv ? NET.jv : NET.company) : "currentColor"}
+                      strokeWidth={(hot ? 1.7 : l.jv ? 1.15 : 1.05) * unit}
+                      strokeDasharray={l.jv ? `${4 * unit} ${4.5 * unit}` : undefined}
+                      className={`text-muted-foreground ${hot && l.jv ? "net-flow" : ""}`}
+                      style={{
+                        opacity: hot ? 0.95 : dim ? 0.07 : 0.38,
+                        transition: "opacity .25s ease, stroke-width .25s ease",
+                        ["--net-dash" as string]: `${8.5 * unit}`,
+                      }}
+                    />
+                  );
+                })}
+              </motion.g>
+
+              {/* Nodes */}
+              {nodes.map((n, i) => {
+                const dim = nodeDim(n);
+                const isSel = selected === n.key;
+                const fill = nodeFill(n);
+                const showLabel =
+                  n.kind === "company" ||
+                  isSel ||
+                  hovered === n.key ||
+                  nodes.length <= 14;
+
+                return (
+                  <g
+                    key={n.key}
+                    className="net-float"
+                    style={{
+                      animationDelay: `${(i % 7) * 0.8}s`,
+                      animationDuration: `${7 + (i % 5)}s`,
+                    }}
+                  >
+                    <motion.g
+                      initial={{ opacity: 0, scale: 0.3 }}
+                      animate={{ opacity: dim ? 0.2 : 1, scale: 1 }}
+                      transition={{
+                        opacity: { duration: 0.25 },
+                        scale: {
+                          delay: 0.2 + i * 0.025,
+                          duration: 0.55,
+                          ease: [0.16, 1, 0.3, 1],
+                        },
+                      }}
+                      style={{ transformBox: "fill-box", transformOrigin: "center" }}
+                      className="cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelected(isSel ? null : n.key);
+                      }}
+                      onMouseEnter={() => setHovered(n.key)}
+                      onMouseLeave={() => setHovered(null)}
+                    >
+                      {/* Halo */}
+                      <circle
+                        cx={n.x}
+                        cy={n.y}
+                        r={n.r + (isSel ? 11 : 7)}
+                        fill={fill}
+                        style={{
+                          opacity: isSel ? 0.22 : hovered === n.key ? 0.16 : 0.08,
+                          transition: "all .25s ease",
+                        }}
+                      />
+                      {/* Disc */}
+                      <circle
+                        cx={n.x}
+                        cy={n.y}
+                        r={n.r}
+                        fill={n.kind === "company" ? "transparent" : fill}
+                        stroke={fill}
+                        strokeWidth={(n.kind === "company" ? 2.1 : 1.2) * unit}
+                        strokeOpacity={n.kind === "company" ? 0.9 : 0.55}
+                        filter={isSel ? "url(#netGlow)" : undefined}
+                      />
+                      {/* Company hubs get an inner pip so they read as a ring */}
+                      {n.kind === "company" && (
+                        <circle cx={n.x} cy={n.y} r={n.r * 0.26} fill={fill} opacity={0.95} />
+                      )}
+                      {/* Selection ring */}
+                      {isSel && (
+                        <circle
+                          cx={n.x}
+                          cy={n.y}
+                          r={n.r + 6 * unit}
+                          fill="none"
+                          stroke={fill}
+                          strokeWidth={1 * unit}
+                          strokeOpacity={0.7}
+                          strokeDasharray={`${3 * unit} ${3 * unit}`}
+                          className="net-flow"
+                          style={{ ["--net-dash" as string]: `${6 * unit}` }}
+                        />
+                      )}
+
+                      {showLabel && (
+                        <text
+                          x={n.x}
+                          y={n.y + n.r + 11 * unit}
+                          textAnchor="middle"
+                          className={
+                            n.kind === "company"
+                              ? "fill-current text-foreground"
+                              : "fill-current text-muted-foreground"
+                          }
+                          style={{
+                            fontSize:
+                              (n.kind === "company" ? labelSpec.coPx : labelSpec.prPx) *
+                              unit,
+                            fontWeight: n.kind === "company" ? 700 : 500,
+                            letterSpacing: n.kind === "company" ? "0.06em" : 0,
+                            textTransform:
+                              n.kind === "company" ? "uppercase" : "none",
+                            opacity: dim ? 0.25 : 1,
+                            transition: "opacity .25s ease",
+                            pointerEvents: "none",
+                          }}
+                        >
+                          {netShort(
+                            n.label,
+                            n.kind === "company" ? labelSpec.coChars : labelSpec.prChars,
+                          )}
+                        </text>
+                      )}
+                    </motion.g>
+                  </g>
+                );
+              })}
+            </g>
+          </svg>
+
+          {/* Legend */}
+          <div className="absolute left-3 bottom-2 flex items-center gap-3 pointer-events-none">
+            {[
+              { c: NET.company, t: "Company" },
+              { c: NET.active, t: "Active" },
+              { c: NET.jv, t: "Co-owned" },
+            ].map((l) => (
+              <span key={l.t} className="flex items-center gap-1.5">
+                <span
+                  className="h-1.5 w-1.5 rounded-full"
+                  style={{ background: l.c }}
+                />
+                <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                  {l.t}
+                </span>
+              </span>
+            ))}
+          </div>
+
+          {/* Mobile context chip — the rail is desktop-only */}
+          {sel && (
+            <div className="md:hidden absolute right-2 bottom-2 max-w-[62%] rounded-lg border border-border/60 bg-card/95 backdrop-blur px-2.5 py-1.5">
+              <p className="font-heading text-[11px] font-semibold text-foreground truncate">
+                {sel.label}
+              </p>
+              <p className="text-[9px] text-muted-foreground truncate">
+                {sel.kind === "company"
+                  ? `${sel.count} project${sel.count === 1 ? "" : "s"}`
+                  : sel.project?.company || "Unassigned"}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* ── Context rail ────────────────────────────────────────────────── */}
+        <aside className="hidden md:flex w-[172px] shrink-0 flex-col border-l border-border/40">
+          {sel ? (
+            <motion.div
+              key={sel.key}
+              initial={{ opacity: 0, x: 8 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+              className="p-3 flex flex-col gap-2.5"
+            >
+              <div className="flex items-start gap-1.5">
+                <span
+                  className="h-1.5 w-1.5 rounded-full mt-1 shrink-0"
+                  style={{ background: nodeFill(sel) }}
+                />
+                <div className="min-w-0">
+                  <p className="font-heading text-[11px] font-bold text-foreground leading-tight break-words">
+                    {sel.label}
+                  </p>
+                  <p className="text-[9px] uppercase tracking-wider text-muted-foreground/50 mt-0.5">
+                    {sel.kind === "company" ? "Company" : sel.project?.type || "Project"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="h-px bg-border/50" />
+
+              {sel.kind === "company" ? (
+                <div className="flex flex-col gap-2">
+                  {[
+                    { l: "Projects", v: String(sel.count) },
+                    { l: "Active", v: String(sel.activeCount) },
+                  ].map((row) => (
+                    <div key={row.l} className="flex items-baseline justify-between">
+                      <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                        {row.l}
+                      </span>
+                      <span className="font-heading text-sm font-bold text-foreground tabular-nums">
+                        {row.v}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <div>
+                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50 block">
+                      Company
+                    </span>
+                    <span className="text-[10px] text-foreground break-words">
+                      {sel.project?.company || "Unassigned"}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline justify-between">
+                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                      Team
+                    </span>
+                    <span className="font-heading text-sm font-bold text-foreground tabular-nums">
+                      {sel.project?.teamSize || "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                      Status
+                    </span>
+                    <span
+                      className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold"
+                      style={{
+                        background: `${sel.active ? NET.active : NET.idle}1f`,
+                        color: sel.active ? NET.active : NET.idle,
+                      }}
+                    >
+                      {sel.active ? "Active" : "Dormant"}
+                    </span>
+                  </div>
+                  {sel.jv && (
+                    <div className="rounded-md border border-border/60 px-2 py-1.5">
+                      <span
+                        className="text-[9px] uppercase tracking-wider font-semibold"
+                        style={{ color: NET.jv }}
+                      >
+                        Co-owned
+                      </span>
+                      <p className="text-[9px] text-muted-foreground/70 leading-snug mt-0.5">
+                        Shared across {(sel.project?.coCompanyIds?.length ?? 0) + 1} companies
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+            </motion.div>
+          ) : (
+            // Idle state doubles as a ranking — the reference's "influence
+            // ranking", here the hubs carrying the most projects.
+            <div className="p-3 flex flex-col gap-2.5">
+              <p className="text-[9px] uppercase tracking-[0.14em] text-muted-foreground/50 font-heading font-bold">
+                Busiest hubs
+              </p>
+              <div className="flex flex-col gap-2">
+                {hubs.map((h) => (
+                  <button
+                    key={h.key}
+                    onClick={() => setSelected(h.key)}
+                    onMouseEnter={() => setHovered(h.key)}
+                    onMouseLeave={() => setHovered(null)}
+                    className="text-left group"
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-[10px] text-muted-foreground group-hover:text-foreground transition-colors truncate">
+                        {netShort(h.label, 14)}
+                      </span>
+                      <span className="font-heading text-[11px] font-bold text-foreground tabular-nums shrink-0">
+                        {h.count}
+                      </span>
+                    </div>
+                    <div className="h-[3px] rounded-full bg-muted mt-1 overflow-hidden">
+                      <motion.div
+                        initial={{ width: 0 }}
+                        animate={{ width: `${(h.count / hubMax) * 100}%` }}
+                        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+                        className="h-full rounded-full"
+                        style={{ background: NET.company }}
+                      />
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[9px] text-muted-foreground/40 leading-snug mt-auto">
+                Select a node to inspect it.
+              </p>
+            </div>
+          )}
+        </aside>
+      </div>
+
+      {/* ── Footer ─────────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between gap-4 px-4 py-2.5 border-t border-border/40 shrink-0">
         <div className="flex items-center gap-2">
           <span className="relative flex h-2 w-2 shrink-0">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-50" style={{ background: "#a78bfa" }} />
-            <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: "#a78bfa" }} />
+            <span
+              className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-50"
+              style={{ background: NET.active }}
+            />
+            <span
+              className="relative inline-flex rounded-full h-2 w-2"
+              style={{ background: NET.active }}
+            />
           </span>
           <p className="font-heading font-bold text-lg text-foreground leading-none tabular-nums">
             <AnimatedCounter target={activeCount} />
           </p>
-          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">Active</p>
+          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">
+            Active
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span
+            className="h-2 w-2 rounded-full shrink-0 border"
+            style={{ borderColor: NET.company }}
+          />
+          <p className="font-heading font-bold text-lg text-muted-foreground/80 leading-none tabular-nums">
+            <AnimatedCounter target={companyCount} />
+          </p>
+          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">
+            Companies
+          </p>
         </div>
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full shrink-0 border border-border" />
           <p className="font-heading font-bold text-lg text-muted-foreground/70 leading-none tabular-nums">
             <AnimatedCounter target={total} />
           </p>
-          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">Total</p>
+          <p className="text-[10px] text-muted-foreground/60 uppercase tracking-widest">
+            Total
+          </p>
         </div>
       </div>
     </div>
@@ -813,7 +1605,10 @@ export default function HomePage() {
     refetchInterval: 5 * 60 * 1000,
     retry: 1,
   });
-  const projectList: { id: number; name: string; active: boolean }[] = (() => {
+  // Memoised on the raw payload: ProjectNetworkMap solves a force layout from
+  // this array's identity, so rebuilding it on every Home render (this page
+  // re-renders on each poll) would re-run that solve for nothing.
+  const projectList: ProjectNode[] = useMemo(() => {
     const raw = Array.isArray(projectListData)
       ? projectListData
       : Array.isArray((projectListData as any)?.data)
@@ -823,8 +1618,20 @@ export default function HomePage() {
       id: p.Id ?? p.id,
       name: p.Name ?? p.name ?? `Project #${p.Id ?? p.id}`,
       active: p.IsActive === 1 || p.IsActive === true,
+      code: p.ShortName || p.Code || null,
+      companyId: p.CompanyId ?? null,
+      company: p.CompanyName ?? null,
+      type: p.Type ?? null,
+      teamSize: Number(p.TeamSize) || 0,
+      startDate: p.StartDate ?? null,
+      // Co-owning companies (JV / multi-company projects) — these become the
+      // cross-links that make the map read as a network and not a plain tree.
+      coCompanyIds: String(p.MultiCompanyIds ?? "")
+        .split(",")
+        .map((x: string) => parseInt(x, 10))
+        .filter((x: number) => Number.isFinite(x)),
     }));
-  })();
+  }, [projectListData]);
 
   // Civil Work DPR isn't part of the main home-dashboard aggregator yet —
   // it has its own lightweight stats endpoint, so the tile queries that

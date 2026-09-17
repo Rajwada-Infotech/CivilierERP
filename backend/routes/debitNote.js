@@ -11,7 +11,7 @@ const apiRateLimit = require("../middleware/apiRateLimit");
 const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
 const { syncBillStatus } = require("../utils/syncBillStatus");
 const { reverseDebitNotePosting } = require("../services/generalLedger");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
 const { buildGrnGstData } = require("../utils/buildGrnGstData");
 const { applyBillingTermsToAmount } = require("../utils/billingTerms");
 
@@ -451,6 +451,7 @@ router.put("/:id", requirePageRight("debit-note", "edit"), async (req, res) => {
     // one must be rejected first, an Approved one has no amendment path
     // yet for Debit Note. Only Draft/Rejected records reach the UPDATE below.
     await guardEdit("debit-note", id);
+    const wasRejected = (await getRecordStatus("debit-note", id)) === "Rejected";
 
     const check = await validatePartyAndInvoice(pool, { party_id: party_id_val, party_type: partyType, bill_id: bill_id_val });
     if (check.error) return res.status(400).json({ error: check.error });
@@ -493,7 +494,30 @@ router.put("/:id", requirePageRight("debit-note", "edit"), async (req, res) => {
     await replaceItems(pool, id, okItems);
 
     await bumpCacheVersion("debit-note");
-    res.json({ message: "Debit note updated" });
+
+    // A corrected, previously-Rejected debit note goes straight back into
+    // the approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("debit-note", id, "Pending", userEmail(req), req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[debitNote] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Debit note updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: resubmitted ? "Debit note updated and re-submitted for approval" : "Debit note updated",
+      resubmitted,
+    });
   } catch (err) {
     console.error("[debitNote] PUT /:id:", err.message);
     res.status(400).json({ error: err.message || "Internal server error" });
@@ -518,7 +542,7 @@ router.put("/:id/approve", requirePageRight("debit-note", "edit"), async (req, r
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
-    const result = await transition("debit-note", id, "Approved", userEmail(req), req.user?.role);
+    const result = await transition("debit-note", id, "Approved", userEmail(req), req.user?.role, null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("debit-note");
     res.json({ message: "Debit note approved", ...result });
   } catch (err) {
@@ -532,7 +556,7 @@ router.put("/:id/reject", requirePageRight("debit-note", "edit"), async (req, re
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const { note } = req.body;
-    const result = await transition("debit-note", id, "Rejected", userEmail(req), req.user?.role, note || null);
+    const result = await transition("debit-note", id, "Rejected", userEmail(req), req.user?.role, note || null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("debit-note");
     res.json({ message: "Debit note rejected", ...result });
   } catch (err) {

@@ -1368,7 +1368,28 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
             (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid))
             AND ISNULL(rp.RPStatus,'') <> 'Rejected') AS ReceivedPayments,
         (SELECT COUNT(*) FROM dbo.CrmLoanDetail WHERE BookingId = @bid
-          AND SanctionStatus NOT IN ('NotApplied','Rejected')) AS ActiveLoans
+          AND SanctionStatus NOT IN ('NotApplied','Rejected')) AS ActiveLoans,
+        -- These 8 tables all have a NOT NULL FK on BookingId (confirmed via
+        -- sys.foreign_keys) and were missing from this check entirely — a
+        -- cancelled booking that had picked up even one of these before
+        -- cancellation hit a raw, unhandled SQL FK-constraint error on
+        -- permanent delete instead of this route's own clean "protected
+        -- records" message. None of the columns can be NULLed-out the way
+        -- CrmUnitChangeLog.BookingId is (that one was deliberately made
+        -- nullable for this exact purpose) — so, like Agreements/Sale
+        -- Deeds/monetary records above, these are genuine legal/financial
+        -- documents (AFS stamp-duty payment & registry, allotment letter,
+        -- mutation, inter-booking fund transfer, utility billing) and are
+        -- protected rather than silently deleted.
+        (SELECT COUNT(*) FROM dbo.CrmAfsQueryPayment WHERE BookingId = @bid) AS AfsQueryPayments,
+        (SELECT COUNT(*) FROM dbo.CrmAfsRegistry WHERE BookingId = @bid) AS AfsRegistryEntries,
+        (SELECT COUNT(*) FROM dbo.CrmAllotmentLetter WHERE BookingId = @bid) AS AllotmentLetters,
+        (SELECT COUNT(*) FROM dbo.CrmMutation WHERE BookingId = @bid) AS Mutations,
+        (SELECT COUNT(*) FROM dbo.CrmRebookingTransfer WHERE ToBookingId = @bid) AS RebookingTransfers,
+        (SELECT COUNT(*) FROM dbo.ElectricityBill WHERE BookingId = @bid) AS ElectricityBills,
+        (SELECT COUNT(*) FROM dbo.MaintenanceBill WHERE BookingId = @bid) AS MaintenanceBills,
+        (SELECT COUNT(*) FROM dbo.MaintenanceCustomerCharge WHERE BookingId = @bid) AS MaintenanceCustomerCharges,
+        (SELECT COUNT(*) FROM dbo.MeterReadingMaster WHERE BookingId = @bid) AS MeterReadings
     `);
     const p = protectedRes.recordset[0] || {};
     for (const [label, count] of Object.entries(p)) {
@@ -2267,6 +2288,18 @@ router.post("/:id/provision-portal", requirePageRight("crm-bookings", "edit"), a
     }
     const { ensurePortalUser } = require("../services/crmPortalProvision");
     const result = await ensurePortalUser(pool, ApplicationId);
+    // ensurePortalUser signals a real failure (e.g. no mobile on file — now
+    // a normal, expected state since Mobile is optional) via
+    // { created: false, error } — but { created: false, id } is ALSO the
+    // legitimate idempotent "portal already exists" case, so the check has
+    // to be specifically on `error`, not on `created`. This route always
+    // returned 200 { success: true, ... } regardless of which one it was,
+    // so the frontend's `if (!r.ok)` check never fired and staff saw a
+    // false "provisioned successfully" toast for a customer whose portal
+    // was never actually created.
+    if (result.error) {
+      return res.status(400).json({ error: result.error });
+    }
     res.json({ success: true, ...result });
   } catch (e) {
     console.error("[crm-bookings] POST /:id/provision-portal error:", e.message);
