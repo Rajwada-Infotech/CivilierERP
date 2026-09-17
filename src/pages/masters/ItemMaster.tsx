@@ -887,6 +887,7 @@ const ItemMaster: React.FC = () => {
               defaultSupplierId,
               glHeadId,
               costCenterId,
+              daysOfSupply: "",
             },
             group.description,
           );
