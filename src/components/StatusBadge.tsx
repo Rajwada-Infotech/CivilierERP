@@ -247,6 +247,14 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
   const config = (status && ALL_STATUS_CONFIG[status]) || FALLBACK;
   const Icon = config.icon;
 
+  // A page that prints its live DOM (window.print() on a preview modal, e.g.
+  // ExpenseBookingPreviewModal.tsx) has no separate print HTML to intercept
+  // — whatever's on screen prints as-is. "Pending" is a live system state,
+  // not something to hand someone as paperwork, so a printed copy reads
+  // "Provisional" instead via a print-only swap; the on-screen badge (and
+  // every other status) is unaffected.
+  const isPending = status === "Pending";
+
   return (
     <span
       className={cn(
@@ -256,7 +264,14 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
       )}
     >
       <Icon className="w-3 h-3 shrink-0" />
-      {config.label}
+      {isPending ? (
+        <>
+          <span className="print:hidden">{config.label}</span>
+          <span className="hidden print:inline">Provisional</span>
+        </>
+      ) : (
+        config.label
+      )}
     </span>
   );
 }
