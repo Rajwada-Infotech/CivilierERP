@@ -887,6 +887,9 @@ const ItemMaster: React.FC = () => {
               defaultSupplierId,
               glHeadId,
               costCenterId,
+              // No Days of Supply column in the CSV format — same
+              // empty-default this field already gets on the manual Add
+              // form (EMPTY_FORM below).
               daysOfSupply: "",
             },
             group.description,
