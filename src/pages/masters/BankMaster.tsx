@@ -132,18 +132,18 @@ function buildExportColumns(accountGroups: AccountGroup[]): ExportColumn[] {
   const groupName = (id: unknown) =>
     id != null ? (accountGroups.find((g) => g._id === String(id))?.name ?? "—") : "—";
   return [
-    { header: "Company", accessor: "companyName" },
-    { header: "Bank Name", accessor: "bankName" },
-    { header: "Branch", accessor: "branch" },
-    { header: "Account No", accessor: "accountNo" },
-    { header: "IFSC", accessor: "ifsc" },
-    { header: "Account Type", accessor: "accountType" },
-    { header: "Bank Type", accessor: "bankType" },
-    { header: "Holder Name", accessor: "holderName" },
-    { header: "Opening Balance", accessor: "openingBalance" },
+    { header: "Company", accessor: "BCompanyName" },
+    { header: "Bank Name", accessor: "BName" },
+    { header: "Branch", accessor: "BBranch" },
+    { header: "Account No", accessor: "BAccountNumber" },
+    { header: "IFSC", accessor: "BIfscCode" },
+    { header: "Account Type", accessor: "BAccountType" },
+    { header: "Bank Type", accessor: "BBankType" },
+    { header: "Holder Name", accessor: "BAccountHolderName" },
+    { header: "Opening Balance", accessor: "BOpeningBalance" },
     { header: "Group", accessor: (r) => groupName(r.BLBelongsTo) },
-    { header: "Address", accessor: "address" },
-    { header: "Status", accessor: (r) => (r.BActive ? "Active" : "Inactive") },
+    { header: "Address", accessor: "BAddress" },
+    { header: "Status", accessor: (r) => (r.BStatus ? "Active" : "Inactive") },
   ];
 }
 
