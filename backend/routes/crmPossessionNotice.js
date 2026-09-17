@@ -7,7 +7,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -38,6 +38,7 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
         a.ApplicantName
       FROM dbo.CrmBooking b
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
       OUTER APPLY (
         SELECT TOP 1 UnitNo FROM dbo.vw_CrmBookingDisplay WHERE BookingId = b.Id
       ) bv
@@ -47,9 +48,14 @@ router.get("/eligible-bookings", requirePageRight("crm-possession-notice", "view
           SELECT 1 FROM dbo.CrmPrePossession pp
           WHERE pp.BookingId = b.Id AND pp.Status = 'Ready'
         )
+        -- Block-level OC/CC (migration 447) checked first, falling back to
+        -- the project's blanket cert — same fallback as crmPrePossession.js.
         AND (b.ProjectId IS NULL OR EXISTS (
           SELECT 1 FROM dbo.CrmOccupancyCertificate oc
-          WHERE oc.ProjectId = b.ProjectId AND oc.Status = 'Received'
+          WHERE oc.Status = 'Received' AND (
+            (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)
+            OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)
+          )
         ))
         AND NOT EXISTS (
           SELECT 1 FROM dbo.CrmPossessionNotice pn
@@ -109,14 +115,14 @@ router.post("/", requirePageRight("crm-possession-notice", "create"), async (req
       return res.status(400).json({ error: "Possession notice requires the pre-possession check to be Ready first" });
     }
 
-    // OC / CC must be received for the project (same check as Pre-Possession).
+    // OC / CC must be received — block-level first, project blanket as
+    // fallback (same check as Pre-Possession; see resolveOcCcGate).
     const bk = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT TOP 1 ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
     if (bk.recordset[0]?.ProjectId) {
-      const occc = await pool.request().input("pid", sql.Int, bk.recordset[0].ProjectId)
-        .query("SELECT TOP 1 Id FROM dbo.CrmOccupancyCertificate WHERE ProjectId = @pid AND Status = 'Received'");
-      if (!occc.recordset.length) {
-        return res.status(400).json({ error: "Possession notice requires the project's OC / CC to be received first" });
+      const gate = await resolveOcCcGate(pool, bookingId);
+      if (!gate.received) {
+        return res.status(400).json({ error: "Possession notice requires the project's (or this unit's block's) OC / CC to be received first" });
       }
     }
 
