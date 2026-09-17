@@ -13,7 +13,10 @@ process.env.NODE_ENV = "test";
 jest.mock("../db", () => {
   const sql = require("mssql");
   let recordStatus = "Pending";
-  let approvedLevelCount = 0;
+  // Tracks whether an approval was written this test — these tests never
+  // use "all" mode (no workflow configured -> single default level), so a
+  // single Approved insert always satisfies the one level that exists.
+  let insertedApproval = false;
 
   const makeRequest = () => {
     const req = {
@@ -26,10 +29,18 @@ jest.mock("../db", () => {
           return { recordset: [], rowsAffected: [1] };
         }
         if (/INSERT INTO dbo\.ApprovalAuditLog/i.test(text)) {
+          insertedApproval = true;
           return { recordset: [], rowsAffected: [1] };
         }
         if (/MAX\(Level\) AS maxApprovedLevel/i.test(text)) {
-          return { recordset: [{ maxApprovedLevel: approvedLevelCount }] };
+          return { recordset: [{ maxApprovedLevel: insertedApproval ? 1 : 0 }] };
+        }
+        // isLevelSatisfied()'s default "any" check.
+        if (/SELECT TOP 1 1 AS found/i.test(text)) {
+          return { recordset: insertedApproval ? [{ found: 1 }] : [] };
+        }
+        if (/SELECT DISTINCT UserId FROM dbo\.ApprovalAuditLog/i.test(text)) {
+          return { recordset: [] };
         }
         if (/FROM dbo\.ApprovalWorkflows/i.test(text)) {
           return { recordset: [] }; // no workflow configured -> defaults to 1 level
@@ -57,6 +68,7 @@ jest.mock("../db", () => {
     sql: { ...sql, Transaction: FakeTransaction },
     getPool: () => fakePool,
     __setRecordStatus: (s) => { recordStatus = s; },
+    __resetApproval: () => { insertedApproval = false; },
   };
 });
 
@@ -72,6 +84,7 @@ const dbMock = require("../db");
 
 beforeEach(() => {
   dbMock.__setRecordStatus("Pending");
+  dbMock.__resetApproval();
 });
 
 describe("approvalService: per-module approver role restriction", () => {
@@ -107,6 +120,7 @@ describe("approvalService: per-module approver role restriction", () => {
     const asAdmin = await transition("grn", 1, "Approved", "user@example.com", "admin");
     expect(asAdmin.newStatus).toBe("Approved");
     dbMock.__setRecordStatus("Pending");
+    dbMock.__resetApproval();
     const asDba = await transition("grn", 1, "Approved", "user@example.com", "dba");
     expect(asDba.newStatus).toBe("Approved");
   });

@@ -18,7 +18,6 @@ import {
   Check,
   ShieldCheck,
   Loader2,
-  ArrowDown,
   Users,
   GitBranch,
   CheckCircle2,
@@ -35,6 +34,10 @@ export interface ApprovalLevel {
   id: number;
   label: string;
   userIds: number[];
+  // "any" (default) — the step is done as soon as one assigned person
+  // approves. "all" — every assigned person must approve before the step
+  // moves on (e.g. Director 1 AND Director 2, not just one of them).
+  mode: "any" | "all";
 }
 
 export interface ApprovalWorkflow {
@@ -319,30 +322,6 @@ const MODULE_GROUPS = [
   },
 ] as const;
 
-const APPROVAL_TYPES = [
-  {
-    id: "sequential" as const,
-    label: "One by one",
-    icon: ArrowDown,
-    desc: "Each person must approve before the next is asked. Like a chain — first Manager, then Director.",
-    example: "Manager → Director → CFO",
-  },
-  {
-    id: "any" as const,
-    label: "Anyone can approve",
-    icon: Users,
-    desc: "Any one person from the list can approve. Useful when multiple people share the same role.",
-    example: "Manager A or Manager B",
-  },
-  {
-    id: "parallel" as const,
-    label: "Everyone at once",
-    icon: GitBranch,
-    desc: "All approvers are asked at the same time. All must approve before it moves forward.",
-    example: "Manager + Director + CFO (simultaneously)",
-  },
-] as const;
-
 const APPROVAL_API = "/api/approval-workflows";
 
 // ─── API helpers ──────────────────────────────────────────────────────────────
@@ -588,6 +567,7 @@ function AddLevelRow({
 }) {
   const [label, setLabel] = useState("");
   const [userIds, setUserIds] = useState<number[]>([]);
+  const [mode, setMode] = useState<"any" | "all">("any");
   const labelRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -599,7 +579,7 @@ function AddLevelRow({
       labelRef.current?.focus();
       return;
     }
-    onConfirm({ label: label.trim(), userIds });
+    onConfirm({ label: label.trim(), userIds, mode });
   }
 
   return (
@@ -641,11 +621,57 @@ function AddLevelRow({
             onChange={setUserIds}
             users={users}
           />
-          <p className="text-[11px] text-muted-foreground mt-1">
-            You can assign multiple people — anyone assigned can approve unless
-            you chose "Everyone at once" above.
-          </p>
         </div>
+
+        {userIds.length > 1 && (
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+              How many of them need to approve?
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  {
+                    id: "any" as const,
+                    icon: Users,
+                    label: "Any one of them",
+                    desc: "The first person to approve settles this step.",
+                  },
+                  {
+                    id: "all" as const,
+                    icon: GitBranch,
+                    label: "All of them",
+                    desc: "Every person assigned here must approve before it moves on.",
+                  },
+                ]
+              ).map((opt) => {
+                const Icon = opt.icon;
+                const selected = mode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setMode(opt.id)}
+                    className={cn(
+                      "text-left p-3 rounded-lg border-2 transition-all",
+                      selected
+                        ? "border-primary bg-primary/5"
+                        : "border-border bg-background hover:border-primary/30",
+                    )}
+                  >
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Icon className={cn("w-3.5 h-3.5", selected ? "text-primary" : "text-muted-foreground")} />
+                      <span className={cn("text-xs font-semibold", selected ? "text-primary" : "text-foreground")}>
+                        {opt.label}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground leading-snug">{opt.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-2 pt-1">
@@ -715,8 +741,15 @@ function LevelCard({
       {/* Card */}
       <div className="flex-1 flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 mb-1 hover:border-primary/30 hover:shadow-sm transition-all">
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-foreground">
-            {level.label}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-sm font-semibold text-foreground">
+              {level.label}
+            </div>
+            {level.mode === "all" && levelUsers.length > 1 && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-600 bg-violet-500/10 border border-violet-500/20 rounded-full px-2 py-0.5">
+                <GitBranch className="w-2.5 h-2.5" /> All must approve
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
             {levelUsers.length === 0 ? (
@@ -837,9 +870,6 @@ function ConfigForm({
   saving: boolean;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
-  const [type, setType] = useState<"sequential" | "any" | "parallel">(
-    initial?.type ?? "sequential",
-  );
   const [selectedModules, setSelectedModules] = useState<string[]>(
     initial?.modules ?? [],
   );
@@ -888,8 +918,10 @@ function ConfigForm({
       return;
     }
     onSave({
+      // Each step now carries its own Anyone/Everyone mode — the workflow
+      // itself is always "sequential" (steps happen in the order below).
       name: name.trim(),
-      type,
+      type: "sequential",
       modules: selectedModules,
       levels,
       active: initial?.active ?? true,
@@ -951,68 +983,11 @@ function ConfigForm({
           )}
         </FormStep>
 
-        {/* Step 3: Approval style */}
-        <FormStep
-          number={3}
-          title="How should approvals work?"
-          subtitle="Choose how approvers respond when a request comes in"
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {APPROVAL_TYPES.map((t) => {
-              const Icon = t.icon;
-              const selected = type === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setType(t.id)}
-                  className={cn(
-                    "text-left p-4 rounded-xl border-2 transition-all",
-                    selected
-                      ? "border-primary bg-primary/5 shadow-sm"
-                      : "border-border bg-muted/20 hover:border-primary/30 hover:bg-muted/40",
-                  )}
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <div
-                      className={cn(
-                        "w-7 h-7 rounded-lg flex items-center justify-center",
-                        selected
-                          ? "bg-primary/15 text-primary"
-                          : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      <Icon className="w-4 h-4" />
-                    </div>
-                    <span
-                      className={cn(
-                        "text-sm font-semibold",
-                        selected ? "text-primary" : "text-foreground",
-                      )}
-                    >
-                      {t.label}
-                    </span>
-                    {selected && (
-                      <Check className="w-4 h-4 text-primary ml-auto" />
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {t.desc}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground/60 mt-2 font-mono">
-                    {t.example}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-        </FormStep>
-
-        {/* Step 4: Approval steps */}
+        {/* Step 3: Approval steps */}
         <div className="flex gap-4">
           <div className="flex flex-col items-center flex-shrink-0">
             <div className="w-7 h-7 rounded-full bg-primary/10 border-2 border-primary/30 text-primary text-xs font-bold flex items-center justify-center">
-              4
+              3
             </div>
           </div>
           <div className="flex-1 pb-2">
@@ -1021,8 +996,9 @@ function ConfigForm({
                 Who needs to approve, and in what order?
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">
-                Add approval steps — each step is one person or group that must
-                sign off
+                Add approval steps in order. Assign one or more people to
+                each — if you assign more than one, choose whether any one of
+                them can approve, or all of them must.
               </div>
             </div>
 
@@ -1038,7 +1014,7 @@ function ConfigForm({
                 <p className="text-xs text-muted-foreground mb-4">
                   Click the button below to add your first approver.
                   <br />
-                  Example: Step 1 → Site Manager, Step 2 → Finance Head
+                  Example: Step 1 → Head Engineer, Step 2 → Director 1 & Director 2 (all must approve)
                 </p>
               </div>
             )}
@@ -1422,8 +1398,9 @@ export default function ApprovalSetup() {
             ) : (
               <div className="divide-y divide-border/60">
                 {workflows.map((wf) => {
-                  const typeInfo = APPROVAL_TYPES.find((t) => t.id === wf.type);
-                  const TypeIcon = typeInfo?.icon ?? ArrowDown;
+                  const allModeSteps = wf.levels.filter(
+                    (l) => l.mode === "all" && l.userIds.length > 1,
+                  ).length;
                   return (
                     <div
                       key={wf.id}
@@ -1448,10 +1425,12 @@ export default function ApprovalSetup() {
                           <span className="text-sm font-semibold text-foreground">
                             {wf.name}
                           </span>
-                          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full border border-border">
-                            <TypeIcon className="w-3 h-3" />
-                            {typeInfo?.label}
-                          </span>
+                          {allModeSteps > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-violet-600 bg-violet-500/10 px-2 py-0.5 rounded-full border border-violet-500/20">
+                              <GitBranch className="w-3 h-3" />
+                              {allModeSteps} step{allModeSteps > 1 ? "s" : ""} need everyone
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                           {/* Modules */}

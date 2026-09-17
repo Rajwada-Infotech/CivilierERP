@@ -359,6 +359,7 @@ async function writeAuditLog(
   actionStatus,
   note,
   executor = null,
+  userId = null,
 ) {
   const exec = executor || getPool();
   await exec
@@ -369,16 +370,22 @@ async function writeAuditLog(
     .input("Role", sql.NVarChar(100), role || null)
     .input("ApproverEmail", sql.NVarChar(200), approverEmail || null)
     .input("ActionStatus", sql.NVarChar(50), actionStatus)
-    .input("Note", sql.NVarChar(500), note || null).query(`
+    .input("Note", sql.NVarChar(500), note || null)
+    .input("UserId", sql.Int, userId ?? null).query(`
       INSERT INTO dbo.ApprovalAuditLog
-        (TableName, RecordId, Level, Role, ApproverEmail, ActionStatus, Note, ActionAt)
+        (TableName, RecordId, Level, Role, ApproverEmail, ActionStatus, Note, ActionAt, UserId)
       VALUES
-        (@TableName, @RecordId, @Level, @Role, @ApproverEmail, @ActionStatus, @Note, SYSDATETIME())
+        (@TableName, @RecordId, @Level, @Role, @ApproverEmail, @ActionStatus, @Note, SYSDATETIME(), @UserId)
     `);
 }
 
 /**
  * Fetch how many levels have been approved so far for a record.
+ * NOTE: for a level whose mode is "all", this can return a level as soon as
+ * ONE of its required approvers has acted — it's a simple MAX(Level), not
+ * mode-aware. Fine for its current use (an advisory "are we near the final
+ * level" pre-check in saleOrders.js); transition()'s own approve logic
+ * uses the mode-aware resolveCurrentLevel() below instead, never this.
  */
 async function getApprovedLevelCount(tableName, recordId, executor = null) {
   const exec = executor || getPool();
@@ -391,6 +398,58 @@ async function getApprovedLevelCount(tableName, recordId, executor = null) {
       WHERE TableName = @TableName AND RecordId = @RecordId AND ActionStatus = 'Approved'
     `);
   return result.recordset[0]?.maxApprovedLevel ?? 0;
+}
+
+/**
+ * Whether a single level is fully satisfied, given its mode:
+ *  - "all": every userId in levelDef.userIds has its own distinct Approved
+ *    entry at this level. Requires at least one userId to mean anything —
+ *    a level with no assigned people can't collect per-person approvals,
+ *    so it falls back to "any" (matches pre-existing behavior for such
+ *    role-only levels).
+ *  - anything else (undefined, "any"): today's original behavior — a
+ *    single Approved entry at this level is enough.
+ */
+async function isLevelSatisfied(tableName, recordId, level, levelDef, executor = null) {
+  const exec = executor || getPool();
+  if (levelDef?.mode === "all" && Array.isArray(levelDef.userIds) && levelDef.userIds.length > 0) {
+    const result = await exec
+      .request()
+      .input("TableName", sql.NVarChar(100), tableName)
+      .input("RecordId", sql.Int, recordId)
+      .input("Level", sql.Int, level).query(`
+        SELECT DISTINCT UserId FROM dbo.ApprovalAuditLog
+        WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level
+          AND ActionStatus = 'Approved' AND UserId IS NOT NULL
+      `);
+    const approvedUserIds = new Set(result.recordset.map((r) => r.UserId));
+    return levelDef.userIds.every((uid) => approvedUserIds.has(uid));
+  }
+  const result = await exec
+    .request()
+    .input("TableName", sql.NVarChar(100), tableName)
+    .input("RecordId", sql.Int, recordId)
+    .input("Level", sql.Int, level).query(`
+      SELECT TOP 1 1 AS found FROM dbo.ApprovalAuditLog
+      WHERE TableName = @TableName AND RecordId = @RecordId AND Level = @Level AND ActionStatus = 'Approved'
+    `);
+  return result.recordset.length > 0;
+}
+
+/**
+ * Walk levels in order from 1 and return the first one not yet satisfied —
+ * the level the next approval action should apply to. Returns
+ * totalLevels + 1 once every level is satisfied. This is what makes a
+ * "everyone must approve" level actually wait for every assigned person
+ * instead of completing on the first approval, the way getApprovedLevelCount
+ * alone would.
+ */
+async function resolveCurrentLevel(tableName, recordId, totalLevels, levelDefs, executor = null) {
+  for (let level = 1; level <= totalLevels; level++) {
+    const satisfied = await isLevelSatisfied(tableName, recordId, level, levelDefs[level - 1], executor);
+    if (!satisfied) return level;
+  }
+  return totalLevels + 1;
 }
 
 /**
@@ -589,26 +648,43 @@ async function transition(
       if (currentStatus !== "Pending") {
         throw new Error(`Cannot reject from status "${currentStatus}"`);
       }
+      // Log the rejection at the level it actually happened, not a fixed 0 —
+      // this is what lets a badge like ApprovalStatusChain show "who
+      // rejected, at which step" without any changes on its side: it
+      // already reads per-level ActionStatus, it just never received a
+      // Rejected row at a real level before this.
+      const workflow = await getWorkflow(module);
+      const totalLevels = workflow?.Levels ?? 1;
+      const levelDefs = workflow?.LevelDefs ?? [];
+      const rejectedAtLevel = await resolveCurrentLevel(tableName, id, totalLevels, levelDefs, tx);
       await setRecordStatus(module, id, "Rejected", tx);
       await writeAuditLog(
         tableName,
         id,
-        0,
+        rejectedAtLevel > totalLevels ? 0 : rejectedAtLevel,
         userRole,
         userEmail,
         "Rejected",
         note,
         tx,
+        userId,
       );
-      result = { newStatus: "Rejected" };
+      result = { newStatus: "Rejected", level: rejectedAtLevel > totalLevels ? null : rejectedAtLevel };
     } else if (targetStatus === "Approved") {
       if (currentStatus !== "Pending") {
         throw new Error(`Cannot approve from status "${currentStatus}"`);
       }
       const workflow = await getWorkflow(module);
       const totalLevels = workflow?.Levels ?? 1;
-      const approvedSoFar = await getApprovedLevelCount(tableName, id, tx);
-      const nextLevel = approvedSoFar + 1;
+      const levelDefs = workflow?.LevelDefs ?? [];
+      // Mode-aware: an "everyone must approve" level stays the current level
+      // across multiple approvals until every assigned person has acted —
+      // unlike the old approvedSoFar+1, which advanced past a level the
+      // instant any single approval landed on it.
+      const nextLevel = await resolveCurrentLevel(tableName, id, totalLevels, levelDefs, tx);
+      if (nextLevel > totalLevels) {
+        throw new Error("This record has already completed every approval level.");
+      }
 
       // -- Per-level gate --
       // The coarse role check above only confirms the user is *some* kind of
@@ -619,7 +695,7 @@ async function transition(
       // A level with neither `roles` nor `userIds` set falls through to the
       // module-wide coarse check only (today's existing behaviour), so this
       // is fully backward compatible with workflows that don't use it yet.
-      const levelDef = workflow?.LevelDefs?.[nextLevel - 1];
+      const levelDef = levelDefs[nextLevel - 1];
       if (levelDef) {
         const roleOk =
           !Array.isArray(levelDef.roles) || levelDef.roles.length === 0 ||
@@ -637,6 +713,19 @@ async function transition(
           levelErr.status = 403;
           throw levelErr;
         }
+        // On an "everyone must approve" level, one person can't satisfy the
+        // requirement twice — without this, the same director re-approving
+        // would look like a second, distinct sign-off.
+        if (levelDef.mode === "all" && userId != null) {
+          const alreadyApproved = await isLevelSatisfied(
+            tableName, id, nextLevel, { mode: "all", userIds: [userId] }, tx,
+          );
+          if (alreadyApproved) {
+            const dupErr = new Error("You have already approved this step.");
+            dupErr.status = 409;
+            throw dupErr;
+          }
+        }
       }
 
       await writeAuditLog(
@@ -648,9 +737,21 @@ async function transition(
         "Approved",
         note,
         tx,
+        userId,
       );
 
-      if (nextLevel >= totalLevels) {
+      // Re-check: on an "everyone must approve" level, this single approval
+      // may not be enough yet — stay Pending at the SAME level until every
+      // assigned person has signed off.
+      const levelNowSatisfied = await isLevelSatisfied(tableName, id, nextLevel, levelDef, tx);
+      if (!levelNowSatisfied) {
+        result = {
+          newStatus: "Pending",
+          level: nextLevel,
+          totalLevels,
+          waitingOnLevel: true,
+        };
+      } else if (nextLevel >= totalLevels) {
         await setRecordStatus(module, id, "Approved", tx);
         fullyApproved = true;
         result = { newStatus: "Approved", level: nextLevel, totalLevels };
