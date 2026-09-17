@@ -7,6 +7,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
+const { MODULE_MAP: DOC_MODULE_MAP } = require("../services/approvalService");
 
 const CACHE_NS = "approval-workflows";
 
@@ -402,13 +403,55 @@ router.get("/trail", authMiddleware, async (req, res) => {
         isTerminal: true,
       }));
 
+    // The record's own Status column is the actual source of truth for a
+    // terminal outcome — the walk above only re-derives "fully approved" by
+    // matching audit history against the workflow's CURRENT level list. If a
+    // level is added to an already-active workflow after a record was fully
+    // approved under the old (shorter) shape, that record suddenly has no
+    // audit row for the new level and every consumer of `steps` — including
+    // ApprovalStatusChain on the frontend, which recomputes fullyApproved
+    // itself from each step's own `status` rather than trusting the
+    // `fullyApproved` field below — would show it as stuck on that new level,
+    // even though nothing about the record itself changed. Backfilling every
+    // step to "Approved" here (not just the summary flags) is what actually
+    // fixes the badge, since the frontend never reads the flags directly.
+    // Only in-progress (Pending) records are still evaluated against the
+    // current workflow shape.
+    const docEntry = Object.values(DOC_MODULE_MAP).find(
+      (m) => m.table.replace("dbo.", "") === module,
+    );
+    let actualStatus = null;
+    if (docEntry) {
+      try {
+        const docResult = await pool
+          .request()
+          .input("id", sql.Int, recordId)
+          .query(`SELECT ${docEntry.status} AS Status FROM ${docEntry.table} WHERE ${docEntry.pk} = @id`);
+        actualStatus = docResult.recordset[0]?.Status ?? null;
+      } catch {
+        // Best-effort — if the lookup fails for any reason, fall back to
+        // the step-derived computation below rather than erroring the badge.
+      }
+    }
+    if (actualStatus === "Approved") {
+      for (const s of steps) {
+        if (s.status !== "Approved") {
+          s.status = "Approved";
+          s.note = s.note ?? "Approved under an earlier version of this workflow";
+        }
+      }
+    }
+
     const fullSteps = [...submittedMarkers, ...steps, ...rejectedMarkers];
 
     const currentLevel =
       steps.findIndex((s) => s.status !== "Approved") + 1 || steps.length;
     const fullyApproved =
-      steps.length > 0 && steps.every((s) => s.status === "Approved");
-    const hasRejection = rejectedMarkers.length > 0 || steps.some((s) => s.status === "Rejected");
+      actualStatus === "Approved" ||
+      (steps.length > 0 && steps.every((s) => s.status === "Approved"));
+    const hasRejection =
+      actualStatus !== "Approved" &&
+      (actualStatus === "Rejected" || rejectedMarkers.length > 0 || steps.some((s) => s.status === "Rejected"));
 
     res.json({
       workflowName: wfRow?.Name || null,
