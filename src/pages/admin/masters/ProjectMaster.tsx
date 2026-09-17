@@ -23,11 +23,15 @@ import {
   CalendarDays,
   ChevronDown,
   ShieldAlert,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   getProjects,
   createProject,
@@ -109,6 +113,115 @@ function ProjectAvatar({
     >
       {name.charAt(0).toUpperCase()}
     </div>
+  );
+}
+
+// A fixed palette cycled by id, so companies sitting side by side in the
+// stack read as distinct at a glance instead of a wall of same-colored dots.
+const TAG_AVATAR_COLORS = [
+  "bg-violet-500/15 text-violet-600",
+  "bg-blue-500/15 text-blue-600",
+  "bg-emerald-500/15 text-emerald-600",
+  "bg-amber-500/15 text-amber-600",
+  "bg-rose-500/15 text-rose-600",
+  "bg-cyan-500/15 text-cyan-600",
+];
+function tagAvatarColor(id: string) {
+  const n = parseInt(id, 10) || 0;
+  return TAG_AVATAR_COLORS[n % TAG_AVATAR_COLORS.length];
+}
+
+// Assignee-stack style picker: collapses to overlapping avatar circles (or
+// a bare "Add companies" affordance when empty) and expands into a
+// searchable list on click — the same interaction Linear/Notion use for
+// assigning multiple people, applied here to companies instead of a wall
+// of toggle chips.
+function CompanyTagPicker({
+  companies,
+  excludeId,
+  selectedIds,
+  onChange,
+}: {
+  companies: any[];
+  excludeId: string;
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const options = (companies as any[]).filter((c) => String(c.Id ?? c.id) !== excludeId);
+  const selected = options.filter((c) => selectedIds.includes(String(c.Id ?? c.id)));
+  const MAX_SHOWN = 5;
+  const shownAvatars = selected.slice(0, MAX_SHOWN);
+  const extra = selected.length - shownAvatars.length;
+
+  const toggle = (id: string) => {
+    onChange(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" className="group flex items-center gap-2.5 py-1">
+          {selected.length === 0 ? (
+            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-dashed border-border text-xs text-muted-foreground group-hover:border-primary/40 group-hover:text-primary transition-colors">
+              <Plus size={12} /> Add companies
+            </span>
+          ) : (
+            <>
+              <div className="flex items-center -space-x-2.5">
+                {shownAvatars.map((c) => {
+                  const id = String(c.Id ?? c.id);
+                  const name = c.Name ?? c.name ?? "";
+                  return (
+                    <Avatar key={id} className="h-8 w-8 border-2 border-card ring-1 ring-border/60">
+                      <AvatarFallback className={`text-[11px] font-heading font-bold ${tagAvatarColor(id)}`}>
+                        {name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  );
+                })}
+                {extra > 0 && (
+                  <Avatar className="h-8 w-8 border-2 border-card ring-1 ring-border/60">
+                    <AvatarFallback className="text-[10px] font-heading font-bold bg-muted text-muted-foreground">
+                      +{extra}
+                    </AvatarFallback>
+                  </Avatar>
+                )}
+              </div>
+              <span className="text-xs text-muted-foreground group-hover:text-primary transition-colors">
+                {selected.length} tagged
+              </span>
+            </>
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search companies…" />
+          <CommandList>
+            <CommandEmpty>No companies found.</CommandEmpty>
+            <CommandGroup>
+              {options.map((c) => {
+                const id = String(c.Id ?? c.id);
+                const name = c.Name ?? c.name ?? "";
+                const checked = selectedIds.includes(id);
+                return (
+                  <CommandItem key={id} value={name} onSelect={() => toggle(id)} className="gap-2">
+                    <Avatar className="h-6 w-6">
+                      <AvatarFallback className={`text-[10px] font-heading font-bold ${tagAvatarColor(id)}`}>
+                        {name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="flex-1 truncate">{name}</span>
+                    <Check size={14} className={checked ? "opacity-100 text-primary" : "opacity-0"} />
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1322,94 +1435,47 @@ export default function ProjectMaster() {
 
                   {/* Multi-Company tagging toggle */}
                   <div className="col-span-full border border-border rounded-lg p-4 bg-muted/10 space-y-3">
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() =>
-                          setForm((p) => ({
-                            ...p,
-                            multiCompanyEnabled: !p.multiCompanyEnabled,
-                            multiCompanyIds: !p.multiCompanyEnabled
-                              ? p.multiCompanyIds
-                              : [],
-                          }))
+                    <button
+                      onClick={() =>
+                        setForm((p) => ({
+                          ...p,
+                          multiCompanyEnabled: !p.multiCompanyEnabled,
+                          multiCompanyIds: !p.multiCompanyEnabled
+                            ? p.multiCompanyIds
+                            : [],
+                        }))
+                      }
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      {form.multiCompanyEnabled ? (
+                        <ToggleRight size={24} className="text-blue-500" />
+                      ) : (
+                        <ToggleLeft size={24} className="text-muted-foreground" />
+                      )}
+                      <span
+                        className={
+                          form.multiCompanyEnabled
+                            ? "text-blue-600 font-medium"
+                            : "text-muted-foreground"
                         }
-                        className="flex items-center gap-2 text-sm"
                       >
-                        {form.multiCompanyEnabled ? (
-                          <ToggleRight size={24} className="text-blue-500" />
-                        ) : (
-                          <ToggleLeft
-                            size={24}
-                            className="text-muted-foreground"
-                          />
-                        )}
-                        <span
-                          className={
-                            form.multiCompanyEnabled
-                              ? "text-blue-600 font-medium"
-                              : "text-muted-foreground"
-                          }
-                        >
-                          Tag Additional Companies
-                        </span>
-                      </button>
-                      {form.multiCompanyEnabled &&
-                        form.multiCompanyIds.length > 0 && (
-                          <span className="px-2 py-0.5 rounded-full text-xs bg-blue-500/10 text-blue-600 font-medium">
-                            {form.multiCompanyIds.length} tagged
-                          </span>
-                        )}
-                    </div>
+                        Tag Additional Companies
+                      </span>
+                    </button>
 
                     {form.multiCompanyEnabled && (
                       <div>
                         <label className="block text-xs font-medium text-muted-foreground mb-2">
                           Companies (besides the primary Company above)
                         </label>
-                        {(companies as any[]).filter(
-                          (c) => String(c.Id ?? c.id) !== form.companyId,
-                        ).length === 0 ? (
-                          <p className="text-xs text-muted-foreground">
-                            No other companies available to tag.
-                          </p>
-                        ) : (
-                          <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto pr-1">
-                            {(companies as any[])
-                              .filter(
-                                (c) =>
-                                  String(c.Id ?? c.id) !== form.companyId,
-                              )
-                              .map((c) => {
-                                const id = String(c.Id ?? c.id);
-                                const name = c.Name ?? c.name ?? "";
-                                const checked =
-                                  form.multiCompanyIds.includes(id);
-                                return (
-                                  <button
-                                    key={id}
-                                    type="button"
-                                    onClick={() =>
-                                      setForm((p) => ({
-                                        ...p,
-                                        multiCompanyIds: checked
-                                          ? p.multiCompanyIds.filter(
-                                              (x) => x !== id,
-                                            )
-                                          : [...p.multiCompanyIds, id],
-                                      }))
-                                    }
-                                    className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                                      checked
-                                        ? "bg-blue-500/10 border-blue-500/40 text-blue-600"
-                                        : "border-border text-muted-foreground hover:bg-muted"
-                                    }`}
-                                  >
-                                    {name}
-                                  </button>
-                                );
-                              })}
-                          </div>
-                        )}
+                        <CompanyTagPicker
+                          companies={companies}
+                          excludeId={form.companyId}
+                          selectedIds={form.multiCompanyIds}
+                          onChange={(ids) =>
+                            setForm((p) => ({ ...p, multiCompanyIds: ids }))
+                          }
+                        />
                       </div>
                     )}
                   </div>
