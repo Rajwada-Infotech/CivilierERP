@@ -1569,11 +1569,11 @@ router.put("/on-account/:id/apply", requirePageRight("crm-payments", "edit"), as
 router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const { status, projectId, companyId, blockId, search, dateFrom, dateTo, page = "1", pageSize = "50" } = req.query;
-    const offset = (parseInt(page) - 1) * parseInt(pageSize);
+    const { status, projectId, companyId, blockId, search, dateFrom, dateTo } = req.query;
+    const { page, pageSize, offset } = applyPagination(req, 50);
 
     const req_ = pool.request()
-      .input("pageSize", sql.Int, parseInt(pageSize))
+      .input("pageSize", sql.Int, pageSize)
       .input("offset",   sql.Int, offset);
 
     let where = "WHERE o.BookingId IS NOT NULL";
@@ -1640,8 +1640,8 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
     res.json({
       deposits: result.recordset,
       total: countResult.recordset[0]?.Total || 0,
-      page: parseInt(page),
-      pageSize: parseInt(pageSize),
+      page,
+      pageSize,
     });
   } catch (e) {
     console.error("[crm-payments] GET /on-account error:", e.message);
