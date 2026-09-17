@@ -124,6 +124,15 @@ const CrmPaymentPlans: React.FC = () => {
   // untagged plan still participates in every level's "all active plans"
   // fallback, it just never appears in a Project-filtered list.
   const [projectIds, setProjectIds] = useState<string[]>([]);
+  // True only once the user actually adds/removes a tag chip this session —
+  // NOT set just by loading the current tags into the form on Edit open.
+  // Without this, saving a plan for any unrelated reason (renaming it,
+  // tweaking a milestone) always re-synced ProjectIds to whatever state
+  // happened to be loaded, silently wiping real tags if that load was ever
+  // incomplete/raced (see the openEdit request-token guard below) — real
+  // tag rows were found deactivated in exactly this way. Now ProjectIds is
+  // only ever sent (and only ever re-synced server-side) when this is true.
+  const [projectTagsTouched, setProjectTagsTouched] = useState(false);
   // Company picked first, Project narrows to that Company's list and stays
   // disabled until then (same disciplined Company->Project gate every other
   // master page in the app now uses).
@@ -220,6 +229,7 @@ const CrmPaymentPlans: React.FC = () => {
     setPlanName(""); setDescription(""); setBookingAmount("");
     setItems([{ MilestoneMasterId: "", MilestoneName: "Booking", Percent: "" }]);
     setProjectIds([]);
+    setProjectTagsTouched(false);
     setTagCompanyId("");
     setTagProjectPick("");
     setIsActive(true);
@@ -227,9 +237,18 @@ const CrmPaymentPlans: React.FC = () => {
 
   const openCreate = () => { resetForm(); setDialogOpen(true); };
 
+  // Guards against a genuine async race: clicking Edit on one plan, then
+  // Edit on a different plan before the first fetchPlanDetail resolves,
+  // could let the first (now-stale) response land AFTER the second and
+  // stomp its freshly-loaded, correct project tags. openEditRequestId
+  // tracks which call is the most recent; a response only applies its data
+  // if it's still that one.
+  const openEditRequestIdRef = React.useRef(0);
   const openEdit = async (id: number) => {
+    const requestId = ++openEditRequestIdRef.current;
     setPreviewPlan(null);
     const detail = await fetchPlanDetail(id);
+    if (openEditRequestIdRef.current !== requestId) return; // a newer openEdit call has since superseded this one
     if (!detail) { toast.error("Could not load plan"); return; }
     const { plan, items: planItems } = detail;
     setEditingId(id);
@@ -238,6 +257,9 @@ const CrmPaymentPlans: React.FC = () => {
     setBookingAmount(plan.BookingAmount != null ? String(plan.BookingAmount) : "");
     const taggedProjectIds = parseTaggedProjects(plan.ProjectsJson).map((row) => String(row.ProjectId));
     setProjectIds(taggedProjectIds);
+    // Loading the plan's existing tags is not the same as the user touching
+    // the picker — only an actual add/remove click should mark this dirty.
+    setProjectTagsTouched(false);
     setIsActive(plan.IsActive !== false && plan.IsActive !== 0);
     setTagCompanyId("");
     setTagProjectPick("");
@@ -281,14 +303,24 @@ const CrmPaymentPlans: React.FC = () => {
       // itself, so its stored Percent is always 0 regardless of what an
       // older plan (saved before this rule) had in that field.
       const normalizedItems = items.map((it, idx) => idx === 0 ? { ...it, Percent: "0" } : it);
+      // ProjectIds is only included when the user actually touched the
+      // tagging picker (or this is a brand-new plan, where "touched" is
+      // moot — there's nothing existing to preserve). The backend's PUT
+      // route only re-syncs tags when the key is present at all, so
+      // omitting it here means saving a plan for an unrelated reason
+      // (renaming it, tweaking a milestone) can never silently wipe its
+      // real project tags — see projectTagsTouched's own comment above.
+      const body: Record<string, any> = {
+        PlanName: planName, Description: description, BookingAmount: bookingAmount, Items: normalizedItems,
+        IsActive: isActive,
+      };
+      if (!isEdit || projectTagsTouched) {
+        body.ProjectIds = projectIds.map((id) => parseInt(id, 10));
+      }
       const res = await fetchWithAuth(isEdit ? `${API}/${editingId}` : API, {
         method: isEdit ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          PlanName: planName, Description: description, BookingAmount: bookingAmount, Items: normalizedItems,
-          ProjectIds: projectIds.map((id) => parseInt(id, 10)),
-          IsActive: isActive,
-        }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error);
@@ -678,6 +710,7 @@ const CrmPaymentPlans: React.FC = () => {
                     onClick={() => {
                       if (!tagProjectPick || projectIds.includes(tagProjectPick)) return;
                       setProjectIds((ids) => [...ids, tagProjectPick]);
+                      setProjectTagsTouched(true);
                       setTagProjectPick("");
                     }}
                     className="h-[34px] px-3 text-xs font-medium rounded-lg border border-border hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
@@ -697,7 +730,7 @@ const CrmPaymentPlans: React.FC = () => {
                       </span>
                       <button
                         type="button"
-                        onClick={() => setProjectIds((ids) => ids.filter((id) => id !== tp.id))}
+                        onClick={() => { setProjectIds((ids) => ids.filter((id) => id !== tp.id)); setProjectTagsTouched(true); }}
                         title={`Remove ${tp.name}`}
                         className="p-0.5 rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                       >

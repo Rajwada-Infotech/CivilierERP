@@ -93,6 +93,10 @@ const LM_SELECT = `
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
   LEFT JOIN dbo.enterprise proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
+  -- Needed for block-level OC/CC resolution below (migration 447) — moved
+  -- here (was previously only appended by the GET / list route's own
+  -- SELECT_WITH_BLOCK) so GET /booking/:bookingId gets it too.
+  LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
   OUTER APPLY (
     SELECT TOP 1 Id, AgreementNo, Status FROM dbo.CrmAgreement
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
@@ -121,10 +125,17 @@ const LM_SELECT = `
     SELECT TOP 1 Id, MutationNo, Status FROM dbo.CrmMutation
     WHERE BookingId = m.BookingId ORDER BY CreatedAt DESC
   ) mut
+  -- Block-level OC/CC (migration 447) is authoritative when this booking's
+  -- own block has a Received cert of its own; falls back to the project's
+  -- blanket (BlockId IS NULL) cert otherwise — same fallback resolveOcCcGate
+  -- (crmWorkflowGuards.js) implements for single-booking JS lookups.
   OUTER APPLY (
     SELECT CASE WHEN EXISTS (
-      SELECT 1 FROM dbo.CrmOccupancyCertificate
-      WHERE ProjectId = b.ProjectId AND Status = 'Received'
+      SELECT 1 FROM dbo.CrmOccupancyCertificate oc
+      WHERE oc.Status = 'Received' AND (
+        (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)
+        OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)
+      )
     ) THEN 1 ELSE 0 END AS HasReceived
   ) occc
   OUTER APPLY (
@@ -167,7 +178,10 @@ router.get("/", requirePageRight("crm-legal-milestones", "view"), async (req, re
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search)");
     }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
-    const SELECT_WITH_BLOCK = `${LM_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
+    // um is now joined directly inside LM_SELECT itself (needed there for
+    // block-level OC/CC resolution) — this alias just keeps the name used
+    // by the WHERE clause below meaningful, no second join needed.
+    const SELECT_WITH_BLOCK = LM_SELECT;
 
     if (!req.query.page) {
       const result = await req0.query(`${SELECT_WITH_BLOCK} ${where} ORDER BY m.CreatedAt DESC`);
