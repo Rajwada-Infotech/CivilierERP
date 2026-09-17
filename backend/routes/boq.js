@@ -653,7 +653,7 @@ router.post("/:id/transition", async (req, res) => {
       action === "approve" ? "Approved" :
       action === "reject" ? "Rejected" : null;
     if (!targetStatus) return res.status(400).json({ error: `Unknown action: ${action}` });
-    const result = await transition("boq", id, targetStatus, userEmail, req.user?.role, req.body.note || null);
+    const result = await transition("boq", id, targetStatus, userEmail, req.user?.role, req.body.note || null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("boq");
     res.json({ message: `BOQ ${action}d`, ...result });
   } catch (err) {
@@ -691,6 +691,8 @@ router.put("/:id/approve", async (req, res) => {
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("boq");
     res.json({ message: "BOQ approved", ...result });
@@ -714,6 +716,7 @@ router.put("/:id/reject", async (req, res) => {
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("boq");
     res.json({ message: "BOQ rejected", ...result });

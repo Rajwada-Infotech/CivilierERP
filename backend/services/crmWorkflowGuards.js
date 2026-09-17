@@ -4,10 +4,6 @@ const { emitNotification } = require("./notify");
 const { generateInvoicePdf } = require("./invoicePdf");
 const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
 
-function hasValue(value) {
-  return value !== null && value !== undefined && String(value).trim() !== "";
-}
-
 // Server-side backstop for "a cancelled booking must be released from every
 // workflow action, not just hidden from dropdowns" — a stale client-side
 // list, a deep link, or a direct API call could otherwise still reach a
@@ -151,12 +147,17 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   if (!booking.UnitId) {
     errors.push("Booking must be linked to a Unit Master unit");
   }
-  if (!hasValue(booking.Email)) {
-    errors.push("Applicant email is required for customer portal login");
-  }
-  if (!hasValue(booking.Mobile)) {
-    errors.push("Applicant mobile number is required as the initial portal password");
-  }
+  // Neither Email nor Mobile is required here any more (business decision).
+  // Both used to be mandatory purely because they double as the portal
+  // login's username (Email) and initial password (Mobile). A customer
+  // missing either now simply never gets a portal account provisioned —
+  // ensurePortalUser in crmPortalProvision.js already checks both
+  // (`if (!row.Mobile)` / `if (!row.Email)`) and returns a clean
+  // "cannot provision portal login" result instead of failing — the same
+  // way they already can't receive SMS/email notifications without one.
+  // That's a narrower, more accurate consequence than blocking the entire
+  // Agreement over a field that has nothing to do with the legal contract
+  // itself.
 
   const welcome = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT TOP 1 Id
@@ -480,18 +481,32 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   if (!bookingRow) return null;
 
   const deedNo = await getNextDocNumber(pool, "DEED", "DEED");
-  const result = await pool.request()
-    .input("no",   sql.NVarChar(30), deedNo)
-    .input("bid",  sql.Int, bookingId)
-    .input("agid", sql.Int, agreement.recordset[0].Id)
-    .input("note", sql.NVarChar(sql.MAX), "Auto-created — handover completed and AFS registered")
-    .input("cb",   sql.Int, actorUserId || null)
-    .query(`
-      INSERT INTO dbo.CrmSalesDeed (DeedNo, BookingId, AgreementId, Status, Notes, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id
-      VALUES (@no, @bid, @agid, 'Draft', @note, @cb, SYSDATETIME())
-    `);
-  const deedId = result.recordset[0].Id;
+  let deedId;
+  try {
+    const result = await pool.request()
+      .input("no",   sql.NVarChar(30), deedNo)
+      .input("bid",  sql.Int, bookingId)
+      .input("agid", sql.Int, agreement.recordset[0].Id)
+      .input("note", sql.NVarChar(sql.MAX), "Auto-created — handover completed and AFS registered")
+      .input("cb",   sql.Int, actorUserId || null)
+      .query(`
+        INSERT INTO dbo.CrmSalesDeed (DeedNo, BookingId, AgreementId, Status, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @agid, 'Draft', @note, @cb, SYSDATETIME())
+      `);
+    deedId = result.recordset[0].Id;
+  } catch (e) {
+    // Same race guard as every sibling maybeAutoCreate* in this file
+    // (maybeAutoCreateAgreement, maybeAutoCreateLegalMilestone) — this one
+    // was missing it. Two near-simultaneous triggers (Handover completion
+    // and the milestone-settlement holdover call, see comment above) can
+    // both pass the `existing` check above before either INSERTs; the
+    // UNIQUE constraint on CrmSalesDeed.BookingId still prevents an actual
+    // duplicate row, but without this catch the loser surfaced as a raw,
+    // unhandled 500 instead of a clean no-op.
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) return null;
+    throw e;
+  }
 
   if (bookingRow.AssignedTo) {
     await emitNotification(pool, bookingRow.AssignedTo, "crm_sales_deed_ready",

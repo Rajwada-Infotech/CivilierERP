@@ -931,6 +931,8 @@ router.put("/:id/approve", requirePageRight("vehicle-in-out", "edit"), async (re
       "Approved",
       req.user?.email || email,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(CACHE_KEY);
     res.json({ message: "Vehicle In/Out approved", ...result });
@@ -958,6 +960,7 @@ router.put("/:id/reject", requirePageRight("vehicle-in-out", "edit"), async (req
       req.user?.email || email,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(CACHE_KEY);
     res.json({ message: "Vehicle In/Out rejected", ...result });

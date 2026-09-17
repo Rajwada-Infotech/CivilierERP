@@ -1440,6 +1440,8 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
 
     // Sync EMI installment if this payment is for an EMI ref
@@ -1756,6 +1758,7 @@ router.put("/:id/reject", requirePageRight("new-payment", "edit"), async (req, r
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await Promise.all([
       bumpCacheVersion("new-payment"),
