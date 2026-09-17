@@ -482,15 +482,6 @@ export default function FundTransfer() {
   const isDigitalMode = DIGITAL_MODES.includes(mode as FundTransferMode);
   const isPostDated = mode === "Post-Dated Cheque";
 
-  // A Cash in Hand bank (LHeadCode "CASH-IN-HAND" or per-company
-  // "CASH-C-<companyId>" — see generalLedger.js's ensureCashInHandHead)
-  // isn't a real bank account — either side of the transfer being one
-  // locks Payment Mode to Cash the same way Payment.tsx does, instead of
-  // leaving it possible to record e.g. a Cheque against cash-in-hand.
-  const isCashInHandBank = (bankId: string) =>
-    banks.find((b) => String(b.BId) === bankId)?.BCode?.startsWith("CASH-") ?? false;
-  const cashInHandInvolved = isCashInHandBank(sourceBankId) || isCashInHandBank(destBankId);
-
   // The cheque book being drawn from belongs to the SOURCE bank — that's
   // the account the money (and the physical cheque) actually leaves from.
   useEffect(() => {
@@ -704,13 +695,6 @@ export default function FundTransfer() {
     }
     if (!DIGITAL_MODES.includes(m)) setDigitalRefNumber("");
   };
-
-  // Picking a Cash in Hand bank on either side locks Payment Mode to Cash —
-  // see cashInHandInvolved above.
-  useEffect(() => {
-    if (cashInHandInvolved && mode !== "Cash") handleModeChange("Cash");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cashInHandInvolved]);
 
   const submit = async () => {
     if (!sourceCompanyId) { toast.error("Select the source company."); return; }
@@ -1174,33 +1158,22 @@ export default function FundTransfer() {
                 <Wallet size={11} /> Payment Mode *
               </p>
               <div className="flex flex-wrap gap-1.5">
-                {PAYMENT_MODES.map((m) => {
-                  const disabled = cashInHandInvolved && m !== "Cash";
-                  return (
-                    <button
-                      key={m}
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => !disabled && handleModeChange(m)}
-                      className={cn(
-                        "px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all",
-                        disabled
-                          ? "border-border/40 text-muted-foreground/30 cursor-not-allowed"
-                          : mode === m
-                            ? "border-primary bg-primary/10 text-primary shadow-sm"
-                            : "border-border text-muted-foreground hover:bg-muted/40 hover:border-border/80",
-                      )}
-                    >
-                      {m}
-                    </button>
-                  );
-                })}
+                {PAYMENT_MODES.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => handleModeChange(m)}
+                    className={cn(
+                      "px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-all",
+                      mode === m
+                        ? "border-primary bg-primary/10 text-primary shadow-sm"
+                        : "border-border text-muted-foreground hover:bg-muted/40 hover:border-border/80",
+                    )}
+                  >
+                    {m}
+                  </button>
+                ))}
               </div>
-              {cashInHandInvolved && (
-                <p className="text-[11px] text-muted-foreground/70">
-                  Cash in Hand isn't a real bank account — Payment Mode is locked to Cash.
-                </p>
-              )}
 
               {isChequeMode && (
                 <div className="rounded-xl border border-border bg-muted/10 p-3 sm:p-3.5 space-y-3 mt-1">
