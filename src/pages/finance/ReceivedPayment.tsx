@@ -104,7 +104,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Customer", accessor: (r) => String(r.customerName || r.receivedFrom || "—") },
   { header: "Mode", accessor: "mode" },
   { header: "Deposit Bank", accessor: "depositBankName" },
-  { header: "Amount", accessor: (r) => formatINR(Number(r.amount || 0)) },
+  { header: "Amount", accessor: (r) => Number(r.amount || 0) },
   { header: "Status", accessor: (r) => printStatusLabel(r.status as string) },
   { header: "Transaction / Cheque Ref", accessor: (r) => String(r.transactionId || r.checkNumber || "") },
 ];
@@ -728,6 +728,21 @@ export default function ReceivedPaymentPage() {
     loadPayments(1);
   }, [loadPayments]);
 
+  // Export must cover every matching record, not just whatever page happens
+  // to be on screen — the list is server-paginated (PAGE_SIZE=20) and the
+  // backend caps ?limit= at 100 per request, so this loops pages of 100
+  // until every record is collected instead of a single capped fetch.
+  const fetchAllPaymentsForExport = useCallback(async (): Promise<Record<string, unknown>[]> => {
+    const FETCH_LIMIT = 100;
+    const first = await getReceivedPayments(1, FETCH_LIMIT);
+    const all = [...first.data];
+    for (let page = 2; page <= first.totalPages; page++) {
+      const res = await getReceivedPayments(page, FETCH_LIMIT);
+      all.push(...res.data);
+    }
+    return all.map(mapReceivedPaymentRow) as unknown as Record<string, unknown>[];
+  }, []);
+
   const setField = (key: keyof typeof EMPTY_FORM, value: string | boolean) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -1119,6 +1134,7 @@ export default function ReceivedPaymentPage() {
               )}
               <ExportMenu
                 data={payments as unknown as Record<string, unknown>[]}
+                fetchData={fetchAllPaymentsForExport}
                 columns={EXPORT_COLUMNS}
                 title="Received Payments"
                 filename="received-payments"
