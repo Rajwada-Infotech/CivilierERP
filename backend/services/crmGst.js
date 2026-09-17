@@ -1,4 +1,5 @@
 const { sql } = require("../db");
+const { resolveOcCcGate } = require("./crmWorkflowGuards");
 
 // Fixed business rule (migration 283) — never a per-booking input, never
 // editable anywhere except by editing the HSN Master rows themselves:
@@ -18,6 +19,52 @@ const EXTRA_WORK_HSN_CODE = "9954EXW";
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/**
+ * GST exemption on post-OC/CC sales — Schedule III, Entry 5 of the CGST Act
+ * 2017: sale of a completed building is neither a supply of goods nor of
+ * services (i.e. outside GST entirely) once the ENTIRE sale consideration
+ * is received after OC or CC is issued (whichever is earlier) — not merely
+ * once the certificate exists. A single rupee of pre-certificate payment
+ * disqualifies the WHOLE booking; there is no partial exemption. This is a
+ * unit/block-level rule in practice (a block's units all share one
+ * certificate), which is exactly why block-level OC/CC exists (migration
+ * 447, resolveOcCcGate in crmWorkflowGuards.js) — a project-wide blanket
+ * flag couldn't represent this correctly for a multi-block project where
+ * only some blocks are finished.
+ *
+ * Per business decision, exemption (once it applies) covers the whole
+ * booking: Unit price, Parking, AND Extra Charges — not just the unit.
+ *
+ * Returns { exempt: boolean, certDate: Date|null } — certDate is surfaced
+ * so callers/UI can explain *why* (e.g. "OC received 12-Jun, first payment
+ * 20-Jun").
+ */
+async function checkGstExemption(pool, bookingId) {
+  // resolveOcCcGate with no certType returns whichever of OC/CC/OC+CC was
+  // Received earliest for this booking's block (falling back to the
+  // project's blanket cert) — exactly "OC or CC, whichever is earlier."
+  const gate = await resolveOcCcGate(pool, bookingId);
+  if (!gate.received) return { exempt: false, certDate: null };
+
+  const paidRow = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT MIN(d) AS EarliestPaid FROM (
+      SELECT MIN(cr.ReceivedDate) AS d
+      FROM dbo.CrmPaymentReceipt cr
+      JOIN dbo.CrmPaymentMilestone m ON m.Id = cr.MilestoneId
+      WHERE m.BookingId = @bid
+      UNION ALL
+      SELECT MIN(ReceivedDate) FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid
+    ) x
+  `);
+  const earliestPaid = paidRow.recordset[0]?.EarliestPaid || null;
+
+  // No real money received yet -> trivially "everything received so far"
+  // happened after the cert (there's nothing before it). Once a payment
+  // does land, it's checked properly on the very next recalculation.
+  const exempt = !earliestPaid || new Date(earliestPaid) >= new Date(gate.receivedDate);
+  return { exempt, certDate: gate.receivedDate };
 }
 
 // Combined CGST+SGST is the real intra-state rate every other rate in this
@@ -61,12 +108,23 @@ async function recalculateBookingGst(pool, bookingId) {
     .query("SELECT ISNULL(SUM(RateSnapshot * Quantity), 0) AS Base FROM dbo.CrmParkingAllotment WHERE BookingId = @bid AND IsActive = 1");
   const parkingBase = Number(parkingBaseRow.recordset[0].Base || 0);
 
-  const unitParking = totalValue + parkingBase;
-  const hsnCode = unitParking <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE;
-  const unitParkingRate = await getHsnRate(pool, hsnCode);
+  // GST exemption check (Schedule III Entry 5 — see checkGstExemption doc
+  // comment) runs before any rate resolution. When it applies, skip the
+  // HSN bracket entirely: HsnCode is cleared and every GST figure — Unit,
+  // Parking, AND Extra Charges, per business decision — goes to zero. This
+  // re-runs every time GST is recalculated (booking edit, parking/extra-
+  // charge change), so a booking correctly gains exemption the moment its
+  // block's OC/CC clears with payment timing already satisfied, and would
+  // correctly lose it again if that were ever no longer true — nothing is
+  // cached beyond these same columns.
+  const { exempt } = await checkGstExemption(pool, bookingId);
 
-  // Reprice every active parking allotment to this same resolved rate —
-  // Parking is part of the Unit+Parking bracket, not independently taxed.
+  const hsnCode = exempt ? null : (totalValue + parkingBase <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE);
+  const unitParkingRate = exempt ? 0 : await getHsnRate(pool, hsnCode);
+
+  // Reprice every active parking allotment to this same resolved rate (0
+  // when exempt) — Parking is part of the Unit+Parking bracket, not
+  // independently taxed, so it shares the bracket's exemption too.
   await pool.request()
     .input("bid", sql.Int, bookingId)
     .input("r", sql.Decimal(5, 2), unitParkingRate)
@@ -82,9 +140,17 @@ async function recalculateBookingGst(pool, bookingId) {
     .query("SELECT ISNULL(SUM(TotalAmount), 0) AS Total FROM dbo.CrmParkingAllotment WHERE BookingId = @bid AND IsActive = 1");
   const parkingTotal = Number(parkingTotalRow.recordset[0].Total || 0);
 
-  // Extra Charges already carry their own correct, per-item HSN-18% GstAmount
-  // (crmExtraCharges.js) — sum those directly rather than re-taxing
-  // ExtraChargesTotal, which is itself already GST-inclusive.
+  // Extra Charges normally carry their own correct, per-item HSN-18%
+  // GstAmount (crmExtraCharges.js) — summed directly rather than re-taxing
+  // ExtraChargesTotal, which is itself already GST-inclusive. When exempt,
+  // zero each active row's own Gst columns too (they're stored separately
+  // from CrmBooking and getGstSplit doesn't touch them) before summing.
+  if (exempt) {
+    await pool.request().input("bid", sql.Int, bookingId).query(`
+      UPDATE dbo.CrmExtraCharge SET GstRate = 0, GstAmount = 0, TotalAmount = Amount
+      WHERE BookingId = @bid AND IsActive = 1
+    `);
+  }
   const extraRow = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT ISNULL(SUM(TotalAmount), 0) AS Total, ISNULL(SUM(GstAmount), 0) AS Gst
     FROM dbo.CrmExtraCharge WHERE BookingId = @bid AND IsActive = 1
@@ -141,11 +207,13 @@ async function recalculateBookingGst(pool, bookingId) {
     hsnCode, unitParkingRate, unitGstAmount, parkingGstAmount, unitParkingGstAmount,
     extraWorkGstAmount, totalGstAmount,
     parkingTotal, extraChargesTotal, grandTotal,
+    isGstExempt: exempt,
   };
 }
 
 module.exports = {
   recalculateBookingGst,
+  checkGstExemption,
   getHsnRate,
   UNIT_PARKING_THRESHOLD,
   AFFORDABLE_HSN_CODE,

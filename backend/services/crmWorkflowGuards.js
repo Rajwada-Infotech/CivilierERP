@@ -1259,8 +1259,77 @@ async function resolveNocType(pool, bookingId) {
   return { nocType: isLoanFinanced ? "Bank" : "Organisation", isLoanFinanced };
 }
 
+/**
+ * Resolves whether a booking's OC/CC (Occupancy/Completion Certificate)
+ * gate is cleared — the single place every consumer (Pre-Possession,
+ * Possession Notice, Legal Milestones, and the GST exemption check) should
+ * call instead of hand-rolling the same lookup, so they can never drift out
+ * of sync with each other (mirrors resolveNocType above).
+ *
+ * CrmOccupancyCertificate can now hold either a project-wide blanket row
+ * (BlockId IS NULL) or a block-specific row (see migration 447) — a large
+ * project can have some finished, ready-to-move blocks and others still
+ * under construction, and each needs its own OC/CC status rather than one
+ * blanket flag for the whole project. A block's own cert is authoritative
+ * over the project's blanket one: if Block A has its own Received OC, that
+ * booking is cleared even if the project's overall blanket row is still
+ * Applied — a finished block doesn't have to wait for the rest of a large
+ * project to catch up.
+ *
+ * certType: pass 'OC' | 'CC' | 'OC+CC' to check one specific type, or omit
+ * (null) to check "any of OC/CC/OC+CC is Received" — used by the GST
+ * exemption check, where either certificate satisfies Schedule III Entry 5
+ * (whichever of OC or CC came first).
+ *
+ * Returns { received, source: 'block'|'project'|null, receivedDate, certType, certRow }.
+ */
+async function resolveOcCcGate(pool, bookingId, certType = null) {
+  const typeFilter = certType ? "AND oc.CertType = @ct" : "";
+  const req = () => {
+    const r = pool.request().input("bid", sql.Int, bookingId);
+    if (certType) r.input("ct", sql.NVarChar(20), certType);
+    return r;
+  };
+
+  // Booking -> Block, via the same UnitMaster join used everywhere else in
+  // this codebase to resolve a booking's real block.
+  const blockRow = await req().query(`
+    SELECT um.BlockId, b.ProjectId
+    FROM dbo.CrmBooking b
+    LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+    WHERE b.Id = @bid
+  `);
+  const { BlockId, ProjectId } = blockRow.recordset[0] || {};
+  if (!ProjectId) return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
+
+  if (BlockId) {
+    const blockCert = await req().input("bid2", sql.Int, BlockId).query(`
+      SELECT TOP 1 oc.* FROM dbo.CrmOccupancyCertificate oc
+      WHERE oc.BlockId = @bid2 AND oc.Status = 'Received' ${typeFilter}
+      ORDER BY oc.ReceivedDate ASC
+    `);
+    if (blockCert.recordset.length) {
+      const row = blockCert.recordset[0];
+      return { received: true, source: "block", receivedDate: row.ReceivedDate, certType: row.CertType, certRow: row };
+    }
+  }
+
+  const projectCert = await req().input("pid", sql.Int, ProjectId).query(`
+    SELECT TOP 1 oc.* FROM dbo.CrmOccupancyCertificate oc
+    WHERE oc.ProjectId = @pid AND oc.BlockId IS NULL AND oc.Status = 'Received' ${typeFilter}
+    ORDER BY oc.ReceivedDate ASC
+  `);
+  if (projectCert.recordset.length) {
+    const row = projectCert.recordset[0];
+    return { received: true, source: "project", receivedDate: row.ReceivedDate, certType: row.CertType, certRow: row };
+  }
+
+  return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
+}
+
 module.exports = {
   resolveNocType,
+  resolveOcCcGate,
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
   maybeAutoCreateLegalMilestone,
