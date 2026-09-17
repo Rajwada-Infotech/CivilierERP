@@ -411,18 +411,31 @@ router.get("/options", authMiddleware, async (req, res) => {
     }
     // Scope projects (business_type=P) to a single parent company — the
     // frontend has always sent this (e.g. GRN.tsx's Company→Project
-    // cascade), but it was silently ignored here, so every project showed
-    // regardless of which company was selected.
+    // cascade). Widened to also admit a project TAGGED to this company via
+    // dbo.ProjectCompanies (see migration 451) — a project can now be
+    // authorized to transact against more than one company, not just its
+    // single primary company_id, without changing which company actually
+    // owns it.
     if (req.query.enterprise_id) {
-      conditions.push("company_id = @companyId");
+      conditions.push(`(company_id = @companyId OR EXISTS (
+        SELECT 1 FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = enterprise.id AND pc.CompanyId = @companyId
+      ))`);
       request.input("companyId", sql.Int, parseInt(req.query.enterprise_id, 10));
     }
 
     // Always exclude soft-deleted rows from dropdown options
     conditions.push("(discontinue IS NULL OR discontinue = 0)");
 
-    let query =
-      "SELECT id, name AS label, belongs_to, company_id, enterprise_id FROM dbo.enterprise";
+    // tagged_company_ids lets callers that fetch the FULL project list once
+    // and filter client-side (most of them — see JournalVoucher.tsx,
+    // Payment.tsx, MaterialExpenseBooking.tsx) also honour the same
+    // ProjectCompanies tagging without a per-company round trip. Mirrors
+    // projectMaster.js's own MultiCompanyIds column exactly.
+    let query = `
+      SELECT id, name AS label, belongs_to, company_id, enterprise_id,
+        (SELECT STRING_AGG(CAST(pc.CompanyId AS NVARCHAR(20)), ',')
+           FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = enterprise.id) AS tagged_company_ids
+      FROM dbo.enterprise`;
     query += " WHERE " + conditions.join(" AND ");
     query += " ORDER BY name";
 

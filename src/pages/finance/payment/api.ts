@@ -171,6 +171,7 @@ export const fetchProjectOptions = async (): Promise<
     label: string;
     belongs_to?: number | null;
     company_id?: number | null;
+    tagged_company_ids?: string | null;
   }[]
 > => {
   const res = await fetchWithAuth("/api/enterprises/options?business_type=P");

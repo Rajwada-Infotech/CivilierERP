@@ -8,6 +8,7 @@ const { bumpCacheVersion } = require("../redis");
 const { cache } = require("../middleware/cache");
 const { deleteProjectCascade } = require("../services/projectCascadeDelete");
 const { getProjectLockReason } = require("../services/crmHierarchyLocks");
+const { recordAmendment } = require("../services/amendmentLog");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
@@ -132,30 +133,79 @@ async function ensureProjectLedgerHeads(pool, projectId, projectName, address, c
   await bumpCacheVersion("account-head-master");
 }
 
+// A tagged company can't be untagged once it actually has transactions
+// against this project — removing the row would just make those historical
+// documents' project/company pairing inexplicable in every dropdown that
+// now checks ProjectCompanies. Existing transactions are never touched by a
+// re-tag either way (see the Invoice/Payment/JV visibility checks, which
+// only gate *new* documents).
+async function companyHasTransactionsAgainstProject(pool, projectId, companyId) {
+  const r = await pool
+    .request()
+    .input("pid", sql.Int, projectId)
+    .input("cid", sql.Int, companyId)
+    .query(`
+      SELECT
+        (SELECT COUNT(*) FROM dbo.ExpenseBooking WHERE ECompanyId = @cid AND TRY_CAST(EProjectName AS INT) = @pid) +
+        (SELECT COUNT(*) FROM dbo.NewPayment WHERE TRY_CAST(PCompany AS INT) = @cid AND TRY_CAST(PProject AS INT) = @pid) +
+        (SELECT COUNT(*) FROM dbo.JournalVoucher WHERE CompanyId = @cid AND ProjectId = @pid) AS cnt
+    `);
+  return (r.recordset[0]?.cnt || 0) > 0;
+}
+
 // ── Sync a project's tagged additional companies ───────────────────────────────
 // The primary company_id stays untouched — this only replaces the
 // ProjectCompanies rows and the multi_company_enabled flag. Disabling the
 // toggle clears any previously tagged companies rather than just hiding
-// them, so a re-enable starts from a clean slate.
-async function syncProjectCompanies(pool, projectId, enabled, companyIds) {
+// them, so a re-enable starts from a clean slate — except for a tag that
+// already has real transactions against it, which is silently kept either
+// way (see companyHasTransactionsAgainstProject) and reported back as
+// `keptTags` for the caller to surface as a warning.
+async function syncProjectCompanies(pool, projectId, enabled, companyIds, changedBy) {
+  const beforeResult = await pool
+    .request()
+    .input("pid", sql.Int, projectId)
+    .query("SELECT CompanyId FROM dbo.ProjectCompanies WHERE ProjectId=@pid ORDER BY CompanyId");
+  const beforeIds = beforeResult.recordset.map((r) => r.CompanyId);
+
   await pool
     .request()
     .input("id", sql.Int, projectId)
     .input("enabled", sql.Bit, enabled ? 1 : 0)
     .query("UPDATE dbo.enterprise SET multi_company_enabled=@enabled WHERE id=@id");
 
+  const requestedIds = enabled && Array.isArray(companyIds)
+    ? [...new Set(
+        companyIds
+          .map((raw) => parseInt(raw, 10))
+          .filter((cid) => Number.isInteger(cid) && cid !== projectId),
+      )]
+    : [];
+
+  const finalIds = new Set(requestedIds);
+  const keptTags = [];
+  for (const cid of beforeIds) {
+    if (finalIds.has(cid)) continue;
+    if (await companyHasTransactionsAgainstProject(pool, projectId, cid)) {
+      finalIds.add(cid);
+      const nameResult = await pool
+        .request()
+        .input("cid", sql.Int, cid)
+        .query("SELECT name FROM dbo.enterprise WHERE id=@cid");
+      keptTags.push({ companyId: cid, companyName: nameResult.recordset[0]?.name || `Company #${cid}` });
+    }
+  }
+
+  const finalIdList = [...finalIds];
   await pool
     .request()
     .input("pid", sql.Int, projectId)
-    .query("DELETE FROM dbo.ProjectCompanies WHERE ProjectId=@pid");
+    .query(
+      `DELETE FROM dbo.ProjectCompanies WHERE ProjectId=@pid AND CompanyId NOT IN (${finalIdList.length ? finalIdList.join(",") : "-1"})`,
+    );
 
-  if (!enabled || !Array.isArray(companyIds) || companyIds.length === 0) return;
-
-  const seen = new Set();
-  for (const raw of companyIds) {
-    const cid = parseInt(raw, 10);
-    if (!Number.isInteger(cid) || cid === projectId || seen.has(cid)) continue;
-    seen.add(cid);
+  for (const cid of finalIdList) {
+    if (beforeIds.includes(cid)) continue;
     await pool
       .request()
       .input("pid", sql.Int, projectId)
@@ -164,6 +214,25 @@ async function syncProjectCompanies(pool, projectId, enabled, companyIds) {
         "INSERT INTO dbo.ProjectCompanies (ProjectId, CompanyId) VALUES (@pid, @cid)",
       );
   }
+
+  const beforeCsv = beforeIds.slice().sort((a, b) => a - b).join(",");
+  const afterCsv = finalIdList.slice().sort((a, b) => a - b).join(",");
+  if (beforeCsv !== afterCsv) {
+    try {
+      await recordAmendment({
+        refDocType: "project-master",
+        refDocId: projectId,
+        changedBy,
+        before: { TaggedCompanyIds: beforeCsv },
+        after: { TaggedCompanyIds: afterCsv },
+        fieldLabels: { TaggedCompanyIds: "Tagged Companies" },
+      });
+    } catch (amendErr) {
+      console.warn("[projectMaster] Tag change audit log failed:", amendErr.message);
+    }
+  }
+
+  return { keptTags };
 }
 
 // ── GET all projects ──────────────────────────────────────────────────────────
@@ -516,8 +585,17 @@ router.put("/:id", adminOnly, async (req, res) => {
     }
 
     // Tag additional companies, if the form enabled it
+    let keptTags = [];
     try {
-      await syncProjectCompanies(pool, parseInt(req.params.id, 10), !!f.multiCompanyEnabled, f.multiCompanyIds);
+      const changedBy = req.user?.name || req.user?.email || "system";
+      const syncResult = await syncProjectCompanies(
+        pool,
+        parseInt(req.params.id, 10),
+        !!f.multiCompanyEnabled,
+        f.multiCompanyIds,
+        changedBy,
+      );
+      keptTags = syncResult?.keptTags || [];
     } catch (multiCompanyErr) {
       console.warn(
         "[projectMaster] Multi-company tagging failed:",
@@ -525,7 +603,14 @@ router.put("/:id", adminOnly, async (req, res) => {
       );
     }
 
-    res.json({ success: true });
+    res.json({
+      success: true,
+      ...(keptTags.length
+        ? {
+            warning: `${keptTags.map((t) => `"${t.companyName}"`).join(", ")} ${keptTags.length === 1 ? "wasn't" : "weren't"} untagged — transactions already exist against this project for that company.`,
+          }
+        : {}),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

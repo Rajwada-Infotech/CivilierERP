@@ -858,12 +858,13 @@ export default function ProjectMaster() {
 
       return editId ? updateProject(editId, payload) : createProject(payload);
     },
-    onSuccess: () => {
+    onSuccess: (result: any) => {
       toast.success(
         editId
           ? "Project updated successfully"
           : "Project created successfully",
       );
+      if (result?.warning) toast.warning(result.warning);
       qc.invalidateQueries({ queryKey: ["project-master"] });
       qc.invalidateQueries({ queryKey: ["enterprises"] });
       resetForm();

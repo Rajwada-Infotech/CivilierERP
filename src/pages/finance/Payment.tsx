@@ -827,11 +827,22 @@ const Payment: React.FC = () => {
       label: string;
       belongs_to?: number | null;
       company_id?: number | null;
+      tagged_company_ids?: string | null;
     }[]
   >({
     queryKey: ["project-options-payment-filter"],
     queryFn: fetchProjectOptions,
   });
+
+  // A project is available to a company if it's the project's primary
+  // (owning) company, or the company is tagged onto the project via
+  // Project Master's multi-company tagging (dbo.ProjectCompanies).
+  const isProjectVisibleToCompany = useMemo(
+    () => (p: { company_id?: number | null; tagged_company_ids?: string | null }, companyId: string | number) =>
+      String(p.company_id) === String(companyId) ||
+      (p.tagged_company_ids?.split(",") ?? []).includes(String(companyId)),
+    [],
+  );
 
   const { data: supplierOptions = [] } = useQuery<
     { id: number; label: string; type?: string }[]
@@ -2414,7 +2425,7 @@ const Payment: React.FC = () => {
                                         (p) =>
                                           p.label === prev.project &&
                                           (p.belongs_to === newCompanyId ||
-                                            p.company_id === newCompanyId),
+                                            isProjectVisibleToCompany(p, newCompanyId)),
                                       )
                                     : true;
                                   if (!projStillValid) next.project = "";
@@ -2615,8 +2626,8 @@ const Payment: React.FC = () => {
                                   )?.id ?? null);
                             return (
                               companyId
-                                ? projectOptions.filter(
-                                    (p) => p.company_id === companyId,
+                                ? projectOptions.filter((p) =>
+                                    isProjectVisibleToCompany(p, companyId),
                                   )
                                 : projectOptions
                             ).map((p) => (
@@ -4279,7 +4290,7 @@ const Payment: React.FC = () => {
                                     (p) =>
                                       p.label === projectFilter &&
                                       (p.belongs_to === Number(val) ||
-                                        p.company_id === Number(val)),
+                                        isProjectVisibleToCompany(p, Number(val))),
                                   );
                                   if (!stillValid) setProjectFilter("");
                                 }
@@ -4320,7 +4331,7 @@ const Payment: React.FC = () => {
                                 ? projectOptions.filter(
                                     (p) =>
                                       p.belongs_to === Number(companyFilter) ||
-                                      p.company_id === Number(companyFilter),
+                                      isProjectVisibleToCompany(p, Number(companyFilter)),
                                   )
                                 : projectOptions
                               ).map((p) => (

@@ -7,6 +7,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -713,6 +714,12 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
 
     const pool = getPool();
 
+    try {
+      await assertProjectVisibleToCompany(pool, PProject, PCompany);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+
     const expenseHeadAllocations = normalizeAllocations(EExpenseHeadAllocations);
     if (expenseHeadAllocations.length > 0) {
       const allocSum = sumAllocations(expenseHeadAllocations);
@@ -1068,6 +1075,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       return res.status(400).json({ error: "This payment's cheque was cancelled and cannot be edited." });
     }
 
+    await assertProjectVisibleToCompany(pool, PProject, PCompany);
+
     const expenseHeadAllocationsPut = normalizeAllocations(EExpenseHeadAllocations);
     if (expenseHeadAllocationsPut.length > 0) {
       const allocSum = sumAllocations(expenseHeadAllocationsPut);
@@ -1274,7 +1283,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       });
     }
     console.error("PAYMENT UPDATE ERROR:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 

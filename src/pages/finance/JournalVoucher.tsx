@@ -142,7 +142,7 @@ export default function JournalVoucher() {
   // just like every other document in the system — otherwise it floats
   // free of the entity structure everything else is scoped by.
   const [companies, setCompanies] = useState<{ id: number; label: string }[]>([]);
-  const [allProjects, setAllProjects] = useState<{ id: number; label: string; company_id: number | null }[]>([]);
+  const [allProjects, setAllProjects] = useState<{ id: number; label: string; company_id: number | null; tagged_company_ids?: string | null }[]>([]);
   const [companyId, setCompanyId] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
 
@@ -194,12 +194,26 @@ export default function JournalVoucher() {
       .then((rows) => setCompanies(rows.map((r) => ({ id: r.id, label: r.label }))))
       .catch(() => setCompanies([]));
     getEnterpriseOptions(undefined, "P")
-      .then((rows) => setAllProjects(rows.map((r) => ({ id: r.id, label: r.label, company_id: r.company_id }))))
+      .then((rows) =>
+        setAllProjects(
+          rows.map((r) => ({ id: r.id, label: r.label, company_id: r.company_id, tagged_company_ids: r.tagged_company_ids })),
+        ),
+      )
       .catch(() => setAllProjects([]));
   }, []);
 
+  // A project shows up for a company if it's either the project's primary
+  // (owning) company, or the company has been tagged onto the project via
+  // Project Master's multi-company tagging — see dbo.ProjectCompanies.
   const projectsForCompany = useMemo(
-    () => (companyId ? allProjects.filter((p) => String(p.company_id) === companyId) : []),
+    () =>
+      companyId
+        ? allProjects.filter(
+            (p) =>
+              String(p.company_id) === companyId ||
+              (p.tagged_company_ids?.split(",") ?? []).includes(companyId),
+          )
+        : [],
     [allProjects, companyId],
   );
 

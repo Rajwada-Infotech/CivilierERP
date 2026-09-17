@@ -8,6 +8,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { validateBody } = require("../middleware/validateRequest");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -1858,6 +1859,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
     err.status = 400;
     throw err;
   }
+  await assertProjectVisibleToCompany(pool, EProjectName, ECompanyId);
 
   const hasPayTermCol = await ebHasPaymentTermId(pool);
   const hasDirectItemsCol = await ebHasDirectItemsData(pool);
@@ -2323,6 +2325,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
   }
 
   const pool = getPool();
+  try {
+    await assertProjectVisibleToCompany(pool, EProjectName, ECompanyId);
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message });
+  }
   const hasPayTermCol = await ebHasPaymentTermId(pool);
   const hasDirectItemsCol = await ebHasDirectItemsData(pool);
   const transaction = pool.transaction();
@@ -3521,6 +3528,7 @@ router.put(
 
     try {
       const pool = getPool();
+      await assertProjectVisibleToCompany(pool, EProjectName, ECompanyId);
       const hasPayTermColPut = await ebHasPaymentTermId(pool);
       const hasDirectItemsColPut = await ebHasDirectItemsData(pool);
 
@@ -3843,7 +3851,7 @@ router.put(
       });
     } catch (err) {
       console.error("Update error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(err.status || 500).json({ error: err.message });
     }
   },
 );
