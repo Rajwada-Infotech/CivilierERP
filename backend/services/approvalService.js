@@ -69,6 +69,11 @@ const MODULE_MAP = {
     pk: "VehicleInOutID",
     status: "Status",
   },
+  "stock-transfers": {
+    table: "dbo.StockTransfers",
+    pk: "TransferID",
+    status: "Status",
+  },
   "journal-voucher": {
     table: "dbo.JournalVoucher",
     pk: "JVID",
@@ -257,6 +262,7 @@ const WORKFLOW_ID_MAP = {
   "material-issues": "MaterialIssues",
   "sale-orders": "SaleOrder",
   "vehicle-in-out": "VehicleInOut",
+  "stock-transfers": "StockTransfer",
   "journal-voucher": "JournalVoucher",
   "inter-company-transfer": "InterCompanyTransfer",
   "fund-transfer": "FundTransfer",

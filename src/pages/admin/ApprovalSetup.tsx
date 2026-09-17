@@ -109,6 +109,12 @@ const MODULE_OPTIONS = [
     desc: "Supplier debit note before it's finalized",
   },
   {
+    id: "StockTransfer",
+    label: "Stock Transfer",
+    icon: "🔄",
+    desc: "Stock only moves between godowns once this is fully approved",
+  },
+  {
     id: "SaleOrder",
     label: "Sale Order",
     icon: "🛍️",
@@ -257,6 +263,7 @@ const MODULE_GROUPS = [
       "InterCompanyTransfer",
       "VehicleInOut",
       "debit-note",
+      "StockTransfer",
     ],
   },
   {

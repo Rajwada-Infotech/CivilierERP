@@ -340,6 +340,34 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "stock-transfers") {
+      queries.push(`
+        SELECT
+          'stock-transfers'                    AS Module,
+          'Stock Transfer'                     AS ModuleLabel,
+          CAST(st.TransferID AS NVARCHAR)      AS RecordId,
+          st.DocNo                             AS Reference,
+          st.TransferDate                      AS RecordDate,
+          st.Status,
+          CAST(fg.GodownName AS NVARCHAR(255)) AS ContractorName,
+          CAST(CONCAT(
+            COALESCE(fg.GodownName, ''), N' → ', COALESCE(tg.GodownName, '')
+          ) AS NVARCHAR(512))                  AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))          AS Amount,
+          ${NULL_EXTRA}
+          CAST(st.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
+          ''                                   AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ISNULL(CAST(st.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(st.UpdatedAt, st.CreatedAt)   AS LastModified
+        FROM dbo.StockTransfers st
+        LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
+        LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
+        WHERE st.Status = 'Pending'
+      `);
+    }
+
     if (!module || module === "vehicle-in-out") {
       queries.push(`
         SELECT
@@ -927,6 +955,7 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.MaterialIssues     WHERE ISNULL(Status,'Pending') = 'Pending') +
         (SELECT COUNT(*) FROM dbo.SaleOrders         WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.VehicleInOut       WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.StockTransfers     WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.JournalVoucher     WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.FundTransfer       WHERE Status = 'Pending') +
