@@ -458,8 +458,12 @@ export default function MaterialRequest() {
 
   const updateMutation = useMutation({
     mutationFn: (p: any) => mrApi.updateMaterialRequest(editingId!, p),
-    onSuccess: () => {
-      toast.success("Material Request updated");
+    onSuccess: (res: any) => {
+      toast.success(
+        res?.resubmitted
+          ? "Material Request updated and re-submitted for approval"
+          : "Material Request updated",
+      );
       invalidate();
       setSaved(true);
       setTimeout(() => {
@@ -725,8 +729,9 @@ export default function MaterialRequest() {
             </button>
 
             {/* Update — Draft or Approved (post-approval edits get logged
-                as amendments), or any status for admins */}
-            {rights.canEdit && status !== "Short Closed" && (status === "Draft" || status === "Approved" || isAdmin) && (
+                as amendments), Rejected (saving re-submits it from level 1),
+                or any status for admins */}
+            {rights.canEdit && status !== "Short Closed" && (status === "Draft" || status === "Approved" || status === "Rejected" || isAdmin) && (
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
@@ -736,7 +741,9 @@ export default function MaterialRequest() {
                     ? "Edit this request"
                     : status === "Approved"
                       ? "Edit (will be logged as an amendment)"
-                      : "Edit (admin override)"
+                      : status === "Rejected"
+                        ? "Edit and re-submit for approval"
+                        : "Edit (admin override)"
                 }
               >
                 <Edit3 size={15} />
@@ -1630,7 +1637,7 @@ export default function MaterialRequest() {
               >
                 <Printer size={13} /><span className="hidden sm:inline">Print</span>
               </button>
-            {rights.canEdit && viewingRecord.Status !== "Short Closed" && (viewingRecord.Status === "Draft" || viewingRecord.Status === "Approved" || isAdmin) && (
+            {rights.canEdit && viewingRecord.Status !== "Short Closed" && (viewingRecord.Status === "Draft" || viewingRecord.Status === "Approved" || viewingRecord.Status === "Rejected" || isAdmin) && (
               <button
                 onClick={() => { closeOverlay(); handleEdit(viewingRecord); }}
                 className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"

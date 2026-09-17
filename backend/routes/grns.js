@@ -1305,6 +1305,7 @@ router.put(
   validateBody(grnBodySchema),
   async (req, res) => {
     let wasApproved = false;
+    let wasRejected = false;
     let beforeSnapshot = null;
     try {
       const currentStatus = await getRecordStatus("goods-receipt", req.params.id);
@@ -1326,6 +1327,7 @@ router.put(
       }
 
       wasApproved = currentStatus === "Approved";
+      wasRejected = currentStatus === "Rejected";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.GoodsReceiptNotes", "GRNID", req.params.id);
       }
@@ -1491,7 +1493,29 @@ router.put(
         }
       }
 
-      res.json({ message: "GRN updated successfully" });
+      // A corrected, previously-Rejected GRN goes straight back into the
+      // approval queue on save — no separate "Submit" click. transition()'s
+      // Pending branch writes a fresh Level=0 marker, which restarts
+      // approval at level 1 regardless of what was approved before the
+      // rejection (see approvalService.js's currentCycleCutoffSql).
+      let resubmitted = false;
+      if (wasRejected) {
+        try {
+          await transition("goods-receipt", grnId, "Pending", req.user?.email, req.user?.role);
+          resubmitted = true;
+        } catch (resubmitErr) {
+          console.error("[grns] auto-resubmit after edit failed:", resubmitErr.message);
+          return res.status(207).json({
+            message: "GRN updated, but could not be re-submitted for approval — submit it manually.",
+            resubmitError: resubmitErr.message,
+          });
+        }
+      }
+
+      res.json({
+        message: resubmitted ? "GRN updated and re-submitted for approval" : "GRN updated successfully",
+        resubmitted,
+      });
     } catch (err) {
       await transaction.rollback().catch(() => {});
       console.error("UPDATE GRN ERROR:", err);
