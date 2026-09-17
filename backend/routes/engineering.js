@@ -881,6 +881,8 @@ router.put("/work-done/:id/approve", async (req, res) => {
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
@@ -904,6 +906,7 @@ router.put("/work-done/:id/reject", async (req, res) => {
       userEmail,
       req.user?.role,
       req.body?.note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");

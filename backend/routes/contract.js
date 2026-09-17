@@ -430,7 +430,7 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const result = await transition("contracts", id, "Approved", email, req.user?.role);
+    const result = await transition("contracts", id, "Approved", email, req.user?.role, null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("contracts");
     res.json({ message: "Contract approved", ...result });
   } catch (err) {
@@ -447,7 +447,7 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
 
     const { note } = req.body;
-    const result = await transition("contracts", id, "Rejected", email, req.user?.role, note || null);
+    const result = await transition("contracts", id, "Rejected", email, req.user?.role, note || null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("contracts");
     res.json({ message: "Contract rejected", ...result });
   } catch (err) {

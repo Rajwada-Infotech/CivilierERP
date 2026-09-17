@@ -1642,6 +1642,8 @@ router.put("/:id/approve", async (req, res) => {
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order approved", ...result });
@@ -1666,6 +1668,7 @@ router.put("/:id/reject", async (req, res) => {
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order rejected", ...result });

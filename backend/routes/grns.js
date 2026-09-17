@@ -1784,6 +1784,8 @@ router.put(
         "Approved",
         userEmail,
         req.user?.role,
+        null,
+        req.user?.userId ?? req.user?.id ?? null,
       );
       // On full approval, transition()'s GL_POSTERS hook already ran
       // postGRNApproval — the one place StockLedger gets credited for this
@@ -1818,6 +1820,7 @@ router.put(
         userEmail,
         req.user?.role,
         note || null,
+        req.user?.userId ?? req.user?.id ?? null,
       );
 
       // Reversal — normally a no-op today (reject only fires from Pending,

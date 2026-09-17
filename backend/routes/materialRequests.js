@@ -1181,6 +1181,8 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
       "Approved",
       user,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("material-requests");
     res.json({ message: "Material Request approved", ...result });
@@ -1207,6 +1209,7 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
       user,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("material-requests");
     res.json({ message: "Material Request rejected", ...result });

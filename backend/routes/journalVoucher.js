@@ -583,6 +583,7 @@ router.put("/:id/approve", authenticateToken, requirePageRight("journal-voucher"
     if (!alreadyApproved) {
       transitionResult = await transition(
         "journal-voucher", id, "Approved", user, req.user?.role, req.body?.note,
+        req.user?.userId ?? req.user?.id ?? null,
       );
     }
 
@@ -613,7 +614,7 @@ router.put("/:id/reject", authenticateToken, requirePageRight("journal-voucher",
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const result = await transition("journal-voucher", id, "Rejected", user, req.user?.role, req.body?.note);
+    const result = await transition("journal-voucher", id, "Rejected", user, req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("journal-voucher");
     res.json({ message: "Journal Voucher rejected", ...result });
   } catch (err) {
