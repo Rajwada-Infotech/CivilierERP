@@ -492,6 +492,7 @@ router.delete(
           -- Ownership rows: delete entirely (UserId is NOT NULL in these tables)
           DELETE FROM dbo.UserPageRightsJson WHERE UserId = @id;
           DELETE FROM dbo.UserWidgetRights   WHERE UserId = @id;
+          DELETE FROM dbo.SaNotification     WHERE UserId = @id;
         `);
 
       // All FK references cleared — safe to delete
@@ -523,6 +524,26 @@ router.delete(
         "| errNum:",
         err.number,
       );
+      // FK violation (547) means this user is still referenced by a table
+      // the cascade above doesn't yet clear/reassign — there are dozens of
+      // NOT NULL CreatedBy/UpdatedBy/AssignedTo-style columns across the
+      // schema, and new ones get added as modules grow. Rather than leak
+      // the raw SQL Server text (unreadable to an admin, and the table name
+      // it names is the one true lead to actually fixing the cascade),
+      // surface a clear, actionable message and log the offending table for
+      // whoever adds the missing UPDATE/DELETE line above next.
+      if (err.number === 547) {
+        const tableMatch = /table\s+"dbo\.([^"]+)"/i.exec(err.message || "");
+        const offendingTable = tableMatch?.[1];
+        console.error(
+          `[DELETE USER] Missing cascade entry for dbo.${offendingTable || "?"} — add an UPDATE/DELETE for it above.`,
+        );
+        return res.status(409).json({
+          error: offendingTable
+            ? `This user cannot be deleted yet — they're still referenced in "${offendingTable}", which isn't cleared automatically. Reassign or remove those records first, or ask an admin to extend the delete cascade for this table.`
+            : "This user cannot be deleted — they're still referenced by other records that aren't cleared automatically.",
+        });
+      }
       res.status(500).json({ error: err.message });
     }
   },
