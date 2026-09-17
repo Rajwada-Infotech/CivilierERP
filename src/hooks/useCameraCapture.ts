@@ -22,11 +22,28 @@ export function useCameraCapture() {
       setUnsupported(true);
       return false;
     }
+    // Desktop webcams have no "environment"-facing camera, and requesting
+    // it as a hard constraint makes getUserMedia reject outright instead of
+    // falling back — so ask for it as a soft preference first, and if the
+    // browser still can't satisfy it (or any other OverconstrainedError),
+    // retry with no facingMode constraint at all before giving up.
+    const tryGetStream = (constraints: MediaStreamConstraints) =>
+      navigator.mediaDevices.getUserMedia(constraints);
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "environment" },
-        audio: false,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await tryGetStream({
+          video: { facingMode: { ideal: "environment" } },
+          audio: false,
+        });
+      } catch (err) {
+        if (err instanceof Error && err.name === "OverconstrainedError") {
+          stream = await tryGetStream({ video: true, audio: false });
+        } else {
+          throw err;
+        }
+      }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
