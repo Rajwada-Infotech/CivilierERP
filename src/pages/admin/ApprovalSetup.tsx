@@ -22,6 +22,7 @@ import {
   GitBranch,
   CheckCircle2,
   AlertCircle,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -71,6 +72,12 @@ const MODULE_OPTIONS = [
     label: "Material Issue",
     icon: "🚚",
     desc: "When materials leave store",
+  },
+  {
+    id: "MaterialIssueReturn",
+    label: "Material Issue Return",
+    icon: "↩️",
+    desc: "Before returned material is credited back to stock",
   },
   {
     id: "Expenses",
@@ -259,6 +266,7 @@ const MODULE_GROUPS = [
       "GRN",
       "PurchaseOrders",
       "MaterialIssues",
+      "MaterialIssueReturn",
       "MaterialRequests",
       "InterCompanyTransfer",
       "VehicleInOut",
@@ -378,9 +386,11 @@ function UserMultiSelect({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     function handle(e: MouseEvent) {
@@ -423,7 +433,14 @@ function UserMultiSelect({
   }, []);
 
   useEffect(() => {
-    if (open) updatePosition();
+    if (open) {
+      updatePosition();
+      setSearch("");
+      // Autofocus the search box the moment the dropdown opens — the whole
+      // point of adding search is to let someone start typing immediately
+      // instead of scrolling a long user list by hand.
+      requestAnimationFrame(() => searchRef.current?.focus());
+    }
   }, [open, updatePosition]);
 
   useEffect(() => {
@@ -452,6 +469,14 @@ function UserMultiSelect({
   }
 
   const selectedUsers = users.filter((u) => value.includes(u.id));
+  const q = search.trim().toLowerCase();
+  const filteredUsers = q
+    ? users.filter(
+        (u) =>
+          u.name.toLowerCase().includes(q) ||
+          u.role?.toLowerCase().includes(q),
+      )
+    : users;
 
   return (
     <div ref={ref} className="relative">
@@ -498,20 +523,36 @@ function UserMultiSelect({
           style={dropdownStyle}
           className="rounded-xl border border-border bg-popover shadow-xl overflow-hidden"
         >
-          <div className="px-3 py-2 border-b border-border bg-muted/30">
+          <div className="px-3 py-2 border-b border-border bg-muted/30 space-y-2">
             <p className="text-xs text-muted-foreground font-medium">
               {selectedUsers.length === 0
                 ? "Select who can approve at this level"
                 : `${selectedUsers.length} person${selectedUsers.length > 1 ? "s" : ""} selected — click to add/remove`}
             </p>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                ref={searchRef}
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                placeholder="Search by name or role…"
+                className="w-full h-8 pl-8 pr-2 rounded-md border border-border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+            </div>
           </div>
           <div className="max-h-72 overflow-y-auto">
             {users.length === 0 ? (
               <div className="px-3 py-6 text-center text-sm text-muted-foreground">
                 No users available
               </div>
+            ) : filteredUsers.length === 0 ? (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                No users match "{search}"
+              </div>
             ) : (
-              users.map((u) => {
+              filteredUsers.map((u) => {
                 const sel = value.includes(u.id);
                 return (
                   <div

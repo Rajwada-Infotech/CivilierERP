@@ -10,6 +10,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { parseJsonArray } from "@/utils/parseJsonArray";
+import { printStatusLabel } from "@/utils/printStatus";
 import { useAuth } from "@/contexts/AuthContext";
 import { OrderChat } from "@/components/orders/OrderChat";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -29,7 +30,7 @@ const VIO_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Vehicle No", accessor: "VehicleNo" },
   { header: "Supplier", accessor: "SupplierName" },
   { header: "PO Number", accessor: "PONumber" },
-  { header: "Status", accessor: "Status" },
+  { header: "Status", accessor: (r) => printStatusLabel(r.Status as string) },
 ];
 
 import { Input } from "@/components/ui/input";

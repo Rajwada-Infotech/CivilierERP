@@ -833,9 +833,12 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       items = [],
     } = req.body;
 
-    // Guard against editing a Pending/Rejected MR — Draft is normal editing,
-    // Approved is allowed too (logged as an amendment below) so an approved
-    // request doesn't become permanently frozen.
+    // Guard against editing a Pending MR (mid-approval — reject it first) —
+    // Draft is normal editing, Approved is allowed too (logged as an
+    // amendment below) so an approved request doesn't become permanently
+    // frozen, and Rejected is allowed so a corrected request doesn't have to
+    // be recreated from scratch under a new doc number: saving it here
+    // re-submits it automatically (below), restarting approval at level 1.
     const statusCheck = await pool
       .request()
       .input("id", sql.Int, id)
@@ -843,11 +846,12 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     if (!statusCheck.recordset.length)
       return res.status(404).json({ error: "Not found" });
     const currentMRStatus = statusCheck.recordset[0].Status;
-    if (!["Draft", "Approved"].includes(currentMRStatus))
+    if (!["Draft", "Approved", "Rejected"].includes(currentMRStatus))
       return res.status(409).json({
-        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft or Approved requests can be edited.`,
+        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Approved, or Rejected requests can be edited.`,
       });
     const wasApproved = currentMRStatus === "Approved";
+    const wasRejected = currentMRStatus === "Rejected";
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialRequests", "MRId", id)
       : null;
@@ -894,7 +898,7 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
               RequestDate=@RequestDate, RequiredByDate=@RequiredByDate,
               Priority=@Priority, Reason=@Reason, Remarks=@Remarks,
               Status=COALESCE(@Status, Status), UpdatedBy=@UpdatedBy, UpdatedAt=GETDATE()
-          WHERE MRId=@id AND Status IN ('Draft', 'Approved')
+          WHERE MRId=@id AND Status IN ('Draft', 'Approved', 'Rejected')
         `);
 
       // Race-condition guard: if another request approved/submitted this MR
@@ -957,7 +961,33 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       }
     }
 
-    res.json({ message: "Material request updated" });
+    // A corrected, previously-Rejected MR goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which (via
+    // approvalService.js's currentCycleCutoffSql) makes any levels approved
+    // BEFORE the rejection stop counting: the edited request is genuinely
+    // re-reviewed starting at level 1, not resumed from wherever it was
+    // rejected.
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("material-requests", id, "Pending", user, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[material-requests] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Material request updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: resubmitted
+        ? "Material request updated and re-submitted for approval"
+        : "Material request updated",
+      resubmitted,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

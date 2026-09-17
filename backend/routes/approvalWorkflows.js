@@ -213,6 +213,7 @@ router.get("/trail", authMiddleware, async (req, res) => {
     ExpenseBooking: { workflowId: "Expenses" },
     NewPayment: { workflowId: "NewPayment" },
     MaterialIssues: { workflowId: "MaterialIssues" },
+    MaterialIssueReturn: { workflowId: "MaterialIssueReturn" },
     MaterialRequests: { workflowId: "MaterialRequests" },
     StockTransfers: { workflowId: "StockTransfer" },
     BOQ: { workflowId: "BOQ" },

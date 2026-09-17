@@ -85,6 +85,7 @@ import {
   fetchNextDocNumber,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { formatINR } from "@/utils/formatCurrency";
+import { printStatusLabel } from "@/utils/printStatus";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -104,7 +105,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Mode", accessor: "mode" },
   { header: "Deposit Bank", accessor: "depositBankName" },
   { header: "Amount", accessor: (r) => formatINR(Number(r.amount || 0)) },
-  { header: "Status", accessor: "status" },
+  { header: "Status", accessor: (r) => printStatusLabel(r.status as string) },
   { header: "Transaction / Cheque Ref", accessor: (r) => String(r.transactionId || r.checkNumber || "") },
 ];
 
@@ -1058,7 +1059,7 @@ export default function ReceivedPaymentPage() {
     <div style="text-align:right;">
       <div style="font-size:20px;font-weight:800;color:#10b981;letter-spacing:-0.5px;">RECEIPT</div>
       <div style="margin-top:6px;">
-        <span style="padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sColor}18;color:${sColor};border:1px solid ${sColor}40;">${p.status}</span>
+        <span style="padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sColor}18;color:${sColor};border:1px solid ${sColor}40;">${printStatusLabel(p.status)}</span>
       </div>
       <div style="font-size:11px;color:#6b7280;margin-top:4px;">${p.docDate ? new Date(p.docDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : ""}</div>
     </div>

@@ -676,6 +676,7 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
       });
     }
     const wasApproved = currentStatus === "Approved";
+    const wasRejected = currentStatus === "Rejected";
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialIssues", "IssueId", id)
       : null;
@@ -778,7 +779,29 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
       }
     }
 
-    res.json({ message: "Issue updated successfully" });
+    // A corrected, previously-Rejected issue goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("material-issues", id, "Pending", req.user?.email || req.user?.name, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[material-issues] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Issue updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: resubmitted ? "Issue updated and re-submitted for approval" : "Issue updated successfully",
+      resubmitted,
+    });
   } catch (error) {
     console.error("Error updating material issue:", error);
     res.status(500).json({ error: "Failed to update material issue" });

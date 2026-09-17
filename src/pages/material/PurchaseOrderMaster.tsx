@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
+import { printStatusLabel } from "@/utils/printStatus";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -242,7 +243,7 @@ const PO_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Company", accessor: "companyName" },
   { header: "Project", accessor: "projectName" },
   { header: "Total Amount", accessor: (r) => Number(r.totalAmount) || 0 },
-  { header: "Status", accessor: "status" },
+  { header: "Status", accessor: (r) => printStatusLabel(r.status as string) },
   { header: "Type", accessor: "poType" },
 ];
 
@@ -871,7 +872,7 @@ const PurchaseOrderMaster: React.FC = () => {
       rejected: { bg: "#fef2f2", color: "#991b1b", border: "#fca5a5" },
     };
     const sc = statusColors[poStatus.toLowerCase()] ?? statusColors.draft;
-    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${escapeHtml(poStatus.toUpperCase())}</span>`;
+    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${escapeHtml(printStatusLabel(poStatus).toUpperCase())}</span>`;
 
     const itemRows = lineItems
       .map(
@@ -1954,7 +1955,7 @@ const PurchaseOrderMaster: React.FC = () => {
       rejected: { bg: "#fef2f2", color: "#991b1b", border: "#fca5a5" },
     };
     const sc = statusColors[poStatus.toLowerCase()] ?? statusColors.draft;
-    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${poStatus.toUpperCase()}</span>`;
+    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${printStatusLabel(poStatus).toUpperCase()}</span>`;
 
     const lineItemsArr: any[] = Array.isArray(viewingPO.LineItems)
       ? viewingPO.LineItems

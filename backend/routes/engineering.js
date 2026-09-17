@@ -762,7 +762,12 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
 
-    // Re-submit to Pending if still in Draft/Rejected
+    // Re-submit to Pending if still in Draft/Rejected. For a genuinely
+    // Rejected record, transition()'s Pending branch writes a fresh Level=0
+    // marker, which restarts approval at level 1 regardless of what was
+    // approved before the rejection (see approvalService.js's
+    // currentCycleCutoffSql).
+    let resubmitted = false;
     try {
       const pool = getPool();
       const r = await pool
@@ -779,6 +784,7 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
           req.user?.role,
         );
         await bumpCacheVersion(WORK_DONE_CACHE);
+        resubmitted = true;
       }
     } catch (e) {
       console.warn("[Work Done auto-submit on update]", e.message);
@@ -802,7 +808,10 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
       }
     }
 
-    res.json({ message: "Work Done entry updated" });
+    res.json({
+      message: resubmitted ? "Work Done entry updated and re-submitted for approval" : "Work Done entry updated",
+      resubmitted,
+    });
   } catch (err) {
     console.error("[PUT /engineering/work-done/:id]", err);
     res.status(500).json({ error: "Failed to update work done entry." });

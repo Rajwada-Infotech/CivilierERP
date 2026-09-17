@@ -22,6 +22,7 @@ export type ApprovalTable =
   | "ExpenseBooking"
   | "NewPayment"
   | "MaterialIssues"
+  | "MaterialIssueReturn"
   | "MaterialRequests"
   | "StockTransfers"
   | "BOQ"
@@ -190,6 +191,12 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
   }
 
   // ── Pending ─────────────────────────────────────────────────────────────────
+  // A page that prints its live DOM (window.print(), e.g. SaleOrder.tsx's
+  // preview) has no separate "print HTML" to intercept — whatever's on
+  // screen gets printed as-is. "Pending" is a live system state, not
+  // something to hand someone as paperwork, so a printed copy reads
+  // "Provisional" instead via a print-only swap; the on-screen badge is
+  // unaffected (print:hidden / print-only pair, not a prop toggle).
   return (
     <span
       title={tooltipText(currentStep)}
@@ -202,7 +209,8 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
       )}
     >
       <Clock size={10} />
-      {badgeText(currentStep, "Pending")}
+      <span className="print:hidden">{badgeText(currentStep, "Pending")}</span>
+      <span className="hidden print:inline">{currentStep.label} · Provisional</span>
     </span>
   );
 }
