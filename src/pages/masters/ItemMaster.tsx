@@ -76,6 +76,8 @@ interface Item {
   defaultSupplierId: string;
   glHeadId: string;
   costCenterId: string;
+  dayOfSupplies: string;
+  daysOfSupply: string;
 }
 
 function dbToItem(row: DbItem): Item {
@@ -96,6 +98,10 @@ function dbToItem(row: DbItem): Item {
       : "",
     glHeadId: row.M_GLHeadId ? String(row.M_GLHeadId) : "",
     costCenterId: row.M_CostCenterId ? String(row.M_CostCenterId) : "",
+    dayOfSupplies:
+      row.M_DayOfSupplies != null ? String(row.M_DayOfSupplies) : "",
+    daysOfSupply:
+      row.M_DaysOfSupply != null ? String(row.M_DaysOfSupply) : "",
   };
 }
 
@@ -119,6 +125,8 @@ function itemToPayload(form: Omit<Item, "_id">, groupName: string) {
       : null,
     M_GLHeadId: form.glHeadId ? parseInt(form.glHeadId) : null,
     M_CostCenterId: form.costCenterId ? parseInt(form.costCenterId) : null,
+    M_DayOfSupplies: form.dayOfSupplies ? parseInt(form.dayOfSupplies) : null,
+    M_DaysOfSupply: form.daysOfSupply ? parseInt(form.daysOfSupply) : null,
   };
 }
 
@@ -136,6 +144,8 @@ const EMPTY_FORM: Omit<Item, "_id"> = {
   defaultSupplierId: "",
   glHeadId: "",
   costCenterId: "",
+  dayOfSupplies: "",
+  daysOfSupply: "",
 };
 
 // ── CSV template / import column mapping ─────────────────────────────────────
@@ -1090,6 +1100,26 @@ const ItemMaster: React.FC = () => {
       },
     },
     {
+      accessorKey: "dayOfSupplies",
+      header: "Day of Supplies",
+      size: 130,
+      cell: ({ row }) => (
+        <span className="text-sm text-muted-foreground">
+          {row.original.dayOfSupplies || "-"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "daysOfSupply",
+      header: "Days of Supply",
+      size: 130,
+      cell: ({ row }) => (
+        <span className="text-sm text-muted-foreground">
+          {row.original.daysOfSupply || "-"}
+        </span>
+      ),
+    },
+    {
       accessorKey: "hsnCode",
       header: "HSN",
       size: 90,
@@ -1435,6 +1465,30 @@ const ItemMaster: React.FC = () => {
                 ))}
               </select>
             </Field>
+            {/* Day of Supplies — numeric lead-time/reorder value */}
+            <Field label="Day of Supplies">
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={form.dayOfSupplies}
+                onChange={(e) => set("dayOfSupplies", e.target.value)}
+                className={inputCls()}
+                placeholder="e.g. 7"
+              />
+            </Field>
+            {/* Days of Supply — numeric field */}
+            <Field label="Days of Supply">
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={form.daysOfSupply}
+                onChange={(e) => set("daysOfSupply", e.target.value)}
+                className={inputCls()}
+                placeholder="e.g. 30"
+              />
+            </Field>
           </div>
 
           {/* ── Tax Rates ── */}
@@ -1666,6 +1720,14 @@ const ItemMaster: React.FC = () => {
                       { label: "SGST", value: `${viewRow.sgst}%` },
                       { label: "IGST", value: `${viewRow.igst}%` },
                       { label: "UOM", value: uomLabel },
+                      {
+                        label: "Day of Supplies",
+                        value: viewRow.dayOfSupplies,
+                      },
+                      {
+                        label: "Days of Supply",
+                        value: viewRow.daysOfSupply,
+                      },
                       { label: "Description", value: viewRow.description },
                     ].map(({ label, value, mono }) => (
                       <div key={label}>
