@@ -166,6 +166,13 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/vehicle-in-out",
     label: "Vehicle In/Out",
   },
+  "stock-transfers": {
+    icon: Warehouse,
+    color: "text-teal-500 bg-teal-500/10",
+    navPath: "/material/stock-transfer",
+    apiEndpoint: "/api/stock-transfers",
+    label: "Stock Transfer",
+  },
   "journal-voucher": {
     icon: Receipt,
     color: "text-amber-600 bg-amber-600/10",
@@ -321,6 +328,7 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
   "work-done": "WorkDone",
   "sale-orders": "SaleOrders",
   "vehicle-in-out": "VehicleInOut",
+  "stock-transfers": "StockTransfers",
   contracts: "Contract",
 };
 
@@ -483,6 +491,7 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "material-issues":      "border-cyan-500",
   "sale-orders":          "border-fuchsia-500",
   "vehicle-in-out":       "border-sky-500",
+  "stock-transfers":      "border-teal-500",
   "journal-voucher":      "border-amber-600",
   "inter-company-transfer":"border-fuchsia-600",
   "fund-transfer":        "border-violet-600",
@@ -515,6 +524,7 @@ const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
   "fund-transfer": { icon: "text-violet-600", active: "bg-violet-600 border-violet-600" },
   "sale-orders": { icon: "text-lime-600", active: "bg-lime-600 border-lime-600" },
   "vehicle-in-out": { icon: "text-sky-600", active: "bg-sky-600 border-sky-600" },
+  "stock-transfers": { icon: "text-teal-500", active: "bg-teal-500 border-teal-500" },
   "crm-money-receipts": { icon: "text-teal-600", active: "bg-teal-600 border-teal-600" },
   contracts: { icon: "text-purple-500", active: "bg-purple-500 border-purple-500" },
 };

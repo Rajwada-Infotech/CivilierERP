@@ -261,11 +261,12 @@ router.get("/trail", authMiddleware, async (req, res) => {
         ORDER BY Level ASC, ActionAt ASC
       `);
 
-    // 2b. Level 0 rows separately — submission ('Pending') and rejection
-    // ('Rejected') markers. transition() (services/approvalService.js)
-    // always writes a rejection at Level 0, never at the level it actually
-    // happened, so without these a rejected record's trail would show no
-    // rejection at all — every step above would just read "Pending".
+    // 2b. Level 0 rows separately — submission ('Pending') markers, plus
+    // rejection markers from records rejected before transition() was
+    // fixed to log the real level it happened at (see approvalService.js
+    // resolveCurrentLevel/writeAuditLog). New rejections land at their real
+    // level and are picked up by the numbered-level merge above; this
+    // Level 0 fallback only still matters for that older historical data.
     const level0Result = await pool
       .request()
       .input("TableName", sql.NVarChar(100), module)
@@ -278,29 +279,21 @@ router.get("/trail", authMiddleware, async (req, res) => {
 
     const allAuditRows = auditResult.recordset;
     const workflowType = wfRow?.type || "sequential";
+    // Kept raw (not collapsed to one row per level) — a level whose own
+    // `mode` is "all" can have several distinct approvers, and the per-level
+    // branch below (not a global workflow-wide type) decides how to
+    // summarize each level's rows.
+    const auditRows = allAuditRows;
 
-    // For sequential/any: collapse to latest entry per level
-    const auditRows =
-      workflowType === "parallel"
-        ? allAuditRows
-        : Object.values(
-            allAuditRows.reduce((acc, row) => {
-              if (
-                !acc[row.Level] ||
-                new Date(row.ActionAt) > new Date(acc[row.Level].ActionAt)
-              ) {
-                acc[row.Level] = row;
-              }
-              return acc;
-            }, {}),
-          ).sort((a, b) => a.Level - b.Level);
-
-    // 3. Merge workflow levels with audit entries
+    // 3. Merge workflow levels with audit entries. Each level's own `mode`
+    // ("all" = everyone assigned must approve, anything else = the first
+    // approval settles it) drives how its rows are summarized — this is a
+    // per-step setting (ApprovalLevel.mode), not the old workflow-wide type.
     const steps = workflowLevels.map((lvl, idx) => {
       const levelNum = idx + 1;
       const levelRows = auditRows.filter((a) => a.Level === levelNum);
 
-      if (workflowType === "parallel") {
+      if (lvl.mode === "all") {
         const approvers = levelRows.map((r) => ({
           email: r.ApproverEmail,
           name: r.ApproverEmail?.split("@")[0] || null,
@@ -321,6 +314,7 @@ router.get("/trail", authMiddleware, async (req, res) => {
           level: levelNum,
           label: lvl.label || `Level ${levelNum}`,
           userIds: lvl.userIds || [],
+          mode: "all",
           status: anyRejected
             ? "Rejected"
             : allApproved
@@ -330,41 +324,20 @@ router.get("/trail", authMiddleware, async (req, res) => {
           approverName: latestActor?.name || null,
           role: latestActor?.role || null,
           actionAt: latestActor?.actionAt || null,
-          note: null,
+          note: latestActor?.status === "Rejected" ? (levelRows.find((r) => r.ActionStatus === "Rejected")?.Note ?? null) : null,
           approvers,
           workflowType,
         };
       }
 
-      if (workflowType === "any") {
-        // First to act wins
-        const actor =
-          levelRows.find(
-            (r) =>
-              r.ActionStatus === "Approved" || r.ActionStatus === "Rejected",
-          ) ||
-          levelRows[0] ||
-          null;
-        return {
-          level: levelNum,
-          label: lvl.label || `Level ${levelNum}`,
-          userIds: lvl.userIds || [],
-          status: actor?.ActionStatus || "Pending",
-          approverEmail: actor?.ApproverEmail || null,
-          approverName: actor?.ApproverEmail?.split("@")[0] || null,
-          role: actor?.Role || null,
-          actionAt: actor?.ActionAt || null,
-          note: actor?.Note || null,
-          workflowType,
-        };
-      }
-
-      // sequential — latest entry at this level
+      // Default ("any"/unset) — a level completes on its first approval, so
+      // there is ever at most one meaningful row here.
       const audit = levelRows[levelRows.length - 1] || null;
       return {
         level: levelNum,
         label: lvl.label || `Level ${levelNum}`,
         userIds: lvl.userIds || [],
+        mode: "any",
         status: audit?.ActionStatus || "Pending",
         approverEmail: audit?.ApproverEmail || null,
         approverName: audit?.ApproverEmail?.split("@")[0] || null,
