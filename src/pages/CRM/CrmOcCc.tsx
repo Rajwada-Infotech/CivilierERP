@@ -26,7 +26,7 @@ const CERT_COLOR: Record<string, string> = {
 };
 
 const EMPTY_FORM = {
-  ProjectId: "", CertType: "OC" as string, Status: "Applied" as string,
+  ProjectId: "", BlockId: "", CertType: "OC" as string, Status: "Applied" as string,
   ApplicationDate: "", ReceivedDate: "", CertificateNo: "", IssuedBy: "", Remarks: "",
 };
 
@@ -47,6 +47,12 @@ async function fetchAll(): Promise<any[]> {
 }
 async function fetchProjects(): Promise<any[]> {
   try { const r = await fetchWithAuth(PROJ_API); return r.ok ? r.json() : []; } catch { return []; }
+}
+// Reuses the same project-scoped blocks endpoint CrmCompanyProjectBlockFilter.tsx
+// already calls elsewhere in the CRM module — no new backend route needed.
+async function fetchBlocksForProject(projectId: string): Promise<any[]> {
+  if (!projectId) return [];
+  try { const r = await fetchWithAuth(`/api/unit-master/blocks?projectId=${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
 }
 
 // ── Status stepper ────────────────────────────────────────────────────────────
@@ -112,7 +118,10 @@ function OcccCard({ row, canEdit, onClick }: { row: any; canEdit: boolean; onCli
         {/* Header row */}
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h3 className="font-semibold text-base text-foreground leading-tight truncate">{row.ProjectName}</h3>
+            <h3 className="font-semibold text-base text-foreground leading-tight truncate">
+              {row.ProjectName}
+              {row.BlockName && <span className="text-muted-foreground font-normal"> · Block {row.BlockName}</span>}
+            </h3>
             {row.IssuedBy && (
               <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
                 <Building2 size={10} /> {row.IssuedBy}
@@ -198,16 +207,66 @@ function OcccForm({
   const sel = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary/40";
   const inp = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-primary/40";
 
+  // Scope is derived from whether a BlockId is already set — no separate
+  // state needed. Only settable at creation (same as Project itself, gated
+  // on showProject) — a cert's scope is immutable after creation, same as
+  // its Project: create a new one instead of moving an existing cert
+  // between scopes.
+  const scope = form.BlockId ? "block" : "project";
+  const { data: blocks = [] } = useQuery({
+    queryKey: ["oc-cc-blocks-for-project", form.ProjectId],
+    queryFn: () => fetchBlocksForProject(form.ProjectId),
+    enabled: showProject && !!form.ProjectId,
+  });
+
   return (
     <div className="space-y-4">
       {showProject && (
-        <div>
-          <label className="text-xs font-medium text-muted-foreground block mb-1">Project *</label>
-          <select value={form.ProjectId} onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value }))} className={sel}>
-            <option value="">Select project</option>
-            {projects.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
-          </select>
-        </div>
+        <>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">Project *</label>
+            <select value={form.ProjectId}
+              onChange={(e) => setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "" }))}
+              className={sel}>
+              <option value="">Select project</option>
+              {projects.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">Scope</label>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setForm((f) => ({ ...f, BlockId: "" }))}
+                className={`flex-1 text-sm rounded-lg border px-3 py-2 transition-colors ${
+                  scope === "project" ? "border-primary bg-primary/5 text-foreground font-medium" : "border-border text-muted-foreground hover:bg-muted/40"
+                }`}>
+                Project-wide
+              </button>
+              <button type="button" onClick={() => setForm((f) => ({ ...f, BlockId: f.BlockId || (blocks[0] ? String(blocks[0].Id) : "") }))}
+                disabled={!form.ProjectId}
+                className={`flex-1 text-sm rounded-lg border px-3 py-2 transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                  scope === "block" ? "border-primary bg-primary/5 text-foreground font-medium" : "border-border text-muted-foreground hover:bg-muted/40"
+                }`}>
+                Specific Block
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-1">
+              {scope === "project"
+                ? "Applies to every booking in the project."
+                : "Applies only to bookings in the selected block — for a large project where some blocks are finished before others."}
+            </p>
+          </div>
+
+          {scope === "block" && (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">Block *</label>
+              <select value={form.BlockId} onChange={(e) => setForm((f) => ({ ...f, BlockId: e.target.value }))} className={sel}>
+                <option value="">Select block</option>
+                {blocks.map((b: any) => <option key={b.Id} value={String(b.Id)}>{b.BlockName}</option>)}
+              </select>
+            </div>
+          )}
+        </>
       )}
 
       <div className="grid grid-cols-2 gap-3">
@@ -273,7 +332,10 @@ function OcccForm({
 
       {form.Status === "Received" && form.CertificateNo && (
         <div className="flex items-center gap-1.5 text-xs text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-3 py-2">
-          <CheckCircle2 size={13} /> Certificate recorded — possession gate will clear for all bookings in this project.
+          <CheckCircle2 size={13} />
+          {scope === "block"
+            ? "Certificate recorded — possession gate will clear for bookings in this block."
+            : "Certificate recorded — possession gate will clear for all bookings in this project."}
         </div>
       )}
     </div>
@@ -329,6 +391,7 @@ const CrmOcCc: React.FC = () => {
     setEditLocked(true);
     setEditForm({
       ProjectId:       String(row.ProjectId),
+      BlockId:         row.BlockId ? String(row.BlockId) : "",
       CertType:        row.CertType,
       Status:          row.Status,
       ApplicationDate: row.ApplicationDate ? String(row.ApplicationDate).slice(0, 10) : "",
@@ -351,6 +414,7 @@ const CrmOcCc: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ProjectId:       parseInt(createForm.ProjectId),
+          BlockId:         createForm.BlockId ? parseInt(createForm.BlockId) : undefined,
           CertType:        createForm.CertType,
           Status:          createForm.Status,
           ApplicationDate: createForm.ApplicationDate || undefined,
@@ -497,6 +561,7 @@ const CrmOcCc: React.FC = () => {
               <span className="flex items-center gap-2">
                 <ShieldCheck size={16} />
                 {detailRow?.ProjectName}
+                {detailRow?.BlockName && <span className="text-muted-foreground font-normal text-sm">· Block {detailRow.BlockName}</span>}
               </span>
               {canEdit && editLocked && (
                 <button onClick={() => setEditLocked(false)}
