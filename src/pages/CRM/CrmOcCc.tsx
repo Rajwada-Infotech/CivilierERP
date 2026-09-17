@@ -262,7 +262,7 @@ function OcccForm({
               <label className="text-xs font-medium text-muted-foreground block mb-1">Block *</label>
               <select value={form.BlockId} onChange={(e) => setForm((f) => ({ ...f, BlockId: e.target.value }))} className={sel}>
                 <option value="">Select block</option>
-                {blocks.map((b: any) => <option key={b.Id} value={String(b.Id)}>{b.BlockName}</option>)}
+                {blocks.map((b: any) => <option key={b.Id} value={String(b.Id)}>{b.Name}</option>)}
               </select>
             </div>
           )}
