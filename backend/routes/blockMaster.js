@@ -410,6 +410,30 @@ router.get("/:id/unit-type-specs", async (req, res) => {
   }
 });
 
+// GET /api/block-master/:id/floors — distinct floor numbers already in use
+// under this block's units. There's no standalone Floor Master table —
+// FloorNo only ever exists as a plain value on UnitMaster rows, so this is
+// the closest thing to a "floor list" for this block (used by Material
+// Issue's Block -> Floor dropdown pair).
+router.get("/:id/floors", async (req, res) => {
+  const blockId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(blockId)) return res.status(400).json({ error: "Invalid block id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request()
+      .input("bid", sql.Int, blockId)
+      .query(`
+        SELECT DISTINCT FloorNo FROM dbo.UnitMaster
+        WHERE BlockId = @bid AND IsActive = 1 AND FloorNo IS NOT NULL
+        ORDER BY FloorNo
+      `);
+    res.json(result.recordset.map((r) => r.FloorNo));
+  } catch (err) {
+    console.error("[block-master] GET floors error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PUT /api/block-master/:id/unit-type-specs — full replace for this block
 // Receives an array of {UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt,
 // SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, BaseRatePerSqFt}.

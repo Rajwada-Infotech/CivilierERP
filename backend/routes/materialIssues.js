@@ -260,6 +260,7 @@ router.get(
         mi.Date, mi.Reason, mi.Remarks, mi.CreatedAt,
         mi.GodownId, g.GodownName, g.GodownCode,
         mi.IssuedTo, mi.CostCenter, mi.Purpose,
+        mi.BlockId, bm.BlockName, mi.FloorNo,
         (SELECT COUNT(*) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS ItemCount,
         (SELECT ISNULL(SUM(mii.Quantity),0) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS TotalQty,
         COUNT(*) OVER() AS TotalCount
@@ -268,6 +269,7 @@ router.get(
       LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
       LEFT JOIN dbo.FinYear    fy ON mi.FinYearId = fy.FId
       LEFT JOIN dbo.Godowns    g  ON mi.GodownId  = g.GodownID
+      LEFT JOIN dbo.BlockMaster bm ON bm.Id = mi.BlockId
       ${whereClause}
       ORDER BY mi.CreatedAt DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -303,12 +305,18 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const colCheck = await colCheckReq.query(`
       SELECT name FROM sys.columns
       WHERE object_id = OBJECT_ID('dbo.MaterialIssues')
-        AND name IN ('IssuedTo','CostCenter','Purpose')
+        AND name IN ('IssuedTo','CostCenter','Purpose','BlockId','FloorNo')
     `);
     const extraCols = colCheck.recordset.map((r) => r.name);
     const issuedToCol   = extraCols.includes("IssuedTo")   ? "mi.IssuedTo,"   : "NULL AS IssuedTo,";
     const costCenterCol = extraCols.includes("CostCenter")  ? "mi.CostCenter," : "NULL AS CostCenter,";
     const purposeCol    = extraCols.includes("Purpose")     ? "mi.Purpose,"    : "NULL AS Purpose,";
+    const blockIdCol    = extraCols.includes("BlockId")     ? "mi.BlockId,"    : "NULL AS BlockId,";
+    const floorNoCol    = extraCols.includes("FloorNo")     ? "mi.FloorNo,"    : "NULL AS FloorNo,";
+    const blockJoin = extraCols.includes("BlockId")
+      ? "LEFT JOIN dbo.BlockMaster bm ON bm.Id = mi.BlockId"
+      : "";
+    const blockNameCol = extraCols.includes("BlockId") ? "bm.BlockName," : "NULL AS BlockName,";
 
     const headerResult = await pool.request().input("id", sql.Int, id).query(`
       SELECT
@@ -321,6 +329,9 @@ router.get("/:id", authenticateToken, async (req, res) => {
         ${issuedToCol}
         ${costCenterCol}
         ${purposeCol}
+        ${blockIdCol}
+        ${floorNoCol}
+        ${blockNameCol}
         c.name   AS CompanyName,
         p.name   AS ProjectName,
         fy.FName AS FinYearName,
@@ -330,6 +341,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
       LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
       LEFT JOIN dbo.FinYear    fy ON mi.FinYearId = fy.FId
       LEFT JOIN dbo.Godowns    g  ON mi.GodownId  = g.GodownID
+      ${blockJoin}
       WHERE mi.IssueId = @id
     `);
 
@@ -387,6 +399,8 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
       CostCenter = null,
       Purpose = null,
       GodownId = null,
+      BlockId = null,
+      FloorNo = null,
       DocTypeId: clientDocTypeId = null,
     } = req.body;
 
@@ -505,6 +519,8 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
       headerReq.input("IssuedTo", sql.NVarChar(200), IssuedTo || null);
       headerReq.input("CostCenter", sql.NVarChar(200), CostCenter || null);
       headerReq.input("Purpose", sql.NVarChar(500), Purpose || null);
+      headerReq.input("BlockId", sql.Int, BlockId ? parseInt(BlockId, 10) : null);
+      headerReq.input("FloorNo", sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo, 10) : null);
       // Legacy NOT NULL columns — populate from first item
       headerReq.input("ItemId", sql.NVarChar(100), String(items[0].ItemId));
       headerReq.input(
@@ -519,14 +535,14 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
            ParentDocNo, RootExBDocNo,
            CompanyId, ProjectId, FinYearId, Date,
            Reason, Remarks, CreatedBy,
-           GodownId, IssuedTo, CostCenter, Purpose, ItemId, Quantity)
+           GodownId, IssuedTo, CostCenter, Purpose, BlockId, FloorNo, ItemId, Quantity)
         OUTPUT INSERTED.*
         VALUES
           (@IssueNo, @DocNo, @DocTypeId, @DocYear, @DocSerial,
            @ParentDocNo, @RootExBDocNo,
            @CompanyId, @ProjectId, @FinYearId, @Date,
            @Reason, @Remarks, @CreatedBy,
-           @GodownId, @IssuedTo, @CostCenter, @Purpose, @ItemId, @Quantity)
+           @GodownId, @IssuedTo, @CostCenter, @Purpose, @BlockId, @FloorNo, @ItemId, @Quantity)
       `);
 
       newRecord = headerResult.recordset[0];
@@ -622,6 +638,8 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
       IssuedTo = null,
       CostCenter = null,
       Purpose = null,
+      BlockId = null,
+      FloorNo = null,
     } = req.body;
 
     // Same NOT NULL columns as POST / — this UPDATE overwrites them
@@ -681,12 +699,15 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
         .input("GodownId", sql.Int, resolvedGodownId)
         .input("IssuedTo", sql.NVarChar(200), IssuedTo || null)
         .input("CostCenter", sql.NVarChar(200), CostCenter || null)
-        .input("Purpose", sql.NVarChar(500), Purpose || null).query(`
+        .input("Purpose", sql.NVarChar(500), Purpose || null)
+        .input("BlockId", sql.Int, BlockId ? parseInt(BlockId, 10) : null)
+        .input("FloorNo", sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo, 10) : null).query(`
           UPDATE dbo.MaterialIssues
           SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
               Date=@Date, Reason=@Reason, Remarks=@Remarks, UpdatedAt=GETDATE(),
               GodownId=@GodownId,
-              IssuedTo=@IssuedTo, CostCenter=@CostCenter, Purpose=@Purpose
+              IssuedTo=@IssuedTo, CostCenter=@CostCenter, Purpose=@Purpose,
+              BlockId=@BlockId, FloorNo=@FloorNo
           WHERE IssueId=@Id
         `);
 
