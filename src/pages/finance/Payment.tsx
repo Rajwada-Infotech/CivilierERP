@@ -26,6 +26,7 @@ import type { CompanyDetail } from "@/api/enterpriseApi";
 import { ExportMenu } from "@/components/ExportMenu";
 import { toast } from "sonner";
 import { formatINR } from "@/utils/formatCurrency";
+import { printStatusLabel } from "@/utils/printStatus";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import {
@@ -614,7 +615,7 @@ const Payment: React.FC = () => {
       <div style="font-size:14px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${rec.docNo || "—"}</div>
       <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
         <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sColor}18;color:${sColor};border:1px solid ${sColor}40;">
-          ${rec.status}
+          ${printStatusLabel(rec.status)}
         </span>
         <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${mColor}18;color:${mColor};border:1px solid ${mColor}40;">
           ${rec.mode}
@@ -826,11 +827,22 @@ const Payment: React.FC = () => {
       label: string;
       belongs_to?: number | null;
       company_id?: number | null;
+      tagged_company_ids?: string | null;
     }[]
   >({
     queryKey: ["project-options-payment-filter"],
     queryFn: fetchProjectOptions,
   });
+
+  // A project is available to a company if it's the project's primary
+  // (owning) company, or the company is tagged onto the project via
+  // Project Master's multi-company tagging (dbo.ProjectCompanies).
+  const isProjectVisibleToCompany = useMemo(
+    () => (p: { company_id?: number | null; tagged_company_ids?: string | null }, companyId: string | number) =>
+      String(p.company_id) === String(companyId) ||
+      (p.tagged_company_ids?.split(",") ?? []).includes(String(companyId)),
+    [],
+  );
 
   const { data: supplierOptions = [] } = useQuery<
     { id: number; label: string; type?: string }[]
@@ -2413,7 +2425,7 @@ const Payment: React.FC = () => {
                                         (p) =>
                                           p.label === prev.project &&
                                           (p.belongs_to === newCompanyId ||
-                                            p.company_id === newCompanyId),
+                                            isProjectVisibleToCompany(p, newCompanyId)),
                                       )
                                     : true;
                                   if (!projStillValid) next.project = "";
@@ -2614,8 +2626,8 @@ const Payment: React.FC = () => {
                                   )?.id ?? null);
                             return (
                               companyId
-                                ? projectOptions.filter(
-                                    (p) => p.company_id === companyId,
+                                ? projectOptions.filter((p) =>
+                                    isProjectVisibleToCompany(p, companyId),
                                   )
                                 : projectOptions
                             ).map((p) => (
@@ -4278,7 +4290,7 @@ const Payment: React.FC = () => {
                                     (p) =>
                                       p.label === projectFilter &&
                                       (p.belongs_to === Number(val) ||
-                                        p.company_id === Number(val)),
+                                        isProjectVisibleToCompany(p, Number(val))),
                                   );
                                   if (!stillValid) setProjectFilter("");
                                 }
@@ -4319,7 +4331,7 @@ const Payment: React.FC = () => {
                                 ? projectOptions.filter(
                                     (p) =>
                                       p.belongs_to === Number(companyFilter) ||
-                                      p.company_id === Number(companyFilter),
+                                      isProjectVisibleToCompany(p, Number(companyFilter)),
                                   )
                                 : projectOptions
                               ).map((p) => (

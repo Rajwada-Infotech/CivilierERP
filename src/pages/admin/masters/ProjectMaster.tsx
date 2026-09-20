@@ -23,9 +23,15 @@ import {
   CalendarDays,
   ChevronDown,
   ShieldAlert,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   getProjects,
   createProject,
@@ -66,6 +72,9 @@ interface Project {
   // jv
   jvEnabled: boolean;
   jvCompanyName: string;
+  // additional companies tagged to this project, beyond the primary one
+  multiCompanyEnabled: boolean;
+  multiCompanyIds: string[];
   // rest
   teamSize: string;
   startDate: string;
@@ -107,6 +116,115 @@ function ProjectAvatar({
   );
 }
 
+// A fixed palette cycled by id, so companies sitting side by side in the
+// stack read as distinct at a glance instead of a wall of same-colored dots.
+const TAG_AVATAR_COLORS = [
+  "bg-violet-500/15 text-violet-600",
+  "bg-blue-500/15 text-blue-600",
+  "bg-emerald-500/15 text-emerald-600",
+  "bg-amber-500/15 text-amber-600",
+  "bg-rose-500/15 text-rose-600",
+  "bg-cyan-500/15 text-cyan-600",
+];
+function tagAvatarColor(id: string) {
+  const n = parseInt(id, 10) || 0;
+  return TAG_AVATAR_COLORS[n % TAG_AVATAR_COLORS.length];
+}
+
+// Assignee-stack style picker: collapses to overlapping avatar circles (or
+// a bare "Add companies" affordance when empty) and expands into a
+// searchable list on click — the same interaction Linear/Notion use for
+// assigning multiple people, applied here to companies instead of a wall
+// of toggle chips.
+function CompanyTagPicker({
+  companies,
+  excludeId,
+  selectedIds,
+  onChange,
+}: {
+  companies: any[];
+  excludeId: string;
+  selectedIds: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const options = (companies as any[]).filter((c) => String(c.Id ?? c.id) !== excludeId);
+  const selected = options.filter((c) => selectedIds.includes(String(c.Id ?? c.id)));
+  const MAX_SHOWN = 5;
+  const shownAvatars = selected.slice(0, MAX_SHOWN);
+  const extra = selected.length - shownAvatars.length;
+
+  const toggle = (id: string) => {
+    onChange(selectedIds.includes(id) ? selectedIds.filter((x) => x !== id) : [...selectedIds, id]);
+  };
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" className="group flex items-center gap-2.5 py-1">
+          {selected.length === 0 ? (
+            <span className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-dashed border-border text-xs text-muted-foreground group-hover:border-primary/40 group-hover:text-primary transition-colors">
+              <Plus size={12} /> Add companies
+            </span>
+          ) : (
+            <>
+              <div className="flex items-center -space-x-2.5">
+                {shownAvatars.map((c) => {
+                  const id = String(c.Id ?? c.id);
+                  const name = c.Name ?? c.name ?? "";
+                  return (
+                    <Avatar key={id} className="h-8 w-8 border-2 border-card ring-1 ring-border/60">
+                      <AvatarFallback className={`text-[11px] font-heading font-bold ${tagAvatarColor(id)}`}>
+                        {name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                  );
+                })}
+                {extra > 0 && (
+                  <Avatar className="h-8 w-8 border-2 border-card ring-1 ring-border/60">
+                    <AvatarFallback className="text-[10px] font-heading font-bold bg-muted text-muted-foreground">
+                      +{extra}
+                    </AvatarFallback>
+                  </Avatar>
+                )}
+              </div>
+              <span className="text-xs text-muted-foreground group-hover:text-primary transition-colors">
+                {selected.length} tagged
+              </span>
+            </>
+          )}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-72 p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search companies…" />
+          <CommandList>
+            <CommandEmpty>No companies found.</CommandEmpty>
+            <CommandGroup>
+              {options.map((c) => {
+                const id = String(c.Id ?? c.id);
+                const name = c.Name ?? c.name ?? "";
+                const checked = selectedIds.includes(id);
+                return (
+                  <CommandItem key={id} value={name} onSelect={() => toggle(id)} className="gap-2">
+                    <Avatar className="h-6 w-6">
+                      <AvatarFallback className={`text-[10px] font-heading font-bold ${tagAvatarColor(id)}`}>
+                        {name.charAt(0).toUpperCase()}
+                      </AvatarFallback>
+                    </Avatar>
+                    <span className="flex-1 truncate">{name}</span>
+                    <Check size={14} className={checked ? "opacity-100 text-primary" : "opacity-0"} />
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 const emptyProject: Project = {
   code: "",
   name: "",
@@ -129,6 +247,8 @@ const emptyProject: Project = {
   tradeLicenseNo: "",
   jvEnabled: false,
   jvCompanyName: "",
+  multiCompanyEnabled: false,
+  multiCompanyIds: [],
   teamSize: "",
   startDate: "",
   endDate: "",
@@ -166,6 +286,10 @@ function rowToForm(row: any): Project {
     tradeLicenseNo: row.CompanyTradeLicenseNo ?? "",
     jvEnabled: !!row.JvEnabled,
     jvCompanyName: row.JvCompanyName ?? "",
+    multiCompanyEnabled: !!row.MultiCompanyEnabled,
+    multiCompanyIds: row.MultiCompanyIds
+      ? String(row.MultiCompanyIds).split(",").filter(Boolean)
+      : [],
     teamSize: row.TeamSize != null ? String(row.TeamSize) : "",
     startDate: row.StartDate ? row.StartDate.slice(0, 10) : "",
     endDate: row.EndDate ? row.EndDate.slice(0, 10) : "",
@@ -568,7 +692,7 @@ export default function ProjectMaster() {
   const [viewTarget, setViewTarget] = useState<Project | null>(null);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<
-    "general" | "location" | "compliance" | "timeline" | "financial"
+    "general" | "location" | "compliance" | "timeline"
   >("general");
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [cascadeTarget, setCascadeTarget] = useState<{ Id: number; Name: string } | null>(null);
@@ -704,6 +828,11 @@ export default function ProjectMaster() {
         // jv
         jvEnabled: form.jvEnabled,
         jvCompanyName: form.jvEnabled ? form.jvCompanyName || null : null,
+        // additional tagged companies
+        multiCompanyEnabled: form.multiCompanyEnabled,
+        multiCompanyIds: form.multiCompanyEnabled
+          ? form.multiCompanyIds.map((id) => parseInt(id, 10))
+          : [],
         // rest
         teamSize: form.teamSize,
         startDate: form.startDate || null,
@@ -729,12 +858,13 @@ export default function ProjectMaster() {
 
       return editId ? updateProject(editId, payload) : createProject(payload);
     },
-    onSuccess: () => {
+    onSuccess: (result: any) => {
       toast.success(
         editId
           ? "Project updated successfully"
           : "Project created successfully",
       );
+      if (result?.warning) toast.warning(result.warning);
       qc.invalidateQueries({ queryKey: ["project-master"] });
       qc.invalidateQueries({ queryKey: ["enterprises"] });
       resetForm();
@@ -812,6 +942,20 @@ export default function ProjectMaster() {
     (p: any) =>
       (p.Name ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (p.Code ?? "").toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const exportColumns: ExportColumn[] = useMemo(
+    () => [
+      { header: "Code", accessor: "Code" },
+      { header: "Project Name", accessor: "Name" },
+      { header: "Enterprise", accessor: "EnterpriseName" },
+      { header: "Company", accessor: "CompanyName" },
+      { header: "Type", accessor: "Type" },
+      { header: "Status", accessor: "Status" },
+      { header: "JV Enabled", accessor: (r: any) => (r.JvEnabled ? "Yes" : "No") },
+      { header: "Active", accessor: (r: any) => (r.IsActive ? "Active" : "Inactive") },
+    ],
+    [],
   );
 
   const openNew = () => {
@@ -917,13 +1061,7 @@ export default function ProjectMaster() {
     </div>
   );
 
-  const TABS = [
-    "general",
-    "location",
-    "compliance",
-    "timeline",
-    "financial",
-  ] as const;
+  const TABS = ["general", "location", "compliance", "timeline"] as const;
 
   return (
     <>
@@ -964,6 +1102,13 @@ export default function ProjectMaster() {
               <span className="text-xs text-muted-foreground">
                 {filtered.length} project{filtered.length !== 1 ? "s" : ""}
               </span>
+              <ExportMenu
+                data={filtered as unknown as Record<string, unknown>[]}
+                columns={exportColumns}
+                title="Project Master"
+                filename="project-master"
+                disabled={!rights.canExport || filtered.length === 0}
+              />
             </div>
             {isLoading ? (
               <div className="flex justify-center py-16">
@@ -1096,6 +1241,7 @@ export default function ProjectMaster() {
                   {fi("Project Name", "name", "text", "", false, true)}
                   {fi("Short Name", "shortName")}
                   {se("Type", "type", projectTypes)}
+                  {se("Currency", "currency", currencies)}
 
                   {/* Enterprise Dropdown */}
                   <div>
@@ -1288,6 +1434,53 @@ export default function ProjectMaster() {
                     )}
                   </div>
 
+                  {/* Multi-Company tagging toggle */}
+                  <div className="col-span-full border border-border rounded-lg p-4 bg-muted/10 space-y-3">
+                    <button
+                      onClick={() =>
+                        setForm((p) => ({
+                          ...p,
+                          multiCompanyEnabled: !p.multiCompanyEnabled,
+                          multiCompanyIds: !p.multiCompanyEnabled
+                            ? p.multiCompanyIds
+                            : [],
+                        }))
+                      }
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      {form.multiCompanyEnabled ? (
+                        <ToggleRight size={24} className="text-blue-500" />
+                      ) : (
+                        <ToggleLeft size={24} className="text-muted-foreground" />
+                      )}
+                      <span
+                        className={
+                          form.multiCompanyEnabled
+                            ? "text-blue-600 font-medium"
+                            : "text-muted-foreground"
+                        }
+                      >
+                        Tag Additional Companies
+                      </span>
+                    </button>
+
+                    {form.multiCompanyEnabled && (
+                      <div>
+                        <label className="block text-xs font-medium text-muted-foreground mb-2">
+                          Companies (besides the primary Company above)
+                        </label>
+                        <CompanyTagPicker
+                          companies={companies}
+                          excludeId={form.companyId}
+                          selectedIds={form.multiCompanyIds}
+                          onChange={(ids) =>
+                            setForm((p) => ({ ...p, multiCompanyIds: ids }))
+                          }
+                        />
+                      </div>
+                    )}
+                  </div>
+
                   <div className="col-span-full">
                     {fi("Description", "description")}
                   </div>
@@ -1390,13 +1583,6 @@ export default function ProjectMaster() {
                   {se("Status", "status", statuses)}
                   {se("Priority", "priority", priorities)}
                   {fi("Team Size", "teamSize", "number")}
-                </div>
-              )}
-
-              {/* ── Financial ── */}
-              {activeTab === "financial" && (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {se("Currency", "currency", currencies)}
                 </div>
               )}
             </div>

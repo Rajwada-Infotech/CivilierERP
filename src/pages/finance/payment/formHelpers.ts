@@ -74,7 +74,11 @@ export function dbToRecord(item: DbPayment): PaymentRecord {
     bankName: (item.PBankName && item.PBankName !== "N/A") ? item.PBankName : "",
     project: item.PProjectName || item.PProject || "",
     projectSite: item.PProjectName || item.PProject || "",
-    company: item.PCompany || "",
+    // Same "prefer the resolved name, fall back to the raw stored value"
+    // pattern already used for project below — PCompany alone is often just
+    // the enterprise id as text for CRM-sourced payouts (Brokerage/Refund),
+    // which never matches a company dropdown option keyed by label.
+    company: item.PCompanyName || item.PCompany || "",
     expenseRef: item.PExpenseRef || "",
     expenseId: item.PExpenseId ? String(item.PExpenseId) : "",
     jvNo: item.JVNo || null,

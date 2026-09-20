@@ -1,0 +1,437 @@
+import React from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { ProfileAdd, DocumentText } from "iconsax-react";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { usePageRights } from "@/hooks/usePageRights";
+import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
+import {
+  MasterPage,
+  type DataChangeEvent,
+  type RecordWithId,
+  type FieldDef,
+  type ColumnDef,
+} from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
+import {
+  getCandidates,
+  addCandidate,
+  updateCandidate,
+  deleteCandidate,
+  updateCandidateInterviewStatus,
+  type CandidateRow,
+  type InterviewResult,
+} from "@/api/candidateMasterApi";
+
+// Interview Result can be set two ways -- directly here, or via the
+// Interview page's own status sync (see backend/routes/interview.js) --
+// both write the same CandidateMaster.InterviewStatus column, so it only
+// ever needs these 3 states, plus "no result yet".
+const INTERVIEW_RESULT_META: Record<string, { label: string; className: string }> = {
+  Selected: { label: "Selected", className: "bg-green-500/10 text-green-600 border-green-500/30" },
+  Rejected: { label: "Rejected", className: "bg-red-500/10 text-red-600 border-red-500/30" },
+  "On Hold": { label: "Hold", className: "bg-amber-500/10 text-amber-600 border-amber-500/30" },
+};
+const DEFAULT_RESULT_CLASS = "bg-muted text-muted-foreground border-border";
+
+// Inline editable dropdown for the "Interview Result" column -- calls its
+// own usePageRights so it can fall back to a read-only badge for viewers
+// without needing canEdit threaded down from the parent column config.
+const InterviewResultSelect: React.FC<{ candidateId: number; value: string }> = ({ candidateId, value }) => {
+  const rights = usePageRights("candidate-master");
+  const queryClient = useQueryClient();
+
+  const mutation = useMutation({
+    mutationFn: (status: InterviewResult) => updateCandidateInterviewStatus(candidateId, status),
+    onSuccess: async () => {
+      toast.success("Interview result updated");
+      await queryClient.invalidateQueries({ queryKey: ["candidate-master"] });
+    },
+    onError: (err: any) => toast.error(err?.message || "Failed to update interview result"),
+  });
+
+  const className = INTERVIEW_RESULT_META[value]?.className || DEFAULT_RESULT_CLASS;
+
+  if (!rights.canEdit) {
+    if (!INTERVIEW_RESULT_META[value]) return <span className="text-xs text-muted-foreground">-</span>;
+    return (
+      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${className}`}>
+        {INTERVIEW_RESULT_META[value].label}
+      </span>
+    );
+  }
+
+  return (
+    <select
+      value={value}
+      disabled={mutation.isPending}
+      onChange={(e) => {
+        const next = e.target.value;
+        if (next) mutation.mutate(next as InterviewResult);
+      }}
+      className={`text-xs px-2 py-1 rounded-full border font-medium ${className}`}
+    >
+      <option value="">Select...</option>
+      <option value="Selected">Selected</option>
+      <option value="On Hold">Hold</option>
+      <option value="Rejected">Rejected</option>
+    </select>
+  );
+};
+
+// ---- Resume storage: gzip-compress client-side before saving ---------------
+// A stored resume string is either:
+//  - the legacy plain data URI ("data:<mime>;base64,...") from before this
+//    compression logic existed, or from a file gzip couldn't shrink, or
+//  - "CZGZ1:<mime>|<base64-of-gzip-bytes>" when compression actually helped.
+// Comparing compressed-vs-original size means a resume is never stored
+// larger than the file the user picked.
+const GZIP_MARKER = "CZGZ1:";
+
+function fileToDataUri(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function readAllChunks(readable: ReadableStream<Uint8Array>): Promise<Uint8Array> {
+  const reader = readable.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      total += value.length;
+    }
+  }
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return out;
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function compressFileForStorage(file: File): Promise<string> {
+  const mimeType = file.type || "application/octet-stream";
+  if (typeof CompressionStream === "undefined") {
+    return fileToDataUri(file);
+  }
+  try {
+    const original = new Uint8Array(await file.arrayBuffer());
+    const cs = new CompressionStream("gzip");
+    const writer = cs.writable.getWriter();
+    writer.write(original as BufferSource);
+    writer.close();
+    const compressed = await readAllChunks(cs.readable);
+    if (compressed.length < original.length) {
+      return `${GZIP_MARKER}${mimeType}|${bytesToBase64(compressed)}`;
+    }
+  } catch {
+    // fall through to the uncompressed data URI below
+  }
+  return fileToDataUri(file);
+}
+
+// Resolves a stored resume string into a URL the browser can open/download
+// -- decompressing first when it's in the gzip-marker format, or using a
+// legacy plain data URI as-is.
+async function resolveResumeUrl(stored: string): Promise<string> {
+  if (!stored.startsWith(GZIP_MARKER)) return stored;
+  const rest = stored.slice(GZIP_MARKER.length);
+  const sep = rest.indexOf("|");
+  const mimeType = rest.slice(0, sep);
+  const base64 = rest.slice(sep + 1);
+  const ds = new DecompressionStream("gzip");
+  const writer = ds.writable.getWriter();
+  writer.write(base64ToBytes(base64) as BufferSource);
+  writer.close();
+  const original = await readAllChunks(ds.readable);
+  const blob = new Blob([original as BlobPart], { type: mimeType });
+  return URL.createObjectURL(blob);
+}
+
+// Read-only display for the server-generated Candidate ID (CAND-00001
+// style) — same "(auto-generated on save)" placeholder pattern as
+// Interview's Document Number field. formData._id is only present once
+// MasterPage has seeded the form from an existing row (edit mode), so
+// that's what distinguishes "show the real code" from "still unsaved".
+const CandidateIdField: React.FC<{
+  value: unknown;
+  formData: Record<string, unknown>;
+}> = ({ value, formData }) => (
+  <input
+    className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border font-mono opacity-70 text-foreground"
+    value={formData._id ? (value as string) || "" : "(auto-generated on save)"}
+    readOnly
+    disabled
+  />
+);
+
+// Resume upload for the "custom" FieldDef slot — stores a gzip-compressed
+// (when smaller) blob + the original filename directly on the candidate
+// record (same approach as Employee Master's Photo field), no separate
+// attachment table needed for a single resume per candidate.
+const ResumeField: React.FC<{
+  value: unknown;
+  onChange: (v: unknown) => void;
+}> = ({ value, onChange }) => {
+  const resume = (value as { name: string; stored: string } | null) || null;
+  const inputId = "candidate-resume-input";
+  const [opening, setOpening] = React.useState(false);
+
+  const handleOpen = async () => {
+    if (!resume) return;
+    setOpening(true);
+    try {
+      const url = await resolveResumeUrl(resume.stored);
+      window.open(url, "_blank", "noreferrer");
+      if (url.startsWith("blob:")) setTimeout(() => URL.revokeObjectURL(url), 30000);
+    } catch {
+      toast.error("Failed to open resume");
+    } finally {
+      setOpening(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      {resume ? (
+        <button
+          type="button"
+          onClick={handleOpen}
+          disabled={opening}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-medium text-foreground hover:bg-muted transition-colors max-w-[220px] disabled:opacity-50"
+        >
+          <DocumentText size={13} className="shrink-0" /> <span className="truncate">{opening ? "Opening…" : resume.name}</span>
+        </button>
+      ) : (
+        <span className="text-xs text-muted-foreground">No resume uploaded</span>
+      )}
+      <label
+        htmlFor={inputId}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors cursor-pointer"
+      >
+        {resume ? "Replace" : "Upload Resume"}
+      </label>
+      {resume && (
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          className="text-xs text-destructive hover:underline"
+        >
+          Remove
+        </button>
+      )}
+      <input
+        id={inputId}
+        type="file"
+        accept=".pdf,.doc,.docx"
+        className="hidden"
+        onChange={async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          if (file.size > 5 * 1024 * 1024) {
+            toast.error("Resume must be under 5 MB");
+            return;
+          }
+          const stored = await compressFileForStorage(file);
+          onChange({ name: file.name, stored });
+          e.target.value = "";
+        }}
+      />
+    </div>
+  );
+};
+
+const mapRow = (r: CandidateRow): RecordWithId => ({
+  _id: String(r.CandidateId),
+  candidateCode: r.CandidateCode,
+  candidateName: r.CandidateName,
+  contact: r.Contact || "",
+  email: r.Email || "",
+  qualification: r.Qualification || "",
+  experience: r.Experience || "",
+  expectedSalary: r.ExpectedSalary ?? "",
+  currentSalary: r.CurrentSalary ?? "",
+  noticePeriod: r.NoticePeriod || "",
+  resume: r.ResumeBase64 ? { name: r.ResumeFileName || "resume", stored: r.ResumeBase64 } : null,
+  interviewStatus: r.InterviewStatus || "",
+  remarks: r.Remarks || "",
+  isActive: Boolean(r.IsActive),
+});
+
+const toPayload = (r: Record<string, any>) => {
+  const resume = r.resume as { name: string; stored: string } | null;
+  return {
+    CandidateCode: r.candidateCode?.trim() || "",
+    CandidateName: r.candidateName?.trim() || "",
+    Contact: r.contact?.trim() || null,
+    Email: r.email?.trim() || null,
+    Qualification: r.qualification?.trim() || null,
+    Experience: r.experience?.trim() || null,
+    ExpectedSalary: r.expectedSalary !== "" && r.expectedSalary != null ? Number(r.expectedSalary) : null,
+    CurrentSalary: r.currentSalary !== "" && r.currentSalary != null ? Number(r.currentSalary) : null,
+    NoticePeriod: r.noticePeriod?.trim() || null,
+    ResumeFileName: resume?.name || null,
+    ResumeBase64: resume?.stored || null,
+    InterviewStatus: r.interviewStatus || null,
+    Remarks: r.remarks?.trim() || null,
+    IsActive: r.isActive !== false,
+  };
+};
+
+const fields: FieldDef[] = [
+  {
+    name: "candidateCode",
+    label: "Candidate ID",
+    type: "custom",
+    render: (p) => <CandidateIdField value={p.value} formData={p.formData} />,
+  },
+  { name: "candidateName", label: "Name", type: "text", required: true },
+  { name: "contact", label: "Contact", type: "text" },
+  { name: "email", label: "Email", type: "text" },
+  { name: "qualification", label: "Qualification", type: "text" },
+  { name: "experience", label: "Experience", type: "text", placeholder: "e.g. 3 years 6 months" },
+  { name: "expectedSalary", label: "Expected Salary", type: "number" },
+  { name: "currentSalary", label: "Current Salary", type: "number" },
+  { name: "noticePeriod", label: "Notice Period", type: "text", placeholder: "e.g. 30 days / Immediate" },
+  { name: "resume", label: "Resume", type: "custom", fullWidth: true, render: (p) => <ResumeField value={p.value} onChange={p.onChange} /> },
+  { name: "remarks", label: "Remarks", type: "textarea", fullWidth: true },
+  { name: "isActive", label: "Status", type: "toggle", defaultValue: true },
+];
+
+const columns: ColumnDef[] = [
+  { key: "candidateCode", label: "Candidate ID" },
+  { key: "candidateName", label: "Name" },
+  { key: "contact", label: "Contact", hideOnMobile: true },
+  { key: "email", label: "Email", hideOnMobile: true },
+  { key: "experience", label: "Experience", hideOnMobile: true },
+  { key: "interviewStatus", label: "Interview Result", sortable: false },
+  { key: "isActive", label: "Status" },
+];
+
+const columnRenderers: Record<string, (value: unknown, row: RecordWithId) => React.ReactNode> = {
+  interviewStatus: (value, row) => (
+    <InterviewResultSelect candidateId={Number(row._id)} value={(value as string) || ""} />
+  ),
+};
+
+const exportColumns: ExportColumn[] = [
+  { header: "Candidate ID", accessor: "candidateCode" },
+  { header: "Name", accessor: "candidateName" },
+  { header: "Contact", accessor: "contact" },
+  { header: "Email", accessor: "email" },
+  { header: "Qualification", accessor: "qualification" },
+  { header: "Experience", accessor: "experience" },
+  { header: "Expected Salary", accessor: "expectedSalary" },
+  { header: "Current Salary", accessor: "currentSalary" },
+  { header: "Notice Period", accessor: "noticePeriod" },
+  { header: "Interview Result", accessor: "interviewStatus" },
+  { header: "Remarks", accessor: "remarks" },
+  { header: "Status", accessor: "isActive" },
+];
+
+const CandidateMaster: React.FC = () => {
+  const rights = usePageRights("candidate-master");
+  const queryClient = useQueryClient();
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["candidate-master"],
+    queryFn: getCandidates,
+    staleTime: 60 * 1000,
+  });
+
+  const rows: CandidateRow[] = Array.isArray(data) ? data : [];
+  const mappedData: RecordWithId[] = rows.map(mapRow);
+
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["candidate-master"] });
+
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    try {
+      if (event.action === "add") {
+        await addCandidate(toPayload(event.record));
+        toast.success("Candidate added!");
+      }
+      if (event.action === "update") {
+        await updateCandidate(Number(event.id), toPayload(event.record));
+        toast.success("Candidate updated!");
+      }
+      if (event.action === "delete") {
+        const res = await deleteCandidate(Number(event.id));
+        toast.success(res?.message || "Candidate deleted!");
+      }
+      await refresh();
+    } catch (err: any) {
+      toast.error(err.message || "Operation failed");
+    }
+  };
+
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading candidates...</div>;
+  if (error) return <div className="p-6 text-red-500">Failed to load candidates.</div>;
+
+  return (
+    <>
+      <Breadcrumbs items={["Dashboard", "HR and Payroll", "Setup", "Candidate Master"]} />
+      <HrPayrollShell title="Candidate Master" subtitle="Recruitment pipeline & interview tracking" icon={ProfileAdd}>
+        <MasterPage
+          title="Candidate"
+          canCreate={rights.canCreate}
+          canEdit={rights.canEdit}
+          canDelete={rights.canDelete}
+          fields={fields}
+          columns={columns}
+          columnRenderers={columnRenderers}
+          initialData={mappedData}
+          onDataEvent={handleDataEvent}
+          exportConfig={{
+            title: "Candidate Master",
+            filename: "candidate-master",
+            columns: exportColumns,
+          }}
+          viewConfig={{
+            title: "Candidate Details",
+            fields: [
+              { key: "candidateCode", label: "Candidate ID" },
+              { key: "candidateName", label: "Name" },
+              { key: "contact", label: "Contact" },
+              { key: "email", label: "Email" },
+              { key: "qualification", label: "Qualification" },
+              { key: "experience", label: "Experience" },
+              { key: "expectedSalary", label: "Expected Salary" },
+              { key: "currentSalary", label: "Current Salary" },
+              { key: "noticePeriod", label: "Notice Period" },
+              { key: "interviewStatus", label: "Interview Result" },
+              { key: "remarks", label: "Remarks" },
+              { key: "isActive", label: "Status" },
+            ],
+          }}
+        />
+      </HrPayrollShell>
+    </>
+  );
+};
+
+export default CandidateMaster;

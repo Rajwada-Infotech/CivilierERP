@@ -13,6 +13,7 @@ const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { postReceivedPaymentApproval } = require("../services/generalLedger");
 const { recordGLPosting } = require("../services/approvalService");
+const { areEarlierMilestonesCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const allowRoles = require("../middleware/role");
 
@@ -867,17 +868,26 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
     }
 
     if (cur.recordset[0].CrmMilestoneId) {
-      const predecessor = await tx.request()
-        .input("mid", sql.Int, cur.recordset[0].CrmMilestoneId).query(`
-          SELECT TOP 1 p.MilestoneName
-          FROM dbo.CrmPaymentMilestone m
-          JOIN dbo.CrmPaymentMilestone p ON p.BookingId = m.BookingId AND p.MilestoneNo < m.MilestoneNo
-          WHERE m.Id = @mid AND p.Status NOT IN ('Paid', 'Waived')
-          ORDER BY p.MilestoneNo
-        `);
-      if (predecessor.recordset.length) {
+      const target = await tx.request().input("mid", sql.Int, cur.recordset[0].CrmMilestoneId)
+        .query("SELECT BookingId, MilestoneNo FROM dbo.CrmPaymentMilestone WHERE Id = @mid");
+      const targetRow = target.recordset[0];
+      // Same virtual-coverage predecessor check as crmPayments.js
+      // (createReceiptForMilestone / applyCrmMilestonePaymentApproval) — real
+      // Status can't gate this, since Milestone 1 itself only becomes Paid
+      // once the WHOLE booking (money for every later milestone included) is
+      // already on-account. Checking real Status here would make it
+      // impossible to ever approve a payment past Milestone 1.
+      if (targetRow && !(await areEarlierMilestonesCoveredByOnAccount(tx, targetRow.BookingId, targetRow.MilestoneNo))) {
+        const predecessor = await tx.request()
+          .input("mid", sql.Int, cur.recordset[0].CrmMilestoneId).query(`
+            SELECT TOP 1 p.MilestoneName
+            FROM dbo.CrmPaymentMilestone m
+            JOIN dbo.CrmPaymentMilestone p ON p.BookingId = m.BookingId AND p.MilestoneNo < m.MilestoneNo
+            WHERE m.Id = @mid AND p.Status NOT IN ('Paid', 'Waived')
+            ORDER BY p.MilestoneNo
+          `);
         await tx.rollback();
-        return res.status(400).json({ error: `Cannot approve — "${predecessor.recordset[0].MilestoneName}" is still due first` });
+        return res.status(400).json({ error: `Cannot approve — "${predecessor.recordset[0]?.MilestoneName || "an earlier milestone"}" is still due first` });
       }
     }
 

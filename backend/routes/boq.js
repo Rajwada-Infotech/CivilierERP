@@ -536,7 +536,12 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     await transaction.commit();
     await bumpCacheVersion("boq");
 
-    // Re-submit to Pending if record was reverted to Draft (e.g. after edit)
+    // Re-submit to Pending if record was reverted to Draft (e.g. after edit).
+    // For a genuinely Rejected record, transition()'s Pending branch writes a
+    // fresh Level=0 marker, which restarts approval at level 1 regardless of
+    // what was approved before the rejection (see approvalService.js's
+    // currentCycleCutoffSql).
+    let resubmitted = false;
     try {
       const currentStatus = await (async () => {
         const pool = getPool();
@@ -549,6 +554,7 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
       if (currentStatus === "Draft" || currentStatus === "Rejected") {
         await transition("boq", id, "Pending", req.user?.email, req.user?.role);
         await bumpCacheVersion("boq");
+        resubmitted = true;
       }
     } catch (e) {
       console.warn("[BOQ auto-submit on update]", e.message);
@@ -572,7 +578,10 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
       }
     }
 
-    res.json({ message: "BOQ updated successfully" });
+    res.json({
+      message: resubmitted ? "BOQ updated and re-submitted for approval" : "BOQ updated successfully",
+      resubmitted,
+    });
   } catch (err) {
     try {
       if (transaction) await transaction.rollback();
@@ -653,7 +662,7 @@ router.post("/:id/transition", async (req, res) => {
       action === "approve" ? "Approved" :
       action === "reject" ? "Rejected" : null;
     if (!targetStatus) return res.status(400).json({ error: `Unknown action: ${action}` });
-    const result = await transition("boq", id, targetStatus, userEmail, req.user?.role, req.body.note || null);
+    const result = await transition("boq", id, targetStatus, userEmail, req.user?.role, req.body.note || null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("boq");
     res.json({ message: `BOQ ${action}d`, ...result });
   } catch (err) {
@@ -691,6 +700,8 @@ router.put("/:id/approve", async (req, res) => {
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("boq");
     res.json({ message: "BOQ approved", ...result });
@@ -714,6 +725,7 @@ router.put("/:id/reject", async (req, res) => {
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("boq");
     res.json({ message: "BOQ rejected", ...result });

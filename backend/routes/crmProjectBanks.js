@@ -30,8 +30,15 @@ router.get("/", requirePageRight("crm-project-banks", "view"), async (req, res) 
 });
 
 // GET /for-project/:projectId — the one lookup every payment surface calls
-// to scope its deposit-bank dropdown. This is the full rule, resolved
-// server-side so no caller can get it wrong:
+// to scope its deposit-bank dropdown. Deliberately NOT gated behind
+// requirePageRight("crm-project-banks", ...) like its siblings in this file —
+// staff recording a CRM payment/refund/cancellation need this dropdown even
+// if their role has no rights on the Project-Bank tagging screen itself, and
+// the response is just bank id/name pairs (no balances, no account numbers).
+// Explicit decision, not an oversight (audited 2026-09; see crmRefunds.js /
+// crmPayments.js / crmCancellations.js callers) — keep this route
+// authenticated-only, do not add a page-right guard here.
+// This is the full rule, resolved server-side so no caller can get it wrong:
 //   1. Any bank(s) tagged to this Project -> return exactly those, nothing
 //      else (a tagged bank is exclusive to its tagged Project(s) and must
 //      never appear for a different one).

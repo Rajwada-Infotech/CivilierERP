@@ -21,6 +21,13 @@ const GL_ACCOUNTS = {
   // AccountGroup wiring in 230) — was seeded but never actually posted to
   // until postOnAccountAdjustment/postPaymentApproval below.
   ON_ACCOUNT: "Company On Account A/c",
+  // Pooled liability for a standalone Received Payment (no invoice,
+  // contract, or CRM milestone/booking to apply against) — see
+  // postReceivedPaymentApproval below. Migration 424 seeded a new head
+  // named "Advance from Customers A/c" for this; migration 425 consolidated
+  // it onto the pre-existing "Advance from Customer" head instead (same
+  // concept, one head, no "A/c" suffix) — this name must match that head.
+  ADVANCE_FROM_CUSTOMERS: "Advance from Customer",
   // Cash-mode counter-account is NOT listed here — since migration 418 it's
   // a real, user-selectable Bank (LHeadType='B'), resolved via
   // getCashInHandBankId() by LHeadCode='CASH-IN-HAND', not this
@@ -1200,7 +1207,8 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
     .input("RPPaymentID", sql.Int, rpId)
     .query(`
       SELECT RPPaymentID, RPAmount, RPDocDate, RPDepositBankId, RPCustomerName,
-             RPReceivedFrom, RPCompanyId, RPProjectId, SourceSaleInvoiceId, DocNo
+             RPReceivedFrom, RPCompanyId, RPProjectId, SourceSaleInvoiceId, DocNo,
+             ContractId, CrmMilestoneId, CrmBookingId, CrmApplicationId
       FROM dbo.ReceivedPayment
       WHERE RPPaymentID = @RPPaymentID
     `);
@@ -1274,25 +1282,45 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
     };
   }
 
+  // Standalone advance — nothing yet to apply this receipt against (no
+  // invoice, no contract, not a CRM milestone/booking payment). Crediting
+  // the customer's own Sundry Debtors head here would be wrong: an advance
+  // is a liability (goods/services still owed to them), not a reduction of
+  // what they owe US — the two are opposite sides of the balance sheet.
+  // Posts to the pooled "Advance from Customer" head instead (same
+  // pattern as GL_ACCOUNTS.ON_ACCOUNT on the supplier side), tagged in the
+  // narration with who it's actually from since the pooled head itself
+  // carries no per-customer breakdown.
+  const isStandaloneAdvance =
+    !rp.SourceSaleInvoiceId && !rp.ContractId && !rp.CrmMilestoneId && !rp.CrmBookingId && !rp.CrmApplicationId;
+
   let customerHeadId = null;
-  if (rp.SourceSaleInvoiceId) {
-    const siResult = await pool
-      .request()
-      .input("SaleInvoiceID", sql.Int, rp.SourceSaleInvoiceId)
-      .query(`SELECT CustomerID FROM dbo.SaleInvoices WHERE SaleInvoiceID = @SaleInvoiceID`);
-    customerHeadId = siResult.recordset[0]?.CustomerID ?? null;
-  }
-  if (!customerHeadId) {
-    customerHeadId = await getHeadIdByName(
-      pool,
-      rp.RPCustomerName || rp.RPReceivedFrom,
-    );
+  if (isStandaloneAdvance) {
+    customerHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
+  } else {
+    if (rp.SourceSaleInvoiceId) {
+      const siResult = await pool
+        .request()
+        .input("SaleInvoiceID", sql.Int, rp.SourceSaleInvoiceId)
+        .query(`SELECT CustomerID FROM dbo.SaleInvoices WHERE SaleInvoiceID = @SaleInvoiceID`);
+      customerHeadId = siResult.recordset[0]?.CustomerID ?? null;
+    }
+    if (!customerHeadId) {
+      customerHeadId = await getHeadIdByName(
+        pool,
+        rp.RPCustomerName || rp.RPReceivedFrom,
+      );
+    }
   }
   if (!customerHeadId)
     return {
       posted: false,
       reason: `ReceivedPayment ${rpId}: could not resolve customer (invoice ${rp.SourceSaleInvoiceId ?? "none"}, name "${rp.RPCustomerName || rp.RPReceivedFrom}")`,
     };
+
+  const creditNarration = isStandaloneAdvance
+    ? `${docNo} — advance received from ${rp.RPCustomerName || rp.RPReceivedFrom || "customer"}`
+    : `${docNo} — payment received`;
 
   await postVoucher(pool, {
     voucherNo: docNo,
@@ -1311,7 +1339,7 @@ async function postReceivedPaymentApproval(pool, rpId, userEmail) {
       {
         lHeadId: customerHeadId,
         credit: amount,
-        narration: `${docNo} — payment received`,
+        narration: creditNarration,
       },
     ],
   });

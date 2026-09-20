@@ -16,6 +16,7 @@ const DOC_TYPES = {
   "expense-booking": { module: "finance", label: "Invoice (Expense Booking)" },
   payment: { module: "finance", label: "Payment" },
   "received-payment": { module: "finance", label: "Received Payment" },
+  "journal-voucher": { module: "finance", label: "Journal Voucher" },
   "material-request": { module: "material", label: "Material Request" },
   "purchase-order": { module: "material", label: "Purchase Order" },
   "vehicle-in-out": { module: "material", label: "Vehicle In/Out" },
@@ -25,9 +26,10 @@ const DOC_TYPES = {
   boq: { module: "engineering", label: "BOQ" },
   "work-order": { module: "engineering", label: "Work Order" },
   "work-done": { module: "engineering", label: "Work Done" },
+  "project-master": { module: "admin", label: "Project" },
 };
 
-const MODULES = ["finance", "material", "engineering"];
+const MODULES = ["finance", "material", "engineering", "admin"];
 
 function docTypesForModule(module) {
   return Object.keys(DOC_TYPES).filter((k) => DOC_TYPES[k].module === module);

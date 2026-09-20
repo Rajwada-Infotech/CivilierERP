@@ -80,7 +80,14 @@ const AGR_SELECT = `
     -- Completed before mark-registered will succeed (see the matching gate
     -- in PUT /:id/mark-registered). Surfaced so the frontend can show/hide
     -- the "Mark Registered" action instead of only failing after the click.
-    (SELECT TOP 1 Status FROM dbo.CrmAfsRegistry WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsRegistryStatus
+    (SELECT TOP 1 Status FROM dbo.CrmAfsRegistry WHERE BookingId = ag.BookingId ORDER BY CreatedAt DESC) AS AfsRegistryStatus,
+    -- Bank/KYC details are no longer required before Agreement prep (business
+    -- decision 2026-09-15), so an agreement can now exist with its own
+    -- LegalName/PanNo/AadhaarNo still blank — never formally set/revised yet.
+    -- These are surfaced as live fallbacks (not written into the agreement's
+    -- own, deliberately version-stamped fields) so the Overview never shows
+    -- an outright "—" for data the customer's already on file with.
+    bd.PanNo AS CustomerPanNo, bd.AadhaarNo AS CustomerAadhaarNo
   FROM dbo.CrmAgreement ag
   JOIN  dbo.CrmBooking b     ON b.Id = ag.BookingId
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
@@ -88,6 +95,7 @@ const AGR_SELECT = `
   LEFT JOIN dbo.Users cu     ON cu.id = ag.CreatedBy
   LEFT JOIN dbo.Users le     ON le.id = ag.LegalExecutiveId
   LEFT JOIN dbo.CrmCustomerPortalUser pu ON pu.CustomerId = a.CustomerId
+  LEFT JOIN dbo.CrmCustomerBankDetail bd ON bd.BookingId = ag.BookingId
 `;
 
 // Shared lock check — nothing here previously checked whether the Booking
@@ -480,6 +488,22 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
       await maybeAutoCreateLegalMilestone(pool, bookingId, actorId(req));
     } catch (e) {
       console.error("[crm-agreements] legal milestone auto-start failed:", e.message);
+    }
+
+    // The LegalReview step's sync previously only fired on a later
+    // (re)assignment PUT (/:id and /:id/assign-legal below) — when
+    // LegalExecutiveId was supplied right here at creation instead, nothing
+    // ever ticked it, permanently freezing the Legal Milestone tracker's
+    // CurrentStep at step 1 even as the agreement sailed through every
+    // later step. Must run after maybeAutoCreateLegalMilestone above, since
+    // the tracker row (which this no-ops without) is only guaranteed to
+    // exist from that point on.
+    if (b.LegalExecutiveId) {
+      try {
+        await syncLegalMilestoneStep(pool, bookingId, "LegalReview", actorId(req));
+      } catch (e) {
+        console.error("[crm-agreements] legal milestone LegalReview sync failed:", e.message);
+      }
     }
 
     // Portal is provisioned at booking confirmation (crmBookingStageService.js)
@@ -1038,7 +1062,20 @@ router.put("/:id/propose-date", requirePageRight("crm-agreements", "edit"), asyn
     const agRow = ag.recordset[0];
     if (!agRow.SentToCustomerAt) return res.status(400).json({ error: "Agreement hasn't been sent to the customer yet" });
 
-    await proposeAgreementDate(pool, id, "Company", proposedDate, actorId(req));
+    // Wrapped like every other caller of proposeAgreementDate (proxy-
+    // propose-date, portal propose-date) — this was the one path that
+    // wasn't, leaving a mid-sequence failure (DateHistory insert succeeds,
+    // Agreement UPDATE fails, or vice versa) able to point the negotiation
+    // status at a date history entry that was never actually recorded.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await proposeAgreementDate(tx, id, "Company", proposedDate, actorId(req));
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     await logCommunication(pool, {
       bookingId: agRow.BookingId, direction: "Outbound",
@@ -1071,7 +1108,17 @@ router.put("/:id/date/accept", requirePageRight("crm-agreements", "edit"), async
     if (!ag.recordset.length) return res.status(404).json({ error: "Agreement not found" });
     const agRow = ag.recordset[0];
 
-    await acceptAgreementDate(pool, id, "Company");
+    // Wrapped like every other caller of acceptAgreementDate (proxy-date-
+    // accept, portal date/accept) — same reasoning as propose-date above.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await acceptAgreementDate(tx, id, "Company");
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back or connection lost */ }
+      throw txErr;
+    }
 
     await logCommunication(pool, {
       bookingId: agRow.BookingId, direction: "Outbound",

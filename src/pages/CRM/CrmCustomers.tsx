@@ -16,6 +16,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 
 const API = "/api/crm/customers";
 const SA_LEADS_API = "/api/sa/leads";
@@ -38,8 +40,8 @@ interface CustomerListFilters {
   projectId: string;
   blockId: string;
 }
-async function fetchCustomersList(filters: CustomerListFilters, page: number): Promise<{ rows: any[]; total: number }> {
-  const params = new URLSearchParams({ page: String(page), pageSize: String(PAGE_SIZE) });
+async function fetchCustomersList(filters: CustomerListFilters, page: number, pageSize: number = PAGE_SIZE): Promise<{ rows: any[]; total: number }> {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (filters.search) params.set("search", filters.search);
   if (filters.companyId) params.set("companyId", filters.companyId);
   if (filters.projectId) params.set("projectId", filters.projectId);
@@ -79,7 +81,7 @@ function AddressFields({
   return (
     <>
       <div>
-        <label className="text-xs text-muted-foreground block mb-1">Permanent Address *</label>
+        <label className="text-xs text-muted-foreground block mb-1">Permanent Address</label>
         <textarea value={form.PermanentAddress} readOnly={readOnly}
           onChange={(e) => setForm((f: any) => ({ ...f, PermanentAddress: e.target.value }))}
           rows={2} className={`${inputCls} resize-none`} />
@@ -191,6 +193,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
   };
 
   const handleSave = async () => {
+    if (!form.CustomerName?.trim()) { toast.error("Customer Name is required"); return; }
     if (form.Mobile?.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
       toast.error("Mobile must be exactly 10 digits"); return;
     }
@@ -264,18 +267,18 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
             </h3>
             <div className="grid grid-cols-3 gap-2.5">
               {[
-                { key: "CustomerName", label: "Customer Name *", type: "text" },
-                { key: "Mobile", label: "Mobile *", type: "text" },
+                { key: "CustomerName", label: "Customer Name", type: "text", required: true },
+                { key: "Mobile", label: "Mobile", type: "text" },
                 { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                 { key: "Email", label: "Email", type: "email" },
-                { key: "PanNo", label: "PAN Number *", type: "text" },
+                { key: "PanNo", label: "PAN Number", type: "text" },
                 { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                 { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                 { key: "Occupation", label: "Occupation", type: "text" },
                 { key: "AnnualIncome", label: "Annual Income", type: "number" },
-              ].map(({ key, label, type }) => (
+              ].map(({ key, label, type, required }) => (
                 <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-0.5">{label}</label>
+                  <label className="text-xs text-muted-foreground block mb-0.5">{label}{required && <span className="text-destructive"> *</span>}</label>
                   <input type={type} value={(form as any)[key]} readOnly={locked}
                     onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                     className={inputCls} />
@@ -456,17 +459,14 @@ const CrmCustomers: React.FC = () => {
   }, []);
 
   const handleCreate = async () => {
-    if (!form.CustomerName.trim() || !form.Mobile.trim() || !form.PanNo.trim() || !form.PermanentAddress.trim()) {
-      toast.error("Customer Name, Mobile, PAN and Permanent Address are required");
-      return;
-    }
-    if (!/^\d{10}$/.test(form.Mobile.trim())) {
+    if (!form.CustomerName.trim()) { toast.error("Customer Name is required"); return; }
+    if (form.Mobile.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
       toast.error("Mobile must be exactly 10 digits"); return;
     }
     if (form.AltMobile.trim() && !/^\d{10}$/.test(form.AltMobile.trim())) {
       toast.error("Alternate mobile must be exactly 10 digits"); return;
     }
-    if (!/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
+    if (form.PanNo.trim() && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.PanNo.trim().toUpperCase())) {
       toast.error("PAN must be in format ABCDE1234F"); return;
     }
     if (form.AadhaarNo.trim() && !/^\d{12}$/.test(form.AadhaarNo.trim())) {
@@ -658,6 +658,22 @@ const CrmCustomers: React.FC = () => {
 
   const { canDelete } = usePageRights("crm-customers");
 
+  const exportColumns: ExportColumn[] = [
+    { header: "Customer No", accessor: "CustomerNo" },
+    { header: "Name", accessor: "CustomerName" },
+    { header: "Mobile", accessor: "Mobile" },
+    { header: "PAN", accessor: "PanNo" },
+    { header: "Address", accessor: (r) => [r.PermanentCity, r.PermanentState].filter(Boolean).join(", ") },
+    { header: "Co-Applicant", accessor: "CoApplicantName" },
+    { header: "Applications", accessor: "ApplicationCount" },
+    { header: "Registered", accessor: (r) => (r.CreatedAt ? String(r.CreatedAt).slice(0, 10) : "") },
+  ];
+
+  const fetchAllCustomersForExport = async () => {
+    const { rows } = await fetchCustomersList(listFilters, 1, Math.max(total, PAGE_SIZE));
+    return rows as Record<string, unknown>[];
+  };
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Customers"]} />
@@ -666,6 +682,13 @@ const CrmCustomers: React.FC = () => {
       subtitle="The master identity record every Application is built on — name, KYC, address, co-applicant"
       action={
         <div className="flex items-center gap-2">
+          <ExportMenu
+            data={filtered as unknown as Record<string, unknown>[]}
+            fetchData={fetchAllCustomersForExport}
+            columns={exportColumns}
+            title="CRM Customers"
+            filename="crm-customers"
+          />
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={() => navigate("/masters/customers")}
             title="Every CRM customer auto-creates/syncs a matching ledger head here for Finance/GL"
@@ -732,18 +755,18 @@ const CrmCustomers: React.FC = () => {
               </h3>
               <div className="grid grid-cols-3 gap-2.5">
                 {[
-                  { key: "CustomerName", label: "Customer Name *", type: "text" },
-                  { key: "Mobile", label: "Mobile *", type: "text" },
+                  { key: "CustomerName", label: "Customer Name", type: "text", required: true },
+                  { key: "Mobile", label: "Mobile", type: "text" },
                   { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                   { key: "Email", label: "Email", type: "email" },
-                  { key: "PanNo", label: "PAN Number *", type: "text" },
+                  { key: "PanNo", label: "PAN Number", type: "text" },
                   { key: "AadhaarNo", label: "Aadhaar Number", type: "text" },
                   { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                   { key: "Occupation", label: "Occupation", type: "text" },
                   { key: "AnnualIncome", label: "Annual Income", type: "number" },
-                ].map(({ key, label, type }) => (
+                ].map(({ key, label, type, required }) => (
                   <div key={key}>
-                    <label className="text-xs text-muted-foreground block mb-0.5">{label}</label>
+                    <label className="text-xs text-muted-foreground block mb-0.5">{label}{required && <span className="text-destructive"> *</span>}</label>
                     <input type={type} value={(form as any)[key]}
                       onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                       onBlur={() => {
@@ -801,10 +824,6 @@ const CrmCustomers: React.FC = () => {
               </div>
             </div>
           </div>
-
-          <p className="text-xs text-muted-foreground">
-            Name, Mobile, PAN and Permanent Address are required — every Application will auto-fetch its details from this record.
-          </p>
 
           {/* Duplicate warning banner — shown when the /suggest endpoint finds
               existing customers that match the entered Mobile, PAN, or Name.

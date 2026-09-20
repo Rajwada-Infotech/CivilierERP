@@ -345,12 +345,6 @@ const CustomerMaster: React.FC = () => {
 
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("");
-  const [page, setPage] = useState(1);
-  const LIMIT = 10;
-
-  useEffect(() => {
-    setPage(1);
-  }, [search, filterStatus]);
 
   // ── Remote data ────────────────────────────────────────────────────────────
   const {
@@ -363,13 +357,16 @@ const CustomerMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Account Group — used to be force-locked server-side to Sundry Debtors
-  // (see accountHeadMaster.js's now-removed getSundryDebtorsGroupId), never
-  // shown as more than a static "Sundry Debtors" label. Now a normal
-  // editable picker, same TreeDropdown pattern this file already uses for
-  // Payment Terms/GST Type — defaults new customers to Sundry Creditors
-  // (Code='SCS'), resolved by Code rather than a hardcoded AGId since AGId
-  // is not stable across environments.
+  // Account Group — used to be force-locked server-side to Sundry Debtors,
+  // never shown as more than a static "Sundry Debtors" label; briefly
+  // defaulted to Sundry Creditors instead when the lock was first opened,
+  // then reverted — customers are Sundry Debtors, full stop (see migration
+  // 423, which also moved every existing Customer Master head back). Still
+  // a normal editable picker (same TreeDropdown pattern this file already
+  // uses for Payment Terms/GST Type) — this only sets the DEFAULT for a
+  // brand-new customer, an accountant can still pick a different group by
+  // hand. Resolved by Code, not a hardcoded AGId, since AGId is not stable
+  // across environments.
   const { data: accountGroupsData } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
@@ -383,8 +380,8 @@ const CustomerMaster: React.FC = () => {
   }, [accountGroupsData]);
   const defaultAccountGroupId = useMemo(() => {
     if (!Array.isArray(accountGroupsData)) return "";
-    const scs = (accountGroupsData as any[]).find((g) => g.Code === "SCS");
-    return scs ? String(scs.AGId) : "";
+    const sds = (accountGroupsData as any[]).find((g) => g.Code === "SDS");
+    return sds ? String(sds.AGId) : "";
   }, [accountGroupsData]);
   // Groups load asynchronously — if the Add form is already open (or
   // restored from a draft) before they resolve, backfill the default the
@@ -582,9 +579,6 @@ const CustomerMaster: React.FC = () => {
     });
   }, [customers, search, filterStatus]);
 
-  const totalPages = Math.max(Math.ceil(filtered.length / LIMIT), 1);
-  const paginated = filtered.slice((page - 1) * LIMIT, page * LIMIT);
-
   // ── Shared CSS ─────────────────────────────────────────────────────────────
   const inputCls =
     "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
@@ -712,7 +706,7 @@ const CustomerMaster: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Account Group — editable (defaults to Sundry Creditors
+                {/* Account Group — editable (defaults to Sundry Debtors
                     for a new customer); see accountHeadMaster.js, which
                     only fills this in server-side when nothing is sent. */}
                 <div className="space-y-1.5">
@@ -999,10 +993,12 @@ const CustomerMaster: React.FC = () => {
           {/* Table */}
           <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden [&_th:last-child]:text-left [&_td:last-child]:text-left">
             <DataTable
-              data={paginated}
+              data={filtered}
               columns={columns}
               loading={isLoading}
-              searchPlaceholder="Search customers..."
+              searchable={false}
+              paginated={true}
+              defaultPageSize={10}
               getRowId={(row) => String(row.LHeadId)}
               emptyMessage={
                 isError
@@ -1020,29 +1016,6 @@ const CustomerMaster: React.FC = () => {
                 row.original.LHeadId === editingId ? "bg-primary/5" : ""
               }
             />
-          </div>
-
-          {/* Pagination */}
-          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-            <span className="text-xs text-muted-foreground">
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page <= 1}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                disabled={page >= totalPages}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
           </div>
         </div>
       </div>

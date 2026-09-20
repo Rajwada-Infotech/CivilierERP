@@ -16,6 +16,7 @@ import {
 import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { Button } from "@/components/ui/button";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { printStatusLabel } from "@/utils/printStatus";
 import {
   Hammer,
   Plus,
@@ -1215,7 +1216,7 @@ export default function WorkDone() {
   <div class="doc-block">
     <div class="doc-label">Document No</div>
     <div class="doc-no">${r.DocNo || "—"}</div>
-    <div style="margin-top:6px"><span class="status-badge">${r.Status || "Draft"}</span></div>
+    <div style="margin-top:6px"><span class="status-badge">${printStatusLabel(r.Status) || "Draft"}</span></div>
   </div>
 </div>
 

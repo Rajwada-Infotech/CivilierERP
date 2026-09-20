@@ -218,10 +218,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Category", accessor: "supplierCategory" },
   {
     header: "Group",
-    accessor: (r) => {
-      // resolved in display — raw value is AGId
-      return r.LBelongsTo != null ? String(r.LBelongsTo) : "—";
-    },
+    accessor: (r) => (r.GroupName as string) || "—",
   },
   { header: "Address", accessor: "LHeadAddress" },
   {
@@ -500,6 +497,10 @@ const SupplierMaster: React.FC = () => {
               : "Supplier")
           : next, // "Vendor" / "Landlord" — the Type IS the stored value
       isTdsApplicable: next === "Supplier" ? p.isTdsApplicable : false,
+      // Switching away from Supplier hides the login-password field — clear
+      // any half-typed value so it can't linger in state and get submitted
+      // if the user switches back and forth before saving.
+      SupplierPassword: next === "Supplier" ? p.SupplierPassword : "",
     }));
   };
 
@@ -1460,7 +1461,11 @@ const SupplierMaster: React.FC = () => {
               </div>
             </div>
 
-            {/* ── Section: Supplier Portal Login ── */}
+            {/* ── Section: Supplier Portal Login — Supplier only. A Vendor or
+                Landlord never gets portal credentials, so the whole section
+                (and everything it would submit) simply doesn't exist for
+                them, rather than being shown disabled/empty. ── */}
+            {vendorType === "Supplier" && (
             <div className="space-y-3">
               <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
@@ -1540,6 +1545,7 @@ const SupplierMaster: React.FC = () => {
             })()}
 
             </div>
+            )}
 
             {/* ── Toggles ── */}
             <div className="flex flex-wrap items-center gap-6 pt-1">

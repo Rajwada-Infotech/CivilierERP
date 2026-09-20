@@ -1520,6 +1520,18 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                     {booking.HsnCode && <span className="text-[11px] font-mono text-muted-foreground">{booking.HsnCode} · {booking.UnitParkingGstRate != null ? `${booking.UnitParkingGstRate}%` : "—"}</span>}
                   </div>
 
+                  {/* No HsnCode with a real TotalValue means recalculateBookingGst
+                      (crmGst.js) found this booking GST-exempt under Schedule
+                      III Entry 5 — the entire consideration was received only
+                      after the relevant OC/CC — rather than "not computed
+                      yet," which would leave TotalValue/GrandTotal blank too. */}
+                  {!booking.HsnCode && Number(booking.TotalValue) > 0 && (
+                    <div className="flex items-center gap-1.5 text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800 rounded-lg px-2.5 py-1.5 mb-1">
+                      <Check size={12} className="shrink-0" />
+                      GST Exempt — Schedule III (entire consideration received after OC/CC)
+                    </div>
+                  )}
+
                   {/* Same explicit sequence everywhere this is shown (see
                       GstBreakdownBox in CrmApplication.tsx): Unit (+ its own
                       GST), Parking (+ its own GST), Extra Charges (+ its own

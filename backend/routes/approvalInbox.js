@@ -5,6 +5,90 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const logger = require("../logger");
 const { getPool } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const {
+  MODULE_MAP,
+  MODULE_APPROVER_ROLE_OVERRIDES,
+  APPROVER_ROLES,
+  getWorkflow,
+  resolveCurrentLevel,
+  hasApprovalInboxEditRight,
+} = require("../services/approvalService");
+
+// ── Per-record visibility filter ────────────────────────────────────────────
+// Before this, GET / returned every Pending row in the system to anyone
+// holding "approval-inbox: view" — a Material Request waiting on its named
+// Level-2 approvers (say, two specific people picked in Approval Setup) was
+// just as visible to everyone else with that page right, with nothing
+// showing which level it was actually on or who was meant to act next.
+//
+// This mirrors transition()'s own per-level gate (approvalService.js) so a
+// record only shows up for:
+//  - admin / super_admin (oversight — they can always see everything), or
+//  - whoever is actually allowed to act on the level it's CURRENTLY on: the
+//    role(s)/specific user(s) named on that level in Approval Setup, or —
+//    for a level left uncustomised, or a module with no workflow configured
+//    at all — the module's existing default approver set (today's fallback
+//    behaviour, unchanged).
+async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) {
+  const role = (viewerRole || "").toLowerCase();
+  if (role === "admin" || role === "super_admin") return true;
+
+  const map = MODULE_MAP[item.Module];
+  const fallbackRoles = MODULE_APPROVER_ROLE_OVERRIDES[item.Module] || APPROVER_ROLES;
+  const fallbackVisible = async () =>
+    fallbackRoles.includes(role) || (await hasApprovalInboxEditRight(viewerUserId));
+
+  // Modules the aggregator lists but that aren't in the shared MODULE_MAP
+  // (e.g. received-payment, crm-money-receipts — they never went through
+  // approvalService.js's level engine) keep today's page-right-only
+  // visibility; there's no per-level data to filter on.
+  if (!map) return true;
+
+  const workflow = workflowCache.get(item.Module);
+  if (!workflow || !workflow.LevelDefs?.length) return fallbackVisible();
+
+  const tableName = map.table.replace("dbo.", "");
+  const recordId = parseInt(item.RecordId, 10);
+  const totalLevels = workflow.Levels || workflow.LevelDefs.length;
+  const currentLevel = await resolveCurrentLevel(tableName, recordId, totalLevels, workflow.LevelDefs);
+  // Fully approved already (shouldn't normally reach here — every branch of
+  // the aggregator query only selects Pending rows) — nothing left to show.
+  if (currentLevel > totalLevels) return false;
+
+  const levelDef = workflow.LevelDefs[currentLevel - 1];
+  if (!levelDef) return fallbackVisible();
+
+  const hasRoles = Array.isArray(levelDef.roles) && levelDef.roles.length > 0;
+  const hasUsers = Array.isArray(levelDef.userIds) && levelDef.userIds.length > 0;
+  // Level left uncustomised — no named roles or people — falls back to the
+  // module's default approver set, exactly like transition()'s own gate does.
+  if (!hasRoles && !hasUsers) return fallbackVisible();
+
+  const roleMatch = hasRoles && levelDef.roles.map((r) => String(r).toLowerCase()).includes(role);
+  const userMatch = hasUsers && viewerUserId != null && levelDef.userIds.includes(viewerUserId);
+  return roleMatch || userMatch;
+}
+
+async function filterVisibleToViewer(items, req) {
+  const viewerRole = req.user?.role;
+  const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+
+  // Resolve each distinct module's workflow once, sequentially, before
+  // filtering — items.map + Promise.all below runs every row concurrently,
+  // so lazily populating the cache inside isVisibleToViewer would just race
+  // (every row for the same module would see an empty cache at once and all
+  // issue their own identical getWorkflow() query).
+  const workflowCache = new Map();
+  const distinctModules = [...new Set(items.map((i) => i.Module))];
+  for (const mod of distinctModules) {
+    workflowCache.set(mod, await getWorkflow(mod));
+  }
+
+  const flags = await Promise.all(
+    items.map((item) => isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache)),
+  );
+  return items.filter((_, i) => flags[i]);
+}
 
 // This router previously had no page-level check at all — every other route
 // file in this codebase gates with requirePageRight, but this one relied
@@ -29,14 +113,15 @@ const NULL_EXTRA = `
   CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
   CAST(NULL AS NVARCHAR(255)) AS ToGodownName,`;
 
-router.get("/", async (req, res) => {
-  try {
-    const pool = getPool();
-    const { module } = req.query;
+// Builds the per-module SELECT list (optionally scoped to one module) shared
+// by both GET / (the full inbox) and GET /count (the badge) — a single
+// source of truth for "what counts as pending" so the two can never drift,
+// and so the badge count can be run through the exact same per-viewer
+// visibility filter as the list itself instead of a separate raw aggregate.
+function buildInboxQueries(module) {
+  const queries = [];
 
-    const queries = [];
-
-    if (!module || module === "purchase-orders") {
+  if (!module || module === "purchase-orders") {
       queries.push(`
         SELECT
           'purchase-orders'                    AS Module,
@@ -90,7 +175,10 @@ router.get("/", async (req, res) => {
           'payments'                           AS Module,
           'Payment'                            AS ModuleLabel,
           CAST(PPaymentID AS NVARCHAR)         AS RecordId,
-          PPaymentName                         AS Reference,
+          -- CRM Refund / Brokerage payouts (SourceCrmRefundId / SourceCrmBrokerageId)
+          -- were showing the generic "CRM Refund"/"CRM Brokerage" name here instead
+          -- of the actual voucher DocNo every other module in this inbox uses.
+          ISNULL(DocNo, PPaymentName)          AS Reference,
           PDate                                AS RecordDate,
           ISNULL(Status, 'Draft')              AS Status,
           CAST(NULL AS NVARCHAR)               AS ContractorName,
@@ -337,6 +425,34 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "stock-transfers") {
+      queries.push(`
+        SELECT
+          'stock-transfers'                    AS Module,
+          'Stock Transfer'                     AS ModuleLabel,
+          CAST(st.TransferID AS NVARCHAR)      AS RecordId,
+          st.DocNo                             AS Reference,
+          st.TransferDate                      AS RecordDate,
+          st.Status,
+          CAST(fg.GodownName AS NVARCHAR(255)) AS ContractorName,
+          CAST(CONCAT(
+            COALESCE(fg.GodownName, ''), N' → ', COALESCE(tg.GodownName, '')
+          ) AS NVARCHAR(512))                  AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))          AS Amount,
+          ${NULL_EXTRA}
+          CAST(st.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
+          ''                                   AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ISNULL(CAST(st.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(st.UpdatedAt, st.CreatedAt)   AS LastModified
+        FROM dbo.StockTransfers st
+        LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
+        LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
+        WHERE st.Status = 'Pending'
+      `);
+    }
+
     if (!module || module === "vehicle-in-out") {
       queries.push(`
         SELECT
@@ -383,6 +499,32 @@ router.get("/", async (req, res) => {
         FROM dbo.MaterialIssues mi
         LEFT JOIN dbo.enterprise p ON p.id = mi.ProjectId
         WHERE ISNULL(mi.Status, 'Pending') = 'Pending'
+      `);
+    }
+
+    if (!module || module === "material-issue-return") {
+      queries.push(`
+        SELECT
+          'material-issue-return'                                        AS Module,
+          'Material Issue Return'                                        AS ModuleLabel,
+          CAST(ir.ReturnId AS NVARCHAR)                                   AS RecordId,
+          ISNULL(ir.DocNo, CONCAT('IRN#', CAST(ir.ReturnId AS NVARCHAR))) AS Reference,
+          ir.ReturnDate                                                   AS RecordDate,
+          ISNULL(ir.Status, 'Pending')                                    AS Status,
+          CAST(NULL AS NVARCHAR)                                         AS ContractorName,
+          ISNULL(mi.DocNo, ISNULL(p.name, ir.Reason))                    AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))                                     AS Amount,
+          ${NULL_EXTRA}
+          CAST(ir.CreatedBy AS NVARCHAR(255))                             AS CreatedBy,
+          ''                                                              AS ApprovedBy,
+          ''                                                              AS ApprovedAt,
+          ''                                                              AS RejectedBy,
+          ''                                                              AS RejectionNote,
+          ISNULL(ir.UpdatedAt, ir.CreatedAt)                             AS LastModified
+        FROM dbo.MaterialIssueReturn ir
+        LEFT JOIN dbo.MaterialIssues mi ON mi.IssueId = ir.IssueId
+        LEFT JOIN dbo.enterprise p ON p.id = ir.ProjectId
+        WHERE ISNULL(ir.Status, 'Pending') = 'Pending'
       `);
     }
 
@@ -820,13 +962,87 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    // Was missing entirely — CrmRefund already has a real Pending/Approve/
+    // Reject cycle (see crmRefunds.js PUT /:id/approve) using the same
+    // shared approvalService.js transition() every other CRM module here
+    // uses, but never got a branch in this aggregator, so refunds only ever
+    // surfaced via CrmRefunds.tsx's own inline ApprovalActions — invisible
+    // to the centralized cross-module inbox every sibling CRM module
+    // (cancellations, agreements, brokerage, NOC, booking amendments) is in.
+    if (!module || module === "crm-refunds") {
+      queries.push(`
+        SELECT
+          'crm-refunds'                          AS Module,
+          'CRM Refund'                           AS ModuleLabel,
+          CAST(r.Id AS NVARCHAR)                 AS RecordId,
+          r.RefundNo                             AS Reference,
+          r.CreatedAt                            AS RecordDate,
+          r.Status,
+          CAST(NULL AS NVARCHAR)                 AS ContractorName,
+          cu.CustomerName                        AS SupplierName,
+          r.GrossAmount                          AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
+          ISNULL(CAST(ap.name AS NVARCHAR(255)), '') AS ApprovedBy,
+          ISNULL(CAST(r.ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
+          ''                                      AS RejectedBy,
+          ISNULL(CAST(r.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(r.UpdatedAt, r.CreatedAt)        AS LastModified
+        FROM dbo.CrmRefund r
+        JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
+        LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
+        WHERE r.Status = 'Pending'
+      `);
+    }
+
+    // Second, separate approval tier — same gap as crm-refunds above but for
+    // the Finance-side step (PUT /:id/finance-approve in crmRefunds.js),
+    // which only ever ran from CrmRefunds.tsx's own inline "Finance Approve"
+    // button. Kept as its own module (not folded into crm-refunds) because
+    // it's a genuinely different gate — CRM checker vs. Finance — exactly
+    // like crm-agreement-date is split out from crm-agreements.
+    if (!module || module === "crm-refunds-finance") {
+      queries.push(`
+        SELECT
+          'crm-refunds-finance'                  AS Module,
+          'CRM Refund (Finance)'                 AS ModuleLabel,
+          CAST(r.Id AS NVARCHAR)                 AS RecordId,
+          r.RefundNo                             AS Reference,
+          r.CreatedAt                            AS RecordDate,
+          r.Status,
+          CAST(NULL AS NVARCHAR)                 AS ContractorName,
+          cu.CustomerName                        AS SupplierName,
+          r.NetAmount                            AS Amount,
+          ${NULL_EXTRA}
+          ISNULL(CAST(rq.name AS NVARCHAR(255)), CAST(r.RequestedBy AS NVARCHAR(255))) AS CreatedBy,
+          ISNULL(CAST(ap.name AS NVARCHAR(255)), '') AS ApprovedBy,
+          ISNULL(CAST(r.ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
+          ''                                      AS RejectedBy,
+          ISNULL(CAST(r.RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(r.UpdatedAt, r.CreatedAt)        AS LastModified
+        FROM dbo.CrmRefund r
+        JOIN dbo.CrmCustomer cu ON cu.Id = r.CustomerId
+        LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
+        LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
+        WHERE r.Status = 'FinancePending'
+      `);
+    }
+
+  return queries;
+}
+
+router.get("/", async (req, res) => {
+  try {
+    const pool = getPool();
+    const queries = buildInboxQueries(req.query.module);
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
       queries.join(" UNION ALL ") + " ORDER BY LastModified DESC";
     const result = await pool.request().query(fullQuery);
 
-    res.json(result.recordset);
+    res.json(await filterVisibleToViewer(result.recordset, req));
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox error");
     res.status(500).json({
@@ -838,40 +1054,22 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/approval-inbox/count — lightweight badge count
+// GET /api/approval-inbox/count — lightweight badge count.
+// Runs the exact same query + visibility filter as GET / and returns just
+// the length — previously a separate raw SQL aggregate that counted every
+// Pending row system-wide, which meant the badge (unlike the list once
+// filterVisibleToViewer landed there) still showed a count that included
+// records the viewer had no part in and couldn't act on.
 router.get("/count", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT
-        (SELECT COUNT(*) FROM dbo.PurchaseOrders      WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.WorkOrderHeader    WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.NewPayment         WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.ReceivedPayment    WHERE RPStatus = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes  WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE EStatus = 'Pending'
-          AND NOT (ISNULL(ESourceType,'') = 'GRN' AND ISNULL(ERemarks,'') LIKE 'Auto-created for remaining items from GRN%')) +
-        (SELECT COUNT(*) FROM dbo.WorkDone           WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.BOQ                WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.MaterialRequests   WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.MaterialIssues     WHERE ISNULL(Status,'Pending') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.SaleOrders         WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.VehicleInOut       WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.JournalVoucher     WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.FundTransfer       WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt     WHERE Status = 'Pending' AND ReceivedPaymentId IS NULL) +
-        (SELECT COUNT(*) FROM dbo.CrmBooking         WHERE Status = 'Pending' AND IsActive = 1 AND ReadyForApprovalAt IS NOT NULL) +
-        (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE SeniorApprovalStatus = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE DateApprovalStatus = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmBrokerageMaster WHERE Status = 'Pending' AND IsLocked = 0) +
-        (SELECT COUNT(*) FROM dbo.CrmCancellation    WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmNoc             WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.Contract           WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.DebitNote          WHERE ISNULL(Status,'Draft') = 'Pending' AND is_active = 1)
-      AS TotalPending
-    `);
-    res.json({ count: result.recordset[0].TotalPending ?? 0 });
+    const queries = buildInboxQueries(undefined);
+    if (queries.length === 0) return res.json({ count: 0 });
+
+    const fullQuery = queries.join(" UNION ALL ");
+    const result = await pool.request().query(fullQuery);
+    const visible = await filterVisibleToViewer(result.recordset, req);
+    res.json({ count: visible.length });
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox count error");
     res.json({ count: 0 });

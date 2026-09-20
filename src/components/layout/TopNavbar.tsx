@@ -15,6 +15,7 @@ import {
   Settings,
   LayoutGrid,
   Receipt,
+  UserSquare,
   Truck,
   Users,
   HardHat,
@@ -148,6 +149,7 @@ const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
   admin: { h: 217, s: 91, l: 60 }, // #3b82f6 blue
   crm: { h: 199, s: 89, l: 48 }, // #0ea5e9 sky
   maintenance: { h: 85, s: 85, l: 35 }, // #65a30d lime
+  "hr-payroll": { h: 45, s: 93, l: 47 }, // #eab308 yellow
 };
 
 function moduleColorVars(id: string): React.CSSProperties {
@@ -268,6 +270,12 @@ const financeSetupItems = [
     color: "text-lime-500",
     pageKey: "payment-reason-master",
   },
+];
+
+// Customer Master lives here, not under Finance — a customer is who a Sale
+// Order/Invoice is raised against, so it belongs with the pages that
+// actually use it.
+const salesSetupItems = [
   {
     icon: Users,
     label: "Customer Master",
@@ -305,6 +313,58 @@ const maintenanceSetupItems = [
     path: "/masters/electricity-tariff",
     color: "text-emerald-500",
     pageKey: "electricity-tariff-master",
+  },
+];
+
+const hrPayrollSetupItems = [
+  {
+    icon: UserSquare,
+    label: "Designation Master",
+    path: "/hr-payroll/setup/designation-master",
+    color: "text-yellow-500",
+    pageKey: "designation-master",
+  },
+  {
+    icon: UserSquare,
+    label: "Candidate Master",
+    path: "/hr-payroll/setup/candidate-master",
+    color: "text-yellow-500",
+    pageKey: "candidate-master",
+  },
+  {
+    icon: UserSquare,
+    label: "Shift Master",
+    path: "/hr-payroll/setup/shift-master",
+    color: "text-yellow-500",
+    pageKey: "shift-master",
+  },
+  {
+    icon: UserSquare,
+    label: "Grace Time Master",
+    path: "/hr-payroll/setup/grace-time-master",
+    color: "text-yellow-500",
+    pageKey: "grace-time-master",
+  },
+  {
+    icon: UserSquare,
+    label: "Holiday Master",
+    path: "/hr-payroll/setup/holiday-master",
+    color: "text-yellow-500",
+    pageKey: "holiday-master",
+  },
+  {
+    icon: UserSquare,
+    label: "Deduction and Addition Master",
+    path: "/hr-payroll/setup/deduction-addition-master",
+    color: "text-yellow-500",
+    pageKey: "deduction-addition-master",
+  },
+  {
+    icon: UserSquare,
+    label: "Salary Structure",
+    path: "/hr-payroll/setup/salary-structure",
+    color: "text-yellow-500",
+    pageKey: "salary-structure",
   },
 ];
 
@@ -1110,6 +1170,13 @@ export const TopNavbar = () => {
         colorStyle: makeColorStyle("finance"),
         available: true,
       };
+    if (activeModule === "sales")
+      return {
+        items: filterSetupItems(salesSetupItems),
+        label: "Sales",
+        colorStyle: makeColorStyle("sales"),
+        available: true,
+      };
     if (activeModule === "sales-automation")
       return {
         items: filterSetupItems(salesAutomationSetupItems),
@@ -1129,6 +1196,13 @@ export const TopNavbar = () => {
         items: filterSetupItems(maintenanceSetupItems),
         label: "Maintenance",
         colorStyle: makeColorStyle("maintenance"),
+        available: true,
+      };
+    if (activeModule === "hr-payroll")
+      return {
+        items: filterSetupItems(hrPayrollSetupItems),
+        label: "HR and Payroll",
+        colorStyle: makeColorStyle("hr-payroll"),
         available: true,
       };
     return {

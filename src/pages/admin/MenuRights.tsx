@@ -306,13 +306,27 @@ export default function MenuRights() {
     [pageDefs, moduleFilter, pageSearch],
   );
 
+  // Three tiers, in this fixed order: Dashboards (every module's dashboard,
+  // together), Setup (every module's setup/master pages, together — "Setup"
+  // matches the exact label TopNavbar's own Setup dropdown uses), then every
+  // other page grouped by its own module as before. Putting the two
+  // cross-module tiers first means granting "every dashboard" or "every
+  // setup page" is one scroll, not a hunt through each module in turn.
+  const TIER_ORDER = ["Dashboards", "Setup"];
   const groupedPages = useMemo(() => {
     const groups: Record<string, PageDef[]> = {};
     filteredPages.forEach((p) => {
       if (!groups[p.group]) groups[p.group] = [];
       groups[p.group].push(p);
     });
-    return groups;
+    const entries = Object.entries(groups);
+    entries.sort(([a], [b]) => {
+      const ai = TIER_ORDER.indexOf(a);
+      const bi = TIER_ORDER.indexOf(b);
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? TIER_ORDER.length : ai) - (bi === -1 ? TIER_ORDER.length : bi);
+      return a.localeCompare(b);
+    });
+    return entries;
   }, [filteredPages]);
 
   const filteredUsers = useMemo(
@@ -856,7 +870,11 @@ export default function MenuRights() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(groupedPages).map(([group, pages]) => {
+                  {groupedPages.map(([group, pages], groupIdx) => {
+                    // Dashboards/Setup deliberately mix every module in one
+                    // list — a single group-level module badge would be
+                    // misleading there, so each row gets its own instead.
+                    const isCrossModuleTier = TIER_ORDER.includes(group);
                     const groupModule = pages[0]?.module ?? "General";
                     const colorClass =
                       MODULE_COLORS[groupModule] ??
@@ -864,9 +882,24 @@ export default function MenuRights() {
                     const allGroupChecked = pages.every((p) =>
                       p.actions.every((a) => isChecked(p.key, a)),
                     );
+                    // First non-tier group after the two universal ones —
+                    // marks where "module-wise pages" actually starts.
+                    const isFirstModuleWiseGroup =
+                      !isCrossModuleTier &&
+                      groupedPages.slice(0, groupIdx).every(([g]) => TIER_ORDER.includes(g));
 
                     return (
                       <React.Fragment key={group}>
+                        {isFirstModuleWiseGroup && (
+                          <tr>
+                            <td colSpan={ALL_ACTIONS.length + 2} className="px-5 pt-5 pb-1">
+                              <span className="text-[10px] font-heading font-bold uppercase tracking-[0.2em] text-muted-foreground/50">
+                                Module Pages
+                              </span>
+                            </td>
+                          </tr>
+                        )}
+
                         {/* Group header */}
                         <tr>
                           <td
@@ -875,14 +908,21 @@ export default function MenuRights() {
                           >
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                <span
-                                  className={`text-[10px] font-heading font-bold px-2 py-0.5 rounded-full border ${colorClass}`}
-                                >
-                                  {groupModule}
-                                </span>
+                                {!isCrossModuleTier && (
+                                  <span
+                                    className={`text-[10px] font-heading font-bold px-2 py-0.5 rounded-full border ${colorClass}`}
+                                  >
+                                    {groupModule}
+                                  </span>
+                                )}
                                 <span className="text-[11px] font-heading font-semibold text-foreground uppercase tracking-wider">
                                   {group}
                                 </span>
+                                {isCrossModuleTier && (
+                                  <span className="text-[10px] text-muted-foreground/50">
+                                    · every module
+                                  </span>
+                                )}
                               </div>
                               <button
                                 onClick={() => toggleGroup(pages)}
@@ -906,6 +946,8 @@ export default function MenuRights() {
                           const allChecked =
                             checkedCount === page.actions.length;
                           const someChecked = checkedCount > 0 && !allChecked;
+                          const rowColorClass =
+                            MODULE_COLORS[page.module] ?? "bg-muted/30 text-muted-foreground";
 
                           return (
                             <tr
@@ -913,7 +955,16 @@ export default function MenuRights() {
                               className="border-b border-border/40 hover:bg-muted/20 transition-colors"
                             >
                               <td className="px-5 py-2.5 text-sm font-body text-foreground pl-10">
-                                {page.label}
+                                <span className="flex items-center gap-2">
+                                  {page.label}
+                                  {isCrossModuleTier && (
+                                    <span
+                                      className={`text-[9px] font-heading font-semibold px-1.5 py-0.5 rounded-full border shrink-0 ${rowColorClass}`}
+                                    >
+                                      {page.module}
+                                    </span>
+                                  )}
+                                </span>
                               </td>
                               {ALL_ACTIONS.map((action) => {
                                 const available = page.actions.includes(

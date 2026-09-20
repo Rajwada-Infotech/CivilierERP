@@ -141,11 +141,16 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
   try {
     const pool = getPool();
     const { mobile, pan, email, name, excludeId } = req.query;
-    const excl = excludeId ? "AND c.Id <> @excl" : "";
     const req0 = pool.request();
     if (excludeId) req0.input("excl", sql.Int, parseInt(excludeId));
 
-    const conds = ["c.IsActive = 1", excl];
+    // Plain predicates only — joined with " AND " below. A stray pre-baked
+    // "AND c.Id <> @excl" fragment here used to produce a doubled "AND AND"
+    // (or, with no excludeId, an empty predicate between two ANDs) — this
+    // endpoint threw a SQL syntax error on every single call, regardless of
+    // excludeId, and had apparently never actually been exercised live.
+    const conds = ["c.IsActive = 1"];
+    if (excludeId) conds.push("c.Id <> @excl");
     const orClauses = [];
 
     if (mobile?.toString().trim()) {
@@ -160,9 +165,18 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
       req0.input("email", sql.NVarChar(200), email.toString().trim().toLowerCase());
       orClauses.push("LOWER(c.Email) = @email");
     }
+    // Name is a REFINEMENT signal only, never an independent match trigger —
+    // it still feeds @name into scoreExpr below to rank an already-real
+    // (mobile/PAN/email) match higher when the name also lines up. Used to
+    // also push its own bare LIKE '%name%' into orClauses, which meant any
+    // two unrelated customers merely sharing a name substring (a common
+    // first name, "KUMAR", "DEVI", ...) got flagged as "possible duplicates"
+    // even with completely different mobile numbers and PANs — the frontend
+    // always sends the current name alongside mobile/PAN on every check
+    // (CrmCustomers.tsx checkDuplicates), so this fired constantly on
+    // ordinary, unrelated registrations.
     if (name?.toString().trim()) {
       req0.input("name", sql.NVarChar(200), `%${name.toString().trim()}%`);
-      orClauses.push("c.CustomerName LIKE @name");
     }
 
     if (!orClauses.length) return res.json([]);
@@ -275,20 +289,26 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
   try {
     const pool = getPool();
     const b = req.body;
-    const missing = [];
-    if (!b.CustomerName?.trim()) missing.push("Customer Name");
-    if (!b.Mobile?.trim()) missing.push("Mobile");
-    if (!b.PanNo?.trim()) missing.push("PAN Number");
-    if (!b.PermanentAddress?.trim()) missing.push("Permanent Address");
-    if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(", ")}` });
 
-    const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())
-      .query("SELECT Id, CustomerNo, CustomerName FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
-    if (existing.recordset.length) {
-      return res.status(409).json({
-        error: `A customer with this mobile number already exists — ${existing.recordset[0].CustomerNo} (${existing.recordset[0].CustomerName})`,
-        existingCustomerId: existing.recordset[0].Id,
-      });
+    // Server-side requiredness for Customer Name — the frontend already
+    // enforces this, but relying on that alone left this endpoint creating
+    // nameless customers whenever it was hit directly, which then crashed
+    // Application creation downstream with a raw SQL NOT NULL error (see
+    // createCrmApplicationRecord in crmEntityCreation.js). Mobile is
+    // deliberately NOT required — that's an intentional business decision,
+    // and CrmCustomer.Mobile / CrmApplication.Mobile are both nullable to
+    // match (migrations 425 and 445).
+    if (!b.CustomerName?.trim()) return res.status(400).json({ error: "Customer Name is required" });
+
+    if (b.Mobile?.trim()) {
+      const existing = await pool.request().input("mob", sql.NVarChar(20), b.Mobile.trim())
+        .query("SELECT Id, CustomerNo, CustomerName FROM dbo.CrmCustomer WHERE Mobile = @mob AND IsActive = 1");
+      if (existing.recordset.length) {
+        return res.status(409).json({
+          error: `A customer with this mobile number already exists — ${existing.recordset[0].CustomerNo} (${existing.recordset[0].CustomerName})`,
+          existingCustomerId: existing.recordset[0].Id,
+        });
+      }
     }
 
     // This is the actual "only a converted lead may enter the CRM module"
@@ -326,15 +346,15 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     const result = await pool.request()
       .input("no",       sql.NVarChar(30),  customerNo)
       .input("lid",       sql.Int,           b.LeadId ? parseInt(b.LeadId) : null)
-      .input("name",      sql.NVarChar(200), b.CustomerName.trim())
-      .input("mob",       sql.NVarChar(20),  b.Mobile.trim())
+      .input("name",      sql.NVarChar(200), b.CustomerName?.trim() || null)
+      .input("mob",       sql.NVarChar(20),  b.Mobile?.trim() || null)
       .input("altmob",    sql.NVarChar(20),  b.AltMobile || null)
       .input("email",     sql.NVarChar(200), email)
-      .input("pan",       sql.NVarChar(20),  b.PanNo.trim())
+      .input("pan",       sql.NVarChar(20),  b.PanNo?.trim() || null)
       .input("aadhaar",   sql.NVarChar(20),  b.AadhaarNo || null)
       .input("occ",       sql.NVarChar(100), b.Occupation || null)
       .input("income",    sql.Decimal(18, 2), b.AnnualIncome !== "" && b.AnnualIncome != null ? parseFloat(b.AnnualIncome) : null)
-      .input("addr",      sql.NVarChar(500), b.PermanentAddress.trim())
+      .input("addr",      sql.NVarChar(500), b.PermanentAddress?.trim() || null)
       .input("city",      sql.NVarChar(100), b.PermanentCity || null)
       .input("state",     sql.NVarChar(100), b.PermanentState || null)
       .input("pin",       sql.NVarChar(10),  b.PermanentPincode || null)

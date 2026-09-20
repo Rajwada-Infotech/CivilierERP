@@ -27,12 +27,14 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Plus, Trash2, Scale, Loader2, RefreshCw,
-  CheckCircle2, Clock, FileText, AlertCircle, Search, X, Check, BookOpen,
+  CheckCircle2, Clock, FileText, AlertCircle, Search, X, Check, BookOpen, Pencil,
 } from "lucide-react";
 import {
   getJournalVouchers,
   getJournalVoucher,
   createJournalVoucher,
+  updateJournalVoucher,
+  deleteJournalVoucher,
   approveJournalVoucher,
   rejectJournalVoucher,
   getJournalVoucherLedgerOptions,
@@ -44,6 +46,8 @@ import {
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 
 // Matches the real LHeadType convention used everywhere else account heads
 // are created (see CustomerMaster/ContractorMaster/SupplierMaster/
@@ -122,11 +126,23 @@ export default function JournalVoucher() {
   const [narration, setNarration] = useState("");
   const [lines, setLines] = useState<JournalVoucherLineUI[]>([emptyLine(), emptyLine()]);
 
+  // Edit — reuses the same dialog as New; editingId set means submit() calls
+  // updateJournalVoucher instead of createJournalVoucher. Loading a voucher
+  // for edit fetches its full detail (list rows don't carry LHeadId per
+  // line) rather than trusting whatever's already in the summary row.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
+
+  // Delete — small confirm dialog, same pattern as VehicleInOut.tsx's own
+  // delete confirmation.
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   // A JV must belong to a real Company (and optionally a Project within it)
   // just like every other document in the system — otherwise it floats
   // free of the entity structure everything else is scoped by.
   const [companies, setCompanies] = useState<{ id: number; label: string }[]>([]);
-  const [allProjects, setAllProjects] = useState<{ id: number; label: string; company_id: number | null }[]>([]);
+  const [allProjects, setAllProjects] = useState<{ id: number; label: string; company_id: number | null; tagged_company_ids?: string | null }[]>([]);
   const [companyId, setCompanyId] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
 
@@ -178,12 +194,26 @@ export default function JournalVoucher() {
       .then((rows) => setCompanies(rows.map((r) => ({ id: r.id, label: r.label }))))
       .catch(() => setCompanies([]));
     getEnterpriseOptions(undefined, "P")
-      .then((rows) => setAllProjects(rows.map((r) => ({ id: r.id, label: r.label, company_id: r.company_id }))))
+      .then((rows) =>
+        setAllProjects(
+          rows.map((r) => ({ id: r.id, label: r.label, company_id: r.company_id, tagged_company_ids: r.tagged_company_ids })),
+        ),
+      )
       .catch(() => setAllProjects([]));
   }, []);
 
+  // A project shows up for a company if it's either the project's primary
+  // (owning) company, or the company has been tagged onto the project via
+  // Project Master's multi-company tagging — see dbo.ProjectCompanies.
   const projectsForCompany = useMemo(
-    () => (companyId ? allProjects.filter((p) => String(p.company_id) === companyId) : []),
+    () =>
+      companyId
+        ? allProjects.filter(
+            (p) =>
+              String(p.company_id) === companyId ||
+              (p.tagged_company_ids?.split(",") ?? []).includes(companyId),
+          )
+        : [],
     [allProjects, companyId],
   );
 
@@ -215,6 +245,7 @@ export default function JournalVoucher() {
     setLines([emptyLine(), emptyLine()]);
     setCompanyId("");
     setProjectId("");
+    setEditingId(null);
   };
 
   // A refresh used to silently drop an in-progress JV — this form's state
@@ -302,25 +333,76 @@ export default function JournalVoucher() {
     }
   };
 
+  const startEdit = async (v: JournalVoucherSummary) => {
+    setEditLoading(true);
+    try {
+      const full = await getJournalVoucher(v.JVID);
+      setJvDate((full.JVDate || "").slice(0, 10) || new Date().toISOString().slice(0, 10));
+      setNarration(full.Narration || "");
+      setCompanyId(full.CompanyId ? String(full.CompanyId) : "");
+      setProjectId(full.ProjectId ? String(full.ProjectId) : "");
+      setLines(
+        (full.lines || []).map((l) => ({
+          _id: (typeof crypto.randomUUID === "function" ? crypto.randomUUID() : Math.random().toString(36).slice(2)),
+          LineID: l.LineID,
+          LHeadId: l.LHeadId,
+          DebitAmount: l.DebitAmount,
+          CreditAmount: l.CreditAmount,
+          Narration: l.Narration || "",
+        })),
+      );
+      setEditingId(v.JVID);
+      setDialogOpen(true);
+    } catch (err: any) {
+      toast.error(err?.message || `Failed to load Journal Voucher #${v.JVID}`);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleDelete = async (id: number) => {
+    setDeleting(true);
+    try {
+      await deleteJournalVoucher(id);
+      toast.success("Journal Voucher deleted");
+      setDeleteId(null);
+      load();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to delete Journal Voucher");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const submit = async () => {
     if (!companyId) { toast.error("Select the Company this voucher belongs to."); return; }
     if (!totals.balanced) { toast.error("Debit and Credit totals must match before saving."); return; }
     if (lines.some((l) => !l.LHeadId)) { toast.error("Every line requires an account head."); return; }
     setSaving(true);
     try {
-      await createJournalVoucher({
+      const payload = {
         JVDate: jvDate,
         Narration: narration,
         CompanyId: parseInt(companyId, 10),
         ProjectId: projectId ? parseInt(projectId, 10) : null,
         lines,
-      });
-      toast.success("Journal Voucher created and submitted for approval");
+      };
+      if (editingId) {
+        const result: any = await updateJournalVoucher(editingId, payload);
+        toast.success(
+          result?.reopenedForApproval
+            ? "Journal Voucher updated — previous GL posting reversed, sent back for approval"
+            : "Journal Voucher updated",
+        );
+      } else {
+        await createJournalVoucher(payload);
+        toast.success("Journal Voucher created and submitted for approval");
+      }
       setDialogOpen(false);
       resetForm();
       load();
     } catch (err: any) {
-      toast.error(err?.message || "Failed to create Journal Voucher");
+      toast.error(err?.message || `Failed to ${editingId ? "update" : "create"} Journal Voucher`);
     } finally {
       setSaving(false);
     }
@@ -333,6 +415,20 @@ export default function JournalVoucher() {
     pending:  vouchers.filter((v) => v.Status === "Pending").length,
     draft:    vouchers.filter((v) => v.Status === "Draft").length,
   }), [vouchers]);
+
+  const exportColumns: ExportColumn[] = useMemo(() => [
+    { header: "JV No", accessor: (r) => (r as unknown as JournalVoucherSummary).JVNo || `JV-${(r as unknown as JournalVoucherSummary).JVID}` },
+    { header: "Date", accessor: (r) => fmtDate((r as unknown as JournalVoucherSummary).JVDate) },
+    { header: "Company", accessor: (r) => (r as unknown as JournalVoucherSummary).CompanyName || "" },
+    { header: "Project", accessor: (r) => (r as unknown as JournalVoucherSummary).ProjectName || "" },
+    { header: "Narration", accessor: (r) => (r as unknown as JournalVoucherSummary).Narration || "" },
+    { header: "Amount", accessor: (r) => (r as unknown as JournalVoucherSummary).TotalAmount || 0 },
+    { header: "Status", accessor: (r) => (r as unknown as JournalVoucherSummary).Status || "" },
+    { header: "GL", accessor: (r) => {
+        const v = r as unknown as JournalVoucherSummary;
+        return v.Status !== "Approved" ? "--" : v.PostedToGL ? "Posted" : "Not posted";
+      } },
+  ], []);
 
   // Filtered list
   const filtered = useMemo(() => {
@@ -355,6 +451,13 @@ export default function JournalVoucher() {
         icon={Scale}
         action={
           <div className="flex items-center gap-2">
+            <ExportMenu
+              data={filtered as unknown as Record<string, unknown>[]}
+              columns={exportColumns}
+              title="Journal Voucher"
+              filename="journal-voucher"
+              disabled={loading}
+            />
             <button
               onClick={load}
               disabled={loading}
@@ -475,26 +578,47 @@ export default function JournalVoucher() {
                       <StatusBadge status={v.Status} />
                       <GLBadge status={v.Status} postedToGL={v.PostedToGL} />
                     </div>
-                    {v.Status === "Pending" && rights.canEdit && (
-                      <div className="flex gap-1">
+                    <div className="flex gap-1">
+                      {v.Status === "Pending" && rights.canEdit && (
+                        <>
+                          <button
+                            disabled={acting?.id === v.JVID}
+                            onClick={() => handleApprove(v.JVID)}
+                            title="Approve"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                          >
+                            {acting?.id === v.JVID && acting.action === "approve" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                          </button>
+                          <button
+                            disabled={acting?.id === v.JVID}
+                            onClick={() => handleReject(v.JVID)}
+                            title="Reject"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
+                          >
+                            {acting?.id === v.JVID && acting.action === "reject" ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
+                          </button>
+                        </>
+                      )}
+                      {v.Status !== "Pending" && rights.canEdit && (
                         <button
-                          disabled={acting?.id === v.JVID}
-                          onClick={() => handleApprove(v.JVID)}
-                          title="Approve"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                          disabled={editLoading}
+                          onClick={() => startEdit(v)}
+                          title={v.Status === "Approved" ? "Edit (reopens for approval)" : "Edit"}
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
                         >
-                          {acting?.id === v.JVID && acting.action === "approve" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                          <Pencil size={13} />
                         </button>
+                      )}
+                      {rights.canDelete && (
                         <button
-                          disabled={acting?.id === v.JVID}
-                          onClick={() => handleReject(v.JVID)}
-                          title="Reject"
-                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
+                          onClick={() => setDeleteId(v.JVID)}
+                          title="Delete"
+                          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                         >
-                          {acting?.id === v.JVID && acting.action === "reject" ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
+                          <Trash2 size={13} />
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
               ))
@@ -585,34 +709,55 @@ export default function JournalVoucher() {
                       <GLBadge status={v.Status} postedToGL={v.PostedToGL} />
                     </td>
                     <td className="px-4 py-3 text-right">
-                      {v.Status === "Pending" && rights.canEdit && (
-                        <div className="flex justify-end gap-1">
+                      <div className="flex justify-end gap-1">
+                        {v.Status === "Pending" && rights.canEdit && (
+                          <>
+                            <button
+                              disabled={acting?.id === v.JVID}
+                              onClick={(e) => { e.stopPropagation(); handleApprove(v.JVID); }}
+                              title="Approve"
+                              className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                            >
+                              {acting?.id === v.JVID && acting.action === "approve" ? (
+                                <Loader2 size={13} className="animate-spin" />
+                              ) : (
+                                <Check size={13} />
+                              )}
+                            </button>
+                            <button
+                              disabled={acting?.id === v.JVID}
+                              onClick={(e) => { e.stopPropagation(); handleReject(v.JVID); }}
+                              title="Reject"
+                              className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
+                            >
+                              {acting?.id === v.JVID && acting.action === "reject" ? (
+                                <Loader2 size={13} className="animate-spin" />
+                              ) : (
+                                <X size={13} />
+                              )}
+                            </button>
+                          </>
+                        )}
+                        {v.Status !== "Pending" && rights.canEdit && (
                           <button
-                            disabled={acting?.id === v.JVID}
-                            onClick={(e) => { e.stopPropagation(); handleApprove(v.JVID); }}
-                            title="Approve"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
+                            disabled={editLoading}
+                            onClick={(e) => { e.stopPropagation(); startEdit(v); }}
+                            title={v.Status === "Approved" ? "Edit (reopens for approval)" : "Edit"}
+                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors disabled:opacity-40"
                           >
-                            {acting?.id === v.JVID && acting.action === "approve" ? (
-                              <Loader2 size={13} className="animate-spin" />
-                            ) : (
-                              <Check size={13} />
-                            )}
+                            <Pencil size={13} />
                           </button>
+                        )}
+                        {rights.canDelete && (
                           <button
-                            disabled={acting?.id === v.JVID}
-                            onClick={(e) => { e.stopPropagation(); handleReject(v.JVID); }}
-                            title="Reject"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
+                            onClick={(e) => { e.stopPropagation(); setDeleteId(v.JVID); }}
+                            title="Delete"
+                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                           >
-                            {acting?.id === v.JVID && acting.action === "reject" ? (
-                              <Loader2 size={13} className="animate-spin" />
-                            ) : (
-                              <X size={13} />
-                            )}
+                            <Trash2 size={13} />
                           </button>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -639,9 +784,13 @@ export default function JournalVoucher() {
                 <Scale size={15} className="text-primary" />
               </div>
               <div className="min-w-0">
-                <DialogTitle className="text-sm font-semibold">New Journal Voucher</DialogTitle>
+                <DialogTitle className="text-sm font-semibold">
+                  {editingId ? "Edit Journal Voucher" : "New Journal Voucher"}
+                </DialogTitle>
                 <DialogDescription className="text-[11px] mt-0.5">
-                  Debit total must equal credit total before saving.
+                  {editingId
+                    ? "Editing an already-approved voucher reverses its GL posting and sends it back for approval."
+                    : "Debit total must equal credit total before saving."}
                 </DialogDescription>
               </div>
             </div>
@@ -824,7 +973,7 @@ export default function JournalVoucher() {
               className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-2 rounded-lg gradient-accent text-white text-sm font-semibold shadow-sm transition-all disabled:opacity-50"
             >
               {saving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
-              {saving ? "Saving…" : "Save & Submit"}
+              {saving ? "Saving…" : editingId ? "Save Changes" : "Save & Submit"}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -942,6 +1091,35 @@ export default function JournalVoucher() {
               </DialogFooter>
             </>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete confirmation ── */}
+      <Dialog open={!!deleteId} onOpenChange={(o) => !o && setDeleteId(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Journal Voucher?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This action cannot be undone. If this voucher was already posted to the General Ledger, that posting will be reversed.
+          </p>
+          <DialogFooter>
+            <button
+              onClick={() => setDeleteId(null)}
+              disabled={deleting}
+              className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => deleteId && handleDelete(deleteId)}
+              disabled={deleting}
+              className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-destructive text-destructive-foreground text-sm font-semibold shadow-sm transition-all disabled:opacity-50"
+            >
+              {deleting ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

@@ -61,6 +61,18 @@ async function resolveLoansGroupId(pool) {
   return res.recordset[0]?.AGId ?? null;
 }
 
+// SUNDRY DEBTORS (Code='SDS', same resolution accountHeadMaster.js's
+// getSundryDebtorsGroupId already uses) — a customer head sitting here
+// with a CREDIT balance (net < 0) means they've paid more than they
+// currently owe: an advance, a liability, not a debtor. Reclassified
+// per-head into the "Advance from Customers" bucket instead of showing as
+// a negative figure under Sundry Debtors — same sign-flip convention the
+// LOANS AND ADVANCES group above already uses.
+async function resolveSundryDebtorsGroupId(pool) {
+  const res = await pool.request().query(`SELECT TOP 1 AGId FROM dbo.AccountGroup WHERE Code = 'SDS'`);
+  return res.recordset[0]?.AGId ?? null;
+}
+
 async function loadGroups(pool) {
   const res = await pool.request().query(`
     SELECT AGId,
@@ -200,6 +212,7 @@ router.get("/balance-sheet", async (req, res) => {
     const groupMap = await loadGroups(pool);
     const rootIds = await resolveRootIds(pool);
     const loansGroupId = await resolveLoansGroupId(pool);
+    const sundryDebtorsGroupId = await resolveSundryDebtorsGroupId(pool);
 
     const headsRes = await pool
       .request()
@@ -486,6 +499,20 @@ router.get("/balance-sheet", async (req, res) => {
         groupName = net > 0 ? "Loan Receivable" : "Loan Payable";
       }
 
+      // A Sundry Debtors head with a CREDIT balance (net < 0) has paid
+      // more than they currently owe — an advance, a liability, not a
+      // debtor. Reclassified as a group inside Current Liabilities instead
+      // of showing as a negative figure under Sundry Debtors (same
+      // sign-flip convention as the LOANS AND ADVANCES special case
+      // above). Bypasses the normal per-group asset classification
+      // entirely for this head — pushed straight into currentLiabilities
+      // (not its own top-level section) since it's a short-term liability
+      // just like every other group already shown there.
+      if (gid === sundryDebtorsGroupId && net < 0) {
+        pushHead(sectionBuckets.currentLiabilities, gid, "Advance from Customers", { id: h.id, name: h.name, amount: -net });
+        continue;
+      }
+
       if (root === rootIds.ASSETS) {
         // Asset head: positive (debit) balance is normal. A credit balance
         // on an asset head still reports under Assets, shown as a negative
@@ -617,6 +644,10 @@ router.get("/balance-sheet", async (req, res) => {
       partnersDrawings: partnersDrawingsRows,
       provisionsReserves,
       fixedLiabilities,
+      // Includes an "Advance from Customers" group for any Sundry Debtors
+      // head with a credit balance, reclassified here instead of showing
+      // as a negative figure under Sundry Debtors — see the
+      // sundryDebtorsGroupId sign-flip above.
       currentLiabilities,
       fixedAssets: { tangible: fixedAssetsTangible, intangible: fixedAssetsIntangible },
       investments,

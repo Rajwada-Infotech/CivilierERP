@@ -593,6 +593,7 @@ router.post("/:id/documents/request", requirePageRight("crm-mutation", "edit"), 
 router.put("/:id/documents/:docId", requirePageRight("crm-mutation", "edit"), async (req, res) => {
   try {
     const pool = getPool();
+    const id = parseInt(req.params.id, 10);
     const docId = parseInt(req.params.docId, 10);
     const { Status, Remarks } = req.body;
 
@@ -603,6 +604,19 @@ router.put("/:id/documents/:docId", requirePageRight("crm-mutation", "edit"), as
       return res.status(400).json({ error: "Remarks are required when rejecting a document" });
     }
 
+    // Every other mutating endpoint in this file gates on the booking still
+    // being active and (once Approved) locks further changes — this one was
+    // missing both, so a document could be silently re-verified/rejected on
+    // a cancelled booking or an already-Approved mutation with no audit trail.
+    const cur = await pool.request().input("id", sql.Int, id).input("docid", sql.Int, docId)
+      .query("SELECT m.BookingId, m.Status FROM dbo.CrmMutation m JOIN dbo.CrmMutationDocument d ON d.MutationId = m.Id WHERE m.Id = @id AND d.Id = @docid");
+    if (!cur.recordset.length) return res.status(404).json({ error: "Mutation document not found" });
+    if (cur.recordset[0].Status === "Approved") {
+      return res.status(400).json({ error: "Cannot change a document once the mutation is Approved" });
+    }
+    const activeErr = await requireActiveBooking(pool, cur.recordset[0].BookingId);
+    if (activeErr) return res.status(400).json({ error: activeErr });
+
     await pool.request()
       .input("docid", sql.Int, docId)
       .input("st", sql.NVarChar(30), Status)
@@ -611,6 +625,9 @@ router.put("/:id/documents/:docId", requirePageRight("crm-mutation", "edit"), as
       .query(`
         UPDATE dbo.CrmMutationDocument SET Status = ISNULL(@st, Status), Remarks = ISNULL(@rem, Remarks), UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @docid
       `);
+    if (Status) {
+      await logMutationHistory(id, Status === "Verified" ? "DocumentVerified" : "DocumentRejected", Remarks || null, actorId(req));
+    }
     res.json({ success: true });
   } catch (e) {
     console.error("[unexpected error]", e);

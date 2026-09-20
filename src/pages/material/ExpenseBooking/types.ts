@@ -306,6 +306,7 @@ export interface ProjectOption {
   id: number;
   label: string;
   company_id?: number | null;
+  tagged_company_ids?: string | null;
 }
 export interface GSTConfig {
   applicable: boolean;

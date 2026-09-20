@@ -38,7 +38,17 @@ const ROLE_RIGHTS_PAGE_MAP = {
   boq: { module: "Engineering", submodule: "BOQ" },
   "engineering-boq": { module: "Engineering", submodule: "BOQ" },
   "work-done": { module: "Engineering", submodule: "WorkDone" },
-  "engineering-dashboard": { module: "Engineering", submodule: "WorkDone" },
+  // Was submodule: "WorkDone" — same {Module,SubModule} pair as "work-done"
+  // above, so the two collapsed into one RoleRights row: granting Work
+  // Done always silently also granted the Engineering Dashboard (and vice
+  // versa), with no way to give one without the other. They're genuinely
+  // distinct, separately-checked pages (EngineeringDashboard.tsx only
+  // checks "engineering-dashboard"; WorkOrderMaster/WorkDone pages never
+  // check it) — own submodule so they save as separate rows. Using plain
+  // "Dashboard" here would kebab down to bare "dashboard" as a fallback
+  // candidate in getCandidatePageKeys, colliding with the Home page's own
+  // key — "EngineeringDashboard" avoids that entirely.
+  "engineering-dashboard": { module: "Engineering", submodule: "EngineeringDashboard" },
   dpr: { module: "Engineering", submodule: "DPR" },
   "work-order": { module: "Engineering", submodule: "WorkOrders" },
   "engineering-work-order": { module: "Engineering", submodule: "WorkOrders" },
@@ -80,16 +90,29 @@ const ROLE_RIGHTS_PAGE_MAP = {
     module: "Followup",
     submodule: "UnitSelections",
   },
-  "sale-order": { module: "Material", submodule: "CustomerSaleOrders" },
   "grn-master": { module: "Material", submodule: "GRN" },
   grns: { module: "Material", submodule: "GRN" },
   "purchase-orders": { module: "Material", submodule: "PurchaseOrders" },
   "vehicle-in-out": { module: "Material", submodule: "VehicleInOut" },
+  // Must match routes/materialDashboard.js's own
+  // checkPermissionForMethod("Material", "MaterialDashboard") exactly - that
+  // middleware does a raw RoleRights.Module/SubModule lookup with no
+  // page-key translation. Without this explicit entry, the naive fallback
+  // would save Module=SubModule="material dashboard" (one merged lowercase
+  // string), which never matches - Material Dashboard's route guard would
+  // pass (page-key system) but its data endpoint would still 403.
+  "material-dashboard": { module: "Material", submodule: "MaterialDashboard" },
   "menu-rights": { module: "Rights", submodule: "Menu" },
   admin_menu_rights: { module: "Rights", submodule: "Menu" },
-  roles: { module: "Rights", submodule: "Menu" },
+  // Was { module: "Rights", submodule: "Menu" } — collided with menu-rights/
+  // admin_menu_rights above (same Module_SubModule pair), so
+  // getCandidatePageKeys (middleware/permissions.js) could only ever
+  // resolve the saved grant back to "menu-rights", never to "roles" itself
+  // — granting Role Master access via Menu Rights silently did nothing.
+  // "RoleMaster" matches the existing PERMISSION_PAGE_KEYS["rights:rolemaster"]
+  // entry, which was already sitting there unused for exactly this pairing.
+  roles: { module: "Rights", submodule: "RoleMaster" },
   "widgets-rights": { module: "Rights", submodule: "Widgets" },
-  "fin-year": { module: "Rights", submodule: "Financial Year" },
   "user-activity": { module: "UserActivity", submodule: "List" },
   "activity-browser": { module: "UserActivity", submodule: "List" },
   users: { module: "Users", submodule: "List" },
@@ -315,7 +338,7 @@ router.get("/:roleId/rights", authMiddleware, async (req, res) => {
     const result = await pool
       .request()
       .input("RoleId", sql.Int, parseInt(req.params.roleId)).query(`
-        SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPostApproval
+        SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPrint, CanExport, CanPostApproval
         FROM dbo.RoleRights WHERE RoleId = @RoleId
       `);
 
@@ -328,6 +351,8 @@ router.get("/:roleId/rights", authMiddleware, async (req, res) => {
       if (Number(row.CanAdd) === 1) actions.push("create");
       if (Number(row.CanEdit) === 1) actions.push("edit");
       if (Number(row.CanDelete) === 1) actions.push("delete");
+      if (Number(row.CanPrint) === 1) actions.push("print");
+      if (Number(row.CanExport) === 1) actions.push("export");
       if (Number(row.CanPostApproval) === 1) actions.push("post-approval");
       return { page, actions };
     });
@@ -345,12 +370,13 @@ router.post(
   authMiddleware,
   checkPermission("Rights", "Menu", "CanEdit"),
   async (req, res) => {
+  let transaction;
   try {
     const roleId = parseInt(req.params.roleId);
     const { pagePermissions } = req.body;
 
     const pool = getPool();
-    const transaction = new sql.Transaction(pool);
+    transaction = new sql.Transaction(pool);
     await transaction.begin();
 
     await new sql.Request(transaction)
@@ -359,24 +385,53 @@ router.post(
 
     for (const permission of pagePermissions || []) {
       const mapping = ROLE_RIGHTS_PAGE_MAP[permission.page] || {
-        module: permission.page.replace(/-/g, " "),
-        submodule: permission.page.replace(/-/g, " "),
+        module: String(permission.page ?? "").replace(/-/g, " "),
+        submodule: String(permission.page ?? "").replace(/-/g, " "),
       };
       const actions = permission.actions || [];
-      await new sql.Request(transaction)
-        .input("RoleId", sql.Int, roleId)
-        .input("Module", sql.NVarChar(100), mapping.module)
-        .input("SubModule", sql.NVarChar(100), mapping.submodule)
-        .input("CanView", sql.Bit, actions.includes("view") ? 1 : 0)
-        .input("CanAdd", sql.Bit, actions.includes("create") ? 1 : 0)
-        .input("CanEdit", sql.Bit, actions.includes("edit") ? 1 : 0)
-        .input("CanDelete", sql.Bit, actions.includes("delete") ? 1 : 0)
-        .input("CanPostApproval", sql.Bit, actions.includes("post-approval") ? 1 : 0).query(`
-          INSERT INTO dbo.RoleRights
-            (RoleId, Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPostApproval)
-          VALUES
-            (@RoleId, @Module, @SubModule, @CanView, @CanAdd, @CanEdit, @CanDelete, @CanPostApproval)
-        `);
+
+      // Defensive coercion — a malformed/blank Module or SubModule here
+      // (e.g. from a stale/empty PageKey) is what was crashing the whole
+      // save with a tedious TDS "invalid data length" error on @Module,
+      // taking every other page's rights down with it. Coerce to a safe
+      // non-empty string instead of trusting the mapping blindly, and log
+      // loudly so the source PageDefinitions row can still be found and
+      // fixed properly.
+      const moduleVal = String(mapping.module ?? "").trim().slice(0, 100) || "General";
+      const submoduleVal = String(mapping.submodule ?? "").trim().slice(0, 100) || "General";
+      if (moduleVal === "General" || submoduleVal === "General") {
+        console.warn("SAVE RIGHTS: coerced blank Module/SubModule", {
+          page: permission.page,
+          mapping,
+        });
+      }
+
+      try {
+        await new sql.Request(transaction)
+          .input("RoleId", sql.Int, roleId)
+          .input("Module", sql.NVarChar(100), moduleVal)
+          .input("SubModule", sql.NVarChar(100), submoduleVal)
+          .input("CanView", sql.Bit, actions.includes("view") ? 1 : 0)
+          .input("CanAdd", sql.Bit, actions.includes("create") ? 1 : 0)
+          .input("CanEdit", sql.Bit, actions.includes("edit") ? 1 : 0)
+          .input("CanDelete", sql.Bit, actions.includes("delete") ? 1 : 0)
+          .input("CanPrint", sql.Bit, actions.includes("print") ? 1 : 0)
+          .input("CanExport", sql.Bit, actions.includes("export") ? 1 : 0)
+          .input("CanPostApproval", sql.Bit, actions.includes("post-approval") ? 1 : 0).query(`
+            INSERT INTO dbo.RoleRights
+              (RoleId, Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPrint, CanExport, CanPostApproval)
+            VALUES
+              (@RoleId, @Module, @SubModule, @CanView, @CanAdd, @CanEdit, @CanDelete, @CanPrint, @CanExport, @CanPostApproval)
+          `);
+      } catch (rowErr) {
+        console.error("SAVE RIGHTS: row insert failed", {
+          page: permission.page,
+          moduleVal,
+          submoduleVal,
+          actions,
+        });
+        throw rowErr;
+      }
     }
 
     await transaction.commit();
@@ -405,6 +460,19 @@ router.post(
     return res.json({ success: true });
   } catch (err) {
     console.error("SAVE RIGHTS ERROR:", err);
+    // The transaction was never rolled back on failure here — on SQL
+    // Server, an unrolled-back Transaction object holds onto its
+    // dedicated pool connection until it's explicitly committed or rolled
+    // back, so a failed save silently leaked one connection from the pool
+    // every time this crashed. Roll back defensively (no-op if the
+    // transaction was never opened, e.g. a failure before `.begin()`).
+    if (transaction) {
+      try {
+        await transaction.rollback();
+      } catch (rollbackErr) {
+        console.error("SAVE RIGHTS: rollback failed", rollbackErr.message);
+      }
+    }
     return res.status(500).json({ error: "Failed to save rights" });
   }
 });

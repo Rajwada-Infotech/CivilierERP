@@ -60,10 +60,19 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 
 async function fetchMilestones(bookingId: string): Promise<any> {
   if (!bookingId) return null;
-  try {
-    const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
-    return r.ok ? r.json() : null;
-  } catch { return null; }
+  // Unlike the other fetch* helpers on this page (banks, on-account, money
+  // receipts — supporting data where a silent empty fallback is harmless),
+  // this one drives the page's main content. Swallowing a failure to null
+  // rendered exactly the same "No milestone data found" empty state as a
+  // booking that genuinely has none — a permissions regression or backend
+  // outage looked identical to "nothing here" on a money-tracking page.
+  // Throwing lets React Query's own isError state distinguish the two.
+  const r = await fetchWithAuth(`${API}/booking/${bookingId}`);
+  if (!r.ok) {
+    const data = await r.json().catch(() => ({}));
+    throw new Error(data.error || `Failed to load milestones (${r.status})`);
+  }
+  return r.json();
 }
 // The booking picker below is a native <select> — fetching every booking in
 // the system into it is fine for a small deployment but degrades badly as
@@ -156,11 +165,12 @@ const CrmPaymentMilestones: React.FC = () => {
     queryFn: () => fetchBookings(pickerScope),
     staleTime: 5 * 60_000,
   });
-  const { data: milestoneData, isLoading, dataUpdatedAt, isFetching, refetch } = useQuery({
+  const { data: milestoneData, isLoading, isError, error: milestoneError, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-milestones", selectedBookingId],
     queryFn: () => fetchMilestones(selectedBookingId),
     enabled: !!selectedBookingId,
     staleTime: 30_000,
+    retry: 1,
   });
   const { data: onAccountData } = useQuery({
     queryKey: ["crm-on-account", selectedBookingId],
@@ -186,6 +196,13 @@ const CrmPaymentMilestones: React.FC = () => {
   const summary = milestoneData?.summary || {};
   const booking = milestoneData?.booking || null;
   const onAccountBalance = onAccountData?.availableBalance || 0;
+  // On Account Adjustment is a full-booking hold — it won't sweep any
+  // milestone until the on-account pool covers the booking's ENTIRE
+  // GrandTotal (matches applyOnAccountToMilestone in crmPayments.js).
+  const bookingGrandTotal = Number(booking?.GrandTotal ?? booking?.TotalValue ?? 0);
+  const bookingOnAccountReceived = Number(booking?.OnAccountTotalReceived || 0);
+  const notFullyPaid = bookingGrandTotal > 0 && bookingOnAccountReceived < bookingGrandTotal;
+  const fullPaymentShortfall = Math.max(0, bookingGrandTotal - bookingOnAccountReceived);
 
   // Total pending finance approval across all milestones
   const totalPendingVerification = milestones.reduce(
@@ -490,6 +507,14 @@ const CrmPaymentMilestones: React.FC = () => {
         const m = i.row.original;
         const balance = (m.AmountDue || 0) - (m.AmountPaid || 0);
         if (m.Status === "Waived") return <span className="text-xs text-muted-foreground">—</span>;
+        // Real ledger balance is unaffected until the automatic full-booking
+        // sweep runs — but showing a red "amount due" next to a status chip
+        // that says "Paid (on-account)" reads as contradictory, so once the
+        // money has genuinely arrived, show that instead of a due figure.
+        const virtuallyCovered = m.Status !== CrmStatus.PAID && m.VirtuallyCovered;
+        if (virtuallyCovered) {
+          return <span className="text-blue-600 font-semibold text-sm flex items-center gap-1"><Wallet size={12} className="shrink-0" />Covered</span>;
+        }
         return balance > 0
           ? <span className="text-red-600 font-semibold text-sm flex items-center gap-1"><ArrowDownCircle size={12} className="shrink-0" />{fmt(balance)}</span>
           : <span className="text-emerald-600 font-semibold text-sm flex items-center gap-1"><CheckCircle2 size={12} className="shrink-0" />Settled</span>;
@@ -497,6 +522,19 @@ const CrmPaymentMilestones: React.FC = () => {
     { id: "status", header: "Status", size: 110, enableSorting: false,
       cell: (i) => {
         const m = i.row.original;
+        // The real ledger sweep only fires automatically once the whole
+        // booking is funded, but the customer's money has genuinely arrived
+        // the moment on-account covers this milestone — show ONE clear
+        // status ("Paid (on-account)"), never alongside "Overdue"/"Pending",
+        // which would read as directly contradictory.
+        const virtuallyCovered = m.Status !== CrmStatus.PAID && m.Status !== "Waived" && m.VirtuallyCovered;
+        if (virtuallyCovered) {
+          return (
+            <span className="flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-medium w-fit border-border text-blue-600 dark:text-blue-400" title="Money is on-account for this milestone; it will settle automatically once the full booking amount is received">
+              <Wallet size={12} />Paid (on-account)
+            </span>
+          );
+        }
         const isOverdue = m.Status === CrmStatus.PENDING && m.DueDate && new Date(m.DueDate) < new Date();
         const displayStatus = isOverdue ? "Overdue" : m.Status;
         return (
@@ -535,30 +573,48 @@ const CrmPaymentMilestones: React.FC = () => {
           </span>
         );
       } },
-    { id: "actions", header: "", size: 150, enableSorting: false,
+    { id: "actions", header: "", size: 190, enableSorting: false,
       cell: (i) => {
         const m = i.row.original;
+        // Money already virtually covers this milestone — offering "Pay"
+        // (implies still owed) or "Waive" (implies forgiving unpaid money)
+        // both contradict what the status column just said.
+        const virtuallyCovered = m.Status !== CrmStatus.PAID && m.Status !== "Waived" && m.VirtuallyCovered;
         return (
-          <div className="flex items-center gap-1.5 whitespace-nowrap">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {rights.canEdit && m.Status !== CrmStatus.PAID && m.Status !== "Waived" && !virtuallyCovered && (
+              <button onClick={() => handleOpenPayment(m)}
+                className="text-xs px-2 py-1 border border-primary text-primary rounded-md hover:bg-primary hover:text-primary-foreground transition-colors font-medium whitespace-nowrap">
+                Pay
+              </button>
+            )}
             {rights.canEdit && m.Status !== CrmStatus.PAID && m.Status !== "Waived" && (
               <>
-                <button onClick={() => handleOpenPayment(m)}
-                  className="text-xs px-2 py-1 border border-primary text-primary rounded-md hover:bg-primary hover:text-primary-foreground transition-colors font-medium">
-                  Pay
-                </button>
                 {onAccountBalance > 0 && (() => {
                   const pmt = onAccountData?.payments?.find((p: any) => Number(p.Amount) - Number(p.AppliedAmount || 0) > 0);
-                  return pmt ? (
+                  if (!pmt) return null;
+                  if (notFullyPaid) {
+                    return (
+                      <span title={`Auto-settles once fully funded — ₹${fullPaymentShortfall.toLocaleString("en-IN")} more coming in on-account will trigger this automatically, no manual action needed`}
+                        className="text-xs px-2 py-1 border border-border text-muted-foreground rounded-md font-medium cursor-not-allowed select-none whitespace-nowrap">
+                        Auto
+                      </span>
+                    );
+                  }
+                  return (
                     <button onClick={() => openApplyDialog(pmt, m)}
-                      className="text-xs px-2 py-1 border border-blue-400 text-blue-600 rounded-md hover:bg-blue-50 transition-colors font-medium">
-                      Adjust On A/c
+                      title="The full booking amount is on-account and this milestone should auto-settle shortly — use this only if it hasn't (e.g. a demand still needs to be raised first)"
+                      className="text-xs px-2 py-1 border border-blue-400 text-blue-600 rounded-md hover:bg-blue-50 transition-colors font-medium whitespace-nowrap">
+                      Apply
                     </button>
-                  ) : null;
+                  );
                 })()}
-                <button onClick={() => handleWaive(m)}
-                  className="text-xs px-2 py-1 border border-border text-muted-foreground rounded-md hover:bg-muted transition-colors font-medium">
-                  Waive
-                </button>
+                {!virtuallyCovered && (
+                  <button onClick={() => handleWaive(m)}
+                    className="text-xs px-2 py-1 border border-border text-muted-foreground rounded-md hover:bg-muted transition-colors font-medium whitespace-nowrap">
+                    Waive
+                  </button>
+                )}
               </>
             )}
           </div>
@@ -650,6 +706,10 @@ const CrmPaymentMilestones: React.FC = () => {
           <div className="py-16 text-center text-muted-foreground text-sm flex items-center justify-center gap-2">
             <RefreshCw size={14} className="animate-spin" /> Loading milestones...
           </div>
+        ) : isError ? (
+          <div className="py-16 text-center text-red-600 text-sm">
+            Failed to load milestones{milestoneError instanceof Error ? `: ${milestoneError.message}` : ""}
+          </div>
         ) : !milestoneData ? (
           <div className="py-16 text-center text-muted-foreground text-sm">No milestone data found</div>
         ) : (
@@ -729,6 +789,12 @@ const CrmPaymentMilestones: React.FC = () => {
                           <span className="text-muted-foreground">Collected</span>
                           <span className="font-medium text-green-600 tabular-nums">{fmt(summary.totalPaid)}</span>
                         </div>
+                        {bookingOnAccountReceived > 0 && (
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-blue-600 flex items-center gap-1"><Wallet size={11} /> Held On-Account (not yet applied)</span>
+                            <span className="text-blue-600 font-medium tabular-nums">{fmt(bookingOnAccountReceived)}</span>
+                          </div>
+                        )}
                         {totalPendingVerification > 0 && (
                           <div className="flex items-baseline justify-between">
                             <span className="text-amber-700 flex items-center gap-1"><Clock size={11} /> Pending Approval</span>
@@ -846,7 +912,7 @@ const CrmPaymentMilestones: React.FC = () => {
 
             {/* On-Account balance */}
             {onAccountData && (onAccountData.payments?.length > 0) && (
-              <div className={`rounded-xl border p-4 ${onAccountBalance > 0 ? "border-emerald-200 bg-emerald-50/40 dark:border-emerald-800 dark:bg-emerald-950/20" : "border-border"}`}>
+              <div className="rounded-xl border border-border bg-card p-4">
                 <div className="flex items-center justify-between mb-2">
                   <h3 className="text-sm font-semibold flex items-center gap-1.5">
                     <Wallet size={14} className={onAccountBalance > 0 ? "text-emerald-600" : "text-muted-foreground"} />
@@ -856,10 +922,32 @@ const CrmPaymentMilestones: React.FC = () => {
                     {onAccountBalance > 0 && <ArrowUpCircle size={16} className="shrink-0" />}{fmt(onAccountBalance)}
                   </span>
                 </div>
+                {notFullyPaid ? (
+                  <div className="mb-3 rounded-lg border border-border bg-muted/10 px-3 py-2.5">
+                    <div className="flex items-center justify-between text-[11px] mb-1.5">
+                      <span className="font-semibold text-foreground flex items-center gap-1.5">
+                        <Wallet size={12} className="text-blue-600 dark:text-blue-400" /> Held on-account — will auto-settle once fully funded
+                      </span>
+                      <span className="text-muted-foreground tabular-nums">
+                        {fmt(bookingOnAccountReceived)} of {fmt(bookingGrandTotal)} ({Math.round((bookingOnAccountReceived / bookingGrandTotal) * 100)}%)
+                      </span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (bookingOnAccountReceived / bookingGrandTotal) * 100)}%` }} />
+                    </div>
+                    <div className="text-[11px] text-muted-foreground mt-1.5">
+                      No action needed — {fmt(fullPaymentShortfall)} more coming in on-account will automatically settle every eligible milestone, in order. Milestones already covered by money on hand show "Paid (on-account)" above.
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mb-3 rounded-lg border border-border bg-muted/10 px-3 py-2 text-[11px] text-foreground flex items-center gap-1.5">
+                    <CheckCircle2 size={12} className="text-emerald-600 dark:text-emerald-400 shrink-0" /> Full booking amount is on-account — every eligible milestone auto-settles automatically, in order.
+                  </div>
+                )}
                 <div className="space-y-2">
                   {onAccountData.payments.map((p: any) => {
                     const remaining = Number(p.Amount) - Number(p.AppliedAmount || 0);
-                    const canApply = remaining > 0 && p.Status !== "Applied";
+                    const canApply = remaining > 0 && p.Status !== "Applied" && !notFullyPaid;
                     return (
                       <div key={p.Id} className="flex items-center justify-between gap-3 text-xs">
                         <span className="text-muted-foreground min-w-0">
@@ -881,8 +969,9 @@ const CrmPaymentMilestones: React.FC = () => {
                           </span>
                           {canApply && (
                             <button onClick={() => openApplyDialog(p, null)}
+                              title="This deposit should auto-apply once its milestone is eligible — use this only as a manual fallback"
                               className="px-2 py-0.5 rounded border border-blue-400 text-blue-600 bg-white dark:bg-transparent hover:bg-blue-50 font-medium transition-colors">
-                              Apply →
+                              Apply Manually
                             </button>
                           )}
                         </div>

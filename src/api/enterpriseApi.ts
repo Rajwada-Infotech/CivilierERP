@@ -111,6 +111,10 @@ export const getEnterpriseOptions = async (
       label: string;
       belongs_to: string | null;
       company_id: number | null;
+      // Comma-separated ids of every company a project (business_type "P")
+      // is tagged to, in addition to its primary company_id — see
+      // dbo.ProjectCompanies. Only populated for project rows.
+      tagged_company_ids?: string | null;
     }[]
   >(res);
 };

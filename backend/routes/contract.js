@@ -7,7 +7,7 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -338,8 +338,10 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   const email = requireUser(req, res);
   if (!email) return;
+  let wasRejected = false;
   try {
     await guardEdit("contracts", id);
+    wasRejected = (await getRecordStatus("contracts", id)) === "Rejected";
   } catch (err) {
     return res.status(409).json({ error: err.message });
   }
@@ -396,7 +398,28 @@ router.put("/:id", authenticateToken, requirePageRight("finance-contracts", "edi
       `);
 
     await bumpCacheVersion("contracts");
-    res.json({ ok: true });
+
+    // A corrected, previously-Rejected contract goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("contracts", id, "Pending", email, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[contract] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          ok: true,
+          message: "Contract updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({ ok: true, resubmitted });
   } catch (err) {
     console.error("[contract] PUT /:id:", err.message);
     res.status(500).json({ error: err.message });
@@ -430,7 +453,7 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const result = await transition("contracts", id, "Approved", email, req.user?.role);
+    const result = await transition("contracts", id, "Approved", email, req.user?.role, null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("contracts");
     res.json({ message: "Contract approved", ...result });
   } catch (err) {
@@ -447,7 +470,7 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
     if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
 
     const { note } = req.body;
-    const result = await transition("contracts", id, "Rejected", email, req.user?.role, note || null);
+    const result = await transition("contracts", id, "Rejected", email, req.user?.role, note || null, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("contracts");
     res.json({ message: "Contract rejected", ...result });
   } catch (err) {

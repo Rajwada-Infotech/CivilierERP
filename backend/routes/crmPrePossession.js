@@ -6,7 +6,7 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId } = require("../services/saAccess");
-const { requireActiveBooking } = require("../services/crmWorkflowGuards");
+const { requireActiveBooking, resolveOcCcGate } = require("../services/crmWorkflowGuards");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -93,13 +93,23 @@ router.get("/gateway-status", requirePageRight("crm-pre-possession", "view"), as
       "  CASE WHEN EXISTS (",
       "    SELECT 1 FROM dbo.CrmAfsRegistry areg WHERE areg.BookingId = b.Id AND areg.Status = 'Completed'",
       "  ) THEN 1 ELSE 0 END AS Gate1b_AfsRegistryCompleted,",
+      // Block-level OC/CC (see migration 447) is authoritative when this
+      // booking's own block has a Received cert of its own; otherwise the
+      // project's blanket (BlockId IS NULL) cert still clears the gate —
+      // same fallback resolveOcCcGate (crmWorkflowGuards.js) implements in
+      // JS for single-booking lookups. Kept inline here since this is one
+      // big multi-row query, not a per-booking JS call.
       "  CASE WHEN b.ProjectId IS NULL OR EXISTS (",
       "    SELECT 1 FROM dbo.CrmOccupancyCertificate oc",
-      "    WHERE oc.ProjectId = b.ProjectId AND oc.Status = 'Received'",
+      "    WHERE oc.Status = 'Received' AND (",
+      "      (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)",
+      "      OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)",
+      "    )",
       "  ) THEN 1 ELSE 0 END AS Gate2_OcCcReceived",
       "FROM dbo.CrmBooking b",
       "JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId",
       "LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id",
+      "LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
       "OUTER APPLY (SELECT TOP 1 Status FROM dbo.CrmAgreement       WHERE BookingId = b.Id ORDER BY CreatedAt DESC) ag_disp",
       "OUTER APPLY (SELECT TOP 1 Status FROM dbo.CrmAfsQueryPayment WHERE BookingId = b.Id ORDER BY CreatedAt DESC) aqp_disp",
       "OUTER APPLY (SELECT TOP 1 Status FROM dbo.CrmAfsRegistry     WHERE BookingId = b.Id ORDER BY CreatedAt DESC) areg_disp",
@@ -129,15 +139,20 @@ router.get("/eligible-bookings", requirePageRight("crm-pre-possession", "create"
       "FROM dbo.CrmBooking b",
       "JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId",
       "LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id",
+      "LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId",
       "WHERE b.IsActive = 1",
       "  AND b.Status NOT IN ('" + cancelled + "', '" + rejected + "')",
       "  AND NOT EXISTS (SELECT 1 FROM dbo.CrmPrePossession pp WHERE pp.BookingId = b.Id)",
       // Agreement for Sale, registered at the Sub-Registrar, is mandatory
       // for every booking regardless of project type — no exception.
       "  AND EXISTS (SELECT 1 FROM dbo.CrmAgreement ag WHERE ag.BookingId = b.Id AND ag.Status = 'Registered')",
+      // Same block-then-project OC/CC fallback as /gateway-status above.
       "  AND (b.ProjectId IS NULL OR EXISTS (",
       "    SELECT 1 FROM dbo.CrmOccupancyCertificate oc",
-      "    WHERE oc.ProjectId = b.ProjectId AND oc.Status = 'Received'",
+      "    WHERE oc.Status = 'Received' AND (",
+      "      (um.BlockId IS NOT NULL AND oc.BlockId = um.BlockId)",
+      "      OR (oc.ProjectId = b.ProjectId AND oc.BlockId IS NULL)",
+      "    )",
       "  ))",
       "ORDER BY b.BookingNo",
     ].join(" ");
@@ -173,10 +188,11 @@ router.post("/", requirePageRight("crm-pre-possession", "create"), async (req, r
     const bk = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT TOP 1 ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
     if (bk.recordset[0]?.ProjectId) {
-      const occc = await pool.request().input("pid", sql.Int, bk.recordset[0].ProjectId)
-        .query("SELECT TOP 1 Id FROM dbo.CrmOccupancyCertificate WHERE ProjectId = @pid AND Status = 'Received'");
-      if (!occc.recordset.length)
-        return res.status(400).json({ error: "Pre-possession inspection requires the project's OC / CC to be received first" });
+      // Block-level OC/CC (migration 447) is checked first, falling back to
+      // the project's blanket cert — see resolveOcCcGate.
+      const gate = await resolveOcCcGate(pool, bookingId);
+      if (!gate.received)
+        return res.status(400).json({ error: "Pre-possession inspection requires the project's (or this unit's block's) OC / CC to be received first" });
     }
 
     const result = await pool.request()

@@ -2523,6 +2523,15 @@ const ReportTable: React.FC<{
   // reset on their own when you switch reports.
   const [companyIds, setCompanyIds] = useState<string[]>([]);
   const [projectIds, setProjectIds] = useState<string[]>([]);
+  // Expense Register also gets its own inline Date Range filter — the
+  // shared Day/Range toggle above (SectionFilters) already wires "from"/
+  // "to" through buildParams() below, but it lives in the parent, a full
+  // scroll away from this table and easy to miss while looking at the
+  // register itself. This local pair renders right in the register's own
+  // toolbar next to Company/Project/Expense Head, and supersedes the
+  // shared filter the same way those already do.
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   useEffect(() => {
     if (!isExpenseRegister) return;
     fetchWithAuth("/api/general-ledger/options")
@@ -2626,6 +2635,11 @@ const ReportTable: React.FC<{
       delete f["projectName"];
     }
 
+    // Expense Register: inline Date Range — supersedes the shared section
+    // bar's Day/Range date filter the same way Company/Project above do.
+    if (isExpenseRegister && dateFrom) f["from"] = dateFrom;
+    if (isExpenseRegister && dateTo) f["to"] = dateTo;
+
     // Payment Reason Report: scope to a single reason when selected
     if (isPaymentReasonReport && reasonFilter) f["reason"] = reasonFilter;
 
@@ -2687,7 +2701,7 @@ const ReportTable: React.FC<{
     }
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, projects]);
+  }, [report.id, filters.companyId, filters.projectId, filters.finYearId, filters.singleDate, filters.rangeFrom, filters.rangeTo, godownId, reasonFilter, expenseHeadIds, companyIds, projectIds, dateFrom, dateTo, projects]);
 
   const load = useCallback(async () => {
     // VendorLedgerReportBody fetches everything it needs itself — nothing
@@ -2734,8 +2748,8 @@ const ReportTable: React.FC<{
       style={{ borderTopWidth: 2, borderTopColor: report.color }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/10">
-        <div className="flex items-center gap-2.5">
+      <div className="flex items-center justify-between flex-wrap gap-y-2 px-4 py-3 border-b border-border bg-muted/10">
+        <div className="flex items-center gap-2.5 flex-wrap gap-y-2">
           <button
             onClick={onClose}
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
@@ -2758,7 +2772,7 @@ const ReportTable: React.FC<{
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap gap-y-2">
           {!isVendorLedger && (
           <button
             onClick={load}
@@ -2864,6 +2878,38 @@ const ReportTable: React.FC<{
                 itemNoun="expense head"
                 className="h-[30px] py-1"
               />
+            </div>
+          )}
+
+          {isExpenseRegister && (
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                max={dateTo || undefined}
+                title="From date"
+                className="h-[30px] px-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              />
+              <span className="text-[10px] text-muted-foreground">→</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                min={dateFrom || undefined}
+                title="To date"
+                className="h-[30px] px-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+              />
+              {(dateFrom || dateTo) && (
+                <button
+                  type="button"
+                  onClick={() => { setDateFrom(""); setDateTo(""); }}
+                  title="Clear date range"
+                  className="h-[30px] flex items-center px-1.5 rounded-lg border border-border text-muted-foreground hover:text-foreground transition-all"
+                >
+                  <X size={11} />
+                </button>
+              )}
             </div>
           )}
 

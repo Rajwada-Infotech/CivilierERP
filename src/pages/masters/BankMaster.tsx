@@ -125,23 +125,27 @@ const EMPTY: FormState = {
 };
 
 // ─── Export Columns ─────────────────────────────────────────────────────────
-const EXPORT_COLUMNS: ExportColumn[] = [
-  { header: "Company", accessor: "companyName" },
-  { header: "Bank Name", accessor: "bankName" },
-  { header: "Branch", accessor: "branch" },
-  { header: "Account No", accessor: "accountNo" },
-  { header: "IFSC", accessor: "ifsc" },
-  { header: "Account Type", accessor: "accountType" },
-  { header: "Bank Type", accessor: "bankType" },
-  { header: "Holder Name", accessor: "holderName" },
-  { header: "Opening Balance", accessor: "openingBalance" },
-  {
-    header: "Group",
-    accessor: (r) => (r.BLBelongsTo != null ? String(r.BLBelongsTo) : "—"),
-  },
-  { header: "Address", accessor: "address" },
-  { header: "Status", accessor: (r) => (r.BActive ? "Active" : "Inactive") },
-];
+// Group is built per-render (see buildExportColumns below) — it needs to
+// resolve BLBelongsTo (an AccountGroup id) to its name via the accountGroups
+// list, which only exists inside the component.
+function buildExportColumns(accountGroups: AccountGroup[]): ExportColumn[] {
+  const groupName = (id: unknown) =>
+    id != null ? (accountGroups.find((g) => g._id === String(id))?.name ?? "—") : "—";
+  return [
+    { header: "Company", accessor: "BCompanyName" },
+    { header: "Bank Name", accessor: "BName" },
+    { header: "Branch", accessor: "BBranch" },
+    { header: "Account No", accessor: "BAccountNumber" },
+    { header: "IFSC", accessor: "BIfscCode" },
+    { header: "Account Type", accessor: "BAccountType" },
+    { header: "Bank Type", accessor: "BBankType" },
+    { header: "Holder Name", accessor: "BAccountHolderName" },
+    { header: "Opening Balance", accessor: "BOpeningBalance" },
+    { header: "Group", accessor: (r) => groupName(r.BLBelongsTo) },
+    { header: "Address", accessor: "BAddress" },
+    { header: "Status", accessor: (r) => (r.BStatus ? "Active" : "Inactive") },
+  ];
+}
 
 // ─── CSV template / import column mapping ─────────────────────────────────────
 // Single source of truth for both the downloadable template and the importer,
@@ -1460,7 +1464,7 @@ const BankMaster: React.FC = () => {
               exportConfig={rights.canExport ? {
                 title: "Bank Master",
                 filename: "bank-master",
-                columns: EXPORT_COLUMNS,
+                columns: buildExportColumns(accountGroups),
               } : undefined}
               rowClassName={(row) =>
                 editingId === String(row.original.BId) ? "bg-primary/5" : ""

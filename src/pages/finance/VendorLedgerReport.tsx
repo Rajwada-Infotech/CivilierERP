@@ -25,6 +25,7 @@ import { formatINR } from "@/utils/formatCurrency";
 import { format, parseISO } from "date-fns";
 import { useQuery } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   searchLedgerHeads,
   getLedgerSummary,
@@ -48,7 +49,15 @@ import {
   Building2,
   Landmark,
   CircleDollarSign,
+  Briefcase,
+  FolderKanban,
 } from "lucide-react";
+
+interface EntityOption {
+  id: number;
+  label: string;
+  company_id?: number;
+}
 
 function fmtDate(d: string | null | undefined): string {
   if (!d) return "—";
@@ -136,6 +145,42 @@ function sourceMeta(sourceType: string) {
   return SOURCE_META[sourceType] || { label: sourceType, icon: Receipt, color: "text-muted-foreground", bg: "bg-muted" };
 }
 
+function FilterSelect({
+  label,
+  icon: Icon,
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  label: string;
+  icon: React.ElementType;
+  value: number | null;
+  onChange: (id: number | null) => void;
+  options: EntityOption[];
+  placeholder: string;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5 flex-1 min-w-[140px]">
+      <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading flex items-center gap-1">
+        <Icon size={9} /> {label}
+      </span>
+      <select
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value ? Number(e.target.value) : null)}
+        className="mt-1 h-8 px-2.5 rounded-lg border border-border bg-input/70 text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none appearance-none cursor-pointer"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function docRefFor(t: LedgerEntry): string | null {
   return (
     t.ExpenseBookingDocNo ||
@@ -210,24 +255,73 @@ export function VendorLedgerReportBody() {
     setToDate(to);
   };
 
+  // ── Company / Project filters ──
+  const [allCompanies, setAllCompanies] = useState<EntityOption[]>([]);
+  const [allProjects, setAllProjects] = useState<EntityOption[]>([]);
+  const [companyId, setCompanyId] = useState<number | null>(null);
+  const [projectId, setProjectId] = useState<number | null>(null);
+
+  useEffect(() => {
+    Promise.all([
+      fetchWithAuth("/api/enterprises/options?business_type=C").then((r) => (r.ok ? r.json() : [])),
+      fetchWithAuth("/api/enterprises/options?business_type=P").then((r) => (r.ok ? r.json() : [])),
+    ])
+      .then(([companies, projects]) => {
+        setAllCompanies(Array.isArray(companies) ? companies : []);
+        setAllProjects(Array.isArray(projects) ? projects : []);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Selecting a Company narrows the Project list; switching Company clears a
+  // Project selection that's no longer in scope.
+  const projectOptions = companyId ? allProjects.filter((p) => p.company_id === companyId) : allProjects;
+  const handleCompanyChange = (id: number | null) => {
+    setCompanyId(id);
+    if (id && projectId) {
+      const stillInScope = allProjects.some((p) => p.id === projectId && p.company_id === id);
+      if (!stillInScope) setProjectId(null);
+    }
+  };
+
   const headId = selectedHead?.Id ?? null;
 
   // Party-scoped queries — only run once a specific head is picked.
   const summaryQuery = useQuery({
-    queryKey: ["vendor-ledger-summary", headId, fromDate, toDate],
-    queryFn: () => getLedgerSummary(headId as number, { from: fromDate || undefined, to: toDate || undefined }),
+    queryKey: ["vendor-ledger-summary", headId, fromDate, toDate, companyId, projectId],
+    queryFn: () =>
+      getLedgerSummary(headId as number, {
+        from: fromDate || undefined,
+        to: toDate || undefined,
+        companyId: companyId || undefined,
+        projectId: projectId || undefined,
+      }),
     enabled: !!headId,
   });
   const transactionsQuery = useQuery({
-    queryKey: ["vendor-ledger-transactions", headId, fromDate, toDate],
-    queryFn: () => getLedgerTransactions(headId as number, { from: fromDate || undefined, to: toDate || undefined, limit: 2000 }),
+    queryKey: ["vendor-ledger-transactions", headId, fromDate, toDate, companyId, projectId],
+    queryFn: () =>
+      getLedgerTransactions(headId as number, {
+        from: fromDate || undefined,
+        to: toDate || undefined,
+        limit: 2000,
+        companyId: companyId || undefined,
+        projectId: projectId || undefined,
+      }),
     enabled: !!headId,
   });
 
   // Unfiltered, all-parties view — the default before anything is picked.
   const allTransactionsQuery = useQuery({
-    queryKey: ["vendor-ledger-all-transactions", fromDate, toDate],
-    queryFn: () => getAllLedgerTransactions({ from: fromDate || undefined, to: toDate || undefined, limit: 1000 }),
+    queryKey: ["vendor-ledger-all-transactions", fromDate, toDate, companyId, projectId],
+    queryFn: () =>
+      getAllLedgerTransactions({
+        from: fromDate || undefined,
+        to: toDate || undefined,
+        limit: 1000,
+        companyId: companyId || undefined,
+        projectId: projectId || undefined,
+      }),
     enabled: !headId,
   });
 
@@ -235,13 +329,14 @@ export function VendorLedgerReportBody() {
   // display cap (see the warning banner below) — re-requests with a much
   // higher limit instead of reusing the already-capped query data.
   const fetchAllTransactionsForExport = React.useCallback(async (): Promise<Record<string, unknown>[]> => {
+    const scope = { companyId: companyId || undefined, projectId: projectId || undefined };
     if (headId) {
-      const res = await getLedgerTransactions(headId, { from: fromDate || undefined, to: toDate || undefined, limit: 100000 });
+      const res = await getLedgerTransactions(headId, { from: fromDate || undefined, to: toDate || undefined, limit: 100000, ...scope });
       return res.transactions as unknown as Record<string, unknown>[];
     }
-    const res = await getAllLedgerTransactions({ from: fromDate || undefined, to: toDate || undefined, limit: 10000 });
+    const res = await getAllLedgerTransactions({ from: fromDate || undefined, to: toDate || undefined, limit: 10000, ...scope });
     return res.transactions as unknown as Record<string, unknown>[];
-  }, [headId, fromDate, toDate]);
+  }, [headId, fromDate, toDate, companyId, projectId]);
 
   const showParty = !headId;
   const transactions: LedgerEntry[] = showParty
@@ -364,6 +459,36 @@ export function VendorLedgerReportBody() {
           </div>
         </div>
       )}
+
+      {/* ── Company / Project filters (applies to both views) ── */}
+      <div className="glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60">
+        <div className="flex flex-wrap items-end gap-3">
+          <FilterSelect
+            label="Company"
+            icon={Briefcase}
+            value={companyId}
+            onChange={handleCompanyChange}
+            options={allCompanies}
+            placeholder="All companies"
+          />
+          <FilterSelect
+            label="Project"
+            icon={FolderKanban}
+            value={projectId}
+            onChange={setProjectId}
+            options={projectOptions}
+            placeholder="All projects"
+          />
+          {(companyId || projectId) && (
+            <button
+              onClick={() => { setCompanyId(null); setProjectId(null); }}
+              className="h-8 shrink-0 flex items-center gap-1 px-2.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-all"
+            >
+              <X size={11} /> Clear
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* ── Date range (applies to both views) ── */}
       <div className="glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60">

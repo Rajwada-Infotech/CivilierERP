@@ -10,6 +10,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { parseJsonArray } from "@/utils/parseJsonArray";
+import { printStatusLabel } from "@/utils/printStatus";
 import { useAuth } from "@/contexts/AuthContext";
 import { OrderChat } from "@/components/orders/OrderChat";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -29,7 +30,7 @@ const VIO_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Vehicle No", accessor: "VehicleNo" },
   { header: "Supplier", accessor: "SupplierName" },
   { header: "PO Number", accessor: "PONumber" },
-  { header: "Status", accessor: "Status" },
+  { header: "Status", accessor: (r) => printStatusLabel(r.Status as string) },
 ];
 
 import { Input } from "@/components/ui/input";
@@ -637,6 +638,13 @@ export default function VehicleInOut() {
   const [photoByItem, setPhotoByItem] = useState<Record<number, string>>({});
   const [capturingPoItemId, setCapturingPoItemId] = useState<number | null>(null);
 
+  // Quick inspection grade per PO line item, keyed the same way as
+  // receivedQtyByItem/photoByItem — reset/prefilled alongside them
+  // everywhere those are.
+  const [qualityByItem, setQualityByItem] = useState<
+    Record<number, vehApi.VehicleInOutItemQuality | "">
+  >({});
+
   // Quality-rejection debit note modal — raised against a single received
   // line item (VehicleInOutItemID) from the view modal.
   const [debitNoteItem, setDebitNoteItem] = useState<any>(null);
@@ -833,6 +841,7 @@ export default function VehicleInOut() {
     });
     setReceivedQtyByItem({});
     setPhotoByItem({});
+    setQualityByItem({});
     setErrors({});
     setSearchParams(
       (prev) => {
@@ -857,6 +866,7 @@ export default function VehicleInOut() {
       setForm(buildEmpty(activeFinYear));
       setReceivedQtyByItem({});
       setPhotoByItem({});
+      setQualityByItem({});
       toast.success(`Vehicle In/Out ${res.docNo} created`);
     },
     onError: (err: any) =>
@@ -875,6 +885,7 @@ export default function VehicleInOut() {
       setForm(buildEmpty(activeFinYear));
       setReceivedQtyByItem({});
       setPhotoByItem({});
+      setQualityByItem({});
       toast.success("Record updated");
     },
     onError: (err: any) => toast.error(err.message || "Failed to update"),
@@ -918,9 +929,10 @@ export default function VehicleInOut() {
           poItemId: Number(poItemId),
           receivedQty: parseFloat(raw) || 0,
           photoBase64: photoByItem[Number(poItemId)] || null,
+          quality: qualityByItem[Number(poItemId)] || null,
         }))
         .filter((it) => it.receivedQty > 0),
-    [receivedQtyByItem, photoByItem],
+    [receivedQtyByItem, photoByItem, qualityByItem],
   );
 
   // ── Validate ──────────────────────────────────────────────────────────────────
@@ -984,6 +996,7 @@ export default function VehicleInOut() {
     setForm(buildEmpty(activeFinYear));
     setReceivedQtyByItem({});
     setPhotoByItem({});
+    setQualityByItem({});
     setEditingId(null);
     setShowForm(false);
     setErrors({});
@@ -1025,6 +1038,13 @@ export default function VehicleInOut() {
       Array.isArray(full.Items)
         ? Object.fromEntries(
             full.Items.filter((it: any) => it.PhotoBase64).map((it: any) => [it.POItemId, it.PhotoBase64]),
+          )
+        : {},
+    );
+    setQualityByItem(
+      Array.isArray(full.Items)
+        ? Object.fromEntries(
+            full.Items.filter((it: any) => it.Quality).map((it: any) => [it.POItemId, it.Quality]),
           )
         : {},
     );
@@ -1345,6 +1365,7 @@ export default function VehicleInOut() {
                     setForm(buildEmpty(activeFinYear));
                     setReceivedQtyByItem({});
                     setPhotoByItem({});
+                    setQualityByItem({});
                     setErrors({});
                   }}
                   className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
@@ -1425,6 +1446,7 @@ export default function VehicleInOut() {
                           });
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
+                          setQualityByItem({});
                         }}
                         className={`${inpSel} ${errors.companyId ? "border-destructive/60" : ""}`}
                       >
@@ -1475,6 +1497,7 @@ export default function VehicleInOut() {
                           });
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
+                          setQualityByItem({});
                         }}
                         className={`${inpSel} ${errors.projectId ? "border-destructive/60" : ""}`}
                       >
@@ -1628,6 +1651,7 @@ export default function VehicleInOut() {
                           // entered against the previous PO's line items.
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
+                          setQualityByItem({});
                         }}
                         className={inpSel}
                       >
@@ -1740,6 +1764,7 @@ export default function VehicleInOut() {
                               <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Remaining</th>
                               <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">UOM</th>
                               <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Qty This Lot</th>
+                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Quality</th>
                               <th className="px-4 py-2 text-center text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Photo</th>
                             </tr>
                           </thead>
@@ -1813,6 +1838,35 @@ export default function VehicleInOut() {
                                         overLimit ? "border-destructive text-destructive" : "border-border"
                                       } ${it.remainingQty === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
                                     />
+                                  </td>
+                                  <td className="px-4 py-2.5">
+                                    <select
+                                      value={qualityByItem[it.poItemId] ?? ""}
+                                      onChange={(e) =>
+                                        setQualityByItem((prev) => ({
+                                          ...prev,
+                                          [it.poItemId]: e.target
+                                            .value as vehApi.VehicleInOutItemQuality | "",
+                                        }))
+                                      }
+                                      disabled={entered <= 0}
+                                      className={`px-2 py-1.5 rounded-lg border bg-background text-xs font-medium focus:outline-none focus:ring-1 focus:ring-primary ${
+                                        entered <= 0 ? "opacity-50 cursor-not-allowed" : ""
+                                      } ${
+                                        qualityByItem[it.poItemId] === "Excellent"
+                                          ? "border-emerald-500/40 text-emerald-600 dark:text-emerald-400"
+                                          : qualityByItem[it.poItemId] === "Good"
+                                            ? "border-amber-500/40 text-amber-600 dark:text-amber-400"
+                                            : qualityByItem[it.poItemId] === "Bad"
+                                              ? "border-rose-500/40 text-rose-600 dark:text-rose-400"
+                                              : "border-border text-muted-foreground"
+                                      }`}
+                                    >
+                                      <option value="">—</option>
+                                      <option value="Excellent">Excellent</option>
+                                      <option value="Good">Good</option>
+                                      <option value="Bad">Bad</option>
+                                    </select>
                                   </td>
                                   <td className="px-4 py-2.5">
                                     <div className="flex items-center justify-center">
@@ -2039,6 +2093,7 @@ export default function VehicleInOut() {
                       setForm(buildEmpty(activeFinYear));
                       setReceivedQtyByItem({});
                       setPhotoByItem({});
+                      setQualityByItem({});
                       setEditingId(null);
                       setErrors({});
                     }}
@@ -2418,7 +2473,24 @@ export default function VehicleInOut() {
                         <tbody className="divide-y divide-border/50">
                           {viewingRec.Items.map((it: any) => (
                             <tr key={it.VehicleInOutItemID}>
-                              <td className="px-3 py-2 font-medium text-foreground">{it.ItemName || "—"}</td>
+                              <td className="px-3 py-2 font-medium text-foreground">
+                                <span className="inline-flex items-center gap-1.5">
+                                  {it.ItemName || "—"}
+                                  {it.Quality && (
+                                    <span
+                                      className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wide border ${
+                                        it.Quality === "Excellent"
+                                          ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25"
+                                          : it.Quality === "Good"
+                                            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25"
+                                            : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25"
+                                      }`}
+                                    >
+                                      {it.Quality}
+                                    </span>
+                                  )}
+                                </span>
+                              </td>
                               <td className="px-3 py-2 text-right font-mono text-foreground">
                                 {it.ReceivedQty} {it.UomName || ""}
                               </td>

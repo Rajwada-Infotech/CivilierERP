@@ -73,7 +73,7 @@ interface Milestone {
 }
 
 interface BookingDetail {
-  booking: { BookingNo: string; ApplicantName: string; ProjectName: string; UnitNo: string; GrandTotal: number };
+  booking: { BookingNo: string; ApplicantName: string; ProjectName: string; UnitNo: string; GrandTotal: number; OnAccountTotalReceived?: number };
   milestones: Milestone[];
   summary: { totalDue: number; totalPaid: number; balance: number; overdue: number };
 }
@@ -130,6 +130,15 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
       (m) => m.Status !== "Paid" && m.Status !== "Waived" &&
              Number(m.AmountDue) - Number(m.AmountPaid) > 0
     ), [bk]);
+
+  // On Account Adjustment is a full-booking hold: the sweep won't settle any
+  // milestone until the on-account pool covers the booking's entire
+  // GrandTotal, so the button is disabled (with an explanatory banner) until
+  // that's true — matches the backend gate in applyOnAccountToMilestone.
+  const bookingGrandTotal = Number(bk?.booking?.GrandTotal) || 0;
+  const bookingOnAccountReceived = Number(bk?.booking?.OnAccountTotalReceived) || 0;
+  const notFullyPaid = bookingGrandTotal > 0 && bookingOnAccountReceived < bookingGrandTotal;
+  const fullPaymentShortfall = Math.max(0, bookingGrandTotal - bookingOnAccountReceived);
 
   const sel = outstanding.find((m) => m.Id === selId);
   const maxAmt = sel
@@ -191,9 +200,28 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
             {deposit.UnitNo && <><span>·</span><span>{deposit.UnitNo}</span></>}
           </div>
 
+          {notFullyPaid && (
+            <div className="rounded-lg border border-border bg-muted/10 px-2.5 py-2">
+              <div className="flex items-center justify-between text-[11px] mb-1.5">
+                <span className="font-semibold text-foreground flex items-center gap-1.5">
+                  <Wallet size={11} className="text-blue-600 dark:text-blue-400" /> Held on-account — auto-settles once fully funded
+                </span>
+                <span className="text-muted-foreground tabular-nums">
+                  {formatINR(bookingOnAccountReceived)} of {formatINR(bookingGrandTotal)}
+                </span>
+              </div>
+              <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                <div className="h-full rounded-full bg-blue-500" style={{ width: `${Math.min(100, (bookingOnAccountReceived / bookingGrandTotal) * 100)}%` }} />
+              </div>
+              <div className="text-[11px] text-muted-foreground mt-1.5">
+                No action needed — ₹{fullPaymentShortfall.toLocaleString("en-IN")} more coming in on-account will automatically settle every eligible milestone, in order. Manual Apply below is a fallback only.
+              </div>
+            </div>
+          )}
+
           {/* Milestone list */}
           <div>
-            <div className="text-xs font-medium mb-1.5 text-muted-foreground uppercase tracking-wide">Select Milestone to Apply Against</div>
+            <div className="text-xs font-medium mb-1.5 text-muted-foreground uppercase tracking-wide">Select Milestone to Apply Against (manual fallback)</div>
             {isLoading ? (
               <div className="flex items-center gap-2 py-5 text-muted-foreground text-sm justify-center">
                 <Loader2 size={14} className="animate-spin" /> Loading…
@@ -254,10 +282,18 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
 
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={onClose} className="px-3.5 py-1.5 text-sm rounded-lg border border-border hover:bg-muted">Cancel</button>
-            <button onClick={apply} disabled={!selId || busy}
-              className="px-3.5 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
-              {busy ? <><Loader2 size={13} className="animate-spin" />Applying…</> : <><ArrowRightLeft size={13} />Apply to Milestone</>}
-            </button>
+            {notFullyPaid ? (
+              <span title={`Auto-settles once fully funded — ₹${fullPaymentShortfall.toLocaleString("en-IN")} more coming in on-account will trigger this automatically`}
+                className="px-3.5 py-1.5 text-sm rounded-lg border border-border text-muted-foreground flex items-center gap-2 cursor-not-allowed select-none">
+                <Wallet size={13} />Auto-settles once fully funded
+              </span>
+            ) : (
+              <button onClick={apply} disabled={!selId || busy}
+                title="This booking is fully funded and should auto-settle — use this only as a manual fallback"
+                className="px-3.5 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
+                {busy ? <><Loader2 size={13} className="animate-spin" />Applying…</> : <><ArrowRightLeft size={13} />Apply Manually</>}
+              </button>
+            )}
           </div>
         </div>
       </DialogContent>
@@ -307,7 +343,8 @@ function MilestoneSubTable({ bookingId, deposit }: { bookingId: number; deposit:
               const bal = Number(m.AmountDue) - paid;
               const pct = Number(m.AmountDue) > 0 ? (paid / Number(m.AmountDue)) * 100 : 0;
               const overdue = m.DueDate && new Date(m.DueDate) < new Date() && m.Status !== "Paid" && m.Status !== "Waived";
-              const barColor = m.Status === "Paid" ? "bg-emerald-500" : overdue ? "bg-red-500" : "bg-amber-500";
+              const virtuallyCovered = m.Status !== "Paid" && m.Status !== "Waived" && (m as any).VirtuallyCovered;
+              const barColor = m.Status === "Paid" ? "bg-emerald-500" : virtuallyCovered ? "bg-blue-500" : overdue ? "bg-red-500" : "bg-amber-500";
               return (
                 <div key={m.Id}
                   className="shrink-0 w-[168px] rounded-lg border border-border bg-card px-2.5 py-2">
@@ -317,6 +354,8 @@ function MilestoneSubTable({ bookingId, deposit }: { bookingId: number; deposit:
                       ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">Paid</span>
                       : m.Status === "Waived"
                       ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">Waived</span>
+                      : virtuallyCovered
+                      ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400" title="Money is on-account for this milestone; auto-settles once fully funded">Paid (on-account)</span>
                       : overdue
                       ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">Overdue</span>
                       : <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-400">Pending</span>}

@@ -8,6 +8,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { validateBody } = require("../middleware/validateRequest");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -1020,17 +1021,27 @@ async function ebHasDirectItemsData(pool) {
   return _ebHasDirectItemsData;
 }
 
-// Classifies one Expense Head as "Direct Expense" or "Indirect Expense" for
-// the Expense Register report's per-filter columns — reuses the same rule
-// financialStatements.js's classifyExpenseBucketName() applies for the P&L
-// (a bucket name matching "direct expense" or "project"/"construction" is
-// Direct; everything else, tax included, folds into Indirect there too).
-// Walks the AccountGroup ancestor chain via a recursive CTE to the nearest
-// ancestor that's a direct child of the EXPENSES root, then classifies that
-// bucket's own name — same two-step ("find the Schedule-III bucket, then
-// classify its name") approach, just scoped to one head instead of the
-// whole chart of accounts, since only the currently-filtered head's type
-// is ever needed here.
+// Classifies one Expense Head as "Direct Expense", "Indirect Expense", or
+// "Work in Progress" for the Expense Register report's per-filter columns —
+// reuses the same rule financialStatements.js's classifyExpenseBucketName()
+// applies for the P&L (a bucket name matching "direct expense" or
+// "project"/"construction" is Direct; everything else, tax included, folds
+// into Indirect there too). Walks the AccountGroup ancestor chain to the
+// nearest ancestor that's a direct child of the EXPENSES root, then
+// classifies that bucket's own name — same two-step ("find the Schedule-III
+// bucket, then classify its name") approach, just scoped to one head instead
+// of the whole chart of accounts, since only the currently-filtered head's
+// type is ever needed here.
+//
+// A real invoice can be booked straight against a Work-in-Progress head —
+// job-costing construction cost into the CURRENT ASSETS balance-sheet asset
+// (see financialStatements.js's RE_WIP) rather than a true P&L expense
+// head — so WIP is checked first, anywhere in the ancestor chain, same
+// "classify by name regardless of nesting" precedent. This must come before
+// the EXPENSES-bucket walk below: a WIP head has no ancestor under EXPENSES
+// at all, so that walk finds nothing and used to silently fall through to a
+// default of "Indirect Expense" — wrongly showing WIP spend as an Indirect
+// Expense in the register instead of what it actually is.
 async function classifyExpenseHeadType(pool, headId) {
   const result = await pool.request().input("HeadId", sql.Int, headId).query(`
     ;WITH grp AS (
@@ -1043,13 +1054,22 @@ async function classifyExpenseHeadType(pool, headId) {
       JOIN grp ON ag.AGId = grp.ParentGroupId
       WHERE grp.lvl < 20
     )
-    SELECT TOP 1 g.Name AS BucketName
-    FROM grp g
-    JOIN dbo.AccountGroup rootGrp ON rootGrp.AGId = g.ParentGroupId
-    WHERE rootGrp.Name = 'EXPENSES' AND rootGrp.ParentGroupId IS NULL
-    ORDER BY g.lvl
+    SELECT AGId, Name, ParentGroupId FROM grp
   `);
-  const bucketName = (result.recordset[0]?.BucketName || "").toLowerCase();
+  const chain = result.recordset;
+  if (chain.length === 0) return null;
+
+  if (chain.some((g) => /work.?in.?progress/i.test(g.Name || ""))) return "Work in Progress";
+
+  const byId = new Map(chain.map((g) => [g.AGId, g]));
+  const bucket = chain.find((g) => {
+    const parent = g.ParentGroupId != null ? byId.get(g.ParentGroupId) : null;
+    return parent && parent.Name === "EXPENSES" && parent.ParentGroupId == null;
+  });
+  // Not actually under EXPENSES at all (e.g. some other balance-sheet head
+  // booked against directly) — not an expense type to mislabel either way.
+  if (!bucket) return null;
+  const bucketName = (bucket.Name || "").toLowerCase();
   const isDirect = /\bdirect expense/.test(bucketName) || /project|construction/.test(bucketName);
   return isDirect ? "Direct Expense" : "Indirect Expense";
 }
@@ -1839,6 +1859,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
     err.status = 400;
     throw err;
   }
+  await assertProjectVisibleToCompany(pool, EProjectName, ECompanyId);
 
   const hasPayTermCol = await ebHasPaymentTermId(pool);
   const hasDirectItemsCol = await ebHasDirectItemsData(pool);
@@ -2304,6 +2325,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
   }
 
   const pool = getPool();
+  try {
+    await assertProjectVisibleToCompany(pool, EProjectName, ECompanyId);
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message });
+  }
   const hasPayTermCol = await ebHasPaymentTermId(pool);
   const hasDirectItemsCol = await ebHasDirectItemsData(pool);
   const transaction = pool.transaction();
@@ -3412,6 +3438,7 @@ router.put(
       return res.status(400).json({ error: "Invalid record id" });
 
     let wasApproved = false;
+    let wasRejected = false;
     let beforeSnapshot = null;
     try {
       // A Pending record is freely editable — it hasn't been approved yet,
@@ -3420,6 +3447,7 @@ router.put(
       // below is for; Pending never reaches that path.
       const currentStatus = await getRecordStatus("expense-booking", numericId);
       wasApproved = currentStatus === "Approved";
+      wasRejected = currentStatus === "Rejected";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.ExpenseBooking", "Eid", numericId);
       }
@@ -3500,6 +3528,7 @@ router.put(
 
     try {
       const pool = getPool();
+      await assertProjectVisibleToCompany(pool, EProjectName, ECompanyId);
       const hasPayTermColPut = await ebHasPaymentTermId(pool);
       const hasDirectItemsColPut = await ebHasDirectItemsData(pool);
 
@@ -3797,10 +3826,32 @@ router.put(
         }
       }
 
-      res.json({ message: "Expense updated successfully" });
+      // A corrected, previously-Rejected booking goes straight back into
+      // the approval queue on save — no separate "Submit" click.
+      // transition()'s Pending branch writes a fresh Level=0 marker, which
+      // restarts approval at level 1 regardless of what was approved before
+      // the rejection (see approvalService.js's currentCycleCutoffSql).
+      let resubmitted = false;
+      if (wasRejected) {
+        try {
+          await transition("expense-booking", numericId, "Pending", req.user?.email || req.user?.name, req.user?.role);
+          resubmitted = true;
+        } catch (resubmitErr) {
+          console.error("[expense-booking] auto-resubmit after edit failed:", resubmitErr.message);
+          return res.status(207).json({
+            message: "Expense updated, but could not be re-submitted for approval — submit it manually.",
+            resubmitError: resubmitErr.message,
+          });
+        }
+      }
+
+      res.json({
+        message: resubmitted ? "Expense updated and re-submitted for approval" : "Expense updated successfully",
+        resubmitted,
+      });
     } catch (err) {
       console.error("Update error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(err.status || 500).json({ error: err.message });
     }
   },
 );
@@ -3939,6 +3990,8 @@ router.put("/:id/approve", requirePageRight("expense-booking", "edit"), async (r
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
 
     // Initialize EBillStatus/ETotalPaid/ERemainingAmount the moment the
@@ -3984,6 +4037,7 @@ router.put(
         userEmail,
         req.user?.role,
         note || null,
+        req.user?.userId ?? req.user?.id ?? null,
       );
       await bumpCacheVersion("expense-booking");
       await bumpCacheVersion("expense-booking-options");

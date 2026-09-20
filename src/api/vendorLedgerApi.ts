@@ -83,34 +83,40 @@ export const searchLedgerHeads = async (q: string): Promise<LedgerHead[]> => {
 
 export const getLedgerSummary = async (
   headId: number,
-  params: { from?: string; to?: string } = {},
+  params: { from?: string; to?: string; companyId?: number; projectId?: number } = {},
 ): Promise<LedgerSummary> => {
   const qs = new URLSearchParams();
   if (params.from) qs.set("from", params.from);
   if (params.to) qs.set("to", params.to);
+  if (params.companyId) qs.set("companyId", String(params.companyId));
+  if (params.projectId) qs.set("projectId", String(params.projectId));
   const res = await fetchWithAuth(`${BASE}/${headId}/summary?${qs.toString()}`);
   return handleResponse<LedgerSummary>(res);
 };
 
 export const getLedgerTransactions = async (
   headId: number,
-  params: { from?: string; to?: string; limit?: number } = {},
+  params: { from?: string; to?: string; limit?: number; companyId?: number; projectId?: number } = {},
 ): Promise<LedgerTransactionsResponse> => {
   const qs = new URLSearchParams();
   if (params.from) qs.set("from", params.from);
   if (params.to) qs.set("to", params.to);
   if (params.limit) qs.set("limit", String(params.limit));
+  if (params.companyId) qs.set("companyId", String(params.companyId));
+  if (params.projectId) qs.set("projectId", String(params.projectId));
   const res = await fetchWithAuth(`${BASE}/${headId}/transactions?${qs.toString()}`);
   return handleResponse<LedgerTransactionsResponse>(res);
 };
 
 export const getAllLedgerTransactions = async (
-  params: { from?: string; to?: string; limit?: number } = {},
+  params: { from?: string; to?: string; limit?: number; companyId?: number; projectId?: number } = {},
 ): Promise<AllLedgerTransactionsResponse> => {
   const qs = new URLSearchParams();
   if (params.from) qs.set("from", params.from);
   if (params.to) qs.set("to", params.to);
   if (params.limit) qs.set("limit", String(params.limit));
+  if (params.companyId) qs.set("companyId", String(params.companyId));
+  if (params.projectId) qs.set("projectId", String(params.projectId));
   const res = await fetchWithAuth(`${BASE}/all-transactions?${qs.toString()}`);
   return handleResponse<AllLedgerTransactionsResponse>(res);
 };

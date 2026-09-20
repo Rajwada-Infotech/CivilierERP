@@ -37,6 +37,7 @@ import {
   Landmark,
   UserCheck,
   FileWarning,
+  Undo2,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
@@ -151,6 +152,13 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/material-issues",
     label: "Material Issues",
   },
+  "material-issue-return": {
+    icon: Undo2,
+    color: "text-lime-500 bg-lime-500/10",
+    navPath: "/material/issue-return",
+    apiEndpoint: "/api/material-issue-return",
+    label: "Material Issue Returns",
+  },
   "sale-orders": {
     icon: ShoppingCart,
     color: "text-fuchsia-500 bg-fuchsia-500/10",
@@ -164,6 +172,13 @@ export const MODULE_CONFIG: Record<
     navPath: "/material/vehicle-in-out",
     apiEndpoint: "/api/vehicle-in-out",
     label: "Vehicle In/Out",
+  },
+  "stock-transfers": {
+    icon: Warehouse,
+    color: "text-teal-500 bg-teal-500/10",
+    navPath: "/material/stock-transfer",
+    apiEndpoint: "/api/stock-transfers",
+    label: "Stock Transfer",
   },
   "journal-voucher": {
     icon: Receipt,
@@ -258,6 +273,31 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/crm/booking-amendments",
     label: "Booking Amendments",
   },
+  // Was missing entirely — CrmRefund already had a real Pending/Approve/
+  // Reject cycle, but with no entry here it never surfaced in the
+  // centralized inbox, only via CrmRefunds.tsx's own inline actions —
+  // inconsistent with every sibling CRM module (cancellations, agreements,
+  // brokerage, NOC, booking amendments), which all appear in both places.
+  "crm-refunds": {
+    icon: Undo2,
+    color: "text-orange-600 bg-orange-600/10",
+    navPath: "/crm/refunds",
+    apiEndpoint: "/api/crm/refunds",
+    label: "CRM Refunds",
+  },
+  // Second, separate approval tier (Finance's own sign-off, distinct from
+  // the CRM checker step above) — same split as crm-agreement-date vs.
+  // crm-agreements. Its /:id/finance-approve route needs a company-bank
+  // pick the inbox can't collect inline, so Approve always hands off to the
+  // real page (see REVIEW_INSTEAD_LABEL below); Reject needs no extra input
+  // and works as a normal one-click via the /finance/reject alias route.
+  "crm-refunds-finance": {
+    icon: Undo2,
+    color: "text-orange-700 bg-orange-700/10",
+    navPath: "/crm/refunds",
+    apiEndpoint: "/api/crm/refunds",
+    label: "CRM Refunds (Finance)",
+  },
   // Was missing entirely — without this, ApprovalActions fell back to
   // `/api/${item.Module}` = "/api/contracts" (plural), a 404: the route is
   // mounted at "/api/contract" (singular). Approve/Reject on Contract rows
@@ -290,11 +330,13 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
   "expense-booking": "ExpenseBooking",
   payments: "NewPayment",
   "material-issues": "MaterialIssues",
+  "material-issue-return": "MaterialIssueReturn",
   "material-requests": "MaterialRequests",
   boq: "BOQ",
   "work-done": "WorkDone",
   "sale-orders": "SaleOrders",
   "vehicle-in-out": "VehicleInOut",
+  "stock-transfers": "StockTransfers",
   contracts: "Contract",
 };
 
@@ -310,7 +352,8 @@ const CRM_BOOKING_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "d
 // approvalService's MODULE_APPROVER_ROLE_OVERRIDES; this only controls
 // button visibility (and which /:id/<suffix>/approve path gets hit) here.
 export const DATE_APPROVER_ROLES = ["super_admin"];
-export const SUB_GATE_SUFFIX: Record<string, string> = { "crm-agreement-date": "date", "crm-sales-deed-director": "director" };
+export const SUB_GATE_SUFFIX: Record<string, string> = { "crm-agreement-date": "date", "crm-sales-deed-director": "director", "crm-refunds-finance": "finance" };
+export const REFUND_FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
 export const SUB_GATE_MODULES = new Set(Object.keys(SUB_GATE_SUFFIX));
 
 // Modules the backend keeps deliberately role-locked (see
@@ -333,6 +376,11 @@ const ALL_MODULES = Object.keys(MODULE_CONFIG);
 const REVIEW_INSTEAD_LABEL: Record<string, string> = {
   "crm-bookings": "Open Booking",
   "crm-brokerage": "Review & Approve",
+  // finance-approve needs a company-bank pick (RefundBankLHeadId) the inbox
+  // has no field for — hands off to CrmRefunds.tsx's own Finance Approve
+  // dialog instead of a one-click that would 400 whenever no bank is
+  // already set on the refund.
+  "crm-refunds-finance": "Finance Approve",
 };
 
 // Modules whose page already supports a "?view=<RecordId>" deep link that
@@ -451,6 +499,7 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "material-issues":      "border-cyan-500",
   "sale-orders":          "border-fuchsia-500",
   "vehicle-in-out":       "border-sky-500",
+  "stock-transfers":      "border-teal-500",
   "journal-voucher":      "border-amber-600",
   "inter-company-transfer":"border-fuchsia-600",
   "fund-transfer":        "border-violet-600",
@@ -463,6 +512,8 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "crm-brokerage":        "border-amber-500",
   "crm-cancellations":    "border-rose-500",
   "crm-noc":              "border-teal-500",
+  "crm-refunds":          "border-orange-600",
+  "crm-refunds-finance":  "border-orange-700",
 };
 
 const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
@@ -481,6 +532,7 @@ const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
   "fund-transfer": { icon: "text-violet-600", active: "bg-violet-600 border-violet-600" },
   "sale-orders": { icon: "text-lime-600", active: "bg-lime-600 border-lime-600" },
   "vehicle-in-out": { icon: "text-sky-600", active: "bg-sky-600 border-sky-600" },
+  "stock-transfers": { icon: "text-teal-500", active: "bg-teal-500 border-teal-500" },
   "crm-money-receipts": { icon: "text-teal-600", active: "bg-teal-600 border-teal-600" },
   contracts: { icon: "text-purple-500", active: "bg-purple-500 border-purple-500" },
 };
@@ -662,7 +714,8 @@ const InboxRow: React.FC<{
         endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
         actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
         approverRoles={
-          SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+          item.Module === "crm-refunds-finance" ? REFUND_FINANCE_APPROVER_ROLES
+          : SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
           : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
           : item.Module === "crm-money-receipts" ? MR_APPROVER_ROLES
           : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
