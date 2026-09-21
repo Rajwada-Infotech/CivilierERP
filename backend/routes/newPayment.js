@@ -426,6 +426,11 @@ router.get("/cheque-lots", async (req, res) => {
           - ISNULL((
               SELECT COUNT(*) FROM dbo.CancelledCheque cc
               WHERE cc.ChequeLotId = cm.CId
+            ), 0)
+          - ISNULL((
+              SELECT COUNT(*) FROM dbo.JournalVoucher jv
+              WHERE jv.ChequeLotId = cm.CId AND jv.ChequeNo IS NOT NULL
+                AND jv.Status NOT IN ('Rejected', 'Deleted')
             ), 0) AS RemainingCheques
       FROM dbo.ChequeMaster cm
       LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
@@ -491,6 +496,15 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
           AND Status NOT IN ('Rejected', 'Deleted')
       `);
     ftUsedRes.recordset.forEach((r) => usedSet.add(String(r.ChequeNo)));
+
+    // ...and by a Journal Voucher that records a cheque settlement.
+    const jvUsedRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
+      .query(`
+        SELECT ChequeNo FROM dbo.JournalVoucher
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo IS NOT NULL
+          AND Status NOT IN ('Rejected', 'Deleted')
+      `);
+    jvUsedRes.recordset.forEach((r) => usedSet.add(String(r.ChequeNo)));
 
     // Same for Loan Sanctions
     const lsUsedRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
@@ -594,6 +608,21 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
         .json({ error: "Cheque number already used in a Fund Transfer" });
     }
 
+    // ...and if a Journal Voucher claimed it.
+    const jvDupRes = await pool
+      .request()
+      .input("ChequeLotId", sql.Int, lotId)
+      .input("ChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
+        SELECT COUNT(*) AS cnt FROM dbo.JournalVoucher
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo
+          AND Status NOT IN ('Rejected', 'Deleted')
+      `);
+    if (jvDupRes.recordset[0].cnt > 0) {
+      return res
+        .status(409)
+        .json({ error: "Cheque number already used in a Journal Voucher" });
+    }
+
     // Also block if a Loan Sanction claimed this number from this lot.
     const lsDupRes = await pool
       .request()
@@ -635,6 +664,9 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
           WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
             AND Status NOT IN ('Rejected', 'Deleted')) +
         (SELECT COUNT(*) FROM dbo.LoanSanction
+          WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
+            AND Status NOT IN ('Rejected', 'Deleted')) +
+        (SELECT COUNT(*) FROM dbo.JournalVoucher
           WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
             AND Status NOT IN ('Rejected', 'Deleted')) AS usedCount
     `);

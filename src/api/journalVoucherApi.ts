@@ -40,6 +40,15 @@ export interface JournalVoucherSummary {
   CreatedAt: string;
   TotalAmount: number | null;
   PostedToGL?: boolean;
+  /** Payment mode + settlement detail (all null on a plain journal). */
+  Mode?: string | null;
+  BankId?: number | null;
+  BankName?: string | null;
+  ChequeLotId?: number | null;
+  ChequeLotNumber?: string | null;
+  ChequeNo?: string | null;
+  ChequeDate?: string | null;
+  DigitalRefNumber?: string | null;
 }
 
 export interface JournalVoucherLedgerOption {
@@ -69,6 +78,12 @@ export interface JournalVoucherPayload {
   CompanyId?: number | null;
   ProjectId?: number | null;
   lines: JournalVoucherLine[];
+  Mode?: string | null;
+  BankId?: number | null;
+  ChequeLotId?: number | null;
+  ChequeNo?: string | null;
+  ChequeDate?: string | null;
+  DigitalRefNumber?: string | null;
 }
 
 export interface JournalVoucherFilters {

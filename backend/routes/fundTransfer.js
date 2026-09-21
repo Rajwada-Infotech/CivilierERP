@@ -88,6 +88,19 @@ async function assertChequeAvailable(pool, lotId, chequeNo, excludeFTId) {
     throw err;
   }
 
+  const dupJV = await pool.request()
+    .input("ChequeLotId", sql.Int, lotId)
+    .input("ChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
+      SELECT COUNT(*) AS cnt FROM dbo.JournalVoucher
+      WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo
+        AND Status NOT IN ('Rejected', 'Deleted')
+    `);
+  if (dupJV.recordset[0].cnt > 0) {
+    const err = new Error("Cheque number already used in a Journal Voucher.");
+    err.status = 409;
+    throw err;
+  }
+
   const cancelled = await pool.request()
     .input("ChequeLotId", sql.Int, lotId)
     .input("ChequeNo", sql.NVarChar(50), String(chequeNo))
