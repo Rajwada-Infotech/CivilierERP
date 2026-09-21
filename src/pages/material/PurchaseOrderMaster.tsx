@@ -613,6 +613,17 @@ const PurchaseOrderMaster: React.FC = () => {
     const compState = normalizeState(companyDetails?.state);
     return !supState || !compState || supState === compState;
   }, [supplierDetails?.LGSTState, companyDetails?.state]);
+  // A non-GST (Unregistered) supplier can't charge GST at all — an item's
+  // own HSN/item-master rate never applies, regardless of what it's tagged
+  // with. LGSTType is explicit when set; for older rows saved before it
+  // existed (null), fall back to inferring from whether a GST number is on
+  // file, same as SupplierMaster.tsx's own normalizeGSTType.
+  const supplierIsGstRegistered = useMemo(() => {
+    if (!supplierDetails) return true; // no supplier picked yet — don't block entry
+    if (supplierDetails.LGSTType === "Unregistered") return false;
+    if (supplierDetails.LGSTType) return true;
+    return !!supplierDetails.LGST?.trim();
+  }, [supplierDetails]);
   // Reuses CompanyDetails shape — the enterprise table holds Project rows
   // too, so the same getCompanyDetails() lookup gives us the project's
   // address to show as the PO's delivery address.
@@ -1607,13 +1618,17 @@ const PurchaseOrderMaster: React.FC = () => {
     // CGST+SGST; different state → IGST. This is why the identical item can
     // price out differently on two POs raised against two different-state
     // suppliers.
-    const { cgstRate, sgstRate, igstRate, gstRate } = resolveLineGstSplit(
-      Number(item.cgst ?? 0),
-      Number(item.sgst ?? 0),
-      Number(item.igst ?? 0),
-      item.resolvedGstRate ?? 0,
-      isIntraState,
-    );
+    // Skip the HSN/item-master GST rate entirely for a non-GST supplier —
+    // see supplierIsGstRegistered above.
+    const { cgstRate, sgstRate, igstRate, gstRate } = supplierIsGstRegistered
+      ? resolveLineGstSplit(
+          Number(item.cgst ?? 0),
+          Number(item.sgst ?? 0),
+          Number(item.igst ?? 0),
+          item.resolvedGstRate ?? 0,
+          isIntraState,
+        )
+      : { cgstRate: 0, sgstRate: 0, igstRate: 0, gstRate: 0 };
 
     updateLine(idx, {
       itemId,
