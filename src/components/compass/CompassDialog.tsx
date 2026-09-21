@@ -166,7 +166,7 @@ export function CompassDialog() {
             <span className="flex items-center gap-1"><Kbd>esc</Kbd> close</span>
           </span>
           <span className="hidden sm:flex items-center gap-1">
-            <Kbd>{shortcut.alt}</Kbd> or <Kbd>{shortcut.primary}</Kbd>
+            <Kbd>{shortcut.primary}</Kbd>
           </span>
         </div>
       </DialogContent>

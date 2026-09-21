@@ -6,6 +6,7 @@ import { useCompassRegistry, type CompassEntry } from "./compassRegistry";
 import {
   CompassContext,
   type CompassContextValue,
+  type HeldKeys,
   getShortcutLabels,
   isCompassShortcut,
 } from "./useCompass";
@@ -77,15 +78,43 @@ export function CompassProvider({ children }: { children: React.ReactNode }) {
     [recentRoutes, pathname, byRoute],
   );
 
-  // Global hotkey. Capture phase so a focused input can't swallow it.
+  // Global hotkey: Enter+Space chord. Capture phase so a focused input can't
+  // swallow it. Neither key is a modifier, so we track which one is
+  // currently held ourselves — a keydown of the other while it's held opens
+  // Compass. held.current only reflects a raw key being down, not whether
+  // it's "part of" a chord attempt, so a Space keydown while Enter happens to
+  // be held (e.g. from an unrelated rapid Enter-then-Space typed elsewhere)
+  // will still trigger — an accepted false-positive for a rarely-typed pair.
   useEffect(() => {
+    const held: HeldKeys = { enter: false, space: false };
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.repeat || e.isComposing || !isCompassShortcut(e)) return;
-      e.preventDefault();
-      setOpen((o) => !o);
+      if (e.isComposing) return;
+      if (!e.repeat && isCompassShortcut(e, held)) {
+        e.preventDefault();
+        setOpen((o) => !o);
+      }
+      if (e.code === "Enter" || e.code === "NumpadEnter") held.enter = true;
+      if (e.code === "Space") held.space = true;
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Enter" || e.code === "NumpadEnter") held.enter = false;
+      if (e.code === "Space") held.space = false;
+    };
+    // A held key's keyup can land outside the window (blur, devtools, etc.)
+    // and never fire — reset both on blur so a stuck "held" flag can't
+    // silently arm the chord later.
+    const onBlur = () => {
+      held.enter = false;
+      held.space = false;
     };
     window.addEventListener("keydown", onKeyDown, true);
-    return () => window.removeEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", onBlur);
+    };
   }, []);
 
   // Browser back/forward (or any navigation) while open shouldn't leave it hanging.
@@ -105,10 +134,7 @@ export function CompassProvider({ children }: { children: React.ReactNode }) {
     [navigate],
   );
 
-  const shortcut = useMemo(
-    () => getShortcutLabels(typeof navigator !== "undefined" ? navigator.platform || navigator.userAgent : ""),
-    [],
-  );
+  const shortcut = useMemo(() => getShortcutLabels(), []);
 
   const value = useMemo<CompassContextValue>(
     () => ({ open, openCompass, closeCompass, toggleCompass, entries, recent, select, shortcut }),

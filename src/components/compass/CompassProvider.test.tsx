@@ -59,7 +59,15 @@ const mount = (path = "/finance") => {
   );
 };
 
-const press = (init: KeyboardEventInit) => fireEvent.keyDown(window, { code: "Space", key: " ", ...init });
+// Enter+Space chord: hold Enter, tap Space, release both — one full press
+// per call, held state clean afterward so repeated calls behave like
+// repeated real presses (and thus toggle open/closed each time).
+const press = () => {
+  fireEvent.keyDown(window, { code: "Enter", key: "Enter" });
+  fireEvent.keyDown(window, { code: "Space", key: " " });
+  fireEvent.keyUp(window, { code: "Space", key: " " });
+  fireEvent.keyUp(window, { code: "Enter", key: "Enter" });
+};
 const input = () => screen.getByPlaceholderText(/search pages/i);
 const isOpen = () => screen.queryByRole("dialog") !== null;
 
@@ -90,55 +98,69 @@ afterEach(() => {
 });
 
 describe("Compass hotkeys", () => {
-  it("opens and closes with Alt+Space", async () => {
+  it("opens and closes with Enter+Space", async () => {
     mount();
     expect(isOpen()).toBe(false);
-    press({ altKey: true });
+    press();
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
-    press({ altKey: true });
+    press();
     await waitFor(() => expect(isOpen()).toBe(false));
   });
 
-  it("opens with Super+Space", async () => {
+  it("opens holding Space first, then Enter", async () => {
     mount();
-    press({ metaKey: true });
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    fireEvent.keyDown(window, { code: "Enter", key: "Enter" });
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
-  it("still opens with Ctrl+K", async () => {
+  it("does not open on Enter alone or Space alone", () => {
+    mount();
+    fireEvent.keyDown(window, { code: "Enter", key: "Enter" });
+    fireEvent.keyUp(window, { code: "Enter", key: "Enter" });
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    fireEvent.keyUp(window, { code: "Space", key: " " });
+    expect(isOpen()).toBe(false);
+  });
+
+  it("no longer opens with the old Ctrl+K/Alt+Space/Super+Space chords", () => {
     mount();
     fireEvent.keyDown(window, { key: "k", code: "KeyK", ctrlKey: true });
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
-  });
-
-  it("ignores lookalike chords", () => {
-    mount();
-    press({ altKey: true, shiftKey: true });
-    press({ ctrlKey: true });
-    press({});
-    press({ altKey: true, metaKey: true });
-    fireEvent.keyDown(window, { key: "k", code: "KeyK", altKey: true });
+    fireEvent.keyDown(window, { code: "Space", key: " ", altKey: true });
+    fireEvent.keyDown(window, { code: "Space", key: " ", metaKey: true });
     expect(isOpen()).toBe(false);
   });
 
-  it("ignores a held-down key (no flicker)", () => {
+  it("ignores the chord with an extra modifier held", () => {
     mount();
-    press({ altKey: true, repeat: true });
+    fireEvent.keyDown(window, { code: "Enter", key: "Enter", shiftKey: true });
+    fireEvent.keyDown(window, { code: "Space", key: " ", shiftKey: true });
     expect(isOpen()).toBe(false);
   });
 
-  it("prevents the browser default so Alt+Space doesn't also fire its own handler", () => {
+  it("ignores OS auto-repeat of the second key (no flicker)", () => {
     mount();
-    const ev = new KeyboardEvent("keydown", { code: "Space", key: " ", altKey: true, cancelable: true, bubbles: true });
-    window.dispatchEvent(ev);
-    expect(ev.defaultPrevented).toBe(true);
+    fireEvent.keyDown(window, { code: "Enter", key: "Enter" });
+    fireEvent.keyDown(window, { code: "Space", key: " " });
+    expect(isOpen()).toBe(true);
+    fireEvent.keyDown(window, { code: "Space", key: " ", repeat: true });
+    expect(isOpen()).toBe(true); // still open, not toggled closed again
+  });
+
+  it("prevents the browser default so Enter+Space doesn't also submit a form or scroll", () => {
+    mount();
+    const kdEnter = new KeyboardEvent("keydown", { code: "Enter", key: "Enter", cancelable: true, bubbles: true });
+    window.dispatchEvent(kdEnter);
+    const kdSpace = new KeyboardEvent("keydown", { code: "Space", key: " ", cancelable: true, bubbles: true });
+    window.dispatchEvent(kdSpace);
+    expect(kdSpace.defaultPrevented).toBe(true);
   });
 });
 
 describe("Compass search and navigation", () => {
   it("finds a page by an alias and groups it under its module", async () => {
     mount();
-    press({ altKey: true });
+    press();
     await screen.findByRole("dialog");
     fireEvent.change(input(), { target: { value: "reconciliation" } });
     expect(await screen.findByText("BRS")).toBeInTheDocument();
@@ -147,7 +169,7 @@ describe("Compass search and navigation", () => {
 
   it("navigates to the highlighted result on Enter and closes", async () => {
     mount("/finance");
-    press({ altKey: true });
+    press();
     await screen.findByRole("dialog");
     fireEvent.change(input(), { target: { value: "reconciliation" } });
     const item = await screen.findByText("BRS");
@@ -159,7 +181,7 @@ describe("Compass search and navigation", () => {
 
   it("navigates on click too", async () => {
     mount("/finance");
-    press({ altKey: true });
+    press();
     await screen.findByRole("dialog");
     fireEvent.change(input(), { target: { value: "trial balance" } });
     fireEvent.click(await screen.findByText("Trial Balance"));
@@ -168,7 +190,7 @@ describe("Compass search and navigation", () => {
 
   it("shows a friendly empty state", async () => {
     mount();
-    press({ altKey: true });
+    press();
     await screen.findByRole("dialog");
     fireEvent.change(input(), { target: { value: "zzzzqqqq" } });
     expect(await screen.findByText(/No pages match/i)).toBeInTheDocument();
@@ -176,19 +198,19 @@ describe("Compass search and navigation", () => {
 
   it("clears the query when reopened", async () => {
     mount();
-    press({ altKey: true });
+    press();
     await screen.findByRole("dialog");
     fireEvent.change(input(), { target: { value: "invoice" } });
-    press({ altKey: true });
+    press();
     await waitFor(() => expect(isOpen()).toBe(false));
-    press({ altKey: true });
+    press();
     await screen.findByRole("dialog");
     expect(input()).toHaveValue("");
   });
 
   it("empty state offers module shortcuts instead of a blank box", async () => {
     mount();
-    press({ altKey: true });
+    press();
     await screen.findByRole("dialog");
     expect(screen.getByText("Jump to a module")).toBeInTheDocument();
     expect(screen.queryByText("Recent")).not.toBeInTheDocument(); // nothing visited yet
@@ -199,7 +221,7 @@ describe("Compass recent pages", () => {
   it("records visited pages per user and lists them (excluding the current page)", async () => {
     mount("/finance");
     // /finance was tracked on mount; go somewhere else through Compass
-    press({ altKey: true });
+    press();
     await screen.findByRole("dialog");
     fireEvent.change(input(), { target: { value: "trial balance" } });
     fireEvent.click(await screen.findByText("Trial Balance"));
@@ -208,7 +230,7 @@ describe("Compass recent pages", () => {
     const stored = JSON.parse(localStorage.getItem("compass:recent:v1:u1") ?? "[]");
     expect(stored).toEqual(["/trial-balance", "/finance"]);
 
-    press({ altKey: true });
+    press();
     await screen.findByRole("dialog");
     expect(screen.getByText("Recent")).toBeInTheDocument();
     expect(screen.getByText("Proceeding")).toBeInTheDocument(); // /finance's label
@@ -217,7 +239,7 @@ describe("Compass recent pages", () => {
   it("ignores stored routes the user can no longer open", async () => {
     localStorage.setItem("compass:recent:v1:u1", JSON.stringify(["/does-not-exist"]));
     mount("/finance");
-    press({ altKey: true });
+    press();
     await screen.findByRole("dialog");
     expect(screen.queryByText("Recent")).not.toBeInTheDocument();
   });
@@ -225,7 +247,7 @@ describe("Compass recent pages", () => {
   it("survives corrupt storage", async () => {
     localStorage.setItem("compass:recent:v1:u1", "{not json");
     mount("/finance");
-    press({ altKey: true });
+    press();
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 });

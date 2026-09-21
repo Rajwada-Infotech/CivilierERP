@@ -31,36 +31,39 @@ export function useCompass(): CompassContextValue {
 
 type KeyLike = Pick<KeyboardEvent, "key" | "code" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">;
 
+/** Which of the chord's two keys is currently held down (tracked by the caller via keydown/keyup). */
+export interface HeldKeys {
+  enter: boolean;
+  space: boolean;
+}
+
+function isSpaceKey(e: KeyLike): boolean {
+  // `code` checked before `key` because macOS reports Option+Space's key as
+  // a non-breaking space rather than " ".
+  return e.code === "Space" || e.key === " " || e.key === " ";
+}
+
+function isEnterKey(e: KeyLike): boolean {
+  return e.code === "Enter" || e.code === "NumpadEnter" || e.key === "Enter";
+}
+
 /**
- * Primary: Super+Space (Win key on Windows/Linux, ⌘ on Mac).
- * Also:    Alt+Space (⌥ Space on Mac).
- * Fallback: Ctrl+K (⌘K on Mac).
- *
- * Caveat the Super chord can't get around: Windows reserves Win+Space
- * (keyboard layout switch) and macOS reserves ⌘Space (Spotlight) at the OS
- * level, so on those platforms the browser usually never receives it at all —
- * the listener is correct, the event just doesn't arrive. Alt+Space and
- * Ctrl+K are the chords that normally reach the page there. `code` is
- * checked before `key` because macOS reports Option+Space's key as a
- * non-breaking space rather than " ".
+ * Compass opens on the Enter+Space chord: hold one, press the other. Neither
+ * key is a modifier, so this can't be read off a single event's own flags
+ * (unlike Ctrl/Alt/Meta) — the caller must track which of the two is
+ * currently held (via keydown/keyup) and pass that in.
  */
-export function isCompassShortcut(e: KeyLike): boolean {
-  if (e.shiftKey) return false;
-  const isSpace = e.code === "Space" || e.key === " ";
-  if (isSpace && e.metaKey && !e.ctrlKey && !e.altKey) return true; // Super+Space
-  if (isSpace && e.altKey && !e.metaKey && !e.ctrlKey) return true; // Alt+Space
-  if (!e.altKey && e.ctrlKey !== e.metaKey && e.key.toLowerCase() === "k") return true; // Ctrl/⌘+K
+export function isCompassShortcut(e: KeyLike, held: HeldKeys): boolean {
+  if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return false;
+  if (isSpaceKey(e)) return held.enter;
+  if (isEnterKey(e)) return held.space;
   return false;
 }
 
 export interface ShortcutLabels {
   primary: string;
-  alt: string;
-  fallback: string;
 }
 
-export function getShortcutLabels(platform: string): ShortcutLabels {
-  if (/mac|iphone|ipad/i.test(platform)) return { primary: "⌘ Space", alt: "⌥ Space", fallback: "⌘ K" };
-  if (/win/i.test(platform)) return { primary: "Win+Space", alt: "Alt+Space", fallback: "Ctrl+K" };
-  return { primary: "Super+Space", alt: "Alt+Space", fallback: "Ctrl+K" };
+export function getShortcutLabels(): ShortcutLabels {
+  return { primary: "Enter + Space" };
 }
