@@ -606,7 +606,12 @@ function buildInboxQueries(module) {
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,
           ''                                    AS RejectedBy,
-          ISNULL(CAST(jv.Narration AS NVARCHAR(MAX)), '') AS RejectionNote,
+          -- JournalVoucher has no RejectionNote column of its own (rejection
+          -- reasons live in ApprovalAuditLog, not surfaced here) — this used
+          -- to read jv.Narration instead, which meant every pending JV's own
+          -- narration/description showed up mislabeled as a "Rejection Note"
+          -- in the inbox, even though it was never rejected.
+          ''                                    AS RejectionNote,
           ISNULL(jv.UpdatedAt, jv.CreatedAt)    AS LastModified
         FROM dbo.JournalVoucher jv
         WHERE jv.Status = 'Pending'
