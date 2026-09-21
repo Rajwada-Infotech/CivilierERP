@@ -385,6 +385,31 @@ router.get("/", async (req, res) => {
 });
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
+// ── GET /po-options — POs that can be picked on a Vehicle In/Out entry ───────
+// The form's PO picker used to read /api/purchase-orders, which is gated by the
+// separate Purchase Orders page right — so a store user with Vehicle In/Out
+// rights but none on Purchase Orders got an empty "No POs available" list.
+// This serves just what the picker needs, under the Vehicle In/Out right this
+// router already enforces. Must stay above "/:id".
+router.get("/po-options", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.Status,
+             po.SupplierID, ahm.LHeadName AS SupplierName,
+             po.CompanyId, po.ProjectId
+      FROM dbo.PurchaseOrders po
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = po.SupplierID
+      WHERE po.Status IN ('Approved', 'Pending', 'Received')
+      ORDER BY po.PurchaseOrderID DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("GET vehicle-in-out po-options error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /pending-summary — POs with goods still outstanding after partial
 // Vehicle In/Out deliveries. Backs the "Pending Vehicle In/Out" widget:
 // PendingQty = ordered - received-so-far (excluding Rejected/Deleted lots),
