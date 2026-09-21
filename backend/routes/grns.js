@@ -213,6 +213,14 @@ async function insertStockLedgerEntries(
 // Reads receivedQty + rate from GRNItems JSON, HSN/GST% from ItemMaster,
 // vendor/company states from the linked PO + supplier + enterprise tables.
 // Must be declared before /:id to avoid being swallowed by the param route.
+// ── PO list + detail for the GRN form, under the GRN right ───────────────────
+// The GRN form's PO picker read /api/purchase-orders, which is gated by the
+// separate Purchase Orders right — so a store user with GRN rights but none on
+// Purchase Orders saw an empty PO list. Same handlers, gated by this router.
+// Must stay above "/:id".
+router.get("/po-list", (req, res) => require("./purchaseOrders").poHandlers.list(req, res));
+router.get("/po/:id", (req, res) => require("./purchaseOrders").poHandlers.detail(req, res));
+
 router.get("/grn-gst-data", async (req, res) => {
   const grnId = parseInt(req.query.grnId, 10);
   if (isNaN(grnId)) return res.status(400).json({ error: "grnId is required" });

@@ -2349,7 +2349,7 @@ export default function VehicleInOut() {
                   {currentUser && (
                     <OrderChat
                       poId={viewingRec.POID}
-                      apiBase="/api/purchase-orders"
+                      apiBase="/api/vehicle-in-out/po-chat"
                       currentUser={{ id: Number(currentUser.id), name: currentUser.name, role: currentUser.role }}
                       className="h-full"
                     />
