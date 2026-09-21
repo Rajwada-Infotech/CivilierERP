@@ -296,7 +296,7 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
 
   try {
     const pool = getPool();
-    const { hasUOM, hasDS, hasGL, hasCC } = await getItemOptionalCols(pool);
+    const { hasUOM, hasDS, hasGL, hasCC, hasDOS2 } = await getItemOptionalCols(pool);
 
     const req2 = pool
       .request()
