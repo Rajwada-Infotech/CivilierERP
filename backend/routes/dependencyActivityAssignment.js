@@ -253,12 +253,13 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
       engineerIds = engRes.recordset.map((r) => r.engineerId);
 
       const cpRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
-        SELECT Id AS id, CheckpointId AS checkpointId, FieldName AS fieldName, SortOrder AS sortOrder,
-               IsChecked AS isChecked, MinWaitDays AS minWaitDays
-        FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @assignmentId
-        ORDER BY SortOrder ASC, Id ASC
+        SELECT c.Id AS id, c.CheckpointId AS checkpointId, c.FieldName AS fieldName, c.SortOrder AS sortOrder,
+               c.IsChecked AS isChecked, c.MinWaitDays AS minWaitDays, CAST(c.IsDaily AS BIT) AS isDaily,
+               (SELECT COUNT(*) FROM dbo.DependencyActivityCheckpointUpdate u WHERE u.AssignmentCheckpointId = c.Id) AS updateCount
+        FROM dbo.DependencyActivityCheckpoint c WHERE c.AssignmentId = @assignmentId
+        ORDER BY c.SortOrder ASC, c.Id ASC
       `);
-      checkpoints = cpRes.recordset.map((c) => ({ ...c, isChecked: !!c.isChecked }));
+      checkpoints = cpRes.recordset.map((c) => ({ ...c, isChecked: !!c.isChecked, isDaily: !!c.isDaily }));
     }
 
     res.json({
@@ -425,32 +426,214 @@ router.post("/:rungId", authMiddleware, async (req, res) => {
         `);
     }
 
-    await pool.request().input("assignmentId", sql.Int, assignmentId)
-      .query(`DELETE FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @assignmentId`);
+    // Checkpoints are reconciled by id rather than deleted and re-inserted: a daily
+    // checkpoint's per-date updates (photos) hang off its row, and rebuilding the
+    // rows on every save would wipe them. Rows the client still lists keep their
+    // id (and updates); new ones are inserted; ones it dropped are deleted.
+    const savedCps = (await pool.request().input("assignmentId", sql.Int, assignmentId)
+      .query(`SELECT Id, IsChecked FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @assignmentId`)).recordset;
+    const savedCpById = new Map(savedCps.map((r) => [Number(r.Id), r]));
+    const keepCpIds = new Set();
     let cpSort = 0;
     for (const row of checkpoints || []) {
       const fieldName = String(row.fieldName || "").trim();
       if (!fieldName) continue;
       cpSort += 10;
-      await pool.request()
-        .input("assignmentId", sql.Int, assignmentId)
-        .input("checkpointId", sql.Int, Number.isFinite(row.checkpointId) ? row.checkpointId : null)
-        .input("fieldName", sql.NVarChar(200), fieldName)
-        .input("sortOrder", sql.Int, cpSort)
-        .input("minWaitDays", sql.Int, Number.isFinite(row.minWaitDays) ? row.minWaitDays : null)
-        .input("isChecked", sql.Bit, !!row.isChecked)
-        .input("checkedAt", sql.DateTime2, row.isChecked ? new Date() : null)
-        .input("checkedBy", sql.NVarChar(200), row.isChecked ? actor : null)
-        .query(`
-          INSERT INTO dbo.DependencyActivityCheckpoint
-            (AssignmentId, CheckpointId, FieldName, SortOrder, MinWaitDays, IsChecked, CheckedAt, CheckedBy)
-          VALUES (@assignmentId, @checkpointId, @fieldName, @sortOrder, @minWaitDays, @isChecked, @checkedAt, @checkedBy)
-        `);
+      const rowId = Number(row.id);
+      const saved = Number.isFinite(rowId) ? savedCpById.get(rowId) : null;
+      if (saved && !keepCpIds.has(rowId)) {
+        keepCpIds.add(rowId);
+        const wasChecked = !!saved.IsChecked;
+        await pool.request()
+          .input("id", sql.Int, rowId)
+          .input("sortOrder", sql.Int, cpSort)
+          .input("isChecked", sql.Bit, !!row.isChecked)
+          // Keep the original who/when when it stays checked; stamp fresh only on a new check.
+          .input("stamp", sql.Bit, !!row.isChecked && !wasChecked)
+          .input("checkedBy", sql.NVarChar(200), actor)
+          .query(`
+            UPDATE dbo.DependencyActivityCheckpoint
+            SET SortOrder = @sortOrder,
+                IsChecked = @isChecked,
+                CheckedAt = CASE WHEN @isChecked = 0 THEN NULL WHEN @stamp = 1 THEN SYSDATETIME() ELSE CheckedAt END,
+                CheckedBy = CASE WHEN @isChecked = 0 THEN NULL WHEN @stamp = 1 THEN @checkedBy ELSE CheckedBy END
+            WHERE Id = @id
+          `);
+      } else {
+        // The master decides whether it's a daily checkpoint — never trust the client for that.
+        let isDaily = false;
+        if (Number.isFinite(row.checkpointId)) {
+          const m = await pool.request().input("cid", sql.Int, row.checkpointId)
+            .query(`SELECT IsDaily FROM dbo.ActivityCheckpoint WHERE Id = @cid`);
+          isDaily = !!m.recordset[0]?.IsDaily;
+        }
+        const ins = await pool.request()
+          .input("assignmentId", sql.Int, assignmentId)
+          .input("checkpointId", sql.Int, Number.isFinite(row.checkpointId) ? row.checkpointId : null)
+          .input("fieldName", sql.NVarChar(200), fieldName)
+          .input("sortOrder", sql.Int, cpSort)
+          .input("minWaitDays", sql.Int, Number.isFinite(row.minWaitDays) ? row.minWaitDays : null)
+          .input("isDaily", sql.Bit, isDaily)
+          .input("isChecked", sql.Bit, !!row.isChecked)
+          .input("checkedAt", sql.DateTime2, row.isChecked ? new Date() : null)
+          .input("checkedBy", sql.NVarChar(200), row.isChecked ? actor : null)
+          .query(`
+            INSERT INTO dbo.DependencyActivityCheckpoint
+              (AssignmentId, CheckpointId, FieldName, SortOrder, MinWaitDays, IsDaily, IsChecked, CheckedAt, CheckedBy)
+            OUTPUT INSERTED.Id AS id
+            VALUES (@assignmentId, @checkpointId, @fieldName, @sortOrder, @minWaitDays, @isDaily, @isChecked, @checkedAt, @checkedBy)
+          `);
+        keepCpIds.add(ins.recordset[0].id);
+      }
+    }
+    for (const r of savedCps) {
+      if (keepCpIds.has(Number(r.Id))) continue;
+      await pool.request().input("id", sql.Int, r.Id)
+        .query(`DELETE FROM dbo.DependencyActivityCheckpoint WHERE Id = @id`);
     }
 
     res.json({ success: true, assignmentId });
   } catch (err) {
     console.error("[dependency-activity-assignment] POST /:rungId error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Daily checkpoint updates ────────────────────────────────────────────────
+// A checkpoint flagged IsDaily (Work Checkpoint Master) gets one update per date:
+// a live-camera photo and/or a note. Saved straight away (not with the big
+// assignment save) because each is an event, not a form field.
+
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const isRealDate = (d) => DATE_RE.test(d) && !Number.isNaN(new Date(d + "T00:00:00Z").getTime());
+
+// GET /checkpoint/:cpId/updates — the dates that have an update (no binary).
+router.get("/checkpoint/:cpId/updates", authMiddleware, async (req, res) => {
+  const cpId = parseInt(req.params.cpId, 10);
+  if (!Number.isFinite(cpId)) return res.status(400).json({ error: "Invalid checkpoint id" });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input("cpId", sql.Int, cpId).query(`
+      SELECT Id AS id, CONVERT(VARCHAR(10), UpdateDate, 23) AS date,
+             CAST(CASE WHEN Photo IS NULL THEN 0 ELSE 1 END AS BIT) AS hasPhoto,
+             Note AS note, CreatedBy AS createdBy, CreatedAt AS createdAt
+      FROM dbo.DependencyActivityCheckpointUpdate
+      WHERE AssignmentCheckpointId = @cpId
+      ORDER BY UpdateDate DESC
+    `);
+    res.json(r.recordset);
+  } catch (err) {
+    console.error("[checkpoint-updates] GET error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /checkpoint/:cpId/updates — log (or replace) the update for one date.
+// multipart: date (YYYY-MM-DD), note (optional), photo (optional file).
+router.post("/checkpoint/:cpId/updates", authMiddleware, upload.single("photo"), async (req, res) => {
+  const cpId = parseInt(req.params.cpId, 10);
+  if (!Number.isFinite(cpId)) return res.status(400).json({ error: "Invalid checkpoint id" });
+  const date = String(req.body?.date || "");
+  if (!isRealDate(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
+  const note = String(req.body?.note || "").trim().slice(0, 500) || null;
+  const photo = req.file || null;
+  if (photo && !/^image\//i.test(photo.mimetype)) return res.status(400).json({ error: "The update photo must be an image" });
+
+  // No future dates (one day of slack for timezone differences between browser and server).
+  const limit = new Date();
+  limit.setUTCDate(limit.getUTCDate() + 1);
+  if (date > limit.toISOString().slice(0, 10)) return res.status(400).json({ error: "You can't log an update for a future date" });
+
+  const actor = req.user?.email || req.user?.name || "system";
+  try {
+    const pool = await getPool();
+    const cp = await pool.request().input("cpId", sql.Int, cpId).query(`
+      SELECT c.Id, c.IsDaily, c.FieldName, CONVERT(VARCHAR(10), a.StartDate, 23) AS startDate
+      FROM dbo.DependencyActivityCheckpoint c
+      JOIN dbo.DependencyActivityAssignment a ON a.Id = c.AssignmentId
+      WHERE c.Id = @cpId
+    `);
+    if (!cp.recordset.length) return res.status(404).json({ error: "Checkpoint not found — save the assignment first" });
+    const row = cp.recordset[0];
+    if (!row.IsDaily) return res.status(400).json({ error: `"${row.FieldName}" isn't a daily-update checkpoint` });
+    if (row.startDate && date < row.startDate) {
+      return res.status(400).json({ error: `That date is before the activity's start date (${row.startDate}).` });
+    }
+
+    const existing = await pool.request().input("cpId", sql.Int, cpId).input("date", sql.Date, date)
+      .query(`SELECT Id, Photo FROM dbo.DependencyActivityCheckpointUpdate WHERE AssignmentCheckpointId = @cpId AND UpdateDate = @date`);
+
+    if (existing.recordset.length) {
+      const id = existing.recordset[0].Id;
+      await pool.request()
+        .input("id", sql.Int, id)
+        .input("note", sql.NVarChar(500), note)
+        .input("hasNewPhoto", sql.Bit, !!photo)
+        .input("photo", sql.VarBinary(sql.MAX), photo ? photo.buffer : null)
+        .input("mime", sql.NVarChar(100), photo ? photo.mimetype : null)
+        .input("by", sql.NVarChar(200), actor)
+        .query(`
+          UPDATE dbo.DependencyActivityCheckpointUpdate
+          SET Note = COALESCE(@note, Note),
+              Photo = CASE WHEN @hasNewPhoto = 1 THEN @photo ELSE Photo END,
+              PhotoMime = CASE WHEN @hasNewPhoto = 1 THEN @mime ELSE PhotoMime END,
+              UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      return res.json({ success: true, id, replaced: true });
+    }
+
+    if (!photo && !note) return res.status(400).json({ error: "Add a photo or a note for this day" });
+    const ins = await pool.request()
+      .input("cpId", sql.Int, cpId)
+      .input("date", sql.Date, date)
+      .input("photo", sql.VarBinary(sql.MAX), photo ? photo.buffer : null)
+      .input("mime", sql.NVarChar(100), photo ? photo.mimetype : null)
+      .input("note", sql.NVarChar(500), note)
+      .input("by", sql.NVarChar(200), actor)
+      .query(`
+        INSERT INTO dbo.DependencyActivityCheckpointUpdate (AssignmentCheckpointId, UpdateDate, Photo, PhotoMime, Note, CreatedBy)
+        OUTPUT INSERTED.Id AS id
+        VALUES (@cpId, @date, @photo, @mime, @note, @by)
+      `);
+    res.status(201).json({ success: true, id: ins.recordset[0].id, replaced: false });
+  } catch (err) {
+    console.error("[checkpoint-updates] POST error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /checkpoint-update/:id/photo — stream the day's photo.
+router.get("/checkpoint-update/:id/photo", authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input("id", sql.Int, id)
+      .query(`SELECT Photo, PhotoMime FROM dbo.DependencyActivityCheckpointUpdate WHERE Id = @id`);
+    const row = r.recordset[0];
+    if (!row || !row.Photo) return res.status(404).json({ error: "No photo for this update" });
+    res.setHeader("Content-Type", row.PhotoMime || "image/jpeg");
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.send(row.Photo);
+  } catch (err) {
+    console.error("[checkpoint-updates] photo error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /checkpoint-update/:id — remove one day's update.
+router.delete("/checkpoint-update/:id", authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input("id", sql.Int, id)
+      .query(`DELETE FROM dbo.DependencyActivityCheckpointUpdate WHERE Id = @id`);
+    if (!r.rowsAffected[0]) return res.status(404).json({ error: "Update not found" });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[checkpoint-updates] DELETE error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

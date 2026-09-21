@@ -64,7 +64,52 @@ export interface AssignmentCheckpoint {
   // Snapshotted off the master checkpoint (see migration 354) at the
   // moment it's attached to this rung — null means checkable any time.
   minWaitDays?: number | null;
+  /** The master flags it "daily" (Work Checkpoint Master) — shows a calendar + live
+   *  camera for one photo update per day. Snapshotted, decided by the server. */
+  isDaily?: boolean;
+  /** How many days already have an update logged (server-provided). */
+  updateCount?: number;
 }
+
+export interface CheckpointUpdate {
+  id: number;
+  /** YYYY-MM-DD */
+  date: string;
+  hasPhoto: boolean;
+  note: string | null;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export const getCheckpointUpdates = async (checkpointId: number): Promise<CheckpointUpdate[]> => {
+  const res = await fetchWithAuth(`${BASE}/checkpoint/${checkpointId}/updates`);
+  return handleResponse<CheckpointUpdate[]>(res);
+};
+
+/** Log (or replace) the update for one date. */
+export const saveCheckpointUpdate = async (
+  checkpointId: number,
+  input: { date: string; photo?: Blob; note?: string },
+): Promise<{ success: boolean; id: number; replaced: boolean }> => {
+  const form = new FormData();
+  form.append("date", input.date);
+  if (input.note) form.append("note", input.note);
+  if (input.photo) form.append("photo", input.photo, `checkpoint-${input.date}.jpg`);
+  const res = await fetchWithAuth(`${BASE}/checkpoint/${checkpointId}/updates`, { method: "POST", body: form });
+  return handleResponse(res);
+};
+
+export const deleteCheckpointUpdate = async (id: number): Promise<{ success: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/checkpoint-update/${id}`, { method: "DELETE" });
+  return handleResponse<{ success: boolean }>(res);
+};
+
+/** The photo needs the auth header, so it's fetched as a blob and shown via an object URL. */
+export const fetchCheckpointUpdatePhoto = async (id: number): Promise<string> => {
+  const res = await fetchWithAuth(`${BASE}/checkpoint-update/${id}/photo`);
+  if (!res.ok) throw new Error("Photo not available");
+  return URL.createObjectURL(await res.blob());
+};
 
 export interface RungAssignmentDetail {
   rungId: number;
