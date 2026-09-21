@@ -22,6 +22,7 @@ const STATUSES: IncentiveStatus[] = ["Pending", "Approved", "Rejected", "Paid"];
 
 const mapRow = (r: IncentiveRow): RecordWithId => ({
   _id: String(r.IncentiveId),
+  documentNo: r.DocumentNo,
   employeeId: String(r.EmployeeId),
   employeeName: r.EmployeeName,
   employeeCode: r.EmployeeCode,
@@ -34,6 +35,16 @@ const mapRow = (r: IncentiveRow): RecordWithId => ({
 });
 
 const fields: FieldDef[] = [
+  {
+    name: "documentNo",
+    label: "Document Number",
+    type: "custom",
+    render: ({ value }) => (
+      <div className="w-full px-3 py-2 rounded-lg text-sm font-mono bg-muted/60 border border-border text-muted-foreground">
+        {value ? String(value) : "Auto-generated on save"}
+      </div>
+    ),
+  },
   {
     name: "employeeId",
     label: "Employee",
@@ -59,6 +70,7 @@ const fields: FieldDef[] = [
 ];
 
 const columns: ColumnDef[] = [
+  { key: "documentNo", label: "Document No" },
   { key: "employeeName", label: "Employee" },
   { key: "incentiveType", label: "Type" },
   { key: "incentiveDate", label: "Date" },
@@ -93,8 +105,8 @@ const IncentiveMaster: React.FC = () => {
   const handleDataEvent = async (event: DataChangeEvent) => {
     try {
       if (event.action === "add") {
-        await addIncentiveRecord(toPayload(event.record));
-        toast.success("Incentive recorded!");
+        const res = await addIncentiveRecord(toPayload(event.record));
+        toast.success(res?.message || "Incentive recorded!");
       }
       if (event.action === "update") {
         await updateIncentiveRecord(Number(event.id), toPayload(event.record));
