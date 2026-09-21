@@ -9,7 +9,6 @@ import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
 import { SaNotificationBell } from "@/components/navbar/SaNotificationBell";
 import { ThemeSwitcher } from "@/components/navbar/ThemeSwitcher";
-import { CompassTrigger } from "@/components/compass/CompassTrigger";
 import {
   Settings,
   ChevronDown,
@@ -953,7 +952,6 @@ export const TopNavbar = () => {
             </button>
           </div>
 
-          <CompassTrigger />
           <SaNotificationBell />
           <ReminderBell />
           <ThemeSwitcher
@@ -1007,7 +1005,6 @@ export const TopNavbar = () => {
 
         {/* ── Mobile right ── */}
         <div className="flex md:hidden items-center gap-1.5 ml-auto">
-          <CompassTrigger />
           <SaNotificationBell />
           <ReminderBell />
           <Dropdown
