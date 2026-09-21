@@ -699,10 +699,7 @@ const mapRow = (po) => ({
 });
 
 // ── GET /  (List with Pagination) ────────────────────────────────────────────
-router.get(
-  "/",
-  cache("purchase-orders", 300, { shared: true }),
-  async (req, res) => {
+const listPurchaseOrders = async (req, res) => {
     try {
       const pool = getPool();
       const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -790,8 +787,8 @@ router.get(
       if (res.headersSent) return;
       res.status(500).json({ error: err.message });
     }
-  },
-);
+};
+router.get("/", cache("purchase-orders", 300, { shared: true }), listPurchaseOrders);
 
 // ── GET /service-eligible — POs whose items are all Service items ────────────
 // Backs the Invoice page's "PO" tab: goods must go through a GRN first,
@@ -809,7 +806,7 @@ router.get("/service-eligible", async (req, res) => {
 });
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
-router.get("/:id", async (req, res) => {
+const getPurchaseOrderDetail = async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;
@@ -858,7 +855,8 @@ router.get("/:id", async (req, res) => {
     console.error("GET PurchaseOrder by id error:", err);
     res.status(500).json({ error: err.message });
   }
-});
+};
+router.get("/:id", getPurchaseOrderDetail);
 
 // ── GET /:id/document-chain — PO -> Vehicle In/Out -> GRN tree ───────────────
 router.get("/:id/document-chain", async (req, res) => {
@@ -1547,7 +1545,7 @@ function emitPOMessage(poId, comment) {
 }
 
 // ── GET /:id/comments — PO<->supplier chat thread (staff side) ──────────────
-router.get("/:id/comments", async (req, res) => {
+const listPurchaseOrderComments = async (req, res) => {
   const poId = parseInt(req.params.id, 10);
   if (!poId) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -1563,10 +1561,11 @@ router.get("/:id/comments", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+router.get("/:id/comments", listPurchaseOrderComments);
 
 // ── POST /:id/comment — reply in the PO<->supplier chat (staff side) ────────
-router.post("/:id/comment", async (req, res) => {
+const addPurchaseOrderComment = async (req, res) => {
   const poId = parseInt(req.params.id, 10);
   if (!poId) return res.status(400).json({ error: "Invalid id" });
   const comment = (req.body?.comment || "").trim();
@@ -1602,8 +1601,19 @@ router.post("/:id/comment", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+router.post("/:id/comment", addPurchaseOrderComment);
 
 module.exports = router;
 module.exports.createPurchaseOrderInternal = createPurchaseOrderInternal;
+// Reused by Vehicle In/Out and GRN so their PO pickers / chat work under THEIR
+// page right — this router is gated by the separate Purchase Orders right, which
+// a store user may not have. The gate lives on the router, so these bare handlers
+// are not gated here; the mounting router must enforce its own permission.
+module.exports.poHandlers = {
+  list: listPurchaseOrders,
+  detail: getPurchaseOrderDetail,
+  listComments: listPurchaseOrderComments,
+  addComment: addPurchaseOrderComment,
+};
 

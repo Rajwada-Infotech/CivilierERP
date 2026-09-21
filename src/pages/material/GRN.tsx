@@ -1323,7 +1323,7 @@ export default function GRN() {
     }
     setLoadingPO(true);
     try {
-      const res = await fetchWithAuth(`/api/purchase-orders/${poId}`);
+      const res = await fetchWithAuth(`/api/grns/po/${poId}`);
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
@@ -1494,7 +1494,7 @@ export default function GRN() {
 
     setLoadingPO(true);
     try {
-      const res = await fetchWithAuth(`/api/purchase-orders/${pending.poId}`);
+      const res = await fetchWithAuth(`/api/grns/po/${pending.poId}`);
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 

@@ -410,6 +410,13 @@ router.get("/po-options", async (req, res) => {
   }
 });
 
+// ── PO <-> supplier chat, under the Vehicle In/Out right ─────────────────────
+// The "Supplier" tab of a Vehicle In/Out entry embeds the PO chat. It used the
+// Purchase Orders routes (separate right); same handlers, gated by this router.
+const poHandlers = () => require("./purchaseOrders").poHandlers;
+router.get("/po-chat/:id/comments", (req, res) => poHandlers().listComments(req, res));
+router.post("/po-chat/:id/comment", (req, res) => poHandlers().addComment(req, res));
+
 // ── GET /pending-summary — POs with goods still outstanding after partial
 // Vehicle In/Out deliveries. Backs the "Pending Vehicle In/Out" widget:
 // PendingQty = ordered - received-so-far (excluding Rejected/Deleted lots),
