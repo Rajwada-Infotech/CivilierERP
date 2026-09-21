@@ -294,8 +294,12 @@ router.get("/grn-gst-data", async (req, res) => {
         : "igst";
 
     // ── 3. Fetch HSN/GST% for every itemId present in GRN items ─────────────
-    //    Items store GST% directly when saved, but we re-fetch from ItemMaster
-    //    as the authoritative source for accuracy.
+    //    Items store GST% directly when saved, but we re-fetch from the item
+    //    master (joined to the HSN master, the authoritative rate source —
+    //    same join buildGrnGstData.js uses) for accuracy. dbo.ItemMaster
+    //    doesn't exist — the real table is dbo.Item_Master_Group, keyed by
+    //    M_Id and carrying only the HSN code (M_HSN); the GST% itself lives
+    //    on dbo.HSN, matched by HCode.
     const itemIds = [...new Set(grnItems.map((i) => i.itemId).filter(Boolean))];
 
     let hsnMap = {}; // itemId → { hsnCode, gstPercent }
@@ -303,13 +307,17 @@ router.get("/grn-gst-data", async (req, res) => {
       // Build parameterised list  @p0, @p1, …
       const req2 = pool.request();
       const placeholders = itemIds.map((id, idx) => {
-        req2.input(`p${idx}`, sql.NVarChar(50), String(id));
+        req2.input(`p${idx}`, sql.NVarChar(100), String(id));
         return `@p${idx}`;
       });
       const hsnResult = await req2.query(`
-        SELECT ItemId, HSNCode, GSTPercent
-        FROM   dbo.ItemMaster
-        WHERE  ItemId IN (${placeholders.join(",")})
+        SELECT
+          CONVERT(NVARCHAR(100), img.M_Id) AS ItemId,
+          img.M_HSN                        AS HSNCode,
+          ISNULL(h.HIGST, ISNULL(h.HCGST, 0) + ISNULL(h.HSGST, 0)) AS GSTPercent
+        FROM   dbo.Item_Master_Group img
+        LEFT JOIN dbo.HSN h ON h.HCode = img.M_HSN AND h.HStatus = 1
+        WHERE  CONVERT(NVARCHAR(100), img.M_Id) IN (${placeholders.join(",")})
       `);
       for (const row of hsnResult.recordset) {
         hsnMap[String(row.ItemId)] = {
