@@ -21,6 +21,7 @@ import {
   useSidebarState,
 } from "./layoutContexts";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { CompassProvider } from "@/components/compass/CompassProvider";
 
 // ── Home page detection ───────────────────────────────────────────────────────
 
@@ -145,6 +146,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
         : STRIP_W + NAV_W;
 
   return (
+    <CompassProvider>
     <SidebarContext.Provider value={sidebarValue}>
       <NavbarCollapseContext.Provider value={navbarValue}>
         <NavPanelAutoExpand>
@@ -290,5 +292,6 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
         </NavPanelAutoExpand>
       </NavbarCollapseContext.Provider>
     </SidebarContext.Provider>
+    </CompassProvider>
   );
 };
