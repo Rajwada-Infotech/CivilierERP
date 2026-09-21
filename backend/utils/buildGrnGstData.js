@@ -39,6 +39,7 @@ async function buildGrnGstData(pool, grnId) {
       SELECT
         grn.GRNID, grn.GRNNo, grn.DocNo, grn.GRNDate, grn.GRNItems, grn.SupplierID, grn.POID,
         supplier.LHeadName AS SupplierName, supplier.LGSTState AS VendorState,
+        supplier.LGSTType AS SupplierGstType, supplier.LGST AS SupplierGst,
         po.PurchaseOrderID, po.PurchaseOrderNo, po.POItems,
         po.HsnCode AS POHsnCode, po.GstRate AS POGstRate, po.GstType AS POGstType,
         po.Rate AS PORate, po.CompanyId, company.state AS CompanyState
@@ -51,6 +52,15 @@ async function buildGrnGstData(pool, grnId) {
 
   const header = headerResult.recordset[0];
   if (!header) return null;
+
+  // A non-GST (Unregistered) supplier can't charge GST at all — see the same
+  // guard in expenseBooking.js's own copy of this function.
+  const supplierIsGstRegistered =
+    header.SupplierGstType === "Unregistered"
+      ? false
+      : header.SupplierGstType
+        ? true
+        : !!(header.SupplierGst && String(header.SupplierGst).trim());
 
   const grnItems = parseJsonArray(header.GRNItems);
   const poItems  = parseJsonArray(header.POItems);
@@ -107,7 +117,9 @@ async function buildGrnGstData(pool, grnId) {
     const lineGstPct = Number(item.gstPct ?? item.GstPct ?? NaN);
     const masterGstPct = toNumber(master.HCGST) + toNumber(master.HSGST) ||
                          toNumber(master.HIGST) || toNumber(poItem.tax) || toNumber(header.POGstRate);
-    const gstPercent   = Number.isFinite(lineGstPct) ? lineGstPct : masterGstPct;
+    const gstPercent   = !supplierIsGstRegistered
+      ? 0
+      : Number.isFinite(lineGstPct) ? lineGstPct : masterGstPct;
     const masterCgstShare = (masterGstPct > 0 && toNumber(master.HCGST)) ? toNumber(master.HCGST) / masterGstPct : 0.5;
     const masterSgstShare = 1 - masterCgstShare;
 

@@ -145,6 +145,17 @@ interface MasterPageProps {
   externalFormPatch?: Record<string, unknown> | null;
   externalFormPatchKey?: string | number | null;
   /**
+   * Opens the form pre-filled for the row with this _id, exactly as if its
+   * Edit button had been clicked — for pages that render `hideTable` and
+   * drive their own custom list view (e.g. a grouped tree), which has
+   * nowhere else to trigger MasterPage's own edit mode from. Only fires
+   * once per `requestEditKey` change (same one-shot pattern as
+   * externalFormPatch/externalFormPatchKey), so the caller bumps the key
+   * (e.g. `${id}-${Date.now()}`) on every click, even re-clicking the same row.
+   */
+  requestEditId?: string | null;
+  requestEditKey?: string | number | null;
+  /**
    * When provided, an Export button appears in the table toolbar.
    * Pass ExportColumn[] — plain { header, accessor } descriptors.
    *
@@ -253,6 +264,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   saveButtonClass,
   externalFormPatch,
   externalFormPatchKey,
+  requestEditId,
+  requestEditKey,
   exportConfig,
   hideTable,
   viewConfig,
@@ -503,6 +516,15 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     setFormOpen(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const prevRequestEditKeyRef = React.useRef<string | number | null>(null);
+  React.useEffect(() => {
+    if (requestEditKey === null || requestEditKey === undefined) return;
+    if (prevRequestEditKeyRef.current === requestEditKey) return;
+    prevRequestEditKeyRef.current = requestEditKey;
+    if (requestEditId) handleEdit(requestEditId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestEditId, requestEditKey]);
 
   const handleDelete = async (id: string) => {
     // Compute next state first so we can pass records to onDataEvent
