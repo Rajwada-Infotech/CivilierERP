@@ -148,7 +148,7 @@ const SEVERITY_STYLES = {
   },
   ok: {
     border: "border-green-200 dark:border-green-800",
-    bg: "bg-green-50/60 dark:bg-green-950/20",
+    bg: "bg-green-50 dark:bg-green-950/20",
     iconBg: "bg-green-100 dark:bg-green-900/30",
     iconColor: "text-green-600 dark:text-green-400",
     countColor: "text-green-700 dark:text-green-300",

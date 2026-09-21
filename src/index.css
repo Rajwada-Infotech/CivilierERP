@@ -670,70 +670,179 @@
    every CRM dialog picks up the dark + orange look — near-black surface,
    #ff920f accent, thin borders — WITHOUT rewriting each dialog's markup.
    Palette from the CRM design spec. ──────────────────────────────────────── */
+
+/* ─────────────────────────────────────────────────────────────────────────
+   CRM Dialog
+   Theme-aware version.
+   CRM orange remains the accent, while background/text/borders come
+   from the active application theme.
+   ───────────────────────────────────────────────────────────────────────── */
+
 .crm-dialog {
     background:
-        linear-gradient(135deg, rgba(255, 146, 15, 0.035), transparent 35%),
-        #0c0c10;
-    border-color: #24242c;
+        linear-gradient(
+            135deg,
+            color-mix(in srgb, #ff920f 4%, transparent),
+            transparent 35%
+        ),
+        hsl(var(--background));
+
+    color: hsl(var(--foreground));
+
+    border-color: hsl(var(--border));
+
     border-top: 3px solid #ff920f;
+
     box-shadow:
-        0 28px 80px rgba(0, 0, 0, 0.7),
-        0 0 0 1px rgba(255, 255, 255, 0.015);
+        0 28px 80px rgba(0, 0, 0, 0.25),
+        0 0 0 1px color-mix(in srgb, hsl(var(--foreground)) 3%, transparent);
 }
 
-/* Form fields — restyled in place */
-.crm-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Form fields
+   ───────────────────────────────────────────────────────────────────────── */
+
+.crm-dialog
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 .crm-dialog select,
 .crm-dialog textarea {
-    background: #0b0b0f;
-    border-color: #292932;
+    background: hsl(var(--background));
+
+    border-color: hsl(var(--border));
+
     border-radius: 6px;
-    color: #f7f7f8;
+
+    color: hsl(var(--foreground));
+
     transition:
         border-color 0.2s ease,
         box-shadow 0.2s ease,
         background 0.2s ease;
 }
-.crm-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):hover,
+
+
+/* Hover */
+
+.crm-dialog
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):hover,
 .crm-dialog select:hover,
 .crm-dialog textarea:hover {
-    border-color: #40404a;
+    border-color: hsl(var(--muted-foreground));
 }
-.crm-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+
+
+/* Focus */
+
+.crm-dialog
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
 .crm-dialog select:focus,
 .crm-dialog textarea:focus {
-    background: #101014;
+    background: hsl(var(--background));
+
     border-color: #ff920f;
-    box-shadow: 0 0 0 3px rgba(255, 146, 15, 0.12);
+
+    box-shadow:
+        0 0 0 3px rgba(255, 146, 15, 0.12);
+
     outline: none;
 }
+
+
+/* Placeholder */
+
 .crm-dialog input::placeholder,
 .crm-dialog textarea::placeholder {
-    color: #5c5c66;
+    color: hsl(var(--muted-foreground));
 }
+
+
+/* Select options */
+
 .crm-dialog select option {
-    background: #0c0c10;
-    color: #f7f7f8;
+    background: hsl(var(--background));
+
+    color: hsl(var(--foreground));
 }
+
+
+/* Date / number / time controls */
+
 .crm-dialog input[type="date"],
 .crm-dialog input[type="number"],
 .crm-dialog input[type="datetime-local"],
 .crm-dialog input[type="time"] {
-    color-scheme: dark;
+    color-scheme: normal;
 }
 
-/* Checkboxes / radios pick up the orange accent */
+
+/* Checkbox / radio */
+
 .crm-dialog input[type="checkbox"],
 .crm-dialog input[type="radio"] {
     accent-color: #ff920f;
 }
 
-/* Keyboard focus ring — orange, matches the spec */
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Theme-aware text
+   ───────────────────────────────────────────────────────────────────────── */
+
+.crm-dialog .text-foreground {
+    color: hsl(var(--foreground));
+}
+
+.crm-dialog .text-muted-foreground {
+    color: hsl(var(--muted-foreground));
+}
+
+.crm-dialog .text-primary {
+    color: hsl(var(--primary));
+}
+
+.crm-dialog .text-destructive {
+    color: hsl(var(--destructive));
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Theme-aware cards / sections
+   ───────────────────────────────────────────────────────────────────────── */
+
+.crm-dialog .border-border {
+    border-color: hsl(var(--border));
+}
+
+.crm-dialog .bg-background {
+    background-color: hsl(var(--background));
+}
+
+.crm-dialog .bg-muted {
+    background-color: hsl(var(--muted));
+}
+
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Buttons / interactive elements
+   ───────────────────────────────────────────────────────────────────────── */
+
+.crm-dialog button:hover {
+    transition:
+        background-color 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease;
+}
+
+
+/* Keyboard focus */
+
 .crm-dialog button:focus-visible,
 .crm-dialog input:focus-visible,
 .crm-dialog select:focus-visible,
 .crm-dialog textarea:focus-visible,
 .crm-dialog a:focus-visible {
     outline: 2px solid #ffad35;
+
     outline-offset: 2px;
 }
+
