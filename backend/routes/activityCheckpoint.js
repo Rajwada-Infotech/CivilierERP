@@ -23,7 +23,8 @@ async function listCheckpoints(_req, res) {
   try {
     const pool = await getPool();
     const r = await pool.request().query(`
-      SELECT Id AS id, FieldName AS fieldName, SortOrder AS sortOrder, MinWaitDays AS minWaitDays
+      SELECT Id AS id, FieldName AS fieldName, SortOrder AS sortOrder, MinWaitDays AS minWaitDays,
+             CAST(IsDaily AS BIT) AS isDaily
       FROM dbo.ActivityCheckpoint
       ORDER BY SortOrder ASC, Id ASC
     `);
@@ -73,11 +74,13 @@ router.post("/", authMiddleware, requirePageRight("work-checkpoint-master", "cre
       .input("fieldName", sql.NVarChar(200), fieldName)
       .input("sortOrder", sql.Int, nextSort)
       .input("minWaitDays", sql.Int, wait.value)
+      .input("isDaily", sql.Bit, req.body?.isDaily ? 1 : 0)
       .input("createdBy", sql.NVarChar(200), actor)
       .query(`
-        INSERT INTO dbo.ActivityCheckpoint (ActivityId, FieldName, SortOrder, MinWaitDays, CreatedBy)
-        OUTPUT INSERTED.Id AS id, INSERTED.FieldName AS fieldName, INSERTED.SortOrder AS sortOrder, INSERTED.MinWaitDays AS minWaitDays
-        VALUES (NULL, @fieldName, @sortOrder, @minWaitDays, @createdBy)
+        INSERT INTO dbo.ActivityCheckpoint (ActivityId, FieldName, SortOrder, MinWaitDays, IsDaily, CreatedBy)
+        OUTPUT INSERTED.Id AS id, INSERTED.FieldName AS fieldName, INSERTED.SortOrder AS sortOrder,
+               INSERTED.MinWaitDays AS minWaitDays, CAST(INSERTED.IsDaily AS BIT) AS isDaily
+        VALUES (NULL, @fieldName, @sortOrder, @minWaitDays, @isDaily, @createdBy)
       `);
     res.status(201).json(inserted.recordset[0]);
   } catch (err) {
@@ -86,16 +89,17 @@ router.post("/", authMiddleware, requirePageRight("work-checkpoint-master", "cre
   }
 });
 
-// PATCH /:id — rename a checkpoint and/or set its minimum wait duration. Both are
-// independent — a caller sending only minWaitDays doesn't need to resend fieldName.
+// PATCH /:id — rename a checkpoint, set its minimum wait duration and/or its
+// "daily update" flag. All independent — send only what changed.
 router.patch("/:id", authMiddleware, requirePageRight("work-checkpoint-master", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
 
   const hasFieldName = req.body?.fieldName !== undefined;
   const hasMinWaitDays = req.body?.minWaitDays !== undefined;
-  if (!hasFieldName && !hasMinWaitDays) {
-    return res.status(400).json({ error: "fieldName or minWaitDays is required" });
+  const hasIsDaily = req.body?.isDaily !== undefined;
+  if (!hasFieldName && !hasMinWaitDays && !hasIsDaily) {
+    return res.status(400).json({ error: "fieldName, minWaitDays or isDaily is required" });
   }
 
   const fieldName = hasFieldName ? String(req.body.fieldName || "").trim() : null;
@@ -119,6 +123,10 @@ router.patch("/:id", authMiddleware, requirePageRight("work-checkpoint-master", 
     if (hasMinWaitDays) {
       setClauses.push("MinWaitDays = @minWaitDays");
       request.input("minWaitDays", sql.Int, wait.value);
+    }
+    if (hasIsDaily) {
+      setClauses.push("IsDaily = @isDaily");
+      request.input("isDaily", sql.Bit, req.body.isDaily ? 1 : 0);
     }
     const result = await request.query(`UPDATE dbo.ActivityCheckpoint SET ${setClauses.join(", ")} WHERE Id = @id`);
     if (!result.rowsAffected[0]) return res.status(404).json({ error: "Checkpoint not found" });

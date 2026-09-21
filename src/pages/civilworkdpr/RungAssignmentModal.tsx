@@ -21,6 +21,7 @@ import { getRoomBlueprint } from "@/api/roomMasterApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
+import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -301,7 +302,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   const addPickedCheckpoints = () => {
     const additions = pool
       .filter((t) => picked.has(t.id))
-      .map((t): AssignmentCheckpoint => ({ checkpointId: t.id, fieldName: t.fieldName, isChecked: false, minWaitDays: t.minWaitDays }));
+      .map((t): AssignmentCheckpoint => ({ checkpointId: t.id, fieldName: t.fieldName, isChecked: false, minWaitDays: t.minWaitDays, isDaily: t.isDaily }));
     if (!additions.length) return;
     setCheckpoints((prev) => [...prev, ...additions]);
     setPicked(new Set());
@@ -332,8 +333,16 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     }
     setCheckpoints((prev) => prev.map((c, i) => (i === index ? { ...c, isChecked: !c.isChecked } : c)));
   };
-  const removeCheckpoint = (index: number) =>
+  const removeCheckpoint = (index: number) => {
+    const cp = checkpoints[index];
+    if (cp?.isDaily && (cp.updateCount ?? 0) > 0) {
+      const ok = window.confirm(
+        `"${cp.fieldName}" has ${cp.updateCount} daily update(s) with photos. Removing it deletes them when you save. Remove anyway?`,
+      );
+      if (!ok) return;
+    }
     setCheckpoints((prev) => prev.filter((_, i) => i !== index));
+  };
 
   // Same rule toggleCheckpoint enforces, exposed here so the row can show
   // *why* a checkpoint can't be checked yet instead of just silently
@@ -643,6 +652,11 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         <label key={t.id} className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-background/60 cursor-pointer text-xs">
                           <input type="checkbox" checked={picked.has(t.id)} onChange={() => togglePicked(t.id)} className="accent-cyan-500" />
                           <span className="flex-1 text-foreground">{t.fieldName}</span>
+                          {t.isDaily && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-cyan-700 dark:text-cyan-300">
+                              <CalendarDays size={9} /> Daily
+                            </span>
+                          )}
                           {t.minWaitDays != null && t.minWaitDays > 0 && (
                             <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
                               <Timer size={9} /> {t.minWaitDays}d wait
@@ -697,9 +711,15 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                           <div className={`w-0.5 flex-1 min-h-[18px] ${cp.isChecked ? "bg-emerald-500/40" : "bg-border"}`} />
                         )}
                       </div>
-                      <div className="flex-1 flex items-center justify-between gap-2 pb-3 pt-0.5">
+                      <div className="flex-1 min-w-0 pb-3 pt-0.5">
+                      <div className="flex items-center justify-between gap-2">
                         <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
                           {cp.fieldName}
+                          {cp.isDaily && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                              <CalendarDays size={9} /> Daily
+                            </span>
+                          )}
                           {gate.locked && (
                             <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
                               <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
@@ -714,6 +734,8 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         >
                           <Trash2 size={12} />
                         </button>
+                      </div>
+                      {cp.isDaily && <CheckpointDailyUpdates checkpointId={cp.id} startDate={startDate || undefined} />}
                       </div>
                     </div>
                     );

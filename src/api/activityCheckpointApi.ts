@@ -24,6 +24,8 @@ export interface ActivityCheckpoint {
   // before this checkpoint can be checked off — null means checkable any
   // time (today's default behavior).
   minWaitDays: number | null;
+  /** "Calendar mark": Work Allocation shows a calendar + live camera for daily updates. */
+  isDaily: boolean;
 }
 
 /** The general checkpoint list — one shared pool, not a list per activity. */
@@ -35,11 +37,12 @@ export const getCheckpoints = async (): Promise<ActivityCheckpoint[]> => {
 export const addCheckpoint = async (
   fieldName: string,
   minWaitDays?: number | null,
+  isDaily = false,
 ): Promise<ActivityCheckpoint> => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ fieldName, minWaitDays: minWaitDays ?? null }),
+    body: JSON.stringify({ fieldName, minWaitDays: minWaitDays ?? null, isDaily }),
   });
   return handleResponse<ActivityCheckpoint>(res);
 };
@@ -67,5 +70,14 @@ export const setActivityCheckpointMinWaitDays = async (
 
 export const deleteActivityCheckpoint = async (id: number): Promise<{ success: boolean }> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  return handleResponse<{ success: boolean }>(res);
+};
+
+export const setCheckpointDaily = async (id: number, isDaily: boolean): Promise<{ success: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ isDaily }),
+  });
   return handleResponse<{ success: boolean }>(res);
 };

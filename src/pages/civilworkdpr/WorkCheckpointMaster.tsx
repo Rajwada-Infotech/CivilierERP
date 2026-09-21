@@ -8,15 +8,38 @@ import {
   getCheckpoints,
   addCheckpoint,
   renameActivityCheckpoint,
-  setActivityCheckpointMinWaitDays,
+  setCheckpointDaily,
   deleteActivityCheckpoint,
   type ActivityCheckpoint,
 } from "@/api/activityCheckpointApi";
-import { ClipboardCheck, ListChecks, Plus, Pencil, Trash2, X, Check, Timer } from "lucide-react";
+import { ClipboardCheck, ListChecks, Plus, Pencil, Trash2, X, Check, Timer, CalendarDays } from "lucide-react";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
 const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5 mb-1.5";
+
+// The "calendar mark": a checkpoint that's updated every day (photo + date) rather
+// than ticked once — Work Allocation shows a calendar and live camera for it.
+function DailyToggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label="Daily update"
+      disabled={disabled}
+      onClick={() => onChange(!on)}
+      title={on ? "Daily update: ON — Work Allocation shows a calendar and camera" : "Daily update: OFF"}
+      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-1 text-[10px] font-semibold transition-colors disabled:opacity-50 ${
+        on
+          ? "border-cyan-500/50 bg-cyan-500/10 text-cyan-700 dark:text-cyan-300"
+          : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+      }`}
+    >
+      <CalendarDays size={11} /> Daily
+    </button>
+  );
+}
 
 function CheckpointRow({
   checkpoint, canEdit, canDelete, onRenamed, onDeleted,
@@ -29,7 +52,7 @@ function CheckpointRow({
 }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(checkpoint.fieldName);
-  const [waitDays, setWaitDays] = useState(checkpoint.minWaitDays != null ? String(checkpoint.minWaitDays) : "");
+  const [isDaily, setIsDaily] = useState(checkpoint.isDaily);
   const [saving, setSaving] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -39,10 +62,9 @@ function CheckpointRow({
 
   const save = async () => {
     const trimmed = value.trim();
-    const nextMinWaitDays = waitDays.trim() === "" ? null : parseInt(waitDays, 10);
     const nameChanged = trimmed && trimmed !== checkpoint.fieldName;
-    const waitChanged = nextMinWaitDays !== (checkpoint.minWaitDays ?? null);
-    if (!nameChanged && !waitChanged) {
+    const dailyChanged = isDaily !== checkpoint.isDaily;
+    if (!nameChanged && !dailyChanged) {
       setEditing(false);
       setValue(checkpoint.fieldName);
       return;
@@ -50,7 +72,7 @@ function CheckpointRow({
     setSaving(true);
     try {
       if (nameChanged) await renameActivityCheckpoint(checkpoint.id, trimmed);
-      if (waitChanged) await setActivityCheckpointMinWaitDays(checkpoint.id, nextMinWaitDays);
+      if (dailyChanged) await setCheckpointDaily(checkpoint.id, isDaily);
       onRenamed();
       setEditing(false);
     } catch (e: any) {
@@ -84,26 +106,11 @@ function CheckpointRow({
           disabled={saving}
           className="flex-1 bg-transparent text-sm text-foreground focus:outline-none disabled:opacity-50"
         />
-        <div className="flex items-center gap-1 shrink-0" title="Minimum wait days after start date">
-          <Timer size={12} className="text-muted-foreground" />
-          <input
-            type="number"
-            min={0}
-            value={waitDays}
-            onChange={(e) => setWaitDays(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); save(); }
-              if (e.key === "Escape") { setEditing(false); setValue(checkpoint.fieldName); }
-            }}
-            placeholder="days"
-            disabled={saving}
-            className="w-16 bg-transparent text-xs text-foreground border border-border rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-cyan-500/40 disabled:opacity-50"
-          />
-        </div>
+        <DailyToggle on={isDaily} onChange={setIsDaily} disabled={saving} />
         <button type="button" onClick={save} disabled={saving} className="w-6 h-6 shrink-0 rounded-md bg-cyan-500 text-white flex items-center justify-center hover:bg-cyan-600 disabled:opacity-40 transition-colors">
           <Check size={12} />
         </button>
-        <button type="button" onClick={() => { setEditing(false); setValue(checkpoint.fieldName); setWaitDays(checkpoint.minWaitDays != null ? String(checkpoint.minWaitDays) : ""); }} disabled={saving} className="w-6 h-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center transition-colors">
+        <button type="button" onClick={() => { setEditing(false); setValue(checkpoint.fieldName); setIsDaily(checkpoint.isDaily); }} disabled={saving} className="w-6 h-6 shrink-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted flex items-center justify-center transition-colors">
           <X size={12} />
         </button>
       </div>
@@ -117,6 +124,11 @@ function CheckpointRow({
         {checkpoint.minWaitDays != null && checkpoint.minWaitDays > 0 && (
           <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
             <Timer size={9} /> {checkpoint.minWaitDays}d wait
+          </span>
+        )}
+        {checkpoint.isDaily && (
+          <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+            <CalendarDays size={9} /> Daily
           </span>
         )}
       </span>
@@ -141,7 +153,7 @@ export default function WorkCheckpointMaster() {
   const qc = useQueryClient();
 
   const [newField, setNewField] = useState("");
-  const [newWaitDays, setNewWaitDays] = useState("");
+  const [newDaily, setNewDaily] = useState(false);
   const [adding, setAdding] = useState(false);
 
   // One general list — Work Allocation picks from it for any activity.
@@ -155,12 +167,11 @@ export default function WorkCheckpointMaster() {
   const handleAdd = async () => {
     const trimmed = newField.trim();
     if (!trimmed) return;
-    const minWaitDays = newWaitDays.trim() === "" ? null : parseInt(newWaitDays, 10);
     setAdding(true);
     try {
-      await addCheckpoint(trimmed, minWaitDays);
+      await addCheckpoint(trimmed, null, newDaily);
       setNewField("");
-      setNewWaitDays("");
+      setNewDaily(false);
       await invalidate();
     } catch (e: any) {
       toast.error(e.message ?? "Couldn't add checkpoint");
@@ -233,21 +244,7 @@ export default function WorkCheckpointMaster() {
                           disabled={adding}
                           className={`${inputCls} flex-1`}
                         />
-                        <div className="flex items-center gap-1 shrink-0" title="Minimum wait days after start date (optional)">
-                          <Timer size={13} className="text-muted-foreground" />
-                          <input
-                            type="number"
-                            min={0}
-                            value={newWaitDays}
-                            onChange={(e) => setNewWaitDays(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") { e.preventDefault(); handleAdd(); }
-                            }}
-                            placeholder="days"
-                            disabled={adding}
-                            className="w-20 h-[42px] rounded-lg text-sm bg-muted border border-border text-foreground px-2.5 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50"
-                          />
-                        </div>
+                        <DailyToggle on={newDaily} onChange={setNewDaily} disabled={adding} />
                         <button
                           type="button"
                           onClick={handleAdd}
