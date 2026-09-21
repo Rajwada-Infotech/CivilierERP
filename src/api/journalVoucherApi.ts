@@ -47,6 +47,9 @@ export interface JournalVoucherLedgerOption {
   label: string;
   code: string | null;
   type: "GL" | "C" | "S" | "B" | string;
+  /** Picker group computed by the server (Landlord/Cash/Partner/Project ledger…
+   *  LHeadType alone can't tell those apart). See journalVoucher/ledgerGroups.ts. */
+  group: string;
   /** Last 4 digits of the bank account number — Bank ("B") heads only, null otherwise. */
   accountNoLast4: string | null;
 }

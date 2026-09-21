@@ -46,23 +46,9 @@ import {
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
+import { LedgerHeadPicker } from "./journalVoucher/LedgerHeadPicker";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
-
-// Matches the real LHeadType convention used everywhere else account heads
-// are created (see CustomerMaster/ContractorMaster/SupplierMaster/
-// CrmBrokerMaster's own CUSTOMER_TYPE/CONTRACTOR_TYPE/SUPPLIER_TYPE
-// constants) — this map previously had "C" labeled "Customer", which is
-// actually Contractor; Customer is "A". Left the group header showing the
-// wrong name for every Contractor head in the picker.
-const LHEAD_TYPE_LABEL: Record<string, string> = {
-  GL: "General Ledger",
-  A: "Customer",
-  C: "Contractor",
-  S: "Supplier",
-  BR: "Broker",
-  B: "Bank",
-};
 
 type JournalVoucherLineUI = JournalVoucherLine & { _id: string };
 const emptyLine = (): JournalVoucherLineUI => ({
@@ -216,15 +202,6 @@ export default function JournalVoucher() {
         : [],
     [allProjects, companyId],
   );
-
-  const groupedLedgerOptions = useMemo(() => {
-    const groups: Record<string, JournalVoucherLedgerOption[]> = {};
-    ledgerOptions.forEach((opt) => {
-      const key = opt.type || "GL";
-      (groups[key] ||= []).push(opt);
-    });
-    return groups;
-  }, [ledgerOptions]);
 
   const totals = useMemo(() => {
     const debit  = lines.reduce((s, l) => s + (Number(l.DebitAmount)  || 0), 0);
@@ -859,31 +836,11 @@ export default function JournalVoucher() {
                     {lines.map((line, idx) => (
                       <tr key={line._id} className="group hover:bg-muted/20">
                         <td className="px-3 py-2">
-                          <Select
-                            value={line.LHeadId ? String(line.LHeadId) : ""}
-                            onValueChange={(v) => updateLine(idx, { LHeadId: parseInt(v, 10) })}
-                          >
-                            <SelectTrigger className="h-8 text-xs border-0 bg-transparent focus:ring-0 focus:ring-offset-0 px-0">
-                              <SelectValue placeholder="Select account…" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {Object.entries(groupedLedgerOptions).map(([type, opts]) => (
-                                <SelectGroup key={type}>
-                                  <SelectLabel className="text-[10px] uppercase tracking-widest">
-                                    {LHEAD_TYPE_LABEL[type] || type}
-                                  </SelectLabel>
-                                  {opts.map((opt) => (
-                                    <SelectItem key={opt.id} value={String(opt.id)} className="text-xs">
-                                      {opt.label}
-                                      {opt.accountNoLast4 && (
-                                        <span className="text-muted-foreground"> •••{opt.accountNoLast4}</span>
-                                      )}
-                                    </SelectItem>
-                                  ))}
-                                </SelectGroup>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                          <LedgerHeadPicker
+                            value={line.LHeadId}
+                            options={ledgerOptions}
+                            onChange={(id) => updateLine(idx, { LHeadId: id })}
+                          />
                         </td>
                         <td className="px-3 py-2">
                           <Input

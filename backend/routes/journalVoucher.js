@@ -15,6 +15,7 @@ const { transition, guardEdit, getRecordStatus } = require("../services/approval
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { postJournalVoucherApproval, hasPosting, reversePostingBySource } = require("../services/generalLedger");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { ledgerOptionGroup } = require("../utils/ledgerOptionGroup");
 const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
 
 function requireUser(req, res) {
@@ -140,6 +141,7 @@ router.get("/ledger-options", authenticateToken, async (req, res) => {
     // actually governs usability.
     const result = await pool.request().query(`
       SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label, LHeadCode AS code, LHeadType AS type,
+        LHeadCategory AS category,
         -- Bank heads only — lets the frontend show "...1234" alongside the
         -- bank name so picking between two accounts at the same bank
         -- doesn't require opening Bank Master to tell them apart.
@@ -148,7 +150,14 @@ router.get("/ledger-options", authenticateToken, async (req, res) => {
       WHERE ISNULL(LHeadStatus, 1) = 1 AND LHeadType <> 'LN'
       ORDER BY LHeadType, LHeadName
     `);
-    res.json(result.recordset);
+    // "group" is what the picker groups/labels by — see ledgerOptionGroup for
+    // why LHeadType alone would mislabel Landlords, Cash and project ledgers.
+    res.json(
+      result.recordset.map(({ category, ...row }) => ({
+        ...row,
+        group: ledgerOptionGroup(row.type, category, row.code),
+      })),
+    );
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
