@@ -188,6 +188,16 @@ describe("Compass search and navigation", () => {
     await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/trial-balance"));
   });
 
+  it("remembers the module of a /masters page so the right sidebar shows", async () => {
+    mount("/finance");
+    press();
+    await screen.findByRole("dialog");
+    fireEvent.change(input(), { target: { value: "customer master" } });
+    fireEvent.click(await screen.findByText("Customer Master"));
+    await waitFor(() => expect(screen.getByTestId("loc")).toHaveTextContent("/masters/customers"));
+    expect(localStorage.getItem("activeModule")).toBe("sales");
+  });
+
   it("shows a friendly empty state", async () => {
     mount();
     press();

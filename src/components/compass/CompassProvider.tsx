@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { rememberModuleForRoute } from "@/contexts/moduleFromPath";
 import { CompassDialog } from "./CompassDialog";
 import { useCompassRegistry, type CompassEntry } from "./compassRegistry";
 import {
@@ -129,6 +130,9 @@ export function CompassProvider({ children }: { children: React.ReactNode }) {
   const select = useCallback(
     (entry: CompassEntry) => {
       setOpen(false);
+      // /masters/* URLs don't say which module they belong to; without this the
+      // sidebar would stay on whichever module the user happened to be in.
+      rememberModuleForRoute(entry.route, entry.moduleId);
       navigate(entry.route, entry.state ? { state: entry.state } : undefined);
     },
     [navigate],
