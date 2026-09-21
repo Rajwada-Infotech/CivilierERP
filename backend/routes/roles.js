@@ -344,8 +344,18 @@ router.get("/:roleId/rights", authMiddleware, async (req, res) => {
 
     const frontendRights = result.recordset.map((row) => {
       const key = `${row.Module}_${row.SubModule}`.trim();
+      // Fallback must be the exact inverse of the SET ROLE RIGHTS handler's
+      // own fallback below (module = submodule = page.replace(/-/g, " ")),
+      // not a reconstruction from the combined "Module_SubModule" key — that
+      // used to turn e.g. Module=SubModule="item master" back into
+      // "item-master_item-master" instead of "item-master", so any page not
+      // in ROLE_RIGHTS_PAGE_MAP (the vast majority) never matched its own
+      // permission entry again after a reload. The saved row was real; only
+      // the read-back page key was wrong, making every such grant look like
+      // it "didn't save" the moment the page list re-rendered.
       const page =
-        ROLE_RIGHTS_REVERSE_MAP[key] || key.toLowerCase().replace(/\s+/g, "-");
+        ROLE_RIGHTS_REVERSE_MAP[key] ||
+        String(row.Module || "").toLowerCase().replace(/\s+/g, "-");
       const actions = [];
       if (Number(row.CanView) === 1) actions.push("view");
       if (Number(row.CanAdd) === 1) actions.push("create");
