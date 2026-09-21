@@ -713,7 +713,7 @@ export default function VehicleInOut() {
   const { data: allPOs = [] } = useQuery({
     queryKey: ["purchaseOrders"],
     queryFn: () =>
-      fetchWithAuth("/api/purchase-orders?limit=500")
+      fetchWithAuth("/api/vehicle-in-out/po-options")
         .then((r) => r.json().catch(() => ({})))
         .then((d) => (Array.isArray(d) ? d : (d.data ?? []))),
     staleTime: 120_000,
@@ -2349,7 +2349,7 @@ export default function VehicleInOut() {
                   {currentUser && (
                     <OrderChat
                       poId={viewingRec.POID}
-                      apiBase="/api/purchase-orders"
+                      apiBase="/api/vehicle-in-out/po-chat"
                       currentUser={{ id: Number(currentUser.id), name: currentUser.name, role: currentUser.role }}
                       className="h-full"
                     />
