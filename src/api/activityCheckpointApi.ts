@@ -26,20 +26,20 @@ export interface ActivityCheckpoint {
   minWaitDays: number | null;
 }
 
-export const getActivityCheckpoints = async (activityId: number): Promise<ActivityCheckpoint[]> => {
-  const res = await fetchWithAuth(`${BASE}/${activityId}`);
+/** The general checkpoint list — one shared pool, not a list per activity. */
+export const getCheckpoints = async (): Promise<ActivityCheckpoint[]> => {
+  const res = await fetchWithAuth(BASE);
   return handleResponse<ActivityCheckpoint[]>(res);
 };
 
-export const addActivityCheckpoint = async (
-  activityId: number,
+export const addCheckpoint = async (
   fieldName: string,
   minWaitDays?: number | null,
 ): Promise<ActivityCheckpoint> => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ activityId, fieldName, minWaitDays: minWaitDays ?? null }),
+    body: JSON.stringify({ fieldName, minWaitDays: minWaitDays ?? null }),
   });
   return handleResponse<ActivityCheckpoint>(res);
 };
