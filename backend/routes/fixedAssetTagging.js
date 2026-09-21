@@ -10,6 +10,7 @@ const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { generateFAItemCodes } = require("../services/faItemCodeGenerator");
 
+const { annotateFACodeDisplay, displayCodeFor } = require("../services/faDisplayCode");
 router.use(authenticateToken);
 
 function requireUser(req, res) {
@@ -162,7 +163,7 @@ router.get("/tagged-codes", requirePageRight("fixed-asset-tagging", "view"), asy
       WHERE ${where.join(" AND ")}
       ORDER BY t.FAItemCode
     `);
-    res.json(result.recordset);
+    res.json(await annotateFACodeDisplay(pool, result.recordset));
   } catch (err) {
     console.error("[fixedAssetTagging] GET /tagged-codes:", err.message);
     res.status(500).json({ error: err.message });
@@ -212,7 +213,7 @@ router.get("/", requirePageRight("fixed-asset-tagging", "view"), async (req, res
       ${whereClause}
       ORDER BY t.CreatedAt DESC
     `);
-    res.json(result.recordset);
+    res.json(await annotateFACodeDisplay(pool, result.recordset));
   } catch (err) {
     console.error("[fixedAssetTagging] GET /:", err.message);
     res.status(500).json({ error: err.message });
@@ -240,7 +241,7 @@ router.get("/:id", requirePageRight("fixed-asset-tagging", "view"), async (req, 
       WHERE t.TagId = @TagId
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
-    res.json(result.recordset[0]);
+    res.json(await annotateFACodeDisplay(pool, result.recordset[0]));
   } catch (err) {
     console.error("[fixedAssetTagging] GET /:id:", err.message);
     res.status(500).json({ error: err.message });

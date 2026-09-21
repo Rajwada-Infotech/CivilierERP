@@ -111,7 +111,12 @@ export default function IDTemplateMaster() {
     {
       id: "sample",
       header: "Sample FA Item Code",
-      cell: ({ row }) => <span className="font-mono text-xs text-muted-foreground">{row.original.projectAlias}/ItemName/0001/26-27</span>,
+      cell: ({ row }) => (
+        <div className="font-mono text-xs text-muted-foreground space-y-0.5">
+          <div><span className="font-sans text-[10px] uppercase tracking-wide opacity-70">Inventory </span>{row.original.projectAlias}/ItemName/0001/26-27</div>
+          <div><span className="font-sans text-[10px] uppercase tracking-wide opacity-70">Assigned </span>{row.original.projectAlias}/<span className="text-amber-600 dark:text-amber-400">Department</span>/ItemName/0001/26-27</div>
+        </div>
+      ),
     },
     {
       id: "status",
@@ -208,7 +213,7 @@ export default function IDTemplateMaster() {
                 value={form.projectAlias}
                 onChange={(e) => setForm((p) => ({ ...p, projectAlias: e.target.value }))} />
               <p className="text-[11px] text-muted-foreground">
-                Used as the first segment of every generated FA Item Code for this project, e.g. <span className="font-mono">RG/Laptop/0001/26-27</span>.
+                Used as the first segment of every generated FA Item Code for this project, e.g. <span className="font-mono">RG/Laptop/0001/26-27</span>. Once an asset is assigned, its holder's department is shown after the alias (<span className="font-mono">RG/Legal/Laptop/0001/26-27</span>) and follows the asset when it is transferred.
               </p>
             </div>
             <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">

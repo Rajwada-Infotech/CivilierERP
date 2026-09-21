@@ -9,6 +9,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 
+const { annotateFACodeDisplay, displayCodeFor } = require("../services/faDisplayCode");
 router.use(authenticateToken);
 
 function requireUser(req, res) {
@@ -215,7 +216,7 @@ router.get("/transferable-assets", requirePageRight("asset-transfer", "view"), a
       WHERE ${where.join(" AND ")}
       ORDER BY fa.FAItemCode
     `);
-    res.json(result.recordset);
+    res.json(await annotateFACodeDisplay(pool, result.recordset));
   } catch (err) {
     console.error("[assetTransfer] GET /transferable-assets:", err.message);
     res.status(500).json({ error: err.message });
@@ -308,7 +309,7 @@ router.get("/", requirePageRight("asset-transfer", "view"), async (req, res) => 
       ${whereClause}
       ORDER BY h.CreatedAt DESC
     `);
-    res.json(result.recordset);
+    res.json(await annotateFACodeDisplay(pool, result.recordset));
   } catch (err) {
     console.error("[assetTransfer] GET /:", err.message);
     res.status(500).json({ error: err.message });
@@ -341,7 +342,7 @@ router.get("/:id", requirePageRight("asset-transfer", "view"), async (req, res) 
       WHERE h.Id = @Id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
-    res.json(result.recordset[0]);
+    res.json(await annotateFACodeDisplay(pool, result.recordset[0]));
   } catch (err) {
     console.error("[assetTransfer] GET /:id:", err.message);
     res.status(500).json({ error: err.message });

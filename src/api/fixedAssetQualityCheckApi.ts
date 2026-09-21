@@ -12,6 +12,7 @@ export type FollowUpStatus = (typeof FOLLOWUP_STATUSES)[number];
 export interface QCAsset {
   AssetId: number;
   FAItemCode: string;
+  FAItemCodeDisplay?: string | null;
   AssetName: string;
   AssetCategory: string | null;
   CompanyId: number | null;
@@ -22,6 +23,7 @@ export interface QCAsset {
 export interface AssetContext {
   assetId: number;
   faItemCode: string | null;
+  faItemCodeDisplay?: string | null;
   itemName: string | null;
   companyId: number | null;
   projectId: number | null;
@@ -51,6 +53,7 @@ export interface QualityCheckItem {
   AssetId: number;
   AssetCode: string | null;
   FAItemCode: string | null;
+  FAItemCodeDisplay?: string | null;
   ItemName: string | null;
   ItemPicture: string | null;
   CurrentUserId: number | null;

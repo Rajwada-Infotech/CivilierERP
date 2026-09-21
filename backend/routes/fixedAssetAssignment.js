@@ -9,6 +9,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 
+const { annotateFACodeDisplay, displayCodeFor } = require("../services/faDisplayCode");
 router.use(authenticateToken);
 
 function requireUser(req, res) {
@@ -47,7 +48,7 @@ router.get("/fa-item-codes", requirePageRight("fixed-asset-assignment", "view"),
         )
       ORDER BY fa.FAItemCode
     `);
-    res.json(result.recordset);
+    res.json(await annotateFACodeDisplay(pool, result.recordset));
   } catch (err) {
     console.error("[fixedAssetAssignment] GET /fa-item-codes:", err.message);
     res.status(500).json({ error: err.message });
@@ -88,7 +89,7 @@ router.get("/", requirePageRight("fixed-asset-assignment", "view"), async (req, 
       ${whereClause}
       ORDER BY h.CreatedAt DESC
     `);
-    res.json(result.recordset);
+    res.json(await annotateFACodeDisplay(pool, result.recordset));
   } catch (err) {
     console.error("[fixedAssetAssignment] GET /:", err.message);
     res.status(500).json({ error: err.message });
@@ -119,7 +120,7 @@ router.get("/:id", requirePageRight("fixed-asset-assignment", "view"), async (re
       WHERE h.AssignmentId = @AssignmentId
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
-    res.json(result.recordset[0]);
+    res.json(await annotateFACodeDisplay(pool, result.recordset[0]));
   } catch (err) {
     console.error("[fixedAssetAssignment] GET /:id:", err.message);
     res.status(500).json({ error: err.message });

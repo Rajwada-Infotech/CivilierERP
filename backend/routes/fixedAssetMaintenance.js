@@ -7,6 +7,7 @@ const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
+const { annotateFACodeDisplay, displayCodeFor } = require("../services/faDisplayCode");
 const {
   resolveDocTypeId, lockNextDocNumber, previewNextDocNumber, backPatchRecordId,
 } = require("../utils/docNumberLock");
@@ -91,7 +92,7 @@ router.get("/assets", requirePageRight(PAGE, "view"), async (req, res) => {
       WHERE ${where.join(" AND ")}
       ORDER BY fa.AssetName, fa.FAItemCode
     `);
-    res.json(result.recordset);
+    res.json(await annotateFACodeDisplay(pool, result.recordset));
   } catch (err) {
     console.error("[faMaintenance] GET /assets:", err.message);
     res.status(500).json({ error: err.message });
@@ -150,7 +151,7 @@ router.get("/fa-item-codes", requirePageRight(PAGE, "view"), async (req, res) =>
       WHERE ${where.join(" AND ")}
       ORDER BY fa.FAItemCode
     `);
-    res.json(result.recordset);
+    res.json(await annotateFACodeDisplay(pool, result.recordset));
   } catch (err) {
     console.error("[faMaintenance] GET /fa-item-codes:", err.message);
     res.status(500).json({ error: err.message });
@@ -199,7 +200,7 @@ router.get("/", requirePageRight(PAGE, "view"), async (req, res) => {
     if (req.query.fromDate)  { request.input("FromDate", sql.Date, req.query.fromDate); where.push("m.DocDate >= @FromDate"); }
     if (req.query.toDate)    { request.input("ToDate", sql.Date, req.query.toDate); where.push("m.DocDate <= @ToDate"); }
     const result = await request.query(`${LIST_SELECT} WHERE ${where.join(" AND ")} ORDER BY m.CreatedAt DESC`);
-    res.json(result.recordset);
+    res.json(await annotateFACodeDisplay(pool, result.recordset));
   } catch (err) {
     console.error("[faMaintenance] GET /:", err.message);
     res.status(500).json({ error: err.message });
@@ -222,7 +223,7 @@ router.get("/:id", requirePageRight(PAGE, "view"), async (req, res) => {
     } catch (e) {
       posting = { error: e.message };
     }
-    res.json({ ...row, posting });
+    res.json({ ...(await annotateFACodeDisplay(pool, row)), posting });
   } catch (err) {
     console.error("[faMaintenance] GET /:id:", err.message);
     res.status(500).json({ error: err.message });
