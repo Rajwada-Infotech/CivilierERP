@@ -140,8 +140,8 @@ function TypePill({ type }: { type: BrsSourceType }) {
   const meta = TYPE_PILL_META[type] ?? TYPE_PILL_META.PAYMENT;
   const Icon = meta.icon;
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${meta.className}`}>
-      <Icon size={9} strokeWidth={2.5} />
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium border whitespace-nowrap ${meta.className}`}>
+      <Icon size={9} strokeWidth={2.5} className="shrink-0" />
       {meta.label}
     </span>
   );

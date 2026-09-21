@@ -30,7 +30,6 @@ import {
   Building2,
   Home,
   Car,
-  ChevronDown,
   SlidersHorizontal,
   Eye,
   FileText,
@@ -38,9 +37,12 @@ import {
   UserCheck,
   FileWarning,
   Undo2,
+  ArrowDownWideNarrow,
+  ArrowUpWideNarrow,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
+import { MultiSelectDropdown, type MultiSelectOption } from "@/components/ui/MultiSelectDropdown";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -424,16 +426,6 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
 
 export const categoryOf = (mod: string): CategoryId => MODULE_CATEGORY[mod] ?? "admin";
 
-// Modules grouped by category, in display order — drives both the filter
-// panel's section headings and the inbox list's grouping.
-const MODULES_BY_CATEGORY: Record<CategoryId, string[]> = CATEGORY_ORDER.reduce(
-  (acc, cat) => {
-    acc[cat] = ALL_MODULES.filter((m) => categoryOf(m) === cat);
-    return acc;
-  },
-  {} as Record<CategoryId, string[]>,
-);
-
 // Modules whose one-click Approve is either guaranteed to fail without a
 // review step first (crm-bookings' Data Review checklist gate) or whose
 // approved amount is only ever editable before approval (crm-brokerage) —
@@ -579,65 +571,6 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "crm-noc":              "border-teal-500",
   "crm-refunds":          "border-orange-600",
   "crm-refunds-finance":  "border-orange-700",
-};
-
-const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
-  "purchase-orders": { icon: "text-blue-500", active: "bg-blue-500 border-blue-500" },
-  "work-orders": { icon: "text-amber-500", active: "bg-amber-500 border-amber-500" },
-  payments: { icon: "text-emerald-500", active: "bg-emerald-500 border-emerald-500" },
-  "goods-receipt": { icon: "text-violet-500", active: "bg-violet-500 border-violet-500" },
-  "expense-booking": { icon: "text-rose-500", active: "bg-rose-500 border-rose-500" },
-  "received-payment": { icon: "text-teal-500", active: "bg-teal-500 border-teal-500" },
-  "work-done": { icon: "text-emerald-600", active: "bg-emerald-600 border-emerald-600" },
-  boq: { icon: "text-indigo-500", active: "bg-indigo-500 border-indigo-500" },
-  "material-requests": { icon: "text-orange-500", active: "bg-orange-500 border-orange-500" },
-  "material-issues": { icon: "text-cyan-500", active: "bg-cyan-500 border-cyan-500" },
-  "journal-voucher": { icon: "text-amber-600", active: "bg-amber-600 border-amber-600" },
-  "inter-company-transfer": { icon: "text-fuchsia-600", active: "bg-fuchsia-600 border-fuchsia-600" },
-  "fund-transfer": { icon: "text-violet-600", active: "bg-violet-600 border-violet-600" },
-  "sale-orders": { icon: "text-lime-600", active: "bg-lime-600 border-lime-600" },
-  "vehicle-in-out": { icon: "text-sky-600", active: "bg-sky-600 border-sky-600" },
-  "stock-transfers": { icon: "text-teal-500", active: "bg-teal-500 border-teal-500" },
-  "crm-money-receipts": { icon: "text-teal-600", active: "bg-teal-600 border-teal-600" },
-  contracts: { icon: "text-purple-500", active: "bg-purple-500 border-purple-500" },
-};
-
-const ModuleTab: React.FC<{
-  module: string | null;
-  label: string;
-  icon?: React.ElementType;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}> = ({ module, label, icon: Icon, count, active, onClick }) => {
-  const colors = module ? MODULE_TAB_COLORS[module] : null;
-
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-all whitespace-nowrap ${
-        active
-          ? `${colors?.active ?? "bg-primary border-primary"} text-white shadow-sm`
-          : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
-      }`}
-    >
-      {Icon && (
-        <Icon size={12} className={active ? "text-white" : colors?.icon} />
-      )}
-      <span>{label}</span>
-      {count > 0 && (
-        <span
-          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
-            active
-              ? "bg-white/20 text-white"
-              : "bg-muted text-foreground/70"
-          }`}
-        >
-          {count}
-        </span>
-      )}
-    </button>
-  );
 };
 
 // ─── Detail preview modal ───────────────────────────────────────────────────
@@ -1056,8 +989,11 @@ const InboxRow: React.FC<{
 const ApprovalInbox: React.FC = () => {
   const queryClient = useQueryClient();
   const rights = usePageRights("approval-inbox");
-  const [activeModule, setActiveModule] = useState<string | null>(null);
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  // Multi-select, nested-by-category filter — replaces the old single-select
+  // module tabs so an approver can pick e.g. "PO + GRN + Payment" at once
+  // instead of flipping between one module at a time. Empty = every module.
+  const [activeModules, setActiveModules] = useState<string[]>([]);
+  const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
 
   const {
     data: allItems = [],
@@ -1074,18 +1010,37 @@ const ApprovalInbox: React.FC = () => {
   const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
 
   const items = (
-    activeModule ? allItems.filter((i) => i.Module === activeModule) : allItems
-  ).filter((i) => !removedKeys.has(`${i.Module}-${i.RecordId}`));
+    activeModules.length > 0
+      ? allItems.filter((i) => activeModules.includes(i.Module))
+      : allItems
+  )
+    .filter((i) => !removedKeys.has(`${i.Module}-${i.RecordId}`))
+    // Sorted by the record's own date, not the backend's LastModified order —
+    // a document dated last month that was only just resubmitted shouldn't
+    // outrank one genuinely raised yesterday.
+    .sort((a, b) => {
+      const da = a.RecordDate ? new Date(a.RecordDate).getTime() : 0;
+      const db = b.RecordDate ? new Date(b.RecordDate).getTime() : 0;
+      return dateSort === "desc" ? db - da : da - db;
+    });
 
   // Group by category (Material, Finance, Engineering, Sales/CRM, Admin) so
   // like modules — MR/PO/GRN under Material, Payment/JV under Finance, etc. —
   // sit together in the list, in a fixed category order. Within a category,
-  // original fetch order (most-recently-relevant first, per the backend's
-  // own ordering) is preserved.
+  // the date sort above is preserved.
   const groupedItems = CATEGORY_ORDER.map((cat) => ({
     cat,
     items: items.filter((i) => categoryOf(i.Module) === cat),
   })).filter((g) => g.items.length > 0);
+
+  // Feeds the nested filter dropdown — every module, grouped by its business
+  // category, with a live pending-count hint per option.
+  const moduleFilterOptions: MultiSelectOption[] = ALL_MODULES.map((mod) => ({
+    id: mod,
+    label: MODULE_CONFIG[mod].label,
+    group: CATEGORY_META[categoryOf(mod)].label,
+    hint: String(allItems.filter((i) => i.Module === mod).length || ""),
+  }));
 
   const handleOptimisticUpdate = (recordId: string, module: string) => {
     setRemovedKeys((prev) => new Set(prev).add(`${module}-${recordId}`));
@@ -1106,8 +1061,6 @@ const ApprovalInbox: React.FC = () => {
     window.dispatchEvent(new CustomEvent("approval-action"));
   };
 
-  const countFor = (mod: string) =>
-    allItems.filter((i) => i.Module === mod).length;
   const totalCount = allItems.length;
 
   return (
@@ -1140,71 +1093,38 @@ const ApprovalInbox: React.FC = () => {
           </div>
         }
       >
-        {/* Module filter — collapsible so the full module list doesn't
-            spill across multiple lines by default; expand to see/pick all. */}
-        <div className="rounded-xl border border-border bg-muted/30 overflow-hidden">
-          <button
-            onClick={() => setFiltersExpanded((v) => !v)}
-            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <span className="flex items-center gap-2">
+        {/* Nested filter — every approval type, grouped by its business
+            category (Material/Finance/Engineering/Sales-CRM), multi-select
+            so several types (e.g. PO + GRN + Payment) can be picked at once
+            instead of one module at a time. Paired with a date-sort toggle
+            since "filter, then sort" is how this list is actually worked. */}
+        <div className="rounded-xl border border-border bg-muted/30 p-2.5 space-y-2">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
               <SlidersHorizontal size={12} />
-              Filter by module
-              {activeModule && (
-                <span className="text-[10px] font-semibold text-primary">
-                  · {MODULE_CONFIG[activeModule]?.label}
-                </span>
-              )}
+              Filter by type
             </span>
-            <ChevronDown
-              size={14}
-              className={`transition-transform ${filtersExpanded ? "rotate-180" : ""}`}
-            />
-          </button>
-          {filtersExpanded && (
-            <div className="p-1.5 pt-0 space-y-2">
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <ModuleTab
-                  module={null}
-                  label="All"
-                  icon={ClipboardCheck}
-                  count={totalCount}
-                  active={activeModule === null}
-                  onClick={() => setActiveModule(null)}
-                />
-              </div>
-              {CATEGORY_ORDER.map((cat) => {
-                const mods = MODULES_BY_CATEGORY[cat];
-                if (mods.length === 0) return null;
-                const meta = CATEGORY_META[cat];
-                return (
-                  <div key={cat}>
-                    <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${meta.color}`}>
-                      {meta.label}
-                    </p>
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      {mods.map((mod) => {
-                        const cfg = MODULE_CONFIG[mod];
-                        return (
-                          <ModuleTab
-                            key={mod}
-                            module={mod}
-                            label={cfg.label}
-                            icon={cfg.icon}
-                            count={countFor(mod)}
-                            active={activeModule === mod}
-                            onClick={() =>
-                              setActiveModule(activeModule === mod ? null : mod)
-                            }
-                          />
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+            <button
+              onClick={() => setDateSort((s) => (s === "desc" ? "asc" : "desc"))}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Toggle date sort order"
+            >
+              {dateSort === "desc" ? (
+                <ArrowDownWideNarrow size={12} />
+              ) : (
+                <ArrowUpWideNarrow size={12} />
+              )}
+              {dateSort === "desc" ? "Newest first" : "Oldest first"}
+            </button>
+          </div>
+          <MultiSelectDropdown
+            options={moduleFilterOptions}
+            value={activeModules}
+            onChange={setActiveModules}
+            placeholder="All approval types"
+            searchPlaceholder="Search PO, GRN, Payment…"
+            itemNoun="type"
+          />
         </div>
 
         {/* Content */}
@@ -1232,13 +1152,13 @@ const ApprovalInbox: React.FC = () => {
                 <Inbox size={24} className="text-muted-foreground/40" />
               </div>
               <p className="text-sm font-semibold text-foreground">
-                {activeModule
-                  ? "No pending items in this module"
+                {activeModules.length > 0
+                  ? "No pending items for the selected type(s)"
                   : "All clear!"}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {activeModule
-                  ? "Switch to All to see the full inbox"
+                {activeModules.length > 0
+                  ? "Clear the filter to see the full inbox"
                   : "No records are awaiting approval right now"}
               </p>
             </div>
@@ -1271,10 +1191,10 @@ const ApprovalInbox: React.FC = () => {
                 {groupedItems.map(({ cat, items: catItems }) => (
                   <div key={cat}>
                     {/* Category section header — only worth showing when the
-                        list spans more than one category (i.e. no module
-                        filter is active); a single-module filter is already
-                        a single category, so the header would be redundant. */}
-                    {!activeModule && (
+                        current result set spans more than one category; a
+                        filter narrow enough to leave just one category on
+                        screen makes the header redundant. */}
+                    {groupedItems.length > 1 && (
                       <div className="sticky top-0 z-[1] flex items-center gap-1.5 px-4 py-1.5 bg-muted/60 backdrop-blur-sm border-b border-border">
                         <span className={`text-[10px] font-bold uppercase tracking-wider ${CATEGORY_META[cat].color}`}>
                           {CATEGORY_META[cat].label}
@@ -1298,8 +1218,8 @@ const ApprovalInbox: React.FC = () => {
                 <p className="text-[11px] text-muted-foreground">
                   {items.length} record{items.length !== 1 ? "s" : ""} pending
                   approval
-                  {activeModule &&
-                    ` in ${MODULE_CONFIG[activeModule]?.label ?? activeModule}`}
+                  {activeModules.length > 0 &&
+                    ` — ${activeModules.map((m) => MODULE_CONFIG[m]?.label ?? m).join(", ")}`}
                 </p>
               </div>
             </>
