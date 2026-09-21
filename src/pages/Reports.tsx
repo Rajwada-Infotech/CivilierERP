@@ -241,6 +241,7 @@ const ALL_REPORTS: ReportDef[] = [
     },
     columns: [
       { header: "Reason", accessor: "ReasonName" },
+      { header: "Vendor", accessor: (r) => (r.VendorName ?? "—") as string },
       { header: "Company", accessor: (r) => (r.Company ?? "—") as string },
       { header: "Project", accessor: (r) => (r.Project ?? "—") as string },
       { header: "Amount", accessor: (r) => fmt(r.Amount as number) },

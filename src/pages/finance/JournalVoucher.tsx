@@ -27,7 +27,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   Plus, Trash2, Scale, Loader2, RefreshCw,
-  CheckCircle2, Clock, FileText, AlertCircle, Search, X, Check, BookOpen, Pencil,
+  CheckCircle2, Clock, FileText, AlertCircle, Search, X, BookOpen, Pencil,
 } from "lucide-react";
 import {
   getJournalVouchers,
@@ -35,8 +35,6 @@ import {
   createJournalVoucher,
   updateJournalVoucher,
   deleteJournalVoucher,
-  approveJournalVoucher,
-  rejectJournalVoucher,
   getJournalVoucherLedgerOptions,
   type JournalVoucherSummary,
   type JournalVoucherLine,
@@ -144,8 +142,6 @@ export default function JournalVoucher() {
   const [allProjects, setAllProjects] = useState<{ id: number; label: string; company_id: number | null; tagged_company_ids?: string | null }[]>([]);
   const [companyId, setCompanyId] = useState<string>("");
   const [projectId, setProjectId] = useState<string>("");
-
-  const [acting, setActing] = useState<{ id: number; action: "approve" | "reject" } | null>(null);
 
   // Detail view — clicking a row, or a deep link from elsewhere (Trial
   // Balance's ledger drill-down navigates here as /journal-voucher?view=<JVID>)
@@ -314,32 +310,6 @@ export default function JournalVoucher() {
       // localStorage unavailable — the draft simply won't persist.
     }
   }, [draftHydrated, jvDate, narration, lines, companyId, projectId, settlement]);
-
-  const handleApprove = async (id: number) => {
-    setActing({ id, action: "approve" });
-    try {
-      await approveJournalVoucher(id);
-      toast.success("Journal Voucher approved and posted to GL");
-      load();
-    } catch (err: any) {
-      toast.error(err?.message || "Approval failed");
-    } finally {
-      setActing(null);
-    }
-  };
-
-  const handleReject = async (id: number) => {
-    setActing({ id, action: "reject" });
-    try {
-      await rejectJournalVoucher(id);
-      toast.success("Journal Voucher rejected");
-      load();
-    } catch (err: any) {
-      toast.error(err?.message || "Rejection failed");
-    } finally {
-      setActing(null);
-    }
-  };
 
   const startEdit = async (v: JournalVoucherSummary) => {
     setEditLoading(true);
@@ -591,26 +561,6 @@ export default function JournalVoucher() {
                       <GLBadge status={v.Status} postedToGL={v.PostedToGL} />
                     </div>
                     <div className="flex gap-1">
-                      {v.Status === "Pending" && rights.canEdit && (
-                        <>
-                          <button
-                            disabled={acting?.id === v.JVID}
-                            onClick={() => handleApprove(v.JVID)}
-                            title="Approve"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
-                          >
-                            {acting?.id === v.JVID && acting.action === "approve" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
-                          </button>
-                          <button
-                            disabled={acting?.id === v.JVID}
-                            onClick={() => handleReject(v.JVID)}
-                            title="Reject"
-                            className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
-                          >
-                            {acting?.id === v.JVID && acting.action === "reject" ? <Loader2 size={13} className="animate-spin" /> : <X size={13} />}
-                          </button>
-                        </>
-                      )}
                       {v.Status !== "Pending" && rights.canEdit && (
                         <button
                           disabled={editLoading}
@@ -722,34 +672,6 @@ export default function JournalVoucher() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex justify-end gap-1">
-                        {v.Status === "Pending" && rights.canEdit && (
-                          <>
-                            <button
-                              disabled={acting?.id === v.JVID}
-                              onClick={(e) => { e.stopPropagation(); handleApprove(v.JVID); }}
-                              title="Approve"
-                              className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors disabled:opacity-40"
-                            >
-                              {acting?.id === v.JVID && acting.action === "approve" ? (
-                                <Loader2 size={13} className="animate-spin" />
-                              ) : (
-                                <Check size={13} />
-                              )}
-                            </button>
-                            <button
-                              disabled={acting?.id === v.JVID}
-                              onClick={(e) => { e.stopPropagation(); handleReject(v.JVID); }}
-                              title="Reject"
-                              className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-rose-600 hover:bg-rose-500/10 transition-colors disabled:opacity-40"
-                            >
-                              {acting?.id === v.JVID && acting.action === "reject" ? (
-                                <Loader2 size={13} className="animate-spin" />
-                              ) : (
-                                <X size={13} />
-                              )}
-                            </button>
-                          </>
-                        )}
                         {v.Status !== "Pending" && rights.canEdit && (
                           <button
                             disabled={editLoading}

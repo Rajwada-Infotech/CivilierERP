@@ -607,15 +607,19 @@ function AddLevelRow({
   levelNumber,
   onConfirm,
   onCancel,
+  initial,
 }: {
   users: User[];
   levelNumber: number;
   onConfirm: (level: Omit<ApprovalLevel, "id">) => void;
   onCancel: () => void;
+  /** Prefills the form and switches it to "edit an existing step" mode/copy. */
+  initial?: Omit<ApprovalLevel, "id">;
 }) {
-  const [label, setLabel] = useState("");
-  const [userIds, setUserIds] = useState<number[]>([]);
-  const [mode, setMode] = useState<"any" | "all">("any");
+  const isEdit = !!initial;
+  const [label, setLabel] = useState(initial?.label ?? "");
+  const [userIds, setUserIds] = useState<number[]>(initial?.userIds ?? []);
+  const [mode, setMode] = useState<"any" | "all">(initial?.mode ?? "any");
   const labelRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -637,7 +641,7 @@ function AddLevelRow({
           {levelNumber}
         </div>
         <span className="text-sm font-semibold text-foreground">
-          New approval step
+          {isEdit ? "Edit approval step" : "New approval step"}
         </span>
       </div>
 
@@ -728,7 +732,7 @@ function AddLevelRow({
           className="gap-1.5 bg-primary hover:bg-primary/90 text-white"
           onClick={confirm}
         >
-          <Check className="w-3.5 h-3.5" /> Add this step
+          <Check className="w-3.5 h-3.5" /> {isEdit ? "Save changes" : "Add this step"}
         </Button>
         <Button
           size="sm"
@@ -753,6 +757,7 @@ function LevelCard({
   onMoveUp,
   onMoveDown,
   onRemove,
+  onEdit,
 }: {
   level: ApprovalLevel;
   index: number;
@@ -761,6 +766,7 @@ function LevelCard({
   onMoveUp: () => void;
   onMoveDown: () => void;
   onRemove: () => void;
+  onEdit: () => void;
 }) {
   function initials(name: string) {
     return name
@@ -854,7 +860,16 @@ function LevelCard({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 ml-1"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 ml-1"
+            onClick={onEdit}
+            title="Edit who's assigned to this step"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
             onClick={onRemove}
             title="Remove this step"
           >
@@ -923,6 +938,7 @@ function ConfigForm({
   );
   const [levels, setLevels] = useState<ApprovalLevel[]>(initial?.levels ?? []);
   const [addingLevel, setAddingLevel] = useState(false);
+  const [editingLevelId, setEditingLevelId] = useState<number | null>(null);
   const nextId = useRef(Date.now());
 
   function toggleModule(id: string) {
@@ -934,6 +950,11 @@ function ConfigForm({
   function addLevel(lv: Omit<ApprovalLevel, "id">) {
     setLevels((prev) => [...prev, { ...lv, id: nextId.current++ }]);
     setAddingLevel(false);
+  }
+
+  function updateLevel(id: number, lv: Omit<ApprovalLevel, "id">) {
+    setLevels((prev) => prev.map((p) => (p.id === id ? { ...lv, id } : p)));
+    setEditingLevelId(null);
   }
 
   function moveUp(idx: number) {
@@ -1069,20 +1090,32 @@ function ConfigForm({
 
             {/* Level cards */}
             <div className="space-y-0">
-              {levels.map((lv, idx) => (
-                <LevelCard
-                  key={lv.id}
-                  level={lv}
-                  index={idx}
-                  total={levels.length}
-                  users={users}
-                  onMoveUp={() => moveUp(idx)}
-                  onMoveDown={() => moveDown(idx)}
-                  onRemove={() =>
-                    setLevels((prev) => prev.filter((_, i) => i !== idx))
-                  }
-                />
-              ))}
+              {levels.map((lv, idx) =>
+                editingLevelId === lv.id ? (
+                  <AddLevelRow
+                    key={lv.id}
+                    users={users}
+                    levelNumber={idx + 1}
+                    initial={{ label: lv.label, userIds: lv.userIds, mode: lv.mode }}
+                    onConfirm={(patch) => updateLevel(lv.id, patch)}
+                    onCancel={() => setEditingLevelId(null)}
+                  />
+                ) : (
+                  <LevelCard
+                    key={lv.id}
+                    level={lv}
+                    index={idx}
+                    total={levels.length}
+                    users={users}
+                    onMoveUp={() => moveUp(idx)}
+                    onMoveDown={() => moveDown(idx)}
+                    onRemove={() =>
+                      setLevels((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                    onEdit={() => setEditingLevelId(lv.id)}
+                  />
+                ),
+              )}
 
               {/* Arrow between last card and add row */}
               {levels.length > 0 && !addingLevel && (
@@ -1098,7 +1131,7 @@ function ConfigForm({
                   onConfirm={addLevel}
                   onCancel={() => setAddingLevel(false)}
                 />
-              ) : (
+              ) : editingLevelId === null ? (
                 <button
                   type="button"
                   onClick={() => setAddingLevel(true)}
@@ -1113,7 +1146,7 @@ function ConfigForm({
                     ? "Add first approval step"
                     : "Add another step"}
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
