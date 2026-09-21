@@ -15,6 +15,8 @@ const { transition, guardEdit, getRecordStatus } = require("../services/approval
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { postJournalVoucherApproval, hasPosting, reversePostingBySource } = require("../services/generalLedger");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { ledgerOptionGroup } = require("../utils/ledgerOptionGroup");
+const { validateSettlementMode, normalizeSettlementMode, assertChequeLeafFree } = require("../utils/settlementMode");
 const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
 
 function requireUser(req, res) {
@@ -140,6 +142,7 @@ router.get("/ledger-options", authenticateToken, async (req, res) => {
     // actually governs usability.
     const result = await pool.request().query(`
       SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label, LHeadCode AS code, LHeadType AS type,
+        LHeadCategory AS category,
         -- Bank heads only — lets the frontend show "...1234" alongside the
         -- bank name so picking between two accounts at the same bank
         -- doesn't require opening Bank Master to tell them apart.
@@ -148,7 +151,14 @@ router.get("/ledger-options", authenticateToken, async (req, res) => {
       WHERE ISNULL(LHeadStatus, 1) = 1 AND LHeadType <> 'LN'
       ORDER BY LHeadType, LHeadName
     `);
-    res.json(result.recordset);
+    // "group" is what the picker groups/labels by — see ledgerOptionGroup for
+    // why LHeadType alone would mislabel Landlords, Cash and project ledgers.
+    res.json(
+      result.recordset.map(({ category, ...row }) => ({
+        ...row,
+        group: ledgerOptionGroup(row.type, category, row.code),
+      })),
+    );
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -231,10 +241,11 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const header = await pool
       .request()
       .input("id", sql.Int, id).query(`
-        SELECT jv.*, co.name AS CompanyName, pr.name AS ProjectName
+        SELECT jv.*, co.name AS CompanyName, pr.name AS ProjectName, bk.LHeadName AS BankName
         FROM dbo.JournalVoucher jv
         LEFT JOIN dbo.enterprise co ON co.id = jv.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = jv.ProjectId
+        LEFT JOIN dbo.AccountHeadMaster bk ON bk.LHeadId = jv.BankId
         WHERE jv.JVID = @id
       `);
     if (!header.recordset.length) return res.status(404).json({ error: "Not found" });
@@ -269,10 +280,25 @@ router.post("/", authenticateToken, requirePageRight("journal-voucher", "create"
     if (!JVDate) return res.status(400).json({ error: "JVDate is required." });
     const linesError = validateLines(lines);
     if (linesError) return res.status(400).json({ error: linesError });
+    const modeError = validateSettlementMode(req.body);
+    if (modeError) return res.status(400).json({ error: modeError });
     try {
       await assertProjectVisibleToCompany(pool, ProjectId, CompanyId);
     } catch (err) {
       return res.status(err.status || 400).json({ error: err.message });
+    }
+
+    const settle = normalizeSettlementMode(req.body);
+    if (settle.ChequeLotId) {
+      try {
+        settle.ChequeLotNumber = await assertChequeLeafFree(pool, {
+          lotId: settle.ChequeLotId,
+          chequeNo: settle.ChequeNo,
+          bankId: settle.BankId,
+        });
+      } catch (err) {
+        return res.status(err.status || 400).json({ error: err.message });
+      }
     }
 
     const dtId = await resolveDocTypeId(pool, sql, "JV");
@@ -300,11 +326,21 @@ router.post("/", authenticateToken, requirePageRight("journal-voucher", "create"
         .input("CompanyId", sql.Int, CompanyId || null)
         .input("ProjectId", sql.Int, ProjectId || null)
         .input("DocTypeId", sql.Int, dtId || null)
+        .input("Mode", sql.NVarChar(30), settle.Mode)
+        .input("BankId", sql.Int, settle.BankId)
+        .input("ChequeLotId", sql.Int, settle.ChequeLotId)
+        .input("ChequeLotNumber", sql.NVarChar(50), settle.ChequeLotNumber || null)
+        .input("ChequeNo", sql.NVarChar(20), settle.ChequeNo)
+        .input("ChequeDate", sql.Date, settle.ChequeDate)
+        .input("IsPostDated", sql.Bit, settle.IsPostDated)
+        .input("DigitalRefNumber", sql.NVarChar(100), settle.DigitalRefNumber)
         .input("CreatedBy", sql.NVarChar(150), user).query(`
           INSERT INTO dbo.JournalVoucher
-            (JVNo, JVDate, Narration, CompanyId, ProjectId, Status, DocTypeId, CreatedBy)
+            (JVNo, JVDate, Narration, CompanyId, ProjectId, Status, DocTypeId, CreatedBy,
+             Mode, BankId, ChequeLotId, ChequeLotNumber, ChequeNo, ChequeDate, IsPostDated, DigitalRefNumber)
           OUTPUT INSERTED.JVID
-          VALUES (@JVNo, @JVDate, @Narration, @CompanyId, @ProjectId, 'Draft', @DocTypeId, @CreatedBy)
+          VALUES (@JVNo, @JVDate, @Narration, @CompanyId, @ProjectId, 'Draft', @DocTypeId, @CreatedBy,
+                  @Mode, @BankId, @ChequeLotId, @ChequeLotNumber, @ChequeNo, @ChequeDate, @IsPostDated, @DigitalRefNumber)
         `);
 
       newId = insertHdr.recordset[0].JVID;
@@ -392,10 +428,26 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
     if (!JVDate) return res.status(400).json({ error: "JVDate is required." });
     const linesError = validateLines(lines);
     if (linesError) return res.status(400).json({ error: linesError });
+    const modeError = validateSettlementMode(req.body);
+    if (modeError) return res.status(400).json({ error: modeError });
     try {
       await assertProjectVisibleToCompany(pool, ProjectId, CompanyId);
     } catch (err) {
       return res.status(err.status || 400).json({ error: err.message });
+    }
+
+    const settle = normalizeSettlementMode(req.body);
+    if (settle.ChequeLotId) {
+      try {
+        settle.ChequeLotNumber = await assertChequeLeafFree(pool, {
+          lotId: settle.ChequeLotId,
+          chequeNo: settle.ChequeNo,
+          bankId: settle.BankId,
+          excludeJVId: id,
+        });
+      } catch (err) {
+        return res.status(err.status || 400).json({ error: err.message });
+      }
     }
 
     // Editing rewrites every line (delete-all, re-insert) — a line a
@@ -429,6 +481,14 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
         .input("Narration", sql.NVarChar(500), Narration || null)
         .input("CompanyId", sql.Int, CompanyId || null)
         .input("ProjectId", sql.Int, ProjectId || null)
+        .input("Mode", sql.NVarChar(30), settle.Mode)
+        .input("BankId", sql.Int, settle.BankId)
+        .input("ChequeLotId", sql.Int, settle.ChequeLotId)
+        .input("ChequeLotNumber", sql.NVarChar(50), settle.ChequeLotNumber || null)
+        .input("ChequeNo", sql.NVarChar(20), settle.ChequeNo)
+        .input("ChequeDate", sql.Date, settle.ChequeDate)
+        .input("IsPostDated", sql.Bit, settle.IsPostDated)
+        .input("DigitalRefNumber", sql.NVarChar(100), settle.DigitalRefNumber)
         .input("UpdatedBy", sql.NVarChar(150), user);
 
       // Only Approved actually needs its Status reset here — Draft/Rejected
@@ -438,7 +498,11 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
       await updateReq.query(`
           UPDATE dbo.JournalVoucher
           SET JVDate=@JVDate, Narration=@Narration, CompanyId=@CompanyId,
-              ProjectId=@ProjectId, UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()${statusSet}
+              ProjectId=@ProjectId,
+              Mode=@Mode, BankId=@BankId, ChequeLotId=@ChequeLotId, ChequeLotNumber=@ChequeLotNumber,
+              ChequeNo=@ChequeNo, ChequeDate=@ChequeDate, IsPostDated=@IsPostDated,
+              DigitalRefNumber=@DigitalRefNumber,
+              UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()${statusSet}
           WHERE JVID=@id
         `);
 

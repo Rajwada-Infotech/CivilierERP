@@ -51,6 +51,20 @@ function paymentReferenceForBrokerage(row) {
 // DocYear (which only reflects the calendar year the doc number was issued
 // in). Used so direct/manual payments (no linked ExpenseBooking) are still
 // correctly filterable/displayable by Financial Year in Reports.
+// NewPayment.PCompany holds either the enterprise id ("23") or, for payments
+// saved from the current form, the company's NAME ("ABC TEST COMPANY") — both
+// shapes exist in the data (see also brs.js's dual match). TDS needs the id.
+async function resolvePaymentCompanyId(pool, pCompany) {
+  const text = String(pCompany ?? "").trim();
+  if (!text) return null;
+  if (/^\d+$/.test(text)) return parseInt(text, 10);
+  const r = await pool
+    .request()
+    .input("Name", sql.NVarChar(255), text)
+    .query("SELECT TOP 1 id FROM dbo.enterprise WHERE name = @Name AND business_type = 'C'");
+  return r.recordset[0]?.id ?? null;
+}
+
 async function resolveFinYearId(pool, pDate) {
   if (!pDate) return null;
   const result = await pool
@@ -426,6 +440,11 @@ router.get("/cheque-lots", async (req, res) => {
           - ISNULL((
               SELECT COUNT(*) FROM dbo.CancelledCheque cc
               WHERE cc.ChequeLotId = cm.CId
+            ), 0)
+          - ISNULL((
+              SELECT COUNT(*) FROM dbo.JournalVoucher jv
+              WHERE jv.ChequeLotId = cm.CId AND jv.ChequeNo IS NOT NULL
+                AND jv.Status NOT IN ('Rejected', 'Deleted')
             ), 0) AS RemainingCheques
       FROM dbo.ChequeMaster cm
       LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
@@ -491,6 +510,15 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
           AND Status NOT IN ('Rejected', 'Deleted')
       `);
     ftUsedRes.recordset.forEach((r) => usedSet.add(String(r.ChequeNo)));
+
+    // ...and by a Journal Voucher that records a cheque settlement.
+    const jvUsedRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
+      .query(`
+        SELECT ChequeNo FROM dbo.JournalVoucher
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo IS NOT NULL
+          AND Status NOT IN ('Rejected', 'Deleted')
+      `);
+    jvUsedRes.recordset.forEach((r) => usedSet.add(String(r.ChequeNo)));
 
     // Same for Loan Sanctions
     const lsUsedRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
@@ -594,6 +622,21 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
         .json({ error: "Cheque number already used in a Fund Transfer" });
     }
 
+    // ...and if a Journal Voucher claimed it.
+    const jvDupRes = await pool
+      .request()
+      .input("ChequeLotId", sql.Int, lotId)
+      .input("ChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
+        SELECT COUNT(*) AS cnt FROM dbo.JournalVoucher
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo
+          AND Status NOT IN ('Rejected', 'Deleted')
+      `);
+    if (jvDupRes.recordset[0].cnt > 0) {
+      return res
+        .status(409)
+        .json({ error: "Cheque number already used in a Journal Voucher" });
+    }
+
     // Also block if a Loan Sanction claimed this number from this lot.
     const lsDupRes = await pool
       .request()
@@ -635,6 +678,9 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
           WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
             AND Status NOT IN ('Rejected', 'Deleted')) +
         (SELECT COUNT(*) FROM dbo.LoanSanction
+          WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
+            AND Status NOT IN ('Rejected', 'Deleted')) +
+        (SELECT COUNT(*) FROM dbo.JournalVoucher
           WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
             AND Status NOT IN ('Rejected', 'Deleted')) AS usedCount
     `);
@@ -808,7 +854,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // TDS is due but nothing was selected — caught below like every other
     // validation error in this handler.
     const isInvoiceLinkedForTds = !!PExpenseRef && !ContractId;
-    const companyIdForTds = parseInt(PCompany, 10) || null;
+    const companyIdForTds = await resolvePaymentCompanyId(pool, PCompany);
     const finYearIdForTds = await resolveFinYearId(pool, PDate);
     let tdsSnapshot;
     try {

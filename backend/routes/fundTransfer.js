@@ -10,6 +10,7 @@ const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../u
 const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { postFundTransferApproval, hasPosting } = require("../services/generalLedger");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -83,6 +84,19 @@ async function assertChequeAvailable(pool, lotId, chequeNo, excludeFTId) {
   const dupFT = await ftReq.query(ftQuery);
   if (dupFT.recordset[0].cnt > 0) {
     const err = new Error("Cheque number already used in another Fund Transfer.");
+    err.status = 409;
+    throw err;
+  }
+
+  const dupJV = await pool.request()
+    .input("ChequeLotId", sql.Int, lotId)
+    .input("ChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
+      SELECT COUNT(*) AS cnt FROM dbo.JournalVoucher
+      WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo
+        AND Status NOT IN ('Rejected', 'Deleted')
+    `);
+  if (dupJV.recordset[0].cnt > 0) {
+    const err = new Error("Cheque number already used in a Journal Voucher.");
     err.status = 409;
     throw err;
   }
@@ -472,6 +486,88 @@ router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"),
     res.json({
       message: resubmitted ? "Fund Transfer updated and re-submitted for approval" : "Fund Transfer updated",
       resubmitted,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/remarks — edit only the narration/remarks ──────────────────────
+// Remarks carry no financial weight, so unlike PUT /:id (full edit, Draft or
+// Rejected only) they stay editable while the transfer is Pending too. Once
+// Approved they're still editable, but only with the post-approval right, and
+// the change is written to the Amendment trail (Finance → Amendment). The GL
+// posting is left alone — only the transfer's own Narration changes.
+router.put("/:id/remarks", authenticateToken, requirePageRight("fund-transfer", "edit"), async (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const raw = req.body?.Narration;
+    if (raw !== undefined && raw !== null && typeof raw !== "string") {
+      return res.status(400).json({ error: "Narration must be text." });
+    }
+    const narration = (raw || "").trim();
+    if (narration.length > 500) {
+      return res.status(400).json({ error: "Narration can be at most 500 characters." });
+    }
+
+    const before = await snapshotRow(pool, "dbo.FundTransfer", "FTId", id);
+    if (!before) return res.status(404).json({ error: "Not found" });
+
+    const status = before.Status;
+    const wasApproved = status === "Approved";
+    if (!wasApproved && !["Draft", "Pending", "Rejected"].includes(status)) {
+      return res.status(400).json({ error: `Remarks cannot be edited on a ${status} transfer.` });
+    }
+    if (wasApproved && !(await resolveAllowPostApproval(req, "fund-transfer"))) {
+      return res.status(403).json({ error: "You don't have permission to edit an approved transfer." });
+    }
+
+    const updateResult = await pool.request()
+      .input("id", sql.Int, id)
+      .input("status", sql.NVarChar(20), status)
+      .input("Narration", sql.NVarChar(500), narration || null)
+      .input("UpdatedBy", sql.NVarChar(150), user).query(`
+        UPDATE dbo.FundTransfer
+        SET Narration=@Narration, UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()
+        WHERE FTId=@id AND Status=@status
+      `);
+    if (updateResult.rowsAffected[0] === 0) {
+      return res.status(409).json({ error: "The transfer's status changed before the remarks could be saved. Reload and try again." });
+    }
+
+    await bumpCacheVersion("fund-transfer");
+
+    let amendmentId = null;
+    if (wasApproved) {
+      try {
+        const after = await snapshotRow(pool, "dbo.FundTransfer", "FTId", id);
+        const company = await pool.request().input("c", sql.Int, before.SourceCompanyId)
+          .query("SELECT name FROM dbo.enterprise WHERE id = @c");
+        amendmentId = await recordAmendment({
+          refDocType: "fund-transfer",
+          refDocId: id,
+          refDocNo: before.DocNo,
+          projectName: null,
+          companyName: company.recordset[0]?.name || null,
+          changedBy: user,
+          before,
+          after,
+          fieldLabels: { Narration: "Narration / Remarks" },
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (fund-transfer):", logErr.message);
+      }
+    }
+
+    res.json({
+      message: amendmentId ? "Remarks updated and logged in Amendment" : "Remarks updated",
+      amendmentId,
     });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
