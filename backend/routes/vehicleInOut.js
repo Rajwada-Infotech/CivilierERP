@@ -36,7 +36,7 @@ const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageAction, hasAnyPageAction } = require("../middleware/requirePageRight");
 const {
   resolveDocTypeId,
   lockNextDocNumber,
@@ -1075,7 +1075,16 @@ router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, 
 // VehicleInOutID exists — same flow as ticket attachments. Each row starts
 // with VehicleInOutID = NULL and gets linked once the parent record is
 // actually saved (see linkAttachments() in POST / and PUT /:id above).
-router.post("/upload", requirePageRight("vehicle-in-out", "edit"), upload.array("file", 20), async (req, res) => {
+// Attaching files is part of creating a record as much as editing one, so it needs
+// create OR edit — it used to need edit alone, which refused create-only users.
+const uploadFiles = (req, res, next) =>
+  upload.array("file", 20)(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.code === "LIMIT_FILE_SIZE";
+    res.status(400).json({ error: tooBig ? "A file is larger than the 50 MB limit." : err.message || "Upload failed" });
+  });
+
+router.post("/upload", requireAnyPageAction("vehicle-in-out", ["create", "edit"]), uploadFiles, async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -1156,7 +1165,10 @@ router.get("/attachment/:attachId", async (req, res) => {
 // ── DELETE /attachment/:attachId — remove a single attachment ─────────────────
 // Used when the user removes a captured photo / file before saving the form,
 // or removes one from an existing record while editing.
-router.delete("/attachment/:attachId", requirePageRight("vehicle-in-out", "delete"), async (req, res) => {
+// A file that's still un-linked (uploaded on a form that hasn't been saved yet)
+// can be dropped by anyone who could upload it; removing one that's already
+// attached to a saved record still needs the Delete right.
+router.delete("/attachment/:attachId", requireAnyPageAction("vehicle-in-out", ["delete", "create", "edit"]), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -1166,6 +1178,12 @@ router.delete("/attachment/:attachId", requirePageRight("vehicle-in-out", "delet
       return res.status(400).json({ error: "Invalid attachment id" });
 
     const pool = getPool();
+    const meta = await pool.request().input("AttachmentId", sql.Int, attachId)
+      .query(`SELECT VehicleInOutID FROM dbo.VehicleInOutAttachments WHERE AttachmentId = @AttachmentId`);
+    if (!meta.recordset.length) return res.status(404).json({ error: "Attachment not found" });
+    if (meta.recordset[0].VehicleInOutID !== null && !(await hasAnyPageAction(req, "vehicle-in-out", ["delete"]))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     const result = await pool
       .request()
       .input("AttachmentId", sql.Int, attachId)

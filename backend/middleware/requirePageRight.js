@@ -123,4 +123,40 @@ function requireAnyPageRight(pageKeys, action) {
   };
 }
 
-module.exports = { requirePageRight, requireAnyPageRight };
+/**
+ * Whether the caller holds ANY of the given actions on a page (superusers always do).
+ * Used where one endpoint serves several steps of a workflow — e.g. uploading an
+ * attachment is part of both creating and editing a document, so a create-only
+ * user must not be refused.
+ */
+async function hasAnyPageAction(req, pageKey, actions) {
+  const role = (req.user?.role || "").toLowerCase();
+  if (["super_admin", "sa", "dba", "admin"].includes(role)) return true;
+  if (role === "marketing_head" && isMarketingHeadAllowed(String(pageKey).toLowerCase())) return true;
+  const userId = req.user?.userId ?? req.user?.id;
+  if (!userId) return false;
+  const target = String(pageKey).toLowerCase();
+  const wanted = actions.map((x) => String(x).toLowerCase());
+  const effective = await getEffectivePagePermissions(userId, req.user?.roleId);
+  return effective.some(
+    (right) =>
+      String(right?.page || "").toLowerCase() === target &&
+      Array.isArray(right?.actions) &&
+      right.actions.some((x) => wanted.includes(String(x).toLowerCase())),
+  );
+}
+
+function requireAnyPageAction(pageKey, actions) {
+  return async (req, res, next) => {
+    try {
+      if (!req.user?.userId && !req.user?.id) return res.status(401).json({ error: "Invalid token - missing user id" });
+      if (await hasAnyPageAction(req, pageKey, actions)) return next();
+      return res.status(403).json({ error: "Access denied" });
+    } catch (err) {
+      console.error("requireAnyPageAction check failed:", err);
+      return res.status(500).json({ error: "Permission check error" });
+    }
+  };
+}
+
+module.exports = { requirePageRight, requireAnyPageRight, requireAnyPageAction, hasAnyPageAction };
