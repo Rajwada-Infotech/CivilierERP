@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+// Why the camera could not start — lets the UI tell "no webcam" from
+// "permission blocked" from "another app has it" instead of one vague message.
+export type CameraError = "insecure" | "unsupported" | "denied" | "no-device" | "busy" | "other";
+
+export function classifyCameraError(err: unknown): CameraError {
+  const name = err instanceof Error ? err.name : "";
+  if (name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError") return "denied";
+  if (name === "NotFoundError" || name === "DevicesNotFoundError" || name === "OverconstrainedError") return "no-device";
+  if (name === "NotReadableError" || name === "TrackStartError" || name === "AbortError") return "busy";
+  return "other";
+}
+
 // getUserMedia-backed live camera preview + shutter capture, scoped to
 // whatever component calls it — stop() must run on unmount or the "camera
 // light stays on" bug follows the user around the app (mobile browsers keep
@@ -10,6 +22,7 @@ export function useCameraCapture() {
   const streamRef = useRef<MediaStream | null>(null);
   const [isActive, setIsActive] = useState(false);
   const [unsupported, setUnsupported] = useState(false);
+  const [error, setError] = useState<CameraError | null>(null);
 
   const stop = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -19,9 +32,12 @@ export function useCameraCapture() {
 
   const start = useCallback(async (): Promise<boolean> => {
     if (!navigator.mediaDevices?.getUserMedia) {
+      // getUserMedia only exists in secure contexts (HTTPS or localhost).
+      setError(window.isSecureContext === false ? "insecure" : "unsupported");
       setUnsupported(true);
       return false;
     }
+    setError(null);
     // Desktop webcams have no "environment"-facing camera, and requesting
     // it as a hard constraint makes getUserMedia reject outright instead of
     // falling back — so ask for it as a soft preference first, and if the
@@ -51,9 +67,13 @@ export function useCameraCapture() {
       }
       setIsActive(true);
       return true;
-    } catch {
-      // Permission denied, no camera, or insecure context — caller falls
-      // back to a plain file input (still hinting capture="environment").
+    } catch (err) {
+      // Release a stream we did get but could not play, so the camera light
+      // does not stay on after a failed start.
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      console.warn("Camera start failed:", err);
+      setError(classifyCameraError(err));
       setUnsupported(true);
       return false;
     }
@@ -77,5 +97,5 @@ export function useCameraCapture() {
 
   useEffect(() => stop, [stop]);
 
-  return { videoRef, isActive, unsupported, start, stop, capture };
+  return { videoRef, isActive, unsupported, error, start, stop, capture };
 }
