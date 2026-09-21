@@ -26,6 +26,7 @@ import type { CompanyDetail } from "@/api/enterpriseApi";
 import { ExportMenu } from "@/components/ExportMenu";
 import { toast } from "sonner";
 import { formatINR } from "@/utils/formatCurrency";
+import { printStatusLabel } from "@/utils/printStatus";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import {
@@ -614,7 +615,7 @@ const Payment: React.FC = () => {
       <div style="font-size:14px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${rec.docNo || "—"}</div>
       <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
         <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sColor}18;color:${sColor};border:1px solid ${sColor}40;">
-          ${rec.status}
+          ${printStatusLabel(rec.status)}
         </span>
         <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${mColor}18;color:${mColor};border:1px solid ${mColor}40;">
           ${rec.mode}
@@ -784,13 +785,18 @@ const Payment: React.FC = () => {
   // Companies fetched with business_type=C from enterprise table
   const companyOptions = enterprises;
 
+  // ── Contract source ─────────────────────────────────────────────────────────
+  const [selectedContract, setSelectedContract] = useState<any | null>(null);
+
   // TDS eligibility — live-checked against the chosen Payee/Party for a
   // direct (no invoice linked) payment. Reuses the same generic endpoint
   // the Invoice form uses (AccountHeadMaster eligibility isn't module-
   // specific — Payee/Party here is the exact same Supplier/Contractor
   // master row an Invoice's supplier resolves to).
   useEffect(() => {
-    if (form.expenseRef || !form.partyId || !form.company) {
+    // An invoice-linked payment inherits the invoice's TDS; everything else — a
+    // direct payment, a standalone advance, or a Contract advance — picks its own.
+    if ((form.expenseRef && !selectedContract) || !form.partyId || !form.company) {
       setTdsEligibility(null);
       return;
     }
@@ -818,7 +824,68 @@ const Payment: React.FC = () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.expenseRef, form.partyId, form.company, form.amount, form.date, companyOptions]);
+  }, [form.expenseRef, selectedContract, form.partyId, form.company, form.amount, form.date, companyOptions]);
+
+  // TDS field for payments that aren't linked to an invoice (direct payment,
+  // standalone advance, Contract advance). Shown once the party is TDS-applicable;
+  // when it can't be shown, say why instead of leaving the option silently absent.
+  // The ₹30k/₹1L threshold itself is enforced server-side on save.
+  const renderTdsField = () => {
+    if (!form.partyId) return null;
+    if (!form.company) {
+      return (
+        <Field label="TDS">
+          <p className="text-[11px] text-muted-foreground pt-2">Select the company to check TDS for this party.</p>
+        </Field>
+      );
+    }
+    if (!tdsEligibility) return null;
+    if (!tdsEligibility.tdsApplicable) {
+      return (
+        <Field label="TDS">
+          <p className="text-[11px] text-muted-foreground pt-2">
+            TDS isn't enabled for this party — turn on "TDS Applicable" in their master to deduct it.
+          </p>
+        </Field>
+      );
+    }
+    const pct = Number(form.tdsPercentage) || 0;
+    const tdsAmt = form.tdsId ? Math.round(((Number(form.amount) || 0) * pct) / 100 * 100) / 100 : 0;
+    return (
+      <Field
+        label="TDS"
+        hint={
+          tdsEligibility.thresholdMet
+            ? "This party has crossed the TDS threshold — select the applicable TDS"
+            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} paid this year so far) — optional`
+        }
+      >
+        <select
+          value={form.tdsId ?? ""}
+          onChange={(e) => {
+            const id = e.target.value ? Number(e.target.value) : null;
+            const rec = tdsRecords.find((t) => Number(t.id) === id);
+            set("tdsId", id);
+            set("tdsPercentage", rec?.percentage ?? null);
+            set("tdsAmount", rec ? Math.round(((Number(form.amount) || 0) * rec.percentage) / 100 * 100) / 100 : 0);
+          }}
+          className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          <option value="">-- No TDS --</option>
+          {tdsRecords.filter((t) => t.status).map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name || t.nature} — {t.percentage}%
+            </option>
+          ))}
+        </select>
+        {!!form.tdsId && (
+          <p className="text-[11px] text-muted-foreground mt-1">
+            TDS ₹{tdsAmt.toLocaleString("en-IN")} · Net ₹{Math.max(0, (Number(form.amount) || 0) - tdsAmt).toLocaleString("en-IN")}
+          </p>
+        )}
+      </Field>
+    );
+  };
 
   const { data: projectOptions = [] } = useQuery<
     {
@@ -826,11 +893,22 @@ const Payment: React.FC = () => {
       label: string;
       belongs_to?: number | null;
       company_id?: number | null;
+      tagged_company_ids?: string | null;
     }[]
   >({
     queryKey: ["project-options-payment-filter"],
     queryFn: fetchProjectOptions,
   });
+
+  // A project is available to a company if it's the project's primary
+  // (owning) company, or the company is tagged onto the project via
+  // Project Master's multi-company tagging (dbo.ProjectCompanies).
+  const isProjectVisibleToCompany = useMemo(
+    () => (p: { company_id?: number | null; tagged_company_ids?: string | null }, companyId: string | number) =>
+      String(p.company_id) === String(companyId) ||
+      (p.tagged_company_ids?.split(",") ?? []).includes(String(companyId)),
+    [],
+  );
 
   const { data: supplierOptions = [] } = useQuery<
     { id: number; label: string; type?: string }[]
@@ -922,9 +1000,6 @@ const Payment: React.FC = () => {
     // payments made) change the true remainingAmount server-side.
     refetchOnMount: "always",
   });
-
-  // ── Contract source ─────────────────────────────────────────────────────────
-  const [selectedContract, setSelectedContract] = useState<any | null>(null);
 
   // ── Journal Voucher source ───────────────────────────────────────────────────
   // Settle a JV's unpaid liability leg (DR that same head, CR bank — the
@@ -1982,7 +2057,7 @@ const Payment: React.FC = () => {
       }
     }
 
-    if (!form.expenseRef && tdsEligibility?.thresholdMet && !form.tdsId) {
+    if ((!form.expenseRef || selectedContract) && tdsEligibility?.thresholdMet && !form.tdsId) {
       toast.error("TDS is due on this payment — please select a TDS.");
       return false;
     }
@@ -2413,7 +2488,7 @@ const Payment: React.FC = () => {
                                         (p) =>
                                           p.label === prev.project &&
                                           (p.belongs_to === newCompanyId ||
-                                            p.company_id === newCompanyId),
+                                            isProjectVisibleToCompany(p, newCompanyId)),
                                       )
                                     : true;
                                   if (!projStillValid) next.project = "";
@@ -2614,8 +2689,8 @@ const Payment: React.FC = () => {
                                   )?.id ?? null);
                             return (
                               companyId
-                                ? projectOptions.filter(
-                                    (p) => p.company_id === companyId,
+                                ? projectOptions.filter((p) =>
+                                    isProjectVisibleToCompany(p, companyId),
                                   )
                                 : projectOptions
                             ).map((p) => (
@@ -2682,47 +2757,7 @@ const Payment: React.FC = () => {
                         />
                       </div>
                     </Field>
-                    {/* TDS — only shown once the chosen party is actually
-                        TDS-eligible. Never mandatory to fill here in the
-                        sense of blocking typing — the ₹30k/₹1L threshold is
-                        enforced server-side on save. */}
-                    {tdsEligibility?.tdsApplicable && (
-                      <Field
-                        label="TDS"
-                        hint={
-                          tdsEligibility.thresholdMet
-                            ? "This party has crossed the TDS threshold — select the applicable TDS"
-                            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} paid this year so far) — optional`
-                        }
-                      >
-                        <select
-                          value={form.tdsId ?? ""}
-                          onChange={(e) => {
-                            const id = e.target.value ? Number(e.target.value) : null;
-                            const rec = tdsRecords.find((t) => Number(t.id) === id);
-                            set("tdsId", id);
-                            set("tdsPercentage", rec?.percentage ?? null);
-                            set(
-                              "tdsAmount",
-                              rec ? Math.round(((Number(form.amount) || 0) * rec.percentage) / 100 * 100) / 100 : 0,
-                            );
-                          }}
-                          className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                          <option value="">-- No TDS --</option>
-                          {tdsRecords.filter((t) => t.status).map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name || t.nature} — {t.percentage}%
-                            </option>
-                          ))}
-                        </select>
-                        {!!form.tdsId && (
-                          <p className="text-[11px] text-muted-foreground mt-1">
-                            TDS ₹{(form.tdsAmount || 0).toLocaleString("en-IN")} · Net ₹{Math.max(0, (form.amount || 0) - (form.tdsAmount || 0)).toLocaleString("en-IN")}
-                          </p>
-                        )}
-                      </Field>
-                    )}
+                    {renderTdsField()}
                   </div>
                 )}
 
@@ -2860,6 +2895,7 @@ const Payment: React.FC = () => {
                         />
                       </div>
                     </Field>
+                    {renderTdsField()}
                   </div>
                 )}
 
@@ -4278,7 +4314,7 @@ const Payment: React.FC = () => {
                                     (p) =>
                                       p.label === projectFilter &&
                                       (p.belongs_to === Number(val) ||
-                                        p.company_id === Number(val)),
+                                        isProjectVisibleToCompany(p, Number(val))),
                                   );
                                   if (!stillValid) setProjectFilter("");
                                 }
@@ -4319,7 +4355,7 @@ const Payment: React.FC = () => {
                                 ? projectOptions.filter(
                                     (p) =>
                                       p.belongs_to === Number(companyFilter) ||
-                                      p.company_id === Number(companyFilter),
+                                      isProjectVisibleToCompany(p, Number(companyFilter)),
                                   )
                                 : projectOptions
                               ).map((p) => (

@@ -1121,7 +1121,7 @@ export default function LoanSanctionPage() {
       ) : (
         <div className="rounded-2xl bg-card border border-border shadow-sm overflow-hidden">
           {/* Header */}
-          <div className="relative overflow-hidden flex items-center justify-between gap-3 px-6 sm:px-8 py-5 bg-emerald-500/[0.06] border-b border-emerald-500/20">
+          <div className="relative overflow-hidden flex items-center justify-between gap-3 px-4 sm:px-6 py-3 bg-emerald-500/[0.06] border-b border-emerald-500/20">
             <div className="absolute left-0 top-0 bottom-0 w-0.5 bg-gradient-to-b from-transparent via-emerald-500 to-transparent" />
             <div className="flex items-center gap-3 min-w-0">
               <button
@@ -1133,7 +1133,7 @@ export default function LoanSanctionPage() {
                 <span className="hidden sm:inline">Back</span>
               </button>
               <span className="text-emerald-500/40">|</span>
-              <div className="flex items-center gap-2 min-w-0">
+              <div className="flex items-center gap-1.5 min-w-0">
                 <div className="w-6 h-6 rounded-lg flex items-center justify-center bg-emerald-500/[0.18] border border-emerald-500/30 shrink-0">
                   <MoneyRecive size={12} className="text-emerald-500" />
                 </div>
@@ -1142,7 +1142,7 @@ export default function LoanSanctionPage() {
                 </h2>
                 {viewingLoan && (
                   <span
-                    className="px-2 py-0.5 rounded-full text-[10px] font-medium shrink-0"
+                    className="px-1.5 py-0.5 rounded-full text-[9px] font-medium shrink-0"
                     style={{
                       background: `${LOAN_TYPE_COLORS[viewingLoan.LoanType]}18`,
                       color: LOAN_TYPE_COLORS[viewingLoan.LoanType],
@@ -1159,12 +1159,12 @@ export default function LoanSanctionPage() {
                     Bank Loan → we are the borrower → "Loan Received"
                     Inter-Company → could be either; show both party labels */}
                 {viewingLoan && viewingLoan.LoanType === "Customer Loan" && !viewingLoan.LenderCustomerId && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
                     <TrendingUp size={9} /> Loan Given
                   </span>
                 )}
                 {viewingLoan && (viewingLoan.LoanType === "Bank Loan" || (viewingLoan.LoanType === "Customer Loan" && !!viewingLoan.LenderCustomerId)) && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-purple-500/15 text-purple-600 dark:text-purple-400">
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 bg-purple-500/15 text-purple-600 dark:text-purple-400">
                     <TrendingDown size={9} /> Loan Received
                   </span>
                 )}
@@ -1176,23 +1176,23 @@ export default function LoanSanctionPage() {
                     a "Sanctioned" label specifically when Status==="Closed",
                     inverted from what it should say. */}
                 {viewingLoan && viewingLoan.Status === "Closed" && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-slate-500/15 text-slate-600 dark:text-slate-400">
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 bg-slate-500/15 text-slate-600 dark:text-slate-400">
                     <FileCheck2 size={10} /> Closed
                   </span>
                 )}
                 {viewingLoan && viewingLoan.Status !== "Closed" && totalEmis > 0 && paidEmis === totalEmis && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
                     <CheckCircle2 size={10} /> Paid
                   </span>
                 )}
                 {viewingLoan && viewingLoan.Status !== "Closed" && !(totalEmis > 0 && paidEmis === totalEmis) && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
                     <MoneyRecive size={10} /> Sanctioned
                   </span>
                 )}
                 {viewingLoan && viewingLoan.Status !== "Closed" && nextDue && (
                   <span
-                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 ${
                       new Date(nextDue.DueDate) < new Date(new Date().toDateString())
                         ? "bg-red-500/15 text-red-600 dark:text-red-400"
                         : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
@@ -1252,10 +1252,10 @@ export default function LoanSanctionPage() {
             })}
           </div>
 
-          <div className="p-7 sm:p-8 space-y-8">
+          <div className="p-4 sm:p-5 space-y-4">
             {/* Overview tab — General + Loan Details merged into one clean view */}
             {tab === "overview" && (
-              <div className="space-y-8">
+              <div className="space-y-4">
                 {!readOnly && (
                   <>
                     <div className="space-y-2">
@@ -1545,7 +1545,7 @@ export default function LoanSanctionPage() {
 
                     {/* Parties */}
                     <SectionLabel icon={Building2} label="Parties" />
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-2">
                       <InfoCard
                         icon={Building2}
                         label={isBankLoanType ? "Lender (Bank)" : isCustomerToCompanyType ? "Lender (Customer)" : "Lender"}
@@ -1569,7 +1569,7 @@ export default function LoanSanctionPage() {
 
                     {/* Terms */}
                     <SectionLabel icon={MoneyRecive as any} label="Loan Terms" />
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <InfoCard icon={Wallet} label="Amount" value={fmt(displayAmount)} accent />
                       <InfoCard icon={Calendar} label="Loan Date" value={fmtDate(viewingLoan?.LoanDate)} />
                       <InfoCard icon={Hash} label="Loan Doc No." value={viewingLoan?.LoanDocNo || "—"} />
@@ -1619,7 +1619,7 @@ export default function LoanSanctionPage() {
                     {schedule.length > 0 && (
                       <>
                         <SectionLabel icon={Receipt} label="Repayment Status" />
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                           <InfoCard
                             icon={CheckCircle2}
                             label="Amount Paid"
@@ -1652,7 +1652,7 @@ export default function LoanSanctionPage() {
                           />
                         </div>
                         {/* Amount progress bar */}
-                        <div className="rounded-xl border border-border bg-muted/10 px-4 py-3.5 space-y-2">
+                        <div className="rounded-xl border border-border bg-muted/10 px-3.5 py-2.5 space-y-1.5">
                           <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
                             <span>Repayment progress</span>
                             <span className="font-heading font-bold text-foreground tabular-nums">
@@ -2807,7 +2807,7 @@ function InfoCard({
 }) {
   return (
     <div
-      className={`relative overflow-hidden rounded-xl border px-4 py-3.5 transition-colors ${
+      className={`relative overflow-hidden rounded-xl border px-3 py-2.5 transition-colors ${
         accent
           ? "border-emerald-500/25 bg-emerald-500/[0.05]"
           : "border-border bg-muted/10 hover:bg-muted/[0.15]"
@@ -2819,7 +2819,7 @@ function InfoCard({
           style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.10) 0%, transparent 65%)" }}
         />
       )}
-      <div className="relative flex items-start justify-between gap-2 mb-1.5">
+      <div className="relative flex items-start justify-between gap-2 mb-1">
         <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground leading-tight">
           {label}
         </p>

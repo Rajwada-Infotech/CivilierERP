@@ -65,6 +65,9 @@ describe("backend sanity: app bootstrap", () => {
     expect(health.body).toEqual({
       status: "ok",
       name: "CivilierERP API",
+      // Stamped from backend/build-info.json, which only exists inside a
+      // CI-built release artifact — null here in local/test is correct.
+      build: null,
     });
   });
 

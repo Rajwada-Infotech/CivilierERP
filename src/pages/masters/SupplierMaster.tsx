@@ -208,6 +208,10 @@ const EMPTY_FORM: SupplierForm = {
 // ─── Export Columns ────────────────────────────────────────────────────────────
 const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Vendor Name", accessor: "LHeadName" },
+  {
+    header: "Type",
+    accessor: (r) => vendorTypeFromCategory((r.supplierCategory as string) || "") || "—",
+  },
   { header: "Contact Person", accessor: "LHeadContactPerson" },
   { header: "Phone", accessor: "LHeadPhone" },
   { header: "Email", accessor: "LHeadEmail" },

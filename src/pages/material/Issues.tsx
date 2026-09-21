@@ -114,6 +114,8 @@ interface IssueHeader {
   docNoPreview: string;
   issuedTo: string;
   costCenter: string;
+  blockId: string;
+  floorNo: string;
 }
 
 const defaultHeader: IssueHeader = {
@@ -128,6 +130,8 @@ const defaultHeader: IssueHeader = {
   docNoPreview: "",
   issuedTo: "",
   costCenter: "",
+  blockId: "",
+  floorNo: "",
 };
 
 const blankCartItem = (): CartItem => ({
@@ -232,6 +236,21 @@ export default function Issues() {
   const { data: godowns = [], isLoading: loadingGodowns } = useQuery({
     queryKey: ["issues-godowns"],
     queryFn: issuesApi.getGodowns,
+    staleTime: 5 * 60_000,
+  });
+
+  const { data: blocks = [], isLoading: loadingBlocks } = useQuery({
+    queryKey: ["issues-blocks"],
+    queryFn: issuesApi.getBlocks,
+    staleTime: 5 * 60_000,
+  });
+
+  const selectedBlockId = header.blockId ? Number(header.blockId) : null;
+
+  const { data: blockFloors = [], isLoading: loadingFloors } = useQuery({
+    queryKey: ["issues-block-floors", selectedBlockId],
+    queryFn: () => issuesApi.getBlockFloors(selectedBlockId as number),
+    enabled: !!selectedBlockId,
     staleTime: 5 * 60_000,
   });
 
@@ -374,15 +393,34 @@ export default function Issues() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredGodowns]);
 
+  // Blocks scoped to the selected project — same fetch-all-filter-client-side
+  // pattern as filteredGodowns above.
+  const filteredBlocks = useMemo(() => {
+    if (!header.projectId) return [];
+    const pid = Number(header.projectId);
+    return (blocks as any[]).filter(
+      (b) => Number(b.ProjectId) === pid && b.IsActive !== false,
+    );
+  }, [blocks, header.projectId]);
+
   const handleCompanyChange = (v: string) => {
     setH("companyId", v);
     setH("projectId", ""); // reset project when company changes
     setH("godownId", "");
+    setH("blockId", "");
+    setH("floorNo", "");
   };
 
   const handleProjectChange = (v: string) => {
     setH("projectId", v);
     setH("godownId", "");
+    setH("blockId", "");
+    setH("floorNo", "");
+  };
+
+  const handleBlockChange = (v: string) => {
+    setH("blockId", v);
+    setH("floorNo", ""); // reset floor — it's scoped to the block
   };
 
   // ── Cart helpers ─────────────────────────────────────────────────────────
@@ -582,6 +620,8 @@ export default function Issues() {
       docNoPreview: "",
       issuedTo: record.IssuedTo ?? "",
       costCenter: record.CostCenter ?? "",
+      blockId: record.BlockId ? String(record.BlockId) : "",
+      floorNo: record.FloorNo != null ? String(record.FloorNo) : "",
     });
     const items: CartItem[] = (record.items || []).map((it: any) => ({
       _key: generateUUID(),
@@ -637,6 +677,8 @@ export default function Issues() {
       DocTypeId: header.docTypeId || null,
       IssuedTo: header.issuedTo || null,
       CostCenter: header.costCenter || null,
+      BlockId: header.blockId ? Number(header.blockId) : null,
+      FloorNo: header.floorNo !== "" ? Number(header.floorNo) : null,
       items: cart
         .filter((ci) => ci.ItemId && ci.ItemId.trim() !== "")
         .map((ci) => ({
@@ -1187,7 +1229,74 @@ export default function Issues() {
               )}
             </div>
 
-            {/* Row 2: Issued To | Cost Center */}
+            {/* Row 2: Block | Floor — which part of the site this material is
+                for. Optional: Block is scoped to the selected project, Floor
+                is scoped to the selected block (no standalone Floor Master
+                exists, so this lists the floor numbers already in use under
+                that block's units). */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Field label="Block">
+                <div className="relative">
+                  <Building2
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <select
+                    value={header.blockId}
+                    onChange={(e) => handleBlockChange(e.target.value)}
+                    disabled={!header.projectId}
+                    className={`${selectCls} pl-9 disabled:opacity-60 disabled:cursor-not-allowed`}
+                  >
+                    <option value="">
+                      {!header.projectId
+                        ? "Select project first"
+                        : loadingBlocks
+                          ? "Loading…"
+                          : filteredBlocks.length === 0
+                            ? "No blocks for this project"
+                            : "— Select block —"}
+                    </option>
+                    {filteredBlocks.map((b: any) => (
+                      <option key={b.Id} value={String(b.Id)}>
+                        {b.BlockName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </Field>
+
+              <Field label="Floor">
+                <div className="relative">
+                  <Layers
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <select
+                    value={header.floorNo}
+                    onChange={(e) => setH("floorNo", e.target.value)}
+                    disabled={!header.blockId}
+                    className={`${selectCls} pl-9 disabled:opacity-60 disabled:cursor-not-allowed`}
+                  >
+                    <option value="">
+                      {!header.blockId
+                        ? "Select block first"
+                        : loadingFloors
+                          ? "Loading…"
+                          : blockFloors.length === 0
+                            ? "No floors found for this block"
+                            : "— Select floor —"}
+                    </option>
+                    {blockFloors.map((f) => (
+                      <option key={f} value={String(f)}>
+                        {f === 0 ? "Ground Floor" : `Floor ${f}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </Field>
+            </div>
+
+            {/* Row 3: Issued To | Cost Center */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Issued To (Contractor)">
                 <div className="relative">
@@ -1562,6 +1671,10 @@ export default function Issues() {
       { label: "Project", value: viewingRecord.ProjectName },
       { label: "Financial Year", value: viewingRecord.FinYearName },
       { label: "Source Godown", value: viewingRecord.GodownName ? `${viewingRecord.GodownName}${viewingRecord.GodownCode ? ` (${viewingRecord.GodownCode})` : ""}` : "—" },
+      ...(viewingRecord.BlockName ? [{ label: "Block", value: viewingRecord.BlockName }] : []),
+      ...(viewingRecord.FloorNo != null
+        ? [{ label: "Floor", value: viewingRecord.FloorNo === 0 ? "Ground Floor" : `Floor ${viewingRecord.FloorNo}` }]
+        : []),
       ...(viewingRecord.IssuedTo ? [{ label: "Issued To", value: viewingRecord.IssuedTo }] : []),
       ...(viewingRecord.CostCenter ? [{ label: "Cost Center", value: viewingRecord.CostCenter }] : []),
     ];
@@ -1608,6 +1721,8 @@ export default function Issues() {
                             { label: "Project", value: rec.ProjectName },
                             { label: "Financial Year", value: rec.FinYearName },
                             { label: "Source Godown", value: rec.GodownName },
+                            { label: "Block", value: rec.BlockName },
+                            { label: "Floor", value: rec.FloorNo === 0 ? "Ground Floor" : rec.FloorNo != null ? `Floor ${rec.FloorNo}` : null },
                             { label: "Issued To", value: rec.IssuedTo },
                             { label: "Cost Center", value: rec.CostCenter },
                             { label: "Reason", value: rec.Reason },

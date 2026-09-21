@@ -321,6 +321,12 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       if (req.query.type === "C") {
         conditions.push("ISNULL(lh.LHeadCode, '') NOT LIKE '%CUST%'");
       }
+      // A project's auto-created Supplier ledger head (LHeadCode 'PRJ-<id>-SUPP',
+      // named "<Project> (<Company>)") is an internal inter-company ledger, not a
+      // real vendor — keep it out of Vendor Master and every typed picker. It is
+      // still a normal head for the ledger / Trial Balance / Inter-Company Stock
+      // Transfer, which look it up directly rather than through this list.
+      conditions.push(`ISNULL(lh.LHeadCode, '') NOT LIKE 'PRJ-%-SUPP'`);
       // Partner Master gives every Partner TWO heads (Capital + Current
       // Account) — a party picker asking for type=P wants one row per
       // Partner, not two. Always resolves to the Current Account head; the
@@ -682,6 +688,7 @@ router.get("/options", async (req, res) => {
                  LHeadContactPerson AS contactPerson, RTRIM(LHeadType) AS type
                  FROM dbo.AccountHeadMaster
                  WHERE LHeadStatus = 1 AND ISNULL(LHeadCode, '') NOT LIKE '%CUST%'
+                   AND ISNULL(LHeadCode, '') NOT LIKE 'PRJ-%-SUPP'
                    AND (LHeadType <> 'P' OR LHeadCode LIKE '%-CUR')`;
     const request = pool.request();
     if (req.query.type) {
@@ -1124,6 +1131,11 @@ router.delete("/:id", requirePageRight("account-head", "delete"), async (req, re
     res.json({ message: "Ledger head deleted" });
   } catch (err) {
     console.error("DELETE ERROR:", err.message);
+    if (err.number === 547) {
+      return res.status(409).json({
+        error: "This account head cannot be deleted — it already has ledger entries or transactions posted against it.",
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });

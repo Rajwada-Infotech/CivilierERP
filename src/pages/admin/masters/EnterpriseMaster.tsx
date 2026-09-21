@@ -27,6 +27,8 @@ import {
 } from "@/api/enterpriseApi";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
 import { usePageRights } from "@/hooks/usePageRights";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -543,6 +545,19 @@ export default function EnterpriseMaster() {
     [rights],
   );
 
+  const exportColumns: ExportColumn[] = useMemo(
+    () => [
+      { header: "Name", accessor: "name" },
+      { header: "Short Name", accessor: "short_name" },
+      { header: "Type", accessor: "entity_type" },
+      { header: "PAN", accessor: "pan" },
+      { header: "GST Type", accessor: "gst_type" },
+      { header: "Phone", accessor: "phone_number" },
+      { header: "Status", accessor: "status" },
+    ],
+    [],
+  );
+
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -713,6 +728,13 @@ export default function EnterpriseMaster() {
               <span className="text-xs text-muted-foreground">
                 {filtered.length} record{filtered.length !== 1 ? "s" : ""}
               </span>
+              <ExportMenu
+                data={filtered as unknown as Record<string, unknown>[]}
+                columns={exportColumns}
+                title="Enterprise Master"
+                filename="enterprise-master"
+                disabled={!rights.canExport || filtered.length === 0}
+              />
             </div>
             {isLoading ? (
               <div className="p-10 text-center text-muted-foreground text-sm">

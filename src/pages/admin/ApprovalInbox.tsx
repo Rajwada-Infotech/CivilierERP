@@ -152,6 +152,13 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/material-issues",
     label: "Material Issues",
   },
+  "material-issue-return": {
+    icon: Undo2,
+    color: "text-lime-500 bg-lime-500/10",
+    navPath: "/material/issue-return",
+    apiEndpoint: "/api/material-issue-return",
+    label: "Material Issue Returns",
+  },
   "sale-orders": {
     icon: ShoppingCart,
     color: "text-fuchsia-500 bg-fuchsia-500/10",
@@ -165,6 +172,13 @@ export const MODULE_CONFIG: Record<
     navPath: "/material/vehicle-in-out",
     apiEndpoint: "/api/vehicle-in-out",
     label: "Vehicle In/Out",
+  },
+  "stock-transfers": {
+    icon: Warehouse,
+    color: "text-teal-500 bg-teal-500/10",
+    navPath: "/material/stock-transfer",
+    apiEndpoint: "/api/stock-transfers",
+    label: "Stock Transfer",
   },
   "journal-voucher": {
     icon: Receipt,
@@ -316,11 +330,13 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
   "expense-booking": "ExpenseBooking",
   payments: "NewPayment",
   "material-issues": "MaterialIssues",
+  "material-issue-return": "MaterialIssueReturn",
   "material-requests": "MaterialRequests",
   boq: "BOQ",
   "work-done": "WorkDone",
   "sale-orders": "SaleOrders",
   "vehicle-in-out": "VehicleInOut",
+  "stock-transfers": "StockTransfers",
   contracts: "Contract",
 };
 
@@ -352,6 +368,71 @@ export const RESTRICTED_MODULES = new Set([
 ]);
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
+
+// ─── Category grouping ────────────────────────────────────────────────────────
+// Every module bucketed under the business function it belongs to — MR/PO/GRN/
+// Material Issues etc. all read as "Material", Payments/JV/Fund Transfer as
+// "Finance", and so on — so the inbox groups like-with-like instead of one
+// long flat module list.
+export type CategoryId = "material" | "finance" | "engineering" | "sales" | "admin";
+
+export const CATEGORY_META: Record<CategoryId, { label: string; color: string }> = {
+  material: { label: "Material", color: "text-cyan-600" },
+  finance: { label: "Finance", color: "text-emerald-600" },
+  engineering: { label: "Engineering", color: "text-indigo-600" },
+  sales: { label: "Sales / CRM", color: "text-orange-600" },
+  admin: { label: "Admin", color: "text-purple-600" },
+};
+
+const CATEGORY_ORDER: CategoryId[] = ["material", "finance", "engineering", "sales", "admin"];
+
+export const MODULE_CATEGORY: Record<string, CategoryId> = {
+  "material-requests": "material",
+  "purchase-orders": "material",
+  "work-orders": "material",
+  "goods-receipt": "material",
+  "expense-booking": "material",
+  "material-issues": "material",
+  "material-issue-return": "material",
+  "vehicle-in-out": "material",
+  "stock-transfers": "material",
+  "inter-company-transfer": "material",
+  "debit-note": "material",
+
+  payments: "finance",
+  "received-payment": "finance",
+  "journal-voucher": "finance",
+  "fund-transfer": "finance",
+  contracts: "finance",
+
+  "work-done": "engineering",
+  boq: "engineering",
+
+  "sale-orders": "sales",
+  "crm-bookings": "sales",
+  "crm-agreements": "sales",
+  "crm-agreement-date": "sales",
+  "crm-sales-deed-director": "sales",
+  "crm-brokerage": "sales",
+  "crm-cancellations": "sales",
+  "crm-money-receipts": "sales",
+  "crm-noc": "sales",
+  "crm-booking-amendment": "sales",
+  "crm-refunds": "sales",
+  "crm-refunds-finance": "sales",
+};
+
+export const categoryOf = (mod: string): CategoryId => MODULE_CATEGORY[mod] ?? "admin";
+
+// Modules grouped by category, in display order — drives both the filter
+// panel's section headings and the inbox list's grouping.
+const MODULES_BY_CATEGORY: Record<CategoryId, string[]> = CATEGORY_ORDER.reduce(
+  (acc, cat) => {
+    acc[cat] = ALL_MODULES.filter((m) => categoryOf(m) === cat);
+    return acc;
+  },
+  {} as Record<CategoryId, string[]>,
+);
 
 // Modules whose one-click Approve is either guaranteed to fail without a
 // review step first (crm-bookings' Data Review checklist gate) or whose
@@ -483,6 +564,7 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "material-issues":      "border-cyan-500",
   "sale-orders":          "border-fuchsia-500",
   "vehicle-in-out":       "border-sky-500",
+  "stock-transfers":      "border-teal-500",
   "journal-voucher":      "border-amber-600",
   "inter-company-transfer":"border-fuchsia-600",
   "fund-transfer":        "border-violet-600",
@@ -515,6 +597,7 @@ const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
   "fund-transfer": { icon: "text-violet-600", active: "bg-violet-600 border-violet-600" },
   "sale-orders": { icon: "text-lime-600", active: "bg-lime-600 border-lime-600" },
   "vehicle-in-out": { icon: "text-sky-600", active: "bg-sky-600 border-sky-600" },
+  "stock-transfers": { icon: "text-teal-500", active: "bg-teal-500 border-teal-500" },
   "crm-money-receipts": { icon: "text-teal-600", active: "bg-teal-600 border-teal-600" },
   contracts: { icon: "text-purple-500", active: "bg-purple-500 border-purple-500" },
 };
@@ -994,6 +1077,16 @@ const ApprovalInbox: React.FC = () => {
     activeModule ? allItems.filter((i) => i.Module === activeModule) : allItems
   ).filter((i) => !removedKeys.has(`${i.Module}-${i.RecordId}`));
 
+  // Group by category (Material, Finance, Engineering, Sales/CRM, Admin) so
+  // like modules — MR/PO/GRN under Material, Payment/JV under Finance, etc. —
+  // sit together in the list, in a fixed category order. Within a category,
+  // original fetch order (most-recently-relevant first, per the backend's
+  // own ordering) is preserved.
+  const groupedItems = CATEGORY_ORDER.map((cat) => ({
+    cat,
+    items: items.filter((i) => categoryOf(i.Module) === cat),
+  })).filter((g) => g.items.length > 0);
+
   const handleOptimisticUpdate = (recordId: string, module: string) => {
     setRemovedKeys((prev) => new Set(prev).add(`${module}-${recordId}`));
   };
@@ -1069,29 +1162,45 @@ const ApprovalInbox: React.FC = () => {
             />
           </button>
           {filtersExpanded && (
-            <div className="flex items-center gap-1.5 flex-wrap p-1.5 pt-0">
-              <ModuleTab
-                module={null}
-                label="All"
-                icon={ClipboardCheck}
-                count={totalCount}
-                active={activeModule === null}
-                onClick={() => setActiveModule(null)}
-              />
-              {ALL_MODULES.map((mod) => {
-                const cfg = MODULE_CONFIG[mod];
+            <div className="p-1.5 pt-0 space-y-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <ModuleTab
+                  module={null}
+                  label="All"
+                  icon={ClipboardCheck}
+                  count={totalCount}
+                  active={activeModule === null}
+                  onClick={() => setActiveModule(null)}
+                />
+              </div>
+              {CATEGORY_ORDER.map((cat) => {
+                const mods = MODULES_BY_CATEGORY[cat];
+                if (mods.length === 0) return null;
+                const meta = CATEGORY_META[cat];
                 return (
-                  <ModuleTab
-                    key={mod}
-                    module={mod}
-                    label={cfg.label}
-                    icon={cfg.icon}
-                    count={countFor(mod)}
-                    active={activeModule === mod}
-                    onClick={() =>
-                      setActiveModule(activeModule === mod ? null : mod)
-                    }
-                  />
+                  <div key={cat}>
+                    <p className={`text-[10px] font-bold uppercase tracking-wider mb-1 ${meta.color}`}>
+                      {meta.label}
+                    </p>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {mods.map((mod) => {
+                        const cfg = MODULE_CONFIG[mod];
+                        return (
+                          <ModuleTab
+                            key={mod}
+                            module={mod}
+                            label={cfg.label}
+                            icon={cfg.icon}
+                            count={countFor(mod)}
+                            active={activeModule === mod}
+                            onClick={() =>
+                              setActiveModule(activeModule === mod ? null : mod)
+                            }
+                          />
+                        );
+                      })}
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -1159,13 +1268,29 @@ const ApprovalInbox: React.FC = () => {
               </div>
 
               <div>
-                {items.map((item) => (
-                  <InboxRow
-                    key={`${item.Module}-${item.RecordId}`}
-                    item={item}
-                    onActionDone={handleActionDone}
-                    onOptimisticUpdate={handleOptimisticUpdate}
-                  />
+                {groupedItems.map(({ cat, items: catItems }) => (
+                  <div key={cat}>
+                    {/* Category section header — only worth showing when the
+                        list spans more than one category (i.e. no module
+                        filter is active); a single-module filter is already
+                        a single category, so the header would be redundant. */}
+                    {!activeModule && (
+                      <div className="sticky top-0 z-[1] flex items-center gap-1.5 px-4 py-1.5 bg-muted/60 backdrop-blur-sm border-b border-border">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${CATEGORY_META[cat].color}`}>
+                          {CATEGORY_META[cat].label}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">({catItems.length})</span>
+                      </div>
+                    )}
+                    {catItems.map((item) => (
+                      <InboxRow
+                        key={`${item.Module}-${item.RecordId}`}
+                        item={item}
+                        onActionDone={handleActionDone}
+                        onOptimisticUpdate={handleOptimisticUpdate}
+                      />
+                    ))}
+                  </div>
                 ))}
               </div>
 

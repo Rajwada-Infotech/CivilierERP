@@ -1,10 +1,51 @@
 const express = require("express");
 const router = express.Router();
-const rateLimit = require("express-rate-limit");
-router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests" } }));
+const apiRateLimit = require("../middleware/apiRateLimit");
+router.use(apiRateLimit);
 
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+
+// ── Lightweight sales summary for Home dashboard ─────────────────────────────
+// Returns only SQL-aggregated scalars — no row transfer — so the home page
+// doesn't have to pull 500+ sale order rows just to count/sum them.
+router.get("/sales-summary", cache("home-sales-summary", 120), async (req, res) => {
+  try {
+    const pool = getPool();
+    const now = new Date();
+    const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const result = await pool.request()
+      .input("monthPrefix", sql.NVarChar(7), monthPrefix)
+      .query(`
+        SELECT
+          COUNT(*)                                                                AS total,
+          COUNT(CASE WHEN Status NOT IN ('Deleted','Cancelled') THEN 1 END)      AS active,
+          COUNT(CASE WHEN LOWER(ISNULL(Status,'')) LIKE '%approved%'
+                          AND Status NOT IN ('Deleted','Cancelled') THEN 1 END)  AS approved,
+          COUNT(CASE WHEN LOWER(ISNULL(Status,'')) IN ('pending','draft')
+                          AND Status NOT IN ('Deleted','Cancelled') THEN 1 END)  AS pendingApproval,
+          ISNULL(SUM(CASE WHEN LEFT(CONVERT(VARCHAR(10),
+                            COALESCE(OrderDate, CreatedAt, '2000-01-01'), 120), 7) = @monthPrefix
+                          AND Status NOT IN ('Deleted','Cancelled')
+                          THEN ISNULL(TotalAmount,0) ELSE 0 END), 0)             AS thisMonthAmount,
+          ISNULL(SUM(CASE WHEN Status NOT IN ('Deleted','Cancelled')
+                          THEN ISNULL(TotalAmount,0) ELSE 0 END), 0)             AS totalAmount
+        FROM dbo.SaleOrders
+      `);
+    const row = result.recordset[0] ?? {};
+    res.json({
+      total:          row.total          ?? 0,
+      approved:       row.approved       ?? 0,
+      pendingApproval:row.pendingApproval ?? 0,
+      thisMonthAmount:row.thisMonthAmount ?? 0,
+      totalAmount:    row.totalAmount    ?? 0,
+    });
+  } catch (err) {
+    console.error("[homeActivity] GET /sales-summary:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 
 // ── Universal "recent activity" feed ────────────────────────────────────────
 // One normalized row per recently-created transactional record, UNIONed

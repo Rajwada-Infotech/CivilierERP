@@ -117,7 +117,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-bookings", "view"), asyn
 // know to check whether anything needs re-issuing. Admin/super_admin/
 // marketing_head only, same approver set crm-bookings itself uses.
 router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req, res) => {
-  if (!(await canApproveBookingAmendment(req.user?.id, req.user?.role)))
+  if (!(await canApproveBookingAmendment(req.user?.userId ?? req.user?.id ?? null, req.user?.role)))
     return res.status(403).json({ error: "You are not authorised to approve booking amendments" });
   try {
     const pool = getPool();
@@ -216,7 +216,7 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
 
 // PUT /:id/reject — close the request without applying anything.
 router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, res) => {
-  if (!(await canApproveBookingAmendment(req.user?.id, req.user?.role)))
+  if (!(await canApproveBookingAmendment(req.user?.userId ?? req.user?.id ?? null, req.user?.role)))
     return res.status(403).json({ error: "You are not authorised to reject booking amendments" });
   try {
     const pool = getPool();

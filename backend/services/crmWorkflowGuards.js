@@ -4,10 +4,6 @@ const { emitNotification } = require("./notify");
 const { generateInvoicePdf } = require("./invoicePdf");
 const { isMilestoneOneCoveredByOnAccount } = require("./crmOnAccountCoverage");
 
-function hasValue(value) {
-  return value !== null && value !== undefined && String(value).trim() !== "";
-}
-
 // Server-side backstop for "a cancelled booking must be released from every
 // workflow action, not just hidden from dropdowns" — a stale client-side
 // list, a deep link, or a direct API call could otherwise still reach a
@@ -151,12 +147,17 @@ async function validateAgreementPreparationPrerequisites(pool, bookingId) {
   if (!booking.UnitId) {
     errors.push("Booking must be linked to a Unit Master unit");
   }
-  if (!hasValue(booking.Email)) {
-    errors.push("Applicant email is required for customer portal login");
-  }
-  if (!hasValue(booking.Mobile)) {
-    errors.push("Applicant mobile number is required as the initial portal password");
-  }
+  // Neither Email nor Mobile is required here any more (business decision).
+  // Both used to be mandatory purely because they double as the portal
+  // login's username (Email) and initial password (Mobile). A customer
+  // missing either now simply never gets a portal account provisioned —
+  // ensurePortalUser in crmPortalProvision.js already checks both
+  // (`if (!row.Mobile)` / `if (!row.Email)`) and returns a clean
+  // "cannot provision portal login" result instead of failing — the same
+  // way they already can't receive SMS/email notifications without one.
+  // That's a narrower, more accurate consequence than blocking the entire
+  // Agreement over a field that has nothing to do with the legal contract
+  // itself.
 
   const welcome = await pool.request().input("bid", sql.Int, bookingId).query(`
     SELECT TOP 1 Id
@@ -480,18 +481,32 @@ async function maybeAutoCreateSalesDeed(pool, bookingId, actorUserId) {
   if (!bookingRow) return null;
 
   const deedNo = await getNextDocNumber(pool, "DEED", "DEED");
-  const result = await pool.request()
-    .input("no",   sql.NVarChar(30), deedNo)
-    .input("bid",  sql.Int, bookingId)
-    .input("agid", sql.Int, agreement.recordset[0].Id)
-    .input("note", sql.NVarChar(sql.MAX), "Auto-created — handover completed and AFS registered")
-    .input("cb",   sql.Int, actorUserId || null)
-    .query(`
-      INSERT INTO dbo.CrmSalesDeed (DeedNo, BookingId, AgreementId, Status, Notes, CreatedBy, CreatedAt)
-      OUTPUT INSERTED.Id
-      VALUES (@no, @bid, @agid, 'Draft', @note, @cb, SYSDATETIME())
-    `);
-  const deedId = result.recordset[0].Id;
+  let deedId;
+  try {
+    const result = await pool.request()
+      .input("no",   sql.NVarChar(30), deedNo)
+      .input("bid",  sql.Int, bookingId)
+      .input("agid", sql.Int, agreement.recordset[0].Id)
+      .input("note", sql.NVarChar(sql.MAX), "Auto-created — handover completed and AFS registered")
+      .input("cb",   sql.Int, actorUserId || null)
+      .query(`
+        INSERT INTO dbo.CrmSalesDeed (DeedNo, BookingId, AgreementId, Status, Notes, CreatedBy, CreatedAt)
+        OUTPUT INSERTED.Id
+        VALUES (@no, @bid, @agid, 'Draft', @note, @cb, SYSDATETIME())
+      `);
+    deedId = result.recordset[0].Id;
+  } catch (e) {
+    // Same race guard as every sibling maybeAutoCreate* in this file
+    // (maybeAutoCreateAgreement, maybeAutoCreateLegalMilestone) — this one
+    // was missing it. Two near-simultaneous triggers (Handover completion
+    // and the milestone-settlement holdover call, see comment above) can
+    // both pass the `existing` check above before either INSERTs; the
+    // UNIQUE constraint on CrmSalesDeed.BookingId still prevents an actual
+    // duplicate row, but without this catch the loser surfaced as a raw,
+    // unhandled 500 instead of a clean no-op.
+    if (e.message?.includes("UNIQUE") || e.message?.includes("unique")) return null;
+    throw e;
+  }
 
   if (bookingRow.AssignedTo) {
     await emitNotification(pool, bookingRow.AssignedTo, "crm_sales_deed_ready",
@@ -747,8 +762,50 @@ async function syncLegalMilestoneStep(pool, bookingId, step, actorUserId) {
  * still-incomplete step — is correct regardless of completion order, and
  * is idempotent/safe to call after every single step update (manual or
  * auto-synced).
+ *
+ * Before computing CurrentStep, this also backfills any earlier step that
+ * got skipped over. Two of the 8 steps' own trigger events can genuinely
+ * never fire even on a booking that sails all the way to FinalExecution:
+ *   - DocCollection's trigger (Identity Proof Verified) is deliberately
+ *     NOT mandatory — see maybeAutoCreateAgreement()'s own comment: "the
+ *     real gate ... is the actual Sale Agreement paper ... not this KYC
+ *     document." Plenty of real agreements never collect/verify it.
+ *   - LegalReview's trigger only fired on a later (re)assignment PUT, not
+ *     when LegalExecutiveId was supplied directly at Agreement creation —
+ *     a real gap, separately closed in crmAgreements.js POST /, but this
+ *     still needs to self-heal any tracker that was already caught by it.
+ * Either way, once a LATER step in the sequence is genuinely Completed, an
+ * EARLIER one still sitting Pending cannot mean "not yet happened" — it can
+ * only mean its own auto-sync trigger was skipped or missed. Left alone,
+ * that permanently freezes CurrentStep at the first such gap, showing e.g.
+ * "Document Collection pending" on a booking whose Agreement is already
+ * fully Registered. Closing the gap here — the single place CurrentStep is
+ * (re)computed — fixes every existing stuck tracker the next time anything
+ * touches it, and stops new ones from ever freezing the same way.
  */
 async function recomputeLegalMilestoneCurrentStep(pool, legalMilestoneId) {
+  const stepStatusCols = LEGAL_MILESTONE_STEPS.map((s) => `${s}Status`).join(", ");
+  const cur = await pool.request().input("id", sql.Int, legalMilestoneId)
+    .query(`SELECT ${stepStatusCols} FROM dbo.CrmLegalMilestone WHERE Id = @id`);
+  const row = cur.recordset[0];
+  if (row) {
+    const lastDoneIdx = LEGAL_MILESTONE_STEPS.reduce(
+      (acc, s, i) => (row[`${s}Status`] === "Completed" ? i : acc), -1
+    );
+    const toBackfill = LEGAL_MILESTONE_STEPS
+      .slice(0, lastDoneIdx)
+      .filter((s) => row[`${s}Status`] !== "Completed");
+    if (toBackfill.length) {
+      const setClauses = toBackfill.map((s) =>
+        `${s}Done = ISNULL(${s}Done, CAST(SYSDATETIME() AS DATE)), ` +
+        `${s}Status = 'Completed', ` +
+        `${s}Notes = ISNULL(${s}Notes, 'Auto-completed — a later step was already done, so this one must have happened too')`
+      ).join(", ");
+      await pool.request().input("id", sql.Int, legalMilestoneId)
+        .query(`UPDATE dbo.CrmLegalMilestone SET ${setClauses} WHERE Id = @id`);
+    }
+  }
+
   const caseWhens = LEGAL_MILESTONE_STEPS
     .map((step, i) => `WHEN ${step}Status <> 'Completed' THEN ${i + 1}`)
     .join("\n        ");
@@ -1202,8 +1259,77 @@ async function resolveNocType(pool, bookingId) {
   return { nocType: isLoanFinanced ? "Bank" : "Organisation", isLoanFinanced };
 }
 
+/**
+ * Resolves whether a booking's OC/CC (Occupancy/Completion Certificate)
+ * gate is cleared — the single place every consumer (Pre-Possession,
+ * Possession Notice, Legal Milestones, and the GST exemption check) should
+ * call instead of hand-rolling the same lookup, so they can never drift out
+ * of sync with each other (mirrors resolveNocType above).
+ *
+ * CrmOccupancyCertificate can now hold either a project-wide blanket row
+ * (BlockId IS NULL) or a block-specific row (see migration 447) — a large
+ * project can have some finished, ready-to-move blocks and others still
+ * under construction, and each needs its own OC/CC status rather than one
+ * blanket flag for the whole project. A block's own cert is authoritative
+ * over the project's blanket one: if Block A has its own Received OC, that
+ * booking is cleared even if the project's overall blanket row is still
+ * Applied — a finished block doesn't have to wait for the rest of a large
+ * project to catch up.
+ *
+ * certType: pass 'OC' | 'CC' | 'OC+CC' to check one specific type, or omit
+ * (null) to check "any of OC/CC/OC+CC is Received" — used by the GST
+ * exemption check, where either certificate satisfies Schedule III Entry 5
+ * (whichever of OC or CC came first).
+ *
+ * Returns { received, source: 'block'|'project'|null, receivedDate, certType, certRow }.
+ */
+async function resolveOcCcGate(pool, bookingId, certType = null) {
+  const typeFilter = certType ? "AND oc.CertType = @ct" : "";
+  const req = () => {
+    const r = pool.request().input("bid", sql.Int, bookingId);
+    if (certType) r.input("ct", sql.NVarChar(20), certType);
+    return r;
+  };
+
+  // Booking -> Block, via the same UnitMaster join used everywhere else in
+  // this codebase to resolve a booking's real block.
+  const blockRow = await req().query(`
+    SELECT um.BlockId, b.ProjectId
+    FROM dbo.CrmBooking b
+    LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
+    WHERE b.Id = @bid
+  `);
+  const { BlockId, ProjectId } = blockRow.recordset[0] || {};
+  if (!ProjectId) return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
+
+  if (BlockId) {
+    const blockCert = await req().input("bid2", sql.Int, BlockId).query(`
+      SELECT TOP 1 oc.* FROM dbo.CrmOccupancyCertificate oc
+      WHERE oc.BlockId = @bid2 AND oc.Status = 'Received' ${typeFilter}
+      ORDER BY oc.ReceivedDate ASC
+    `);
+    if (blockCert.recordset.length) {
+      const row = blockCert.recordset[0];
+      return { received: true, source: "block", receivedDate: row.ReceivedDate, certType: row.CertType, certRow: row };
+    }
+  }
+
+  const projectCert = await req().input("pid", sql.Int, ProjectId).query(`
+    SELECT TOP 1 oc.* FROM dbo.CrmOccupancyCertificate oc
+    WHERE oc.ProjectId = @pid AND oc.BlockId IS NULL AND oc.Status = 'Received' ${typeFilter}
+    ORDER BY oc.ReceivedDate ASC
+  `);
+  if (projectCert.recordset.length) {
+    const row = projectCert.recordset[0];
+    return { received: true, source: "project", receivedDate: row.ReceivedDate, certType: row.CertType, certRow: row };
+  }
+
+  return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
+}
+
 module.exports = {
   resolveNocType,
+  resolveOcCcGate,
   validateAgreementPreparationPrerequisites,
   maybeAutoCreateAgreement,
   maybeAutoCreateLegalMilestone,

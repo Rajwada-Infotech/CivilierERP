@@ -490,6 +490,22 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
       console.error("[crm-agreements] legal milestone auto-start failed:", e.message);
     }
 
+    // The LegalReview step's sync previously only fired on a later
+    // (re)assignment PUT (/:id and /:id/assign-legal below) — when
+    // LegalExecutiveId was supplied right here at creation instead, nothing
+    // ever ticked it, permanently freezing the Legal Milestone tracker's
+    // CurrentStep at step 1 even as the agreement sailed through every
+    // later step. Must run after maybeAutoCreateLegalMilestone above, since
+    // the tracker row (which this no-ops without) is only guaranteed to
+    // exist from that point on.
+    if (b.LegalExecutiveId) {
+      try {
+        await syncLegalMilestoneStep(pool, bookingId, "LegalReview", actorId(req));
+      } catch (e) {
+        console.error("[crm-agreements] legal milestone LegalReview sync failed:", e.message);
+      }
+    }
+
     // Portal is provisioned at booking confirmation (crmBookingStageService.js)
     // — no duplicate call needed here. The idempotent ensurePortalUser() would
     // no-op anyway, but removing it keeps this path clean and avoids an extra

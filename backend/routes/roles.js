@@ -94,6 +94,14 @@ const ROLE_RIGHTS_PAGE_MAP = {
   grns: { module: "Material", submodule: "GRN" },
   "purchase-orders": { module: "Material", submodule: "PurchaseOrders" },
   "vehicle-in-out": { module: "Material", submodule: "VehicleInOut" },
+  // Must match routes/materialDashboard.js's own
+  // checkPermissionForMethod("Material", "MaterialDashboard") exactly - that
+  // middleware does a raw RoleRights.Module/SubModule lookup with no
+  // page-key translation. Without this explicit entry, the naive fallback
+  // would save Module=SubModule="material dashboard" (one merged lowercase
+  // string), which never matches - Material Dashboard's route guard would
+  // pass (page-key system) but its data endpoint would still 403.
+  "material-dashboard": { module: "Material", submodule: "MaterialDashboard" },
   "menu-rights": { module: "Rights", submodule: "Menu" },
   admin_menu_rights: { module: "Rights", submodule: "Menu" },
   // Was { module: "Rights", submodule: "Menu" } — collided with menu-rights/
@@ -330,7 +338,7 @@ router.get("/:roleId/rights", authMiddleware, async (req, res) => {
     const result = await pool
       .request()
       .input("RoleId", sql.Int, parseInt(req.params.roleId)).query(`
-        SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPostApproval
+        SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPrint, CanExport, CanPostApproval
         FROM dbo.RoleRights WHERE RoleId = @RoleId
       `);
 
@@ -343,6 +351,8 @@ router.get("/:roleId/rights", authMiddleware, async (req, res) => {
       if (Number(row.CanAdd) === 1) actions.push("create");
       if (Number(row.CanEdit) === 1) actions.push("edit");
       if (Number(row.CanDelete) === 1) actions.push("delete");
+      if (Number(row.CanPrint) === 1) actions.push("print");
+      if (Number(row.CanExport) === 1) actions.push("export");
       if (Number(row.CanPostApproval) === 1) actions.push("post-approval");
       return { page, actions };
     });
@@ -405,11 +415,13 @@ router.post(
           .input("CanAdd", sql.Bit, actions.includes("create") ? 1 : 0)
           .input("CanEdit", sql.Bit, actions.includes("edit") ? 1 : 0)
           .input("CanDelete", sql.Bit, actions.includes("delete") ? 1 : 0)
+          .input("CanPrint", sql.Bit, actions.includes("print") ? 1 : 0)
+          .input("CanExport", sql.Bit, actions.includes("export") ? 1 : 0)
           .input("CanPostApproval", sql.Bit, actions.includes("post-approval") ? 1 : 0).query(`
             INSERT INTO dbo.RoleRights
-              (RoleId, Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPostApproval)
+              (RoleId, Module, SubModule, CanView, CanAdd, CanEdit, CanDelete, CanPrint, CanExport, CanPostApproval)
             VALUES
-              (@RoleId, @Module, @SubModule, @CanView, @CanAdd, @CanEdit, @CanDelete, @CanPostApproval)
+              (@RoleId, @Module, @SubModule, @CanView, @CanAdd, @CanEdit, @CanDelete, @CanPrint, @CanExport, @CanPostApproval)
           `);
       } catch (rowErr) {
         console.error("SAVE RIGHTS: row insert failed", {

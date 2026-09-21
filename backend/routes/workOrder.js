@@ -525,12 +525,14 @@ router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (re
   if (!id) return;
 
   let wasApproved = false;
+  let wasRejected = false;
   let beforeSnapshot = null;
   try {
     const currentStatus = await getRecordStatus("work-orders", id);
     const allowPostApproval = await resolveAllowPostApproval(req, "work-order");
     await guardEdit("work-orders", id, { allowPostApproval });
     wasApproved = currentStatus === "Approved";
+    wasRejected = currentStatus === "Rejected";
     if (wasApproved) {
       beforeSnapshot = await snapshotRow(getPool(), "dbo.WorkOrderHeader", "Id", id);
     }
@@ -654,7 +656,29 @@ router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (re
       }
     }
 
-    res.json({ message: "Work order updated" });
+    // A corrected, previously-Rejected work order goes straight back into
+    // the approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("work-orders", id, "Pending", req.user?.email, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[work-orders] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Work order updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: resubmitted ? "Work order updated and re-submitted for approval" : "Work order updated",
+      resubmitted,
+    });
   } catch (err) {
     console.error("[PUT /work-orders/:id]", err.message);
     res.status(500).json({ error: err.message });
@@ -1642,6 +1666,8 @@ router.put("/:id/approve", async (req, res) => {
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order approved", ...result });
@@ -1666,6 +1692,7 @@ router.put("/:id/reject", async (req, res) => {
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order rejected", ...result });

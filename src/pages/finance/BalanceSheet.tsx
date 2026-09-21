@@ -1013,9 +1013,35 @@ export default function BalanceSheet() {
           deep they're nested. */}
       <style>{`
         @media print {
-          body * { visibility: hidden; }
-          #bs-printable, #bs-printable * { visibility: visible; }
-          #bs-printable { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none !important; border: none !important; }
+          body * { visibility: hidden !important; }
+          #bs-printable, #bs-printable * { visibility: visible !important; }
+          /* The dark theme's --foreground/--muted-foreground resolve to
+             near-white text, which nothing here forces back to a readable
+             color for print — amounts would render white-on-white, invisible
+             on paper. Same fix already applied on ProfitAndLoss.tsx's
+             #pl-printable. */
+          #bs-printable, #bs-printable * {
+            color: #000 !important;
+            background-color: transparent !important;
+            border-color: #999 !important;
+          }
+          #bs-printable {
+            /* fixed (not absolute) so it anchors to the page itself instead
+               of whatever relatively-positioned ancestor it happens to sit
+               inside — absolute was positioning it relative to that
+               ancestor's box (somewhere down the page, past the app's
+               navbar/sidebar/toolbar chrome), which is why the printed page
+               opened with a large blank void before the content instead of
+               starting flush at the top. Same fix already applied on
+               ProfitAndLoss.tsx's #pl-printable. */
+            position: fixed !important;
+            inset: 0 !important;
+            width: 100% !important;
+            max-width: none !important;
+            margin: 0 !important;
+            box-shadow: none !important;
+            border: none !important;
+          }
         }
       `}</style>
     </>

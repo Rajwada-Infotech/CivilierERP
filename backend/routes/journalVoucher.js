@@ -11,9 +11,13 @@ const {
   lockNextDocNumber,
   backPatchRecordId,
 } = require("../utils/docNumberLock");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
-const { postJournalVoucherApproval, hasPosting } = require("../services/generalLedger");
+const { postJournalVoucherApproval, hasPosting, reversePostingBySource } = require("../services/generalLedger");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { ledgerOptionGroup } = require("../utils/ledgerOptionGroup");
+const { validateSettlementMode, normalizeSettlementMode, assertChequeLeafFree } = require("../utils/settlementMode");
+const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -138,6 +142,7 @@ router.get("/ledger-options", authenticateToken, async (req, res) => {
     // actually governs usability.
     const result = await pool.request().query(`
       SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label, LHeadCode AS code, LHeadType AS type,
+        LHeadCategory AS category,
         -- Bank heads only — lets the frontend show "...1234" alongside the
         -- bank name so picking between two accounts at the same bank
         -- doesn't require opening Bank Master to tell them apart.
@@ -146,7 +151,14 @@ router.get("/ledger-options", authenticateToken, async (req, res) => {
       WHERE ISNULL(LHeadStatus, 1) = 1 AND LHeadType <> 'LN'
       ORDER BY LHeadType, LHeadName
     `);
-    res.json(result.recordset);
+    // "group" is what the picker groups/labels by — see ledgerOptionGroup for
+    // why LHeadType alone would mislabel Landlords, Cash and project ledgers.
+    res.json(
+      result.recordset.map(({ category, ...row }) => ({
+        ...row,
+        group: ledgerOptionGroup(row.type, category, row.code),
+      })),
+    );
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -229,10 +241,11 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const header = await pool
       .request()
       .input("id", sql.Int, id).query(`
-        SELECT jv.*, co.name AS CompanyName, pr.name AS ProjectName
+        SELECT jv.*, co.name AS CompanyName, pr.name AS ProjectName, bk.LHeadName AS BankName
         FROM dbo.JournalVoucher jv
         LEFT JOIN dbo.enterprise co ON co.id = jv.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = jv.ProjectId
+        LEFT JOIN dbo.AccountHeadMaster bk ON bk.LHeadId = jv.BankId
         WHERE jv.JVID = @id
       `);
     if (!header.recordset.length) return res.status(404).json({ error: "Not found" });
@@ -267,6 +280,26 @@ router.post("/", authenticateToken, requirePageRight("journal-voucher", "create"
     if (!JVDate) return res.status(400).json({ error: "JVDate is required." });
     const linesError = validateLines(lines);
     if (linesError) return res.status(400).json({ error: linesError });
+    const modeError = validateSettlementMode(req.body);
+    if (modeError) return res.status(400).json({ error: modeError });
+    try {
+      await assertProjectVisibleToCompany(pool, ProjectId, CompanyId);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+
+    const settle = normalizeSettlementMode(req.body);
+    if (settle.ChequeLotId) {
+      try {
+        settle.ChequeLotNumber = await assertChequeLeafFree(pool, {
+          lotId: settle.ChequeLotId,
+          chequeNo: settle.ChequeNo,
+          bankId: settle.BankId,
+        });
+      } catch (err) {
+        return res.status(err.status || 400).json({ error: err.message });
+      }
+    }
 
     const dtId = await resolveDocTypeId(pool, sql, "JV");
     const finalDocNo = await lockNextDocNumber(pool, sql, {
@@ -293,11 +326,21 @@ router.post("/", authenticateToken, requirePageRight("journal-voucher", "create"
         .input("CompanyId", sql.Int, CompanyId || null)
         .input("ProjectId", sql.Int, ProjectId || null)
         .input("DocTypeId", sql.Int, dtId || null)
+        .input("Mode", sql.NVarChar(30), settle.Mode)
+        .input("BankId", sql.Int, settle.BankId)
+        .input("ChequeLotId", sql.Int, settle.ChequeLotId)
+        .input("ChequeLotNumber", sql.NVarChar(50), settle.ChequeLotNumber || null)
+        .input("ChequeNo", sql.NVarChar(20), settle.ChequeNo)
+        .input("ChequeDate", sql.Date, settle.ChequeDate)
+        .input("IsPostDated", sql.Bit, settle.IsPostDated)
+        .input("DigitalRefNumber", sql.NVarChar(100), settle.DigitalRefNumber)
         .input("CreatedBy", sql.NVarChar(150), user).query(`
           INSERT INTO dbo.JournalVoucher
-            (JVNo, JVDate, Narration, CompanyId, ProjectId, Status, DocTypeId, CreatedBy)
+            (JVNo, JVDate, Narration, CompanyId, ProjectId, Status, DocTypeId, CreatedBy,
+             Mode, BankId, ChequeLotId, ChequeLotNumber, ChequeNo, ChequeDate, IsPostDated, DigitalRefNumber)
           OUTPUT INSERTED.JVID
-          VALUES (@JVNo, @JVDate, @Narration, @CompanyId, @ProjectId, 'Draft', @DocTypeId, @CreatedBy)
+          VALUES (@JVNo, @JVDate, @Narration, @CompanyId, @ProjectId, 'Draft', @DocTypeId, @CreatedBy,
+                  @Mode, @BankId, @ChequeLotId, @ChequeLotNumber, @ChequeNo, @ChequeDate, @IsPostDated, @DigitalRefNumber)
         `);
 
       newId = insertHdr.recordset[0].JVID;
@@ -348,7 +391,14 @@ router.post("/", authenticateToken, requirePageRight("journal-voucher", "create"
   }
 });
 
-// ── PUT /:id — edit (Draft only) ────────────────────────────────────────────
+// ── PUT /:id — edit ─────────────────────────────────────────────────────────
+// Draft/Rejected: freely editable. Approved: only with the "post-approval"
+// right (guardEdit), and editing one re-opens it — its existing GL posting
+// is reversed, the edited numbers save, and it drops back to Pending so it
+// goes through approval again (which re-posts the new numbers). This is
+// deliberately stricter than a silent in-place correction: numbers that
+// already hit the General Ledger don't get overwritten there without a
+// fresh approval on the new figures.
 router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
@@ -358,9 +408,18 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
+    let wasApproved = false;
+    let wasRejected = false;
+    let beforeSnapshot = null;
     try {
       const allowPostApproval = await resolveAllowPostApproval(req, "journal-voucher");
       await guardEdit("journal-voucher", id, { allowPostApproval });
+      const currentStatus = await getRecordStatus("journal-voucher", id);
+      wasApproved = currentStatus === "Approved";
+      wasRejected = currentStatus === "Rejected";
+      if (wasApproved) {
+        beforeSnapshot = await snapshotRow(pool, "dbo.JournalVoucher", "JVID", id);
+      }
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -369,30 +428,83 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
     if (!JVDate) return res.status(400).json({ error: "JVDate is required." });
     const linesError = validateLines(lines);
     if (linesError) return res.status(400).json({ error: linesError });
+    const modeError = validateSettlementMode(req.body);
+    if (modeError) return res.status(400).json({ error: modeError });
+    try {
+      await assertProjectVisibleToCompany(pool, ProjectId, CompanyId);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
+
+    const settle = normalizeSettlementMode(req.body);
+    if (settle.ChequeLotId) {
+      try {
+        settle.ChequeLotNumber = await assertChequeLeafFree(pool, {
+          lotId: settle.ChequeLotId,
+          chequeNo: settle.ChequeNo,
+          bankId: settle.BankId,
+          excludeJVId: id,
+        });
+      } catch (err) {
+        return res.status(err.status || 400).json({ error: err.message });
+      }
+    }
+
+    // Editing rewrites every line (delete-all, re-insert) — a line a
+    // Payment already references via NewPayment.JVLineId (FK_NewPayment_
+    // JVLineId) would otherwise either orphan that payment or hit a raw FK
+    // violation mid-transaction. Only reachable once a JV can be Approved
+    // (and therefore payable) and then re-edited, so this guard only needs
+    // to apply on that path.
+    if (wasApproved) {
+      const payCheck = await pool
+        .request()
+        .input("id", sql.Int, id).query(`
+          SELECT COUNT(*) AS cnt FROM dbo.NewPayment np
+          JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = np.JVLineId
+          WHERE jvl.JVID = @id
+        `);
+      if (Number(payCheck.recordset[0]?.cnt) > 0) {
+        return res.status(409).json({
+          error: "This voucher has payments recorded against it. Delete or unlink those payments first, then edit.",
+        });
+      }
+    }
 
     const tx = pool.transaction();
     await tx.begin();
     try {
-      const updateResult = await tx
+      const updateReq = tx
         .request()
         .input("id", sql.Int, id)
         .input("JVDate", sql.Date, JVDate)
         .input("Narration", sql.NVarChar(500), Narration || null)
         .input("CompanyId", sql.Int, CompanyId || null)
         .input("ProjectId", sql.Int, ProjectId || null)
-        .input("UpdatedBy", sql.NVarChar(150), user).query(`
+        .input("Mode", sql.NVarChar(30), settle.Mode)
+        .input("BankId", sql.Int, settle.BankId)
+        .input("ChequeLotId", sql.Int, settle.ChequeLotId)
+        .input("ChequeLotNumber", sql.NVarChar(50), settle.ChequeLotNumber || null)
+        .input("ChequeNo", sql.NVarChar(20), settle.ChequeNo)
+        .input("ChequeDate", sql.Date, settle.ChequeDate)
+        .input("IsPostDated", sql.Bit, settle.IsPostDated)
+        .input("DigitalRefNumber", sql.NVarChar(100), settle.DigitalRefNumber)
+        .input("UpdatedBy", sql.NVarChar(150), user);
+
+      // Only Approved actually needs its Status reset here — Draft/Rejected
+      // keep whatever status they already have (matches guardEdit, which
+      // only special-cases Approved; Draft/Rejected pass through unchanged).
+      const statusSet = wasApproved ? ", Status='Pending'" : "";
+      await updateReq.query(`
           UPDATE dbo.JournalVoucher
           SET JVDate=@JVDate, Narration=@Narration, CompanyId=@CompanyId,
-              ProjectId=@ProjectId, UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()
-          WHERE JVID=@id AND Status='Draft'
+              ProjectId=@ProjectId,
+              Mode=@Mode, BankId=@BankId, ChequeLotId=@ChequeLotId, ChequeLotNumber=@ChequeLotNumber,
+              ChequeNo=@ChequeNo, ChequeDate=@ChequeDate, IsPostDated=@IsPostDated,
+              DigitalRefNumber=@DigitalRefNumber,
+              UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()${statusSet}
+          WHERE JVID=@id
         `);
-
-      if (updateResult.rowsAffected[0] === 0) {
-        await tx.rollback();
-        return res.status(409).json({
-          error: "Update failed: the voucher status changed before the update could be applied.",
-        });
-      }
 
       await tx.request().input("id", sql.Int, id).query(
         "DELETE FROM dbo.JournalVoucherLines WHERE JVID=@id",
@@ -414,6 +526,14 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
           `);
       }
 
+      // Reverse whatever this voucher already posted to the GL — the old
+      // numbers no longer reflect what's on the voucher, and it only
+      // re-posts (fresh, via postJournalVoucherApproval's own idempotent
+      // hasPosting() check) once it's approved again with the new numbers.
+      if (wasApproved) {
+        await reversePostingBySource(tx, "JournalVoucher", id);
+      }
+
       await tx.commit();
     } catch (txErr) {
       try {
@@ -425,7 +545,113 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
     }
 
     await bumpCacheVersion("journal-voucher");
-    res.json({ message: "Journal Voucher updated" });
+    await bumpCacheVersion("general-ledger");
+
+    if (wasApproved && beforeSnapshot) {
+      try {
+        const afterSnapshot = await snapshotRow(pool, "dbo.JournalVoucher", "JVID", id);
+        await recordAmendment({
+          refDocType: "journal-voucher",
+          refDocId: id,
+          refDocNo: afterSnapshot?.JVNo || beforeSnapshot.JVNo,
+          projectName: null,
+          companyName: null,
+          changedBy: req.user?.email || req.user?.name || null,
+          before: beforeSnapshot,
+          after: afterSnapshot,
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (journal-voucher):", logErr.message);
+      }
+    }
+
+    // A corrected, previously-Rejected voucher goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("journal-voucher", id, "Pending", user, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[journal-voucher] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Journal Voucher updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: wasApproved
+        ? "Journal Voucher updated — previous GL posting reversed, sent back for approval"
+        : resubmitted
+          ? "Journal Voucher updated and re-submitted for approval"
+          : "Journal Voucher updated",
+      reopenedForApproval: wasApproved,
+      resubmitted,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /:id ──────────────────────────────────────────────────────────────
+// Any status is deletable (Draft/Pending/Rejected freely; Approved reverses
+// its GL posting first, same convention as expenseBooking.js's DELETE) —
+// blocked only if a Payment is already recorded against one of its lines,
+// which would otherwise orphan that payment or hit a raw FK violation.
+router.delete("/:id", authenticateToken, requirePageRight("journal-voucher", "delete"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const existing = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query("SELECT JVID FROM dbo.JournalVoucher WHERE JVID = @id");
+    if (!existing.recordset.length) return res.status(404).json({ error: "Not found" });
+
+    const payCheck = await pool
+      .request()
+      .input("id", sql.Int, id).query(`
+        SELECT COUNT(*) AS cnt FROM dbo.NewPayment np
+        JOIN dbo.JournalVoucherLines jvl ON jvl.LineID = np.JVLineId
+        WHERE jvl.JVID = @id
+      `);
+    if (Number(payCheck.recordset[0]?.cnt) > 0) {
+      return res.status(409).json({
+        error: "This voucher has payments recorded against it. Delete or unlink those payments first.",
+      });
+    }
+
+    await reversePostingBySource(pool, "JournalVoucher", id);
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id).query(
+        "DELETE FROM dbo.JournalVoucherLines WHERE JVID=@id",
+      );
+      await tx.request().input("id", sql.Int, id).query(
+        "DELETE FROM dbo.JournalVoucher WHERE JVID=@id",
+      );
+      await tx.commit();
+    } catch (txErr) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* best-effort — original error is what propagates */
+      }
+      throw txErr;
+    }
+
+    await bumpCacheVersion("journal-voucher");
+    await bumpCacheVersion("general-ledger");
+    res.json({ message: "Journal Voucher deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -457,6 +683,7 @@ router.put("/:id/approve", authenticateToken, requirePageRight("journal-voucher"
     if (!alreadyApproved) {
       transitionResult = await transition(
         "journal-voucher", id, "Approved", user, req.user?.role, req.body?.note,
+        req.user?.userId ?? req.user?.id ?? null,
       );
     }
 
@@ -487,7 +714,7 @@ router.put("/:id/reject", authenticateToken, requirePageRight("journal-voucher",
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const result = await transition("journal-voucher", id, "Rejected", user, req.user?.role, req.body?.note);
+    const result = await transition("journal-voucher", id, "Rejected", user, req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("journal-voucher");
     res.json({ message: "Journal Voucher rejected", ...result });
   } catch (err) {

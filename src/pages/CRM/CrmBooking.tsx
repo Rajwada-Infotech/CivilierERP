@@ -196,8 +196,21 @@ function getNextStep(b: any): NextStep {
   if (b.DateApprovalStatus !== CrmStatus.APPROVED) {
     return { label: "Date Approval", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
   }
-if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
-  return null; // every gated step is complete
+  if (b.PendingMilestoneCount > 0) return { label: "Payments", color: "text-amber-700 border-amber-200 bg-amber-50", path: `/crm/payments?bookingId=${b.Id}` };
+  // Post-agreement lifecycle — mirrors GET /:id/lifecycle's own step order
+  // exactly (Agreement Registered -> NOC / Handover -> Sale Deed -> Registry
+  // -> Mutation). Without this the chip declared "All Steps Complete" the
+  // moment payments+agreement cleared, long before the booking's actual
+  // journey (possession, sale deed, registry) had even started.
+  if (!b.AgreementRegistered) {
+    return { label: "Agreement Registration", color: "text-orange-600 border-orange-200 bg-orange-50", path: `/crm/agreements?bookingId=${b.Id}` };
+  }
+  if (!b.NocIssued) return { label: "NOC", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/noc?bookingId=${b.Id}` };
+  if (!b.HandoverDone) return { label: "Handover", color: "text-sky-600 border-sky-200 bg-sky-50", path: `/crm/handover` };
+  if (!b.SalesDeedDone) return { label: "Sale Deed", color: "text-sky-700 border-sky-200 bg-sky-50", path: `/crm/sales-deed?bookingId=${b.Id}` };
+  if (!b.RegistryDone) return { label: "Registry", color: "text-sky-700 border-sky-200 bg-sky-50", path: `/crm/sales-deed?bookingId=${b.Id}&tab=Registry` };
+  if (!b.MutationDone) return { label: "Mutation", color: "text-sky-800 border-sky-200 bg-sky-50", path: `/crm/mutation?bookingId=${b.Id}` };
+  return null; // every gated step, all the way through Mutation, is complete
 }
 
 const CrmBooking: React.FC = () => {
@@ -434,7 +447,13 @@ const CrmBooking: React.FC = () => {
   const handleSave = async () => {
     if (!form.ApplicationId) { toast.error("Please select an Application"); return; }
     if (!form.UnitId)  { toast.error("A unit must be selected from Unit Master"); return; }
-    if (bankOptions.length > 0 && !form.DepositBankId) { toast.error("Select which company bank this booking's token payment landed in"); return; }
+    // DepositBankId/DepositBankName were never persisted or read anywhere in
+    // the actual booking-creation path (createCrmBookingRecord in
+    // crmEntityCreation.js) — CrmBooking has no such columns at all. This
+    // block required staff to pick a value that was then silently
+    // discarded end-to-end. The real deposit-bank concept lives at the
+    // Payment/Receipt level (crmPayments.js), recorded when the token
+    // payment is actually receipted, not at booking creation.
     setSaving(true);
     try {
       const bankName = form.DepositBankId
@@ -974,7 +993,7 @@ const CrmBooking: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>
-                      Deposited To{bankOptions.length > 0 ? " *" : ""}
+                      Deposited To
                     </label>
                     <Select value={form.DepositBankId || undefined} onValueChange={(v) => setForm((f) => ({ ...f, DepositBankId: v }))}>
                       <SelectTrigger className={inputCls}>

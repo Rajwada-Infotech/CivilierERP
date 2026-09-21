@@ -36,6 +36,22 @@ export const getGodowns = async () => {
   >;
 };
 
+export const getBlocks = async () => {
+  const res = await fetchWithAuth("/api/block-master");
+  if (!res.ok) throw new Error("Failed to fetch blocks");
+  return res.json().catch(() => []) as Promise<
+    { Id: number; ProjectId: number | null; BlockName: string; IsActive: boolean }[]
+  >;
+};
+
+/** Distinct floor numbers already in use under this block's units — there's
+ *  no standalone Floor Master, so this is the closest thing to a floor list. */
+export const getBlockFloors = async (blockId: number) => {
+  const res = await fetchWithAuth(`/api/block-master/${blockId}/floors`);
+  if (!res.ok) throw new Error("Failed to fetch floors");
+  return res.json().catch(() => []) as Promise<number[]>;
+};
+
 export const getItemOptions = async (godownId?: number | null) => {
   const q = godownId ? `?godownId=${godownId}` : "";
   const res = await fetchWithAuth(`${BASE}/item-options${q}`);

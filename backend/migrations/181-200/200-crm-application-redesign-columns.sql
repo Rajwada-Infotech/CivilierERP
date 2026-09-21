@@ -50,8 +50,33 @@ IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.CrmCus
   ALTER TABLE dbo.CrmCustomerBankDetail ADD ApplicationId INT NULL;
 GO
 
-IF EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UQ__CrmCusto__73951AEC0EF5692A' AND object_id = OBJECT_ID('dbo.CrmCustomerBankDetail'))
-  ALTER TABLE dbo.CrmCustomerBankDetail DROP CONSTRAINT UQ__CrmCusto__73951AEC0EF5692A;
+DECLARE @BookingUniqueConstraint NVARCHAR(128);
+
+SELECT TOP 1 @BookingUniqueConstraint = kc.name
+FROM sys.key_constraints kc
+JOIN sys.index_columns ic
+  ON ic.object_id = kc.parent_object_id
+ AND ic.index_id = kc.unique_index_id
+JOIN sys.columns c
+  ON c.object_id = ic.object_id
+ AND c.column_id = ic.column_id
+WHERE kc.parent_object_id = OBJECT_ID('dbo.CrmCustomerBankDetail')
+  AND kc.[type] = 'UQ'
+  AND c.name = 'BookingId'
+  AND NOT EXISTS (
+    SELECT 1
+    FROM sys.index_columns ic2
+    WHERE ic2.object_id = ic.object_id
+      AND ic2.index_id = ic.index_id
+      AND ic2.column_id <> ic.column_id
+  );
+
+IF @BookingUniqueConstraint IS NOT NULL
+BEGIN
+  DECLARE @DropBookingUniqueSql NVARCHAR(MAX) =
+    N'ALTER TABLE dbo.CrmCustomerBankDetail DROP CONSTRAINT ' + QUOTENAME(@BookingUniqueConstraint);
+  EXEC sp_executesql @DropBookingUniqueSql;
+END
 GO
 
 ALTER TABLE dbo.CrmCustomerBankDetail ALTER COLUMN BookingId INT NULL;

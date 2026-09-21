@@ -1014,6 +1014,7 @@ router.put(
       const allowPostApproval = await resolveAllowPostApproval(req, "purchase-orders");
       await guardEdit("purchase-orders", id, { allowPostApproval });
       const wasApproved = currentStatus === "Approved";
+      const wasRejected = currentStatus === "Rejected";
 
       const pool = getPool();
 
@@ -1142,7 +1143,31 @@ router.put(
         }
       }
 
-      res.json({ message: "Purchase order updated successfully" });
+      // A corrected, previously-Rejected PO goes straight back into the
+      // approval queue on save — no separate "Submit" click. transition()'s
+      // Pending branch writes a fresh Level=0 marker, which restarts
+      // approval at level 1 regardless of what was approved before the
+      // rejection (see approvalService.js's currentCycleCutoffSql).
+      let resubmitted = false;
+      if (wasRejected) {
+        try {
+          await transition("purchase-orders", id, "Pending", userEmail, req.user?.role);
+          resubmitted = true;
+        } catch (resubmitErr) {
+          console.error("[purchase-orders] auto-resubmit after edit failed:", resubmitErr.message);
+          return res.status(207).json({
+            message: "Purchase order updated, but could not be re-submitted for approval — submit it manually.",
+            resubmitError: resubmitErr.message,
+          });
+        }
+      }
+
+      res.json({
+        message: resubmitted
+          ? "Purchase order updated and re-submitted for approval"
+          : "Purchase order updated successfully",
+        resubmitted,
+      });
     } catch (err) {
       try {
         if (transaction) await transaction.rollback();
@@ -1426,6 +1451,8 @@ router.put("/:id/approve", requirePageRight("purchase-orders", "edit"), async (r
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order approved", ...result });
@@ -1450,6 +1477,7 @@ router.put("/:id/reject", requirePageRight("purchase-orders", "edit"), async (re
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order rejected", ...result });

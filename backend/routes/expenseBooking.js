@@ -8,6 +8,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, getRecordStatus } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { validateBody } = require("../middleware/validateRequest");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
@@ -1858,6 +1859,7 @@ async function createExpenseBookingInternal(pool, payload, userEmail, userId) {
     err.status = 400;
     throw err;
   }
+  await assertProjectVisibleToCompany(pool, EProjectName, ECompanyId);
 
   const hasPayTermCol = await ebHasPaymentTermId(pool);
   const hasDirectItemsCol = await ebHasDirectItemsData(pool);
@@ -2323,6 +2325,11 @@ router.post("/", requirePageRight("expense-booking", "create"), validateBody(exp
   }
 
   const pool = getPool();
+  try {
+    await assertProjectVisibleToCompany(pool, EProjectName, ECompanyId);
+  } catch (err) {
+    return res.status(err.status || 400).json({ error: err.message });
+  }
   const hasPayTermCol = await ebHasPaymentTermId(pool);
   const hasDirectItemsCol = await ebHasDirectItemsData(pool);
   const transaction = pool.transaction();
@@ -3431,6 +3438,7 @@ router.put(
       return res.status(400).json({ error: "Invalid record id" });
 
     let wasApproved = false;
+    let wasRejected = false;
     let beforeSnapshot = null;
     try {
       // A Pending record is freely editable — it hasn't been approved yet,
@@ -3439,6 +3447,7 @@ router.put(
       // below is for; Pending never reaches that path.
       const currentStatus = await getRecordStatus("expense-booking", numericId);
       wasApproved = currentStatus === "Approved";
+      wasRejected = currentStatus === "Rejected";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.ExpenseBooking", "Eid", numericId);
       }
@@ -3519,6 +3528,7 @@ router.put(
 
     try {
       const pool = getPool();
+      await assertProjectVisibleToCompany(pool, EProjectName, ECompanyId);
       const hasPayTermColPut = await ebHasPaymentTermId(pool);
       const hasDirectItemsColPut = await ebHasDirectItemsData(pool);
 
@@ -3816,10 +3826,32 @@ router.put(
         }
       }
 
-      res.json({ message: "Expense updated successfully" });
+      // A corrected, previously-Rejected booking goes straight back into
+      // the approval queue on save — no separate "Submit" click.
+      // transition()'s Pending branch writes a fresh Level=0 marker, which
+      // restarts approval at level 1 regardless of what was approved before
+      // the rejection (see approvalService.js's currentCycleCutoffSql).
+      let resubmitted = false;
+      if (wasRejected) {
+        try {
+          await transition("expense-booking", numericId, "Pending", req.user?.email || req.user?.name, req.user?.role);
+          resubmitted = true;
+        } catch (resubmitErr) {
+          console.error("[expense-booking] auto-resubmit after edit failed:", resubmitErr.message);
+          return res.status(207).json({
+            message: "Expense updated, but could not be re-submitted for approval — submit it manually.",
+            resubmitError: resubmitErr.message,
+          });
+        }
+      }
+
+      res.json({
+        message: resubmitted ? "Expense updated and re-submitted for approval" : "Expense updated successfully",
+        resubmitted,
+      });
     } catch (err) {
       console.error("Update error:", err.message);
-      res.status(500).json({ error: err.message });
+      res.status(err.status || 500).json({ error: err.message });
     }
   },
 );
@@ -3958,6 +3990,8 @@ router.put("/:id/approve", requirePageRight("expense-booking", "edit"), async (r
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
 
     // Initialize EBillStatus/ETotalPaid/ERemainingAmount the moment the
@@ -4003,6 +4037,7 @@ router.put(
         userEmail,
         req.user?.role,
         note || null,
+        req.user?.userId ?? req.user?.id ?? null,
       );
       await bumpCacheVersion("expense-booking");
       await bumpCacheVersion("expense-booking-options");

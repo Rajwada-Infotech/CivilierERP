@@ -35,9 +35,9 @@ async function fetchCustomerList(filters: Customer360Filters, page: number): Pro
   const data = await r.json();
   return { rows: data.rows || [], total: data.total || 0 };
 }
-async function fetchCustomer360(mobile: string): Promise<any> {
-  if (!mobile) return null;
-  const r = await fetchWithAuth(`${API}/${mobile}`);
+async function fetchCustomer360(customerId: number): Promise<any> {
+  if (!customerId) return null;
+  const r = await fetchWithAuth(`${API}/${customerId}`);
   if (!r.ok) return null;
   return r.json();
 }
@@ -109,7 +109,7 @@ const CrmCustomer360: React.FC = () => {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
-  const [selectedMobile, setSelectedMobile] = useState<string | null>(null);
+  const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
   const [expandedBookingId, setExpandedBookingId] = useState<number | null>(null);
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });
   const [page, setPage] = useState(1);
@@ -121,22 +121,22 @@ const CrmCustomer360: React.FC = () => {
   const { data: listResult, isLoading: listLoading } = useQuery({
     queryKey: ["crm-customer-360-list", listFilters, page],
     queryFn: () => fetchCustomerList(listFilters, page),
-    enabled: !selectedMobile,
+    enabled: !selectedCustomerId,
     staleTime: 30_000,
   });
   const list = listResult?.rows ?? [];
   const total = listResult?.total ?? 0;
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ["crm-customer-360", selectedMobile],
-    queryFn: () => fetchCustomer360(selectedMobile as string),
-    enabled: !!selectedMobile,
+    queryKey: ["crm-customer-360", selectedCustomerId],
+    queryFn: () => fetchCustomer360(selectedCustomerId as number),
+    enabled: !!selectedCustomerId,
     staleTime: 30_000,
   });
 
   const toggleBooking = (id: number) => setExpandedBookingId((cur) => (cur === id ? null : id));
-  const openCustomer = (mobile: string) => { setSelectedMobile(mobile); setExpandedBookingId(null); };
-  const backToList = () => setSelectedMobile(null);
+  const openCustomer = (customerId: number) => { setSelectedCustomerId(customerId); setExpandedBookingId(null); };
+  const backToList = () => setSelectedCustomerId(null);
 
   usePageRights("crm-customer-360");
 
@@ -144,7 +144,7 @@ const CrmCustomer360: React.FC = () => {
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Customer 360"]} />
       <CrmShell title="CRM — Applicant Ledger" subtitle="Full customer journey and centralized financial ledger — lead to after-sales, in one view">
-      {!selectedMobile ? (
+      {!selectedCustomerId ? (
         <>
           <div className="flex gap-2 flex-wrap items-center">
             <div className="relative flex-1 min-w-56 max-w-md">
@@ -168,7 +168,7 @@ const CrmCustomer360: React.FC = () => {
           ) : (
             <div className="rounded-xl border border-border overflow-hidden divide-y divide-border">
               {list.map((c: any) => (
-                <button key={c.Id} onClick={() => openCustomer(c.Mobile)}
+                <button key={c.Id} onClick={() => openCustomer(c.Id)}
                   className="w-full text-left flex items-center gap-3 px-5 py-4 hover:bg-muted/20 transition-colors">
                   <div className="w-9 h-9 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-semibold shrink-0">
                     {(c.CustomerName || "?").trim().charAt(0).toUpperCase()}

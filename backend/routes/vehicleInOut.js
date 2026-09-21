@@ -203,6 +203,8 @@ class ValidationError extends Error {
  * when I ordered 100" rule, enforced per PO line item. Pure — no writes —
  * so callers can validate before touching the header row.
  */
+const VALID_QUALITIES = new Set(["Excellent", "Good", "Bad"]);
+
 async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutId) {
   const submitted = (Array.isArray(items) ? items : [])
     .map((it) => ({
@@ -211,6 +213,9 @@ async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutI
       // Optional real-time capture, base64 data URL — passed straight
       // through to the row without any validation of its own.
       photoBase64: typeof it.photoBase64 === "string" && it.photoBase64 ? it.photoBase64 : null,
+      // Quick inspection grade for this line — independent of the formal
+      // quality-rejection debit note flow.
+      quality: VALID_QUALITIES.has(it.quality) ? it.quality : null,
     }))
     .filter((it) => it.poItemId && it.receivedQty > 0);
 
@@ -256,11 +261,12 @@ async function saveVehicleInOutItems(pool, vehicleInOutId, validatedItems) {
       .input("ItemName", sql.NVarChar(255), line.po.itemName || null)
       .input("UomName", sql.NVarChar(50), line.po.uomName || null)
       .input("ReceivedQty", sql.Decimal(18, 3), line.receivedQty)
-      .input("PhotoBase64", sql.NVarChar(sql.MAX), line.photoBase64 || null).query(`
+      .input("PhotoBase64", sql.NVarChar(sql.MAX), line.photoBase64 || null)
+      .input("Quality", sql.NVarChar(20), line.quality || null).query(`
         INSERT INTO dbo.VehicleInOutItems
-          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64)
+          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality)
         VALUES
-          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty, @PhotoBase64)
+          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty, @PhotoBase64, @Quality)
       `);
   }
 }
@@ -492,7 +498,7 @@ router.get("/:id", async (req, res) => {
     const record = result.recordset[0];
     record.Attachments = await getAttachmentsFor(pool, id);
     const itemsResult = await pool.request().input("ItemsID", sql.Int, id).query(`
-      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality
       FROM dbo.VehicleInOutItems
       WHERE VehicleInOutID = @ItemsID
     `);
@@ -808,6 +814,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     const pool = getPool();
     const beforeSnapshot = await snapshotRow(pool, "dbo.VehicleInOut", "VehicleInOutID", id);
     const wasApproved = beforeSnapshot?.Status === "Approved";
+    const wasRejected = beforeSnapshot?.Status === "Rejected";
 
     // Validate before writing anything — excludeVehicleInOutId=id so this
     // record's own previously-saved quantities don't count against its
@@ -877,7 +884,27 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
       }
     }
 
-    res.json({ success: true });
+    // A corrected, previously-Rejected record goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("vehicle-in-out", id, "Pending", email, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[vehicle-in-out] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          success: true,
+          message: "Updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({ success: true, resubmitted });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -925,6 +952,8 @@ router.put("/:id/approve", requirePageRight("vehicle-in-out", "edit"), async (re
       "Approved",
       req.user?.email || email,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(CACHE_KEY);
     res.json({ message: "Vehicle In/Out approved", ...result });
@@ -952,6 +981,7 @@ router.put("/:id/reject", requirePageRight("vehicle-in-out", "edit"), async (req
       req.user?.email || email,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion(CACHE_KEY);
     res.json({ message: "Vehicle In/Out rejected", ...result });

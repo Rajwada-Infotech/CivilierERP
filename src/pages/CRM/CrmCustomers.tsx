@@ -193,6 +193,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
   };
 
   const handleSave = async () => {
+    if (!form.CustomerName?.trim()) { toast.error("Customer Name is required"); return; }
     if (form.Mobile?.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
       toast.error("Mobile must be exactly 10 digits"); return;
     }
@@ -266,7 +267,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
             </h3>
             <div className="grid grid-cols-3 gap-2.5">
               {[
-                { key: "CustomerName", label: "Customer Name", type: "text" },
+                { key: "CustomerName", label: "Customer Name", type: "text", required: true },
                 { key: "Mobile", label: "Mobile", type: "text" },
                 { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                 { key: "Email", label: "Email", type: "email" },
@@ -275,9 +276,9 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
                 { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                 { key: "Occupation", label: "Occupation", type: "text" },
                 { key: "AnnualIncome", label: "Annual Income", type: "number" },
-              ].map(({ key, label, type }) => (
+              ].map(({ key, label, type, required }) => (
                 <div key={key}>
-                  <label className="text-xs text-muted-foreground block mb-0.5">{label}</label>
+                  <label className="text-xs text-muted-foreground block mb-0.5">{label}{required && <span className="text-destructive"> *</span>}</label>
                   <input type={type} value={(form as any)[key]} readOnly={locked}
                     onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                     className={inputCls} />
@@ -458,6 +459,7 @@ const CrmCustomers: React.FC = () => {
   }, []);
 
   const handleCreate = async () => {
+    if (!form.CustomerName.trim()) { toast.error("Customer Name is required"); return; }
     if (form.Mobile.trim() && !/^\d{10}$/.test(form.Mobile.trim())) {
       toast.error("Mobile must be exactly 10 digits"); return;
     }
@@ -753,7 +755,7 @@ const CrmCustomers: React.FC = () => {
               </h3>
               <div className="grid grid-cols-3 gap-2.5">
                 {[
-                  { key: "CustomerName", label: "Customer Name", type: "text" },
+                  { key: "CustomerName", label: "Customer Name", type: "text", required: true },
                   { key: "Mobile", label: "Mobile", type: "text" },
                   { key: "AltMobile", label: "Alternate Mobile", type: "text" },
                   { key: "Email", label: "Email", type: "email" },
@@ -762,9 +764,9 @@ const CrmCustomers: React.FC = () => {
                   { key: "DateOfBirth", label: "Date of Birth", type: "date" },
                   { key: "Occupation", label: "Occupation", type: "text" },
                   { key: "AnnualIncome", label: "Annual Income", type: "number" },
-                ].map(({ key, label, type }) => (
+                ].map(({ key, label, type, required }) => (
                   <div key={key}>
-                    <label className="text-xs text-muted-foreground block mb-0.5">{label}</label>
+                    <label className="text-xs text-muted-foreground block mb-0.5">{label}{required && <span className="text-destructive"> *</span>}</label>
                     <input type={type} value={(form as any)[key]}
                       onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                       onBlur={() => {

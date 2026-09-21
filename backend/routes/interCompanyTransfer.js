@@ -739,7 +739,7 @@ router.put("/:id/approve", authenticateToken, requirePageRight("stock-transfers"
     const ictRow = headerRes.recordset[0];
     if (!ictRow) return res.status(404).json({ error: "Not found" });
 
-    const result = await transition("inter-company-transfer", id, "Approved", createdBy, req.user?.role, req.body?.note);
+    const result = await transition("inter-company-transfer", id, "Approved", createdBy, req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
 
     if (result.newStatus !== "Approved") {
       // Multi-level workflow, more approvals still required — no chain yet.
@@ -781,7 +781,7 @@ router.put("/:id/reject", authenticateToken, requirePageRight("stock-transfers",
     const id = parsePositiveInt(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid id" });
 
-    const result = await transition("inter-company-transfer", id, "Rejected", userEmail(req), req.user?.role, req.body?.note);
+    const result = await transition("inter-company-transfer", id, "Rejected", userEmail(req), req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("stock-transfers");
     res.json({ message: "Rejected", ...result });
   } catch (err) {

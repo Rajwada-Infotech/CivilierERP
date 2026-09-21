@@ -183,7 +183,18 @@ const BOOKING_SELECT = `
     -- CrmOnAccountPayment row for the exact same money — adding them
     -- double-counted every on-account deposit (confirmed: booking 77 showed
     -- ₹20,000 on-account for a real ₹10,000 deposit).
-    (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount
+    (SELECT ISNULL(SUM(Amount - ISNULL(AppliedAmount,0)),0) FROM dbo.CrmOnAccountPayment WHERE BookingId = b.Id) AS ApprovedOnAccount,
+    -- Post-agreement lifecycle flags — mirror GET /:id/lifecycle's own gates
+    -- exactly (agRegistered/sdDone/hoDone/regDone/mutDone there) so this
+    -- list's "next step" chip stops falsely declaring "All Steps Complete"
+    -- the moment payments+agreement clear, when NOC/Handover/Sale Deed/
+    -- Registry/Mutation haven't even started yet.
+    CAST(CASE WHEN ag.Status = '${CrmStatus.REGISTERED}' THEN 1 ELSE 0 END AS BIT) AS AgreementRegistered,
+    CAST(CASE WHEN lastNoc.LastNocStatus = 'Issued' THEN 1 ELSE 0 END AS BIT) AS NocIssued,
+    CAST(CASE WHEN ho.HandoverStatus = 'Completed' THEN 1 ELSE 0 END AS BIT) AS HandoverDone,
+    CAST(CASE WHEN sd.DirectorApprovalStatus = '${CrmStatus.APPROVED}' THEN 1 ELSE 0 END AS BIT) AS SalesDeedDone,
+    CAST(CASE WHEN reg.RegistryStatus = 'Completed' THEN 1 ELSE 0 END AS BIT) AS RegistryDone,
+    CAST(CASE WHEN mut.MutationStatus = 'Approved' THEN 1 ELSE 0 END AS BIT) AS MutationDone
   FROM dbo.CrmBooking b
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.UnitMaster um   ON um.Id   = b.UnitId
@@ -201,10 +212,26 @@ const BOOKING_SELECT = `
     WHERE BookingId = b.Id ORDER BY CreatedAt DESC
   ) ag
   OUTER APPLY (
-    SELECT TOP 1 Status AS DeedStatus
+    SELECT TOP 1 Status AS DeedStatus, DirectorApprovalStatus
     FROM dbo.CrmSalesDeed
     WHERE BookingId = b.Id ORDER BY CreatedAt DESC
   ) sd
+  -- Same "last non-Rejected NOC, else resolve by loan financing" logic as
+  -- resolveNocType() in crmWorkflowGuards.js — kept in sync deliberately so
+  -- this chip and the real NOC-type gate never disagree.
+  OUTER APPLY (
+    SELECT TOP 1 NocType AS LastNocType, Status AS LastNocStatus
+    FROM dbo.CrmNoc WHERE BookingId = b.Id AND Status <> 'Rejected' ORDER BY CreatedAt DESC
+  ) lastNoc
+  OUTER APPLY (
+    SELECT TOP 1 Status AS HandoverStatus FROM dbo.CrmHandover WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+  ) ho
+  OUTER APPLY (
+    SELECT TOP 1 Status AS RegistryStatus FROM dbo.CrmRegistry WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+  ) reg
+  OUTER APPLY (
+    SELECT TOP 1 Status AS MutationStatus FROM dbo.CrmMutation WHERE BookingId = b.Id ORDER BY CreatedAt DESC
+  ) mut
 `;
 
 // GET / — all bookings. By default, Cancelled/Rejected bookings are
@@ -1341,7 +1368,28 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
             (SELECT Id FROM dbo.CrmPaymentMilestone WHERE BookingId = @bid))
             AND ISNULL(rp.RPStatus,'') <> 'Rejected') AS ReceivedPayments,
         (SELECT COUNT(*) FROM dbo.CrmLoanDetail WHERE BookingId = @bid
-          AND SanctionStatus NOT IN ('NotApplied','Rejected')) AS ActiveLoans
+          AND SanctionStatus NOT IN ('NotApplied','Rejected')) AS ActiveLoans,
+        -- These 8 tables all have a NOT NULL FK on BookingId (confirmed via
+        -- sys.foreign_keys) and were missing from this check entirely — a
+        -- cancelled booking that had picked up even one of these before
+        -- cancellation hit a raw, unhandled SQL FK-constraint error on
+        -- permanent delete instead of this route's own clean "protected
+        -- records" message. None of the columns can be NULLed-out the way
+        -- CrmUnitChangeLog.BookingId is (that one was deliberately made
+        -- nullable for this exact purpose) — so, like Agreements/Sale
+        -- Deeds/monetary records above, these are genuine legal/financial
+        -- documents (AFS stamp-duty payment & registry, allotment letter,
+        -- mutation, inter-booking fund transfer, utility billing) and are
+        -- protected rather than silently deleted.
+        (SELECT COUNT(*) FROM dbo.CrmAfsQueryPayment WHERE BookingId = @bid) AS AfsQueryPayments,
+        (SELECT COUNT(*) FROM dbo.CrmAfsRegistry WHERE BookingId = @bid) AS AfsRegistryEntries,
+        (SELECT COUNT(*) FROM dbo.CrmAllotmentLetter WHERE BookingId = @bid) AS AllotmentLetters,
+        (SELECT COUNT(*) FROM dbo.CrmMutation WHERE BookingId = @bid) AS Mutations,
+        (SELECT COUNT(*) FROM dbo.CrmRebookingTransfer WHERE ToBookingId = @bid) AS RebookingTransfers,
+        (SELECT COUNT(*) FROM dbo.ElectricityBill WHERE BookingId = @bid) AS ElectricityBills,
+        (SELECT COUNT(*) FROM dbo.MaintenanceBill WHERE BookingId = @bid) AS MaintenanceBills,
+        (SELECT COUNT(*) FROM dbo.MaintenanceCustomerCharge WHERE BookingId = @bid) AS MaintenanceCustomerCharges,
+        (SELECT COUNT(*) FROM dbo.MeterReadingMaster WHERE BookingId = @bid) AS MeterReadings
     `);
     const p = protectedRes.recordset[0] || {};
     for (const [label, count] of Object.entries(p)) {
@@ -1479,7 +1527,7 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
         .input("bid",   sql.Int,           id)
         .input("bank",  sql.NVarChar(200), b.BankName    || null)
         .input("branch",sql.NVarChar(200), b.BranchName  || null)
-        .input("amt",   sql.Decimal(18,2), b.LoanAmount  != null ? parseFloat(b.LoanAmount) : null)
+        .input("amt",   sql.Decimal(18,2), b.LoanAmount != null && b.LoanAmount !== "" ? parseFloat(b.LoanAmount) : null)
         .input("st",    sql.NVarChar(30),  b.SanctionStatus || null)
         .input("sdate", sql.Date,          b.SanctionDate   || null)
         .input("acc",   sql.NVarChar(100), b.LoanAccountNo || null)
@@ -1501,7 +1549,7 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
         .input("bid",   sql.Int,           id)
         .input("bank",  sql.NVarChar(200), b.BankName    || null)
         .input("branch",sql.NVarChar(200), b.BranchName  || null)
-        .input("amt",   sql.Decimal(18,2), b.LoanAmount  != null ? parseFloat(b.LoanAmount) : null)
+        .input("amt",   sql.Decimal(18,2), b.LoanAmount != null && b.LoanAmount !== "" ? parseFloat(b.LoanAmount) : null)
         .input("st",    sql.NVarChar(30),  b.SanctionStatus || "NotApplied")
         .input("sdate", sql.Date,          b.SanctionDate   || null)
         .input("acc",   sql.NVarChar(100), b.LoanAccountNo || null)
@@ -2240,6 +2288,18 @@ router.post("/:id/provision-portal", requirePageRight("crm-bookings", "edit"), a
     }
     const { ensurePortalUser } = require("../services/crmPortalProvision");
     const result = await ensurePortalUser(pool, ApplicationId);
+    // ensurePortalUser signals a real failure (e.g. no mobile on file — now
+    // a normal, expected state since Mobile is optional) via
+    // { created: false, error } — but { created: false, id } is ALSO the
+    // legitimate idempotent "portal already exists" case, so the check has
+    // to be specifically on `error`, not on `created`. This route always
+    // returned 200 { success: true, ... } regardless of which one it was,
+    // so the frontend's `if (!r.ok)` check never fired and staff saw a
+    // false "provisioned successfully" toast for a customer whose portal
+    // was never actually created.
+    if (result.error) {
+      return res.status(400).json({ error: result.error });
+    }
     res.json({ success: true, ...result });
   } catch (e) {
     console.error("[crm-bookings] POST /:id/provision-portal error:", e.message);

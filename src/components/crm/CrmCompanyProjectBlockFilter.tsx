@@ -45,8 +45,19 @@ export function CrmCompanyProjectBlockFilter({
   const companies = dropdown?.companies || [];
   const projects = dropdown?.projects || [];
 
+  // company_ids is the project's primary company plus every company it's
+  // tagged to (see businessRoutes.js) — checking membership here, not
+  // exact equality against company_id, is what lets a project tagged to
+  // more than one company show up for each of them.
   const projectOptions = useMemo(
-    () => (value.companyId ? projects.filter((p: any) => String(p.company_id) === value.companyId) : projects),
+    () =>
+      value.companyId
+        ? projects.filter((p: any) =>
+            String(p.company_ids || p.company_id || "")
+              .split(",")
+              .includes(value.companyId),
+          )
+        : projects,
     [projects, value.companyId],
   );
 
