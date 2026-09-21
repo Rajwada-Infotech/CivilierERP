@@ -448,6 +448,8 @@ async function buildGrnGstData(pool, grnId) {
         grn.POID,
         supplier.LHeadName AS SupplierName,
         supplier.LGSTState AS VendorState,
+        supplier.LGSTType AS SupplierGstType,
+        supplier.LGST AS SupplierGst,
         po.PurchaseOrderID,
         po.PurchaseOrderNo,
         po.POItems,
@@ -466,6 +468,17 @@ async function buildGrnGstData(pool, grnId) {
 
   const header = headerResult.recordset[0];
   if (!header) return null;
+
+  // A non-GST (Unregistered) supplier can't charge GST at all — the item's
+  // own HSN/item-master/PO rate never applies. Explicit when SupplierGstType
+  // is set; for older rows saved before it existed (null), fall back to
+  // inferring from whether a GST number is on file.
+  const supplierIsGstRegistered =
+    header.SupplierGstType === "Unregistered"
+      ? false
+      : header.SupplierGstType
+        ? true
+        : !!(header.SupplierGst && String(header.SupplierGst).trim());
 
   const grnItems = parseJsonArray(header.GRNItems);
   const poItems = parseJsonArray(header.POItems);
@@ -544,7 +557,7 @@ async function buildGrnGstData(pool, grnId) {
       toNumber(master.HCGST) + toNumber(master.HSGST) ||
       toNumber(poItem.tax) ||
       toNumber(header.POGstRate);
-    const gstPercent = configuredGst;
+    const gstPercent = supplierIsGstRegistered ? configuredGst : 0;
     const inclusiveAmount =
       toNumber(item.totalAmountInclGST) ||
       toNumber(item.totalAmount) ||
