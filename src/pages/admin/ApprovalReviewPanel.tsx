@@ -267,10 +267,25 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   const effectiveAmount = getEffectiveAmount(item);
   const party = item.SupplierName || item.ContractorName || item.CreatedBy || "—";
   const lineItems = extractLineItems(detail);
+
+  // TDS — Payments/ExpenseBooking both snapshot TDSId/TDSNature/TDSName/
+  // TDSPercentage/TDSAmount onto the record at booking/payment time (same
+  // columns Payment.tsx's own form reads). stripDbPrefix's single-capital-
+  // letter strip mangles "TDSAmount" (→ "DSAmount"), so these are matched
+  // and hidden by their own raw key here rather than relying on
+  // PREVIEW_HIDDEN_KEYS — they get a proper dedicated display below instead
+  // of showing up mislabeled in the generic Details grid.
+  const rawTdsAmount = detail ? Number((detail as Record<string, unknown>).TDSAmount) || 0 : 0;
+  const tdsName = detail ? ((detail as Record<string, unknown>).TDSName as string | null) : null;
+  const tdsNature = detail ? ((detail as Record<string, unknown>).TDSNature as string | null) : null;
+  const tdsPercentage = detail ? (detail as Record<string, unknown>).TDSPercentage : null;
+  const netPayableAfterTds = Math.max(0, (effectiveAmount ?? 0) - rawTdsAmount);
+
   const extraFields = detail
     ? Object.entries(detail).filter(
         ([k, v]) =>
           !PREVIEW_HIDDEN_KEYS.has(stripDbPrefix(k).toLowerCase()) &&
+          !/^tds/i.test(k) &&
           !isIdField(k) &&
           !isJsonBlob(v) &&
           !(Array.isArray(v) && v.length === 0) &&
@@ -378,7 +393,9 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               })() }}
             >
               <div className="px-5 py-4">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">Total Amount</p>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                  {rawTdsAmount > 0 ? "Total Amount (Before TDS)" : "Total Amount"}
+                </p>
                 <p className="text-3xl font-bold font-heading text-foreground tabular-nums tracking-tight">
                   {fmtAmount(effectiveAmount)}
                 </p>
@@ -388,6 +405,29 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                   </p>
                 )}
               </div>
+              {rawTdsAmount > 0 && (
+                <div className="grid grid-cols-2 divide-x divide-border border-t border-border/60 bg-background/40">
+                  <div className="px-5 py-3">
+                    <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                      TDS Deducted{tdsPercentage != null ? ` (${tdsPercentage}%)` : ""}
+                    </p>
+                    <p className="text-lg font-bold font-heading text-amber-600 dark:text-amber-400 tabular-nums">
+                      − {fmtAmount(rawTdsAmount)}
+                    </p>
+                    {(tdsName || tdsNature) && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{tdsName || tdsNature}</p>
+                    )}
+                  </div>
+                  <div className="px-5 py-3">
+                    <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+                      Net Payable (After TDS)
+                    </p>
+                    <p className="text-lg font-bold font-heading text-emerald-600 dark:text-emerald-400 tabular-nums">
+                      {fmtAmount(netPayableAfterTds)}
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Overview — form-style fields */}

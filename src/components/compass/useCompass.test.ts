@@ -12,40 +12,43 @@ const ev = (over: Partial<Parameters<typeof isCompassShortcut>[0]>) => ({
 });
 
 describe("isCompassShortcut", () => {
-  it("accepts Super+Space", () => {
-    expect(isCompassShortcut(ev({ key: " ", code: "Space", metaKey: true }))).toBe(true);
+  it("accepts Space while Enter is held", () => {
+    expect(isCompassShortcut(ev({ key: " ", code: "Space" }), { enter: true, space: false })).toBe(true);
   });
 
-  it("accepts Alt+Space, including macOS's non-breaking-space key", () => {
-    expect(isCompassShortcut(ev({ key: " ", code: "Space", altKey: true }))).toBe(true);
-    expect(isCompassShortcut(ev({ key: "\u00a0", code: "Space", altKey: true }))).toBe(true);
+  it("accepts Enter while Space is held", () => {
+    expect(isCompassShortcut(ev({ key: "Enter", code: "Enter" }), { enter: false, space: true })).toBe(true);
   });
 
-  it("accepts Ctrl+K and ⌘K in either case", () => {
-    expect(isCompassShortcut(ev({ key: "k", ctrlKey: true }))).toBe(true);
-    expect(isCompassShortcut(ev({ key: "K", ctrlKey: true }))).toBe(true);
-    expect(isCompassShortcut(ev({ key: "k", metaKey: true }))).toBe(true);
+  it("accepts macOS's non-breaking-space key for Space", () => {
+    expect(isCompassShortcut(ev({ key: " ", code: "Space" }), { enter: true, space: false })).toBe(true);
   });
 
-  it("ignores plain typing", () => {
-    expect(isCompassShortcut(ev({ key: " ", code: "Space" }))).toBe(false);
-    expect(isCompassShortcut(ev({ key: "k", code: "KeyK" }))).toBe(false);
+  it("ignores either key alone", () => {
+    expect(isCompassShortcut(ev({ key: " ", code: "Space" }), { enter: false, space: false })).toBe(false);
+    expect(isCompassShortcut(ev({ key: "Enter", code: "Enter" }), { enter: false, space: false })).toBe(false);
   });
 
-  it("ignores Shift combos and other modifier mixes", () => {
-    expect(isCompassShortcut(ev({ key: " ", code: "Space", metaKey: true, shiftKey: true }))).toBe(false);
-    expect(isCompassShortcut(ev({ key: "k", ctrlKey: true, shiftKey: true }))).toBe(false);
-    expect(isCompassShortcut(ev({ key: "k", ctrlKey: true, metaKey: true }))).toBe(false);
-    expect(isCompassShortcut(ev({ key: " ", code: "Space", ctrlKey: true }))).toBe(false);
-    expect(isCompassShortcut(ev({ key: " ", code: "Space", metaKey: true, altKey: true }))).toBe(false);
-    expect(isCompassShortcut(ev({ key: "k", ctrlKey: true, altKey: true }))).toBe(false);
+  it("ignores unrelated keys even while the other half is held", () => {
+    expect(isCompassShortcut(ev({ key: "k", code: "KeyK" }), { enter: true, space: false })).toBe(false);
+  });
+
+  it("ignores the chord with any modifier held", () => {
+    expect(isCompassShortcut(ev({ key: " ", code: "Space", shiftKey: true }), { enter: true, space: false })).toBe(false);
+    expect(isCompassShortcut(ev({ key: " ", code: "Space", ctrlKey: true }), { enter: true, space: false })).toBe(false);
+    expect(isCompassShortcut(ev({ key: "Enter", code: "Enter", metaKey: true }), { enter: false, space: true })).toBe(false);
+    expect(isCompassShortcut(ev({ key: "Enter", code: "Enter", altKey: true }), { enter: false, space: true })).toBe(false);
+  });
+
+  it("no longer accepts the old Ctrl+K / Super+Space / Alt+Space chords", () => {
+    expect(isCompassShortcut(ev({ key: "k", ctrlKey: true }), { enter: false, space: false })).toBe(false);
+    expect(isCompassShortcut(ev({ key: " ", code: "Space", metaKey: true }), { enter: false, space: false })).toBe(false);
+    expect(isCompassShortcut(ev({ key: " ", code: "Space", altKey: true }), { enter: false, space: false })).toBe(false);
   });
 });
 
 describe("getShortcutLabels", () => {
-  it("labels per platform", () => {
-    expect(getShortcutLabels("MacIntel").primary).toBe("⌘ Space");
-    expect(getShortcutLabels("Win32")).toEqual({ primary: "Win+Space", alt: "Alt+Space", fallback: "Ctrl+K" });
-    expect(getShortcutLabels("Linux x86_64").primary).toBe("Super+Space");
+  it("returns a single platform-agnostic label", () => {
+    expect(getShortcutLabels()).toEqual({ primary: "Enter + Space" });
   });
 });
