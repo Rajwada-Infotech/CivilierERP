@@ -1036,8 +1036,12 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
       .input("LHeadCode", sql.NVarChar(20), LHeadCode || null)
       .input("LHeadPhone", sql.VarChar(15), LHeadPhone || null)
       .input("LHeadEmail", sql.NVarChar(100), LHeadEmail || null)
-      .input("LHeadAddress", sql.VarChar(300), LHeadAddress || null)
-      .input("LHeadContactPerson", sql.VarChar(100), LHeadContactPerson || null)
+      // Both columns are NOT NULL — same "N/A" fallback POST / already uses
+      // on create. Falling back to null here (as this used to) 500'd every
+      // edit that left either field blank, since create never wrote a real
+      // null for a row to begin with.
+      .input("LHeadAddress", sql.VarChar(300), LHeadAddress || "N/A")
+      .input("LHeadContactPerson", sql.VarChar(100), LHeadContactPerson || "N/A")
       .input("LHeadStatus", sql.Bit, LHeadStatus !== false ? 1 : 0)
       .input("LHeadPaymentTerms", sql.NVarChar(100), LHeadPaymentTerms || null)
       .input("LBranchName", sql.VarChar(100), LBranchName || null)
