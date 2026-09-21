@@ -27,13 +27,14 @@ import {
   Plus, ArrowLeftRight, Building2, Landmark, Loader2, RefreshCw,
   CheckCircle2, Clock, FileText, AlertCircle, Search, X, ExternalLink,
   Calendar, ShieldCheck, Wallet, BookOpen, Hash, CalendarDays, ChevronDown,
-  AlertTriangle, Info, CalendarClock,
+  AlertTriangle, Info, CalendarClock, Pencil,
 } from "lucide-react";
 import {
   getFundTransfers,
   getFundTransfer,
   createFundTransfer,
   getFundTransferPosting,
+  updateFundTransferRemarks,
   type FundTransferSummary,
   type FundTransferDetail,
   type FundTransferType,
@@ -46,6 +47,7 @@ import { fetchChequeLots, fetchChequeNumbers } from "@/pages/finance/payment/api
 import type { ChequeLot } from "@/pages/finance/payment/types";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useAuth } from "@/contexts/AuthContext";
 
 const PAYMENT_MODES: FundTransferMode[] = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card"];
 const CHEQUE_MODES: FundTransferMode[] = ["Cheque", "Post-Dated Cheque"];
@@ -180,9 +182,11 @@ function DetailRow({ label, value, mono = false }: { label: string; value: React
 function TransferDetailDialog({
   ftId,
   onClose,
+  onUpdated,
 }: {
   ftId: number;
   onClose: () => void;
+  onUpdated?: () => void;
 }) {
   const [detail, setDetail] = useState<FundTransferDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -190,6 +194,45 @@ function TransferDetailDialog({
   const [detailTab, setDetailTab] = useState<"details" | "posting">("details");
   const [posting, setPosting] = useState<FundTransferPosting | null>(null);
   const [postingLoading, setPostingLoading] = useState(false);
+
+  // Remarks edit — allowed until Approved; after approval it's logged in Amendment.
+  const [editingRemarks, setEditingRemarks] = useState(false);
+  const [remarksDraft, setRemarksDraft] = useState("");
+  const [savingRemarks, setSavingRemarks] = useState(false);
+  // Approved transfers additionally need the post-approval right (same rule the
+  // server enforces); admin-tier roles always have it.
+  const { canDoAction, currentUser } = useAuth();
+  const hasPostApproval =
+    ["super_admin", "admin", "dba"].includes(currentUser?.role ?? "") || canDoAction("fund-transfer", "post-approval");
+  const canEditRemarks =
+    rights.canEdit &&
+    !!detail &&
+    (["Draft", "Pending", "Rejected"].includes(detail.Status) || (detail.Status === "Approved" && hasPostApproval));
+
+  const startEditRemarks = () => {
+    setRemarksDraft(detail?.Narration || "");
+    setEditingRemarks(true);
+  };
+
+  const saveRemarks = async () => {
+    if (!detail) return;
+    if (remarksDraft.trim() === (detail.Narration || "").trim()) {
+      setEditingRemarks(false);
+      return;
+    }
+    setSavingRemarks(true);
+    try {
+      const res = await updateFundTransferRemarks(ftId, remarksDraft);
+      setDetail({ ...detail, Narration: remarksDraft.trim() || null });
+      setEditingRemarks(false);
+      toast.success(res.message);
+      onUpdated?.();
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to update remarks");
+    } finally {
+      setSavingRemarks(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -365,7 +408,52 @@ function TransferDetailDialog({
               {detail.Mode && !["Cheque", "Post-Dated Cheque", "Cash"].includes(detail.Mode) && detail.DigitalRefNumber && (
                 <DetailRow label="Reference No" value={detail.DigitalRefNumber} mono />
               )}
-              {detail.Narration && <DetailRow label="Narration" value={detail.Narration} />}
+              <div className="py-2 border-b border-border/60">
+                <div className="flex items-center justify-between gap-4">
+                  <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading shrink-0">Narration / Remarks</span>
+                  {canEditRemarks && !editingRemarks && (
+                    <button
+                      onClick={startEditRemarks}
+                      className="inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline"
+                    >
+                      <Pencil size={11} /> {detail.Narration ? "Edit" : "Add"}
+                    </button>
+                  )}
+                </div>
+                {editingRemarks ? (
+                  <div className="mt-2 space-y-2">
+                    <textarea
+                      autoFocus
+                      rows={3}
+                      maxLength={500}
+                      value={remarksDraft}
+                      onChange={(e) => setRemarksDraft(e.target.value)}
+                      placeholder="Add remarks or notes for this transfer"
+                      className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/30"
+                    />
+                    {detail.Status === "Approved" && (
+                      <p className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                        <Info size={12} className="mt-px shrink-0" />
+                        This transfer is approved — the change will be recorded in Finance → Amendment.
+                      </p>
+                    )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-muted-foreground">{remarksDraft.length}/500</span>
+                      <div className="flex items-center gap-2">
+                        <Button variant="ghost" size="sm" onClick={() => setEditingRemarks(false)} disabled={savingRemarks}>Cancel</Button>
+                        <Button size="sm" onClick={saveRemarks} disabled={savingRemarks}>
+                          {savingRemarks && <Loader2 size={13} className="animate-spin mr-1.5" />}
+                          Save
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-sm text-foreground whitespace-pre-wrap break-words">
+                    {detail.Narration || <span className="text-muted-foreground">—</span>}
+                  </p>
+                )}
+              </div>
               <DetailRow label="Created By" value={detail.CreatedBy || "—"} />
               <DetailRow label="Created At" value={fmtDate(detail.CreatedAt)} />
               <DetailRow
@@ -1006,7 +1094,7 @@ export default function FundTransfer() {
       </FinanceShell>
 
       {selectedFTId != null && (
-        <TransferDetailDialog ftId={selectedFTId} onClose={() => setSelectedFTId(null)} />
+        <TransferDetailDialog ftId={selectedFTId} onClose={() => setSelectedFTId(null)} onUpdated={load} />
       )}
 
       {/* ── New Fund Transfer Dialog ── */}

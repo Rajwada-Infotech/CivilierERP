@@ -17,6 +17,7 @@ const DOC_TYPES = {
   payment: { module: "finance", label: "Payment" },
   "received-payment": { module: "finance", label: "Received Payment" },
   "journal-voucher": { module: "finance", label: "Journal Voucher" },
+  "fund-transfer": { module: "finance", label: "Fund Transfer" },
   "material-request": { module: "material", label: "Material Request" },
   "purchase-order": { module: "material", label: "Purchase Order" },
   "vehicle-in-out": { module: "material", label: "Vehicle In/Out" },
