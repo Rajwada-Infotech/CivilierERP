@@ -51,6 +51,20 @@ function paymentReferenceForBrokerage(row) {
 // DocYear (which only reflects the calendar year the doc number was issued
 // in). Used so direct/manual payments (no linked ExpenseBooking) are still
 // correctly filterable/displayable by Financial Year in Reports.
+// NewPayment.PCompany holds either the enterprise id ("23") or, for payments
+// saved from the current form, the company's NAME ("ABC TEST COMPANY") — both
+// shapes exist in the data (see also brs.js's dual match). TDS needs the id.
+async function resolvePaymentCompanyId(pool, pCompany) {
+  const text = String(pCompany ?? "").trim();
+  if (!text) return null;
+  if (/^\d+$/.test(text)) return parseInt(text, 10);
+  const r = await pool
+    .request()
+    .input("Name", sql.NVarChar(255), text)
+    .query("SELECT TOP 1 id FROM dbo.enterprise WHERE name = @Name AND business_type = 'C'");
+  return r.recordset[0]?.id ?? null;
+}
+
 async function resolveFinYearId(pool, pDate) {
   if (!pDate) return null;
   const result = await pool
@@ -840,7 +854,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // TDS is due but nothing was selected — caught below like every other
     // validation error in this handler.
     const isInvoiceLinkedForTds = !!PExpenseRef && !ContractId;
-    const companyIdForTds = parseInt(PCompany, 10) || null;
+    const companyIdForTds = await resolvePaymentCompanyId(pool, PCompany);
     const finYearIdForTds = await resolveFinYearId(pool, PDate);
     let tdsSnapshot;
     try {

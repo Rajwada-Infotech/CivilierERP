@@ -98,7 +98,9 @@ async function getYearlyCumulativeAmount(pool, sql, { partyHeadId, companyId, fi
           SELECT SUM(np.PAmount + ISNULL(np.TDSAmount, 0))
           FROM dbo.NewPayment np
           WHERE np.PPartyId = @PartyHeadId
-            AND TRY_CAST(np.PCompany AS INT) = @CompanyId
+            -- PCompany is the enterprise id on older rows, the company name on newer ones
+            AND (TRY_CAST(np.PCompany AS INT) = @CompanyId
+                 OR np.PCompany = (SELECT TOP 1 name FROM dbo.enterprise WHERE id = @CompanyId))
             AND np.PDate BETWEEN @FStart AND @FEnd
             AND ISNULL(np.PExpenseRef, '') = ''
             AND np.Status <> 'Rejected'
