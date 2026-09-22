@@ -105,8 +105,6 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     // Payment Date (np.PDate) range — list view's Date filter.
     const dateFrom = req.query.from ? String(req.query.from).trim() : "";
     const dateTo = req.query.to ? String(req.query.to).trim() : "";
-    // TDS tab — only payments that actually show a deducted TDS amount.
-    const tdsOnly = req.query.tdsOnly === "1" || req.query.tdsOnly === "true";
 
     // Every column here is qualified with np. — the data query joins
     // dbo.GoodsReceiptNotes and dbo.PurchaseOrders, both of which also have a
@@ -173,7 +171,6 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (dueDate) conditions.push(`np.PChequeDate = @dueDate`);
     if (dateFrom) conditions.push(`np.PDate >= @dateFrom`);
     if (dateTo) conditions.push(`np.PDate <= @dateTo`);
-    if (tdsOnly) conditions.push(`ISNULL(np.TDSAmount, 0) > 0`);
     if (remarks)
       conditions.push(
         `(np.PPaymentName LIKE @remarks OR np.PExpenseRef LIKE @remarks)`,

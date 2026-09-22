@@ -152,9 +152,6 @@ const Payment: React.FC = () => {
   const [dateFromFilter, setDateFromFilter] = useState("");
   const [dateToFilter, setDateToFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
-  // Register tab: All vs. TDS-only (payments with a TDS head linked / an
-  // amount actually deducted).
-  const [tdsOnlyFilter, setTdsOnlyFilter] = useState(false);
   // Direct Expense Payment (migration 303) — a payment mode with no linked
   // invoice/party, paid straight against one or more Expense Heads instead.
   const [showExpenseHeadPayment, setShowExpenseHeadPayment] = useState(false);
@@ -295,9 +292,15 @@ const Payment: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch payment posting data when posting tab opens
+  // Fetch payment posting data when posting tab opens — also needed on the
+  // Payment Chain tab for a direct payment (no expenseRef, no JVLineId
+  // settlement): its own GL posting still gets a real voucher number
+  // (VoucherNo on the journal header, /:id/posting's jvNo), which is what
+  // actually showed as "JV-2026-00115" for a standalone TDS payment like
+  // PAY-2026-00286 — a different thing from JVLineId/jvNo (a payment
+  // settling someone ELSE's Journal Voucher line).
   useEffect(() => {
-    if (detailTab !== "posting" || !viewingRec?.id) return;
+    if ((detailTab !== "posting" && detailTab !== "chain") || !viewingRec?.id) return;
     setPmtPostingLoading(true);
     setPmtPostingData(null);
     const url = viewingRec.expenseRef
@@ -745,7 +748,6 @@ const Payment: React.FC = () => {
       docNumberFilter,
       dateFromFilter,
       dateToFilter,
-      tdsOnlyFilter,
     ],
     queryFn: () =>
       getPayments(
@@ -762,7 +764,6 @@ const Payment: React.FC = () => {
         "",
         dateFromFilter,
         dateToFilter,
-        tdsOnlyFilter,
       ),
     staleTime: 0,
   });
@@ -4640,37 +4641,6 @@ const Payment: React.FC = () => {
               );
             })()}
 
-            {/* Register tabs — All vs. TDS (payments with a TDS head linked /
-                amount deducted on their own GL posting). */}
-            <div className="flex items-center gap-1 mb-3">
-              <button
-                onClick={() => {
-                  setTdsOnlyFilter(false);
-                  setPage(1);
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-heading font-semibold transition-colors ${
-                  !tdsOnlyFilter
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                All Payments
-              </button>
-              <button
-                onClick={() => {
-                  setTdsOnlyFilter(true);
-                  setPage(1);
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-heading font-semibold transition-colors ${
-                  tdsOnlyFilter
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                TDS
-              </button>
-            </div>
-
             {isLoading && (
               <div className="text-center py-16 text-muted-foreground text-sm">
                 <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -4802,32 +4772,22 @@ const Payment: React.FC = () => {
                   <table className="w-full text-sm table-fixed">
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
-                        <th className={`px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[18%]" : "w-[22%]"}`}>
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
                           Payment Purpose
                         </th>
-                        <th className={`px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[13%]" : "w-[16%]"}`}>
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
                           Doc No
                         </th>
-                        <th className={`px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[16%]" : "w-[22%]"}`}>
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
                           Expense Ref
                         </th>
-                        <th className={`px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[9%]" : "w-[10%]"}`}>
+                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%]">
                           Amount
                         </th>
-                        {tdsOnlyFilter && (
-                          <>
-                            <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%]">
-                              TDS Amt
-                            </th>
-                            <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
-                              Net Payable (After TDS)
-                            </th>
-                          </>
-                        )}
-                        <th className={`px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[11%]" : "w-[14%]"}`}>
+                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
                           Status
                         </th>
-                        <th className={`px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[11%]" : "w-[16%]"}`}>
+                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
                           Actions
                         </th>
                       </tr>
@@ -4836,7 +4796,7 @@ const Payment: React.FC = () => {
                       {records.length === 0 && (
                         <tr>
                           <td
-                            colSpan={tdsOnlyFilter ? 8 : 6}
+                            colSpan={6}
                             className="text-center py-14 text-muted-foreground text-sm"
                           >
                             <AlertCircle
@@ -4911,30 +4871,6 @@ const Payment: React.FC = () => {
                           <td className="px-4 py-4 font-mono text-xs font-semibold text-right whitespace-nowrap">
                             {formatINR(rec.amount ?? 0)}
                           </td>
-                          {tdsOnlyFilter && (
-                            <>
-                              {/* TDS Amt — only meaningful when a TDS head is actually linked */}
-                              <td className="px-4 py-4 font-mono text-xs text-right whitespace-nowrap">
-                                {(rec.tdsAmount || 0) > 0 ? (
-                                  <span className="text-amber-600 dark:text-amber-400 font-semibold">
-                                    {formatINR(rec.tdsAmount || 0)}
-                                  </span>
-                                ) : (
-                                  <span className="text-muted-foreground">—</span>
-                                )}
-                              </td>
-                              {/* Net Payable (After TDS) */}
-                              <td className="px-4 py-4 font-mono text-xs font-semibold text-right whitespace-nowrap">
-                                {(rec.tdsAmount || 0) > 0 ? (
-                                  <span className="text-emerald-600 dark:text-emerald-400">
-                                    {formatINR(Math.max(0, (rec.amount ?? 0) - (rec.tdsAmount || 0)))}
-                                  </span>
-                                ) : (
-                                  <span className="text-muted-foreground">—</span>
-                                )}
-                              </td>
-                            </>
-                          )}
                           {/* Status */}
                           <td className="px-4 py-4">
                             <div className="flex flex-col gap-1">
@@ -5135,12 +5071,19 @@ const Payment: React.FC = () => {
             <div className="p-5 space-y-4 flex-1 overflow-y-auto">
 
               {/* ── Payment Chain Tab ── */}
-              {/* A "direct" payment (no PExpenseRef/invoice) can still settle a
-                  real linked document — most commonly a Journal Voucher
-                  (JVLineId, migration 417; resolved server-side as jvNo on
-                  this same record, same source the list's own JV chip reads).
-                  Previously this always fell through to the generic "no
-                  payment chain" message even when a genuine link existed. */}
+              {/* A "direct" payment (no PExpenseRef/invoice) can still carry a
+                  real reference worth showing instead of the blanket "no
+                  payment chain" message — two different things, both handled
+                  here:
+                  1. viewingRec.jvNo (JVLineId, migration 417) — this payment
+                     SETTLES someone else's Journal Voucher line (the JV
+                     Payment Mode strip feature).
+                  2. pmtPostingData.jvNo — this payment's OWN GL posting, once
+                     posted, gets a real voucher number on the journal header
+                     (GeneralLedgerEntry.VoucherNo) in the same JV-XXXX
+                     numbering — this is what shows on the Posting tab as
+                     "✓ {jvNo}" and is what a standalone/TDS payment like
+                     PAY-2026-00286 actually has, not a JVLineId settlement. */}
               {detailTab === "chain" && !viewingRec.expenseRef && viewingRec.jvNo && (
                 <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
                   <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
@@ -5159,9 +5102,29 @@ const Payment: React.FC = () => {
                   </p>
                 </div>
               )}
-              {detailTab === "chain" && !viewingRec.expenseRef && !viewingRec.jvNo && (
+              {detailTab === "chain" && !viewingRec.expenseRef && !viewingRec.jvNo && pmtPostingData?.jvNo && (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
+                    Linked Reference
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Link2 size={13} className="text-primary shrink-0" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">GL Posting Voucher</p>
+                      <p className="font-mono text-sm font-semibold text-foreground">{pmtPostingData.jvNo}</p>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-2">
+                    This is a direct payment (no linked invoice) — its own GL posting was
+                    recorded under this voucher number. See the Posting tab for the full entry.
+                  </p>
+                </div>
+              )}
+              {detailTab === "chain" && !viewingRec.expenseRef && !viewingRec.jvNo && !pmtPostingData?.jvNo && (
                 <p className="text-center text-xs text-muted-foreground py-8">
-                  This is a direct payment with no linked invoice or Journal Voucher — there's no payment chain to show.
+                  {pmtPostingLoading
+                    ? "Loading…"
+                    : "This is a direct payment with no linked invoice or Journal Voucher — there's no payment chain to show."}
                 </p>
               )}
               {detailTab === "chain" && viewingRec.expenseRef && (
