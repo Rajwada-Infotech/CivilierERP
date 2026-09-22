@@ -26,23 +26,42 @@ export function isSidebarToggleShortcut(e: KeyLike): boolean {
 }
 
 /**
+ * Options for the Home page, which renders with no module strip/nav panel
+ * at all by default (a full-width dashboard) — there's nothing for the
+ * normal collapse/expand toggle to act on there. Home instead has its own
+ * temporary "reveal the strip" state (AppLayout.tsx's homeNavOpen), so on
+ * Home the same Ctrl+B toggles that instead.
+ */
+export interface HomeShortcutOptions {
+  isHome: boolean;
+  homeNavOpen: boolean;
+  setHomeNavOpen: (v: boolean) => void;
+}
+
+/**
  * Toggles the sidebar on Ctrl+B / ⌘B — mount once, high up the tree (inside
  * <SidebarContext.Provider>, e.g. AppLayout.tsx), so it works the same from
  * every module rather than needing a per-page listener. Capture phase +
  * preventDefault so it fires before any focused input's own keydown handler
  * and doesn't also trigger the browser's own Ctrl+B (bold, in some browser
- * chrome contexts).
+ * chrome contexts). On Home (see HomeShortcutOptions), it opens/closes the
+ * module strip instead of the normal nav-panel collapse, since Home has
+ * neither by default.
  */
-export function useSidebarToggleShortcut(): void {
+export function useSidebarToggleShortcut(home?: HomeShortcutOptions): void {
   const { collapsed, setCollapsed } = useSidebarState();
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!isSidebarToggleShortcut(e)) return;
       e.preventDefault();
-      setCollapsed(!collapsed);
+      if (home?.isHome) {
+        home.setHomeNavOpen(!home.homeNavOpen);
+      } else {
+        setCollapsed(!collapsed);
+      }
     };
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
-  }, [collapsed, setCollapsed]);
+  }, [collapsed, setCollapsed, home?.isHome, home?.homeNavOpen, home?.setHomeNavOpen]);
 }
