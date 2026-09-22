@@ -142,7 +142,7 @@ const CrmHandover: React.FC = () => {
   const { data: detail } = useQuery({
     queryKey: ["crm-handover-detail", selectedId],
     queryFn: () => fetchDetail(selectedId!),
-    enabled: !!selectedId,
+    enabled: selectedId != null,
     staleTime: 30_000,
   });
   // Only bookings that pass every handover prerequisite gate
@@ -208,7 +208,7 @@ const CrmHandover: React.FC = () => {
 
   // ── Raise snag ─────────────────────────────────────────────────────────────
   const handleAddSnag = async () => {
-    if (!selectedId || !snagForm.Description.trim()) { toast.error("Description is required"); return; }
+    if (selectedId == null || !snagForm.Description.trim()) { toast.error("Description is required"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/snags`, {
@@ -233,7 +233,7 @@ const CrmHandover: React.FC = () => {
 
   // ── Resolve snag ───────────────────────────────────────────────────────────
   const handleResolveSnag = async (snagId: number) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/snags/${snagId}`, {
         method: "PUT",
@@ -253,7 +253,7 @@ const CrmHandover: React.FC = () => {
 
   // ── Status transition (non-Completed) ──────────────────────────────────────
   const handleTransition = async (targetStatus: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     if (targetStatus === "Completed") {
       // Completed requires the full completion dialog
       setCompleteForm({ ActualHandoverDate: "", KeyHandoverBy: "", FinalDuesCleared: false, CustomerAcknowledged: false });
@@ -281,7 +281,7 @@ const CrmHandover: React.FC = () => {
 
   // ── Complete handover (with all mandatory fields) ──────────────────────────
   const handleComplete = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     if (!completeForm.ActualHandoverDate) { toast.error("Actual handover date is required"); return; }
     if (!completeForm.KeyHandoverBy) { toast.error("Select the staff member who handed the key"); return; }
     if (!completeForm.FinalDuesCleared) { toast.error("Confirm that all final dues are cleared"); return; }
@@ -393,7 +393,7 @@ const CrmHandover: React.FC = () => {
 
         {/* ── Detail panel ───────────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto space-y-4">
-          {!selectedId ? (
+          {selectedId == null ? (
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Select a handover</div>
           ) : !detail ? (
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Loading...</div>

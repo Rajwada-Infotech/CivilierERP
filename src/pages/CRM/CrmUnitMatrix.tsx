@@ -202,7 +202,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
   const [extendDays, setExtendDays] = useState("3");
   const [showExtend, setShowExtend] = useState(false);
   const isHold = unit.Status === "OnHold";
-  const hasUnpaidBooking = isHold && !!unit.BookingId;
+  const hasUnpaidBooking = isHold && unit.BookingId != null;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["unit-matrix"] });
 
@@ -247,7 +247,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
   // An Approved-but-unpaid booking needs the fuller cancellation flow on the
   // Bookings page, not a shortcut from here.
   const handleCancelBooking = async () => {
-    if (!unit.BookingId) return;
+    if (unit.BookingId == null) return;
     setCancelling(true);
     try {
       const res = await fetchWithAuth(`/api/crm/bookings/${unit.BookingId}/reject`, {
@@ -379,7 +379,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
                   {cancelling ? "Cancelling..." : "Cancel Booking"}
                 </button>
               )}
-              {rights.canEdit && unit.HoldId && (
+              {rights.canEdit && unit.HoldId != null && (
                 <button onClick={() => setShowExtend((s) => !s)}
                   className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted">
                   Extend Hold

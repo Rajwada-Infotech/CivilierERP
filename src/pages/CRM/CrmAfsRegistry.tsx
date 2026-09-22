@@ -181,7 +181,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
   const afterChange = () => { refetchEmbedded(); onChanged?.(); };
   const [startingEmbedded, setStartingEmbedded] = useState(false);
   const startEmbedded = async () => {
-    if (!embeddedBookingId) return;
+    if (embeddedBookingId == null) return;
     setStartingEmbedded(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -266,7 +266,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
   };
 
   const handleSchedule = async () => {
-    if (!scheduleId || !scheduledDate) { toast.error("Date is required"); return; }
+    if (scheduleId == null || !scheduledDate) { toast.error("Date is required"); return; }
     try {
       const res = await fetchWithAuth(`${API}/${scheduleId}/schedule`, {
         method: "PUT",
@@ -287,7 +287,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
   };
 
   const handleComplete = async () => {
-    if (!completeId) return;
+    if (completeId == null) return;
     // Capture bookingId before clearing state so promptNextStep can deep-link
     const completingRow = (rows as any[]).find((r: any) => r.Id === completeId);
     const completingBookingId = completingRow?.BookingId;
@@ -310,7 +310,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         promptNextStep(
           navigate,
           "AFS Registry visit completed. Next: open the Agreement and click Mark as Registered (enter the AFS Registration No + Date).",
-          completingBookingId ? `/crm/agreements?bookingId=${completingBookingId}` : "/crm/agreements",
+          completingBookingId != null ? `/crm/agreements?bookingId=${completingBookingId}` : "/crm/agreements",
           "Go to Agreement → Mark Registered",
         );
       }
@@ -505,7 +505,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         )}
 
         {/* Schedule dialog */}
-        <Dialog open={!!scheduleId} onOpenChange={(o) => !o && setScheduleId(null)}>
+        <Dialog open={scheduleId != null} onOpenChange={(o) => !o && setScheduleId(null)}>
           <DialogContent className="max-w-xs p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
@@ -530,7 +530,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         </Dialog>
 
         {/* Complete dialog */}
-        <Dialog open={!!completeId} onOpenChange={(o) => !o && setCompleteId(null)}>
+        <Dialog open={completeId != null} onOpenChange={(o) => !o && setCompleteId(null)}>
           <DialogContent className="max-w-xs p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
@@ -684,7 +684,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         </Dialog>
 
         {/* Schedule dialog */}
-        <Dialog open={!!scheduleId} onOpenChange={(o) => !o && setScheduleId(null)}>
+        <Dialog open={scheduleId != null} onOpenChange={(o) => !o && setScheduleId(null)}>
           <DialogContent accent="crm" className="max-w-xs p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">
@@ -709,7 +709,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
         </Dialog>
 
         {/* Complete dialog */}
-        <Dialog open={!!completeId} onOpenChange={(o) => !o && setCompleteId(null)}>
+        <Dialog open={completeId != null} onOpenChange={(o) => !o && setCompleteId(null)}>
           <DialogContent accent="crm" className="max-w-xs p-0 gap-0 overflow-hidden">
             <DialogHeader className="px-5 py-4 border-b border-border bg-muted/20">
               <div className="flex items-start gap-3">

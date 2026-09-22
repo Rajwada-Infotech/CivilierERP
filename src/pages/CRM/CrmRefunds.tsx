@@ -57,7 +57,7 @@ async function fetchEligibleSources(customerId?: number): Promise<any[]> {
   try { const r = await fetchWithAuth(`${API}/eligible-sources${q}`); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
-  if (!projectId) return [];
+  if (projectId == null) return [];
   try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchBookings(): Promise<any[]> {
@@ -108,7 +108,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
   const { data: banks = [] } = useQuery({
     queryKey: ["crm-refund-project-banks", picked?.ProjectId],
     queryFn: () => fetchProjectBanks(picked?.ProjectId),
-    enabled: !!picked?.ProjectId,
+    enabled: picked?.ProjectId != null,
   });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, enabled: mode === "rebook", staleTime: 5 * 60_000 });
   const { data: customerBank } = useQuery({
@@ -380,13 +380,13 @@ const CrmRefunds: React.FC = () => {
           )}
           {r.Status === "FinancePending" && rights.canEdit && (
             <>
-              <button onClick={() => { setFinanceDialog(r); setFinanceBank(r.RefundBankLHeadId ? String(r.RefundBankLHeadId) : ""); }}
+              <button onClick={() => { setFinanceDialog(r); setFinanceBank(r.RefundBankLHeadId != null ? String(r.RefundBankLHeadId) : ""); }}
                 className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200">Finance Approve</button>
               <button onClick={() => financeAction(r.Id, "finance-reject", { note: "Sent back" })}
                 className="text-xs px-2 py-1 text-red-600 hover:underline">Send back</button>
             </>
           )}
-          {r.FinanceNewPaymentId && (
+          {r.FinanceNewPaymentId != null && (
             <button onClick={() => navigate(`/finance/payments?view=${r.FinanceNewPaymentId}`)}
               className="text-xs text-primary hover:underline flex items-center gap-1">Payment <ExternalLink size={11} /></button>
           )}

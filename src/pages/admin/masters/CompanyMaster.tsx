@@ -614,7 +614,7 @@ export default function CompanyMaster() {
         }
       }
 
-      const url = editId
+      const url = editId != null
         ? `/api/company-master/${editId}`
         : "/api/company-master";
       const payload = {
@@ -626,7 +626,7 @@ export default function CompanyMaster() {
         gstDate: form.gstType === "Registered" ? form.gstDate : "",
       };
       const res = await fetchWithAuth(url, {
-        method: editId ? "PUT" : "POST",
+        method: editId != null ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -636,7 +636,7 @@ export default function CompanyMaster() {
       }
     },
     onSuccess: () => {
-      toast.success(editId ? "Company updated" : "Company created");
+      toast.success(editId != null ? "Company updated" : "Company created");
       qc.invalidateQueries({ queryKey: ["company-master"] });
       setShowForm(false);
     },
@@ -911,7 +911,7 @@ export default function CompanyMaster() {
                   size="md"
                 />
                 <h2 className="font-heading font-semibold text-foreground">
-                  {editId ? `Edit — ${form.name || "Company"}` : "New Company"}
+                  {editId != null ? `Edit — ${form.name || "Company"}` : "New Company"}
                 </h2>
               </div>
               <button
@@ -1211,7 +1211,7 @@ export default function CompanyMaster() {
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />
                 )}
-                {editId ? "Update" : "Save"} Company
+                {editId != null ? "Update" : "Save"} Company
               </button>
             </div>
           </div>

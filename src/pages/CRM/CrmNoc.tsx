@@ -325,7 +325,7 @@ const CrmNoc: React.FC = () => {
   };
 
   const handleMarkIssued = async () => {
-    if (!detailId) return;
+    if (detailId == null) return;
     setMarkingIssued(true);
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/mark-issued`, { method: "PUT" });
@@ -576,7 +576,7 @@ const CrmNoc: React.FC = () => {
         </Dialog>
 
         {/* ── Detail dialog ─────────────────────────────────────────────── */}
-        <Dialog open={!!detailId} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
+        <Dialog open={detailId != null} onOpenChange={(o) => { if (!o) setDetailId(null); }}>
           <DialogContent accent="crm" className="max-w-lg p-0 gap-0 overflow-hidden">
             {detail && (
               <>

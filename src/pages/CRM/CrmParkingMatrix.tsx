@@ -328,7 +328,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
   const [extendDays, setExtendDays] = useState("3");
   const [showExtend, setShowExtend] = useState(false);
   const isHold = slot.Status === "OnHold";
-  const hasUnpaidAllotment = isHold && !!slot.AllotmentId;
+  const hasUnpaidAllotment = isHold && slot.AllotmentId != null;
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["parking-matrix"] });
 
@@ -466,7 +466,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
           {hasUnpaidAllotment ? (
             <>
-              {rights.canEdit && slot.HoldId && (
+              {rights.canEdit && slot.HoldId != null && (
                 <button onClick={() => setShowExtend((s) => !s)}
                   className="px-3 py-1.5 text-sm border border-border rounded-lg font-medium hover:bg-muted">
                   Extend Hold

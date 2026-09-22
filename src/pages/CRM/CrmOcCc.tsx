@@ -391,7 +391,7 @@ const CrmOcCc: React.FC = () => {
     setEditLocked(true);
     setEditForm({
       ProjectId:       String(row.ProjectId),
-      BlockId:         row.BlockId ? String(row.BlockId) : "",
+      BlockId:         row.BlockId != null ? String(row.BlockId) : "",
       CertType:        row.CertType,
       Status:          row.Status,
       ApplicationDate: row.ApplicationDate ? String(row.ApplicationDate).slice(0, 10) : "",

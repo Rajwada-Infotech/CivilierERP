@@ -574,7 +574,7 @@ const CrmCustomers: React.FC = () => {
       const r = await fetchWithAuth(`${API}/${editingId}`);
       return r.ok ? r.json() : null;
     },
-    enabled: !!editingId,
+    enabled: editingId != null,
   });
 
   const handleLeadChange = (leadId: string) => {
@@ -861,7 +861,7 @@ const CrmCustomers: React.FC = () => {
         </DialogContent>
       </Dialog>
 
-      {editingId && editingCustomer && (
+      {editingId != null && editingCustomer && (
         <EditCustomerDialog
           customer={editingCustomer}
           canDelete={canDelete}

@@ -178,7 +178,7 @@ const ParkingMaster: React.FC = () => {
         companyId: project ? String(project.company_id) : "",
         projectId: String(item.ProjectId),
         projectName: item.ProjectName ?? "",
-        blockId: item.BlockId ? String(item.BlockId) : "",
+        blockId: item.BlockId != null ? String(item.BlockId) : "",
         blockName: item.BlockName ?? "All blocks",
         parkingType: item.ParkingType ?? "Open",
         charge: item.Charge != null ? String(item.Charge) : "",

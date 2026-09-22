@@ -744,7 +744,7 @@ export default function EnterpriseMaster() {
                   size="md"
                 />
                 <h2 className="font-heading font-semibold text-foreground">
-                  {editId
+                  {editId != null
                     ? `Edit — ${form.name || "Enterprise"}`
                     : "New Enterprise"}
                 </h2>
@@ -966,7 +966,7 @@ export default function EnterpriseMaster() {
                 disabled={saving || !form.name?.trim()}
                 className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all"
               >
-                {saving ? "Saving…" : editId ? "Update" : "Save"}
+                {saving ? "Saving…" : editId != null ? "Update" : "Save"}
               </button>
             </div>
           </div>

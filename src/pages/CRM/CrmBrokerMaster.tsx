@@ -312,7 +312,7 @@ const CrmBrokerMaster: React.FC = () => {
             <div className="flex items-center gap-3">
               <UserRound size={16} className="text-primary" />
               <div>
-                <h2 className="text-sm font-semibold">{editingId ? "Edit Broker" : "Add Broker"}</h2>
+                <h2 className="text-sm font-semibold">{editingId != null ? "Edit Broker" : "Add Broker"}</h2>
                 <p className="text-[11px] text-muted-foreground">Brokers are ledger accounts (LHeadType='BR'), same as Contractors</p>
               </div>
             </div>
@@ -453,10 +453,10 @@ const CrmBrokerMaster: React.FC = () => {
               <button onClick={resetForm} className="px-4 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted">Close</button>
             ) : (
               <>
-                <button onClick={resetForm} className="px-4 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted">{editingId ? "Cancel" : "Reset"}</button>
+                <button onClick={resetForm} className="px-4 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted">{editingId != null ? "Cancel" : "Reset"}</button>
                 <button onClick={handleSave} disabled={saving || !canSave}
                   className="px-4 py-1.5 rounded-lg text-sm font-medium bg-primary text-primary-foreground disabled:opacity-40 flex items-center gap-1.5">
-                  {editingId ? <Check size={14} /> : <Plus size={14} />} {saving ? "Saving..." : editingId ? "Update Broker" : "Save Broker"}
+                  {editingId != null ? <Check size={14} /> : <Plus size={14} />} {saving ? "Saving..." : editingId != null ? "Update Broker" : "Save Broker"}
                 </button>
               </>
             )}

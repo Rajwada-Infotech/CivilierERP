@@ -146,7 +146,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
     : Number(deposit.AvailableBalance);
 
   async function apply() {
-    if (!selId) { toast.error("Select a milestone first"); return; }
+    if (selId == null) { toast.error("Select a milestone first"); return; }
     const n = amt ? parseFloat(amt) : undefined;
     if (n !== undefined && (isNaN(n) || n <= 0)) { toast.error("Enter a valid amount"); return; }
     if (n && n > deposit.AvailableBalance) { toast.error(`Max: ${formatINR(deposit.AvailableBalance)}`); return; }
@@ -288,7 +288,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
                 <Wallet size={13} />Auto-settles once fully funded
               </span>
             ) : (
-              <button onClick={apply} disabled={!selId || busy}
+              <button onClick={apply} disabled={selId == null || busy}
                 title="This booking is fully funded and should auto-settle — use this only as a manual fallback"
                 className="px-3.5 py-1.5 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2">
                 {busy ? <><Loader2 size={13} className="animate-spin" />Applying…</> : <><ArrowRightLeft size={13} />Apply Manually</>}

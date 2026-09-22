@@ -196,7 +196,7 @@ const CrmCancellations: React.FC = () => {
                 CrmRefund is auto-created — shown here as a status chip that
                 links out. Refund / re-booking actions all live on /crm/refunds. */}
             {(c.Status === CrmStatus.APPROVED || c.Status === "Cancelled") && (
-              c.RefundId ? (
+              c.RefundId != null ? (
                 <button onClick={() => navigate(`/crm/refunds?id=${c.RefundId}`)}
                   className={`flex items-center gap-1 text-xs hover:underline ${
                     c.SettlementStatus === "Settled" ? "text-green-600" : "text-primary"}`}>

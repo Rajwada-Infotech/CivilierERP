@@ -126,7 +126,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
 
   if (!a) return null;
 
-  const isLinked = !!a.BookingId;
+  const isLinked = a.BookingId != null;
   const pct = bookingCollectedPct(a);
 
   const handlePay = async () => {
@@ -588,7 +588,7 @@ const CrmParkingBooking: React.FC = () => {
       id: "status", header: "Payment Status", size: 160, enableSorting: false,
       cell: (i) => {
         const a = i.row.original;
-        if (a.BookingId) {
+        if (a.BookingId != null) {
           const pct = bookingCollectedPct(a);
           return (
             <div className="space-y-1">
