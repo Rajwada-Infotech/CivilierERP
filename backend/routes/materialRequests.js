@@ -361,7 +361,17 @@ router.get("/", authenticateToken, async (req, res) => {
             FROM dbo.MaterialRequestItems mri2
             LEFT JOIN dbo.UOMMaster u2 ON u2.UOMCode = mri2.UOMCode
             WHERE mri2.MRId = mr.MRId
-            GROUP BY ISNULL(u2.UOMName, mri2.UOMCode)
+            -- Must match the SELECT's grouping expression exactly (SQL Server
+            -- requires the GROUP BY expression to be textually identical to
+            -- the non-aggregated SELECT expression it covers) — this used to
+            -- read ISNULL(u2.UOMName, mri2.UOMCode), one ISNULL short of the
+            -- SELECT's ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, '')), which
+            -- SQL Server doesn't recognize as the same expression. That
+            -- mismatch 500'd this entire list endpoint outright (error 8120)
+            -- every Material Request list request failed, at every
+            -- page/limit, found via a live "material requests aren't
+            -- fetching" report on 2026-09-22.
+            GROUP BY ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, ''))
             FOR XML PATH('')
           ), 1, 2, '')
         )                        AS QtyByUom,
