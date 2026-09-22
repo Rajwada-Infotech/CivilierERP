@@ -513,7 +513,9 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       try {
         effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
           preferredUnitId: effectiveUnitId,
-          paymentPlanId: b.PaymentPlanId || null,
+          // b.PaymentPlanId can legitimately be 0 (CrmPaymentPlanTemplate
+          // has a row at Id 0) — `||` would silently drop it.
+          paymentPlanId: b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? b.PaymentPlanId : null,
         });
       } catch (planErr) {
         return res.status(planErr.status || 400).json({ error: planErr.message });

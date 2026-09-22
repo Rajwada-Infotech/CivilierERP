@@ -440,10 +440,14 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     // to safely regenerate against); regenerated from scratch otherwise so
     // the schedule actually matches what's now selected — matching what
     // booking creation itself would have produced.
-    const newPlanId = b.PaymentPlanId !== undefined ? (b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null) : undefined;
+    // CrmPaymentPlanTemplate has a real row at Id 0 — `b.PaymentPlanId ?
+    // parseInt(...) : null` would treat that as "no plan", so this checks
+    // for null/undefined/"" explicitly instead of truthiness.
+    const hasPlanId = (v) => v !== null && v !== undefined && v !== "";
+    const newPlanId = b.PaymentPlanId !== undefined ? (hasPlanId(b.PaymentPlanId) ? parseInt(b.PaymentPlanId) : null) : undefined;
     const planIsChanging = newPlanId !== undefined && newPlanId !== oldRow.PaymentPlanId;
     if (planIsChanging) {
-      if (newPlanId) {
+      if (hasPlanId(newPlanId)) {
         // Same tag-based resolver Application/Booking creation use — the new
         // plan must be one of the unit's CrmUnitPaymentPlan tags (or the
         // unit has no tags, in which case any active plan is acceptable).
@@ -483,7 +487,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
         .input("bdate", sql.Date,          b.BookingDate || null)
         .input("pmode", sql.NVarChar(50),  b.PaymentMode  || null)
         .input("asgn",  sql.Int,           b.AssignedTo   ? parseInt(b.AssignedTo) : null)
-        .input("ppid",  sql.Int,           b.PaymentPlanId ? parseInt(b.PaymentPlanId) : null)
+        .input("ppid",  sql.Int,           hasPlanId(b.PaymentPlanId) ? parseInt(b.PaymentPlanId) : null)
         .input("note",  sql.NVarChar(sql.MAX), b.Notes || null)
         .input("ub",    sql.Int,           actorId(req))
         .query(`

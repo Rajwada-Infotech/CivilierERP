@@ -306,7 +306,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("cpid",   sql.Int, channelPartnerId)
       .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
-      .input("ppid", sql.Int,           effectivePaymentPlanId || null)
+      .input("ppid", sql.Int,           effectivePaymentPlanId != null ? effectivePaymentPlanId : null)
       .input("ttype",sql.NVarChar(20),  b.TokenType || null)
       .input("tval", sql.Decimal(18,2), b.TokenValue != null ? parseFloat(b.TokenValue) : null)
       .input("bamt", sql.Decimal(18,2), b.BookingAmount != null ? parseFloat(b.BookingAmount) : null)
@@ -425,7 +425,7 @@ async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, pay
   // the `bookingAmount` parameter only still matters as a fallback for
   // bookings with no tagged plan (DEFAULT_MILESTONES) or a legacy plan saved
   // before this field existed (BookingAmount IS NULL).
-  if (paymentPlanId) {
+  if (paymentPlanId !== null && paymentPlanId !== undefined) {
     const planRes = await poolOrTx.request().input("pid", sql.Int, parseInt(paymentPlanId))
       .query("SELECT BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
     const planBookingAmount = planRes.recordset[0]?.BookingAmount;
@@ -562,7 +562,16 @@ async function getApplicablePaymentPlans(pool, { unitId, blockId, projectId }) {
 //   - Nothing tagged anywhere in the Unit's hierarchy -> any active plan is
 //     acceptable (the cascade's own final fallback already covers this).
 async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPlanId }) {
-  if (!preferredUnitId) return null;
+  // preferredUnitId/paymentPlanId are real IDENTITY values, which are never
+  // guaranteed to start at 1 — this codebase has already hit rows sitting at
+  // Id 0 once (CrmCustomer, migrations 441-443), and CrmPaymentPlanTemplate
+  // has one too. A plain `!x`/`x || y` check treats 0 the same as
+  // null/undefined/"" in JS, which silently discarded a genuinely-selected
+  // plan and is exactly what caused bookings to fail with "must be tagged"
+  // even though the plan was correctly chosen and tagged. Every check here
+  // uses an explicit null/undefined/"" test so 0 survives as a real id.
+  const hasId = (v) => v !== null && v !== undefined && v !== "";
+  if (!hasId(preferredUnitId)) return null;
 
   const unitRow = await pool.request().input("uid", sql.Int, preferredUnitId)
     .query("SELECT BlockId, ProjectId FROM dbo.UnitMaster WHERE Id = @uid");
@@ -571,7 +580,7 @@ async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPla
   const applicable = await getApplicablePaymentPlans(pool, { unitId: preferredUnitId, blockId: BlockId, projectId: ProjectId });
   const applicableIds = applicable.map((r) => r.Id);
 
-  if (!paymentPlanId) {
+  if (!hasId(paymentPlanId)) {
     if (applicableIds.length === 1) return applicableIds[0];
     throw new CrmCreationError(
       applicableIds.length > 1
@@ -674,9 +683,10 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // choice, so that's the fallback here rather than re-deriving one. An
   // explicit b.PaymentPlanId still wins if the caller is deliberately
   // changing it at booking time.
+  const hasId = (v) => v !== null && v !== undefined && v !== "";
   const effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
     preferredUnitId: unitRow.Id,
-    paymentPlanId: b.PaymentPlanId || appRow.recordset[0].PaymentPlanId || null,
+    paymentPlanId: hasId(b.PaymentPlanId) ? b.PaymentPlanId : (hasId(appRow.recordset[0].PaymentPlanId) ? appRow.recordset[0].PaymentPlanId : null),
   });
 
   // AreaSqFt is the single pricing/saleable area. Structural breakdown fields
@@ -700,7 +710,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // without a fixed BookingAmount set (e.g. an old plan saved before this
   // field existed) can no longer produce a booking via a silent %
   // fallback — staff must open the plan and set one first.
-  if (!effectivePaymentPlanId) {
+  if (effectivePaymentPlanId === null || effectivePaymentPlanId === undefined) {
     throw new CrmCreationError("A Payment Plan must be tagged to this unit before a Booking can be created — Booking Amount can only come from the plan.");
   }
   const planRes = await pool.request().input("pid", sql.Int, parseInt(effectivePaymentPlanId))
