@@ -115,6 +115,49 @@ async function assertNoMixedItemTypes(pool, poItemsArray) {
   }
 }
 
+// The base date + longest lead time (Days of Supply) among the items on this
+// PO — ExpectedDeliveryDate can never be earlier than this, since the
+// slowest item to supply can't arrive any sooner. Mirrors the client-side
+// min-date computation in PurchaseOrderMaster.tsx so a direct API call
+// can't bypass it. Returns null when there's nothing to enforce.
+async function computeMinExpectedDate(pool, baseDate, poItemsArray) {
+  const itemIds = [
+    ...new Set(
+      (Array.isArray(poItemsArray) ? poItemsArray : [])
+        .map((it) => it.itemId)
+        .filter((id) => id && typeof id === "string"),
+    ),
+  ];
+  if (!itemIds.length || !baseDate) return null;
+
+  const hasCol = await pool
+    .request()
+    .query(
+      `SELECT COUNT(1) AS cnt FROM sys.columns
+       WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_DaysOfSupply'`,
+    )
+    .then((r) => r.recordset[0].cnt > 0);
+  if (!hasCol) return null;
+
+  const request = pool.request();
+  const idParams = itemIds.map((id, i) => {
+    const p = `dosItemId${i}`;
+    request.input(p, sql.UniqueIdentifier, id);
+    return `@${p}`;
+  });
+  const result = await request.query(`
+    SELECT MAX(M_DaysOfSupply) AS MaxDays
+    FROM   dbo.Item_Master_Group
+    WHERE  M_Id IN (${idParams.join(",")})
+  `);
+  const maxDays = result.recordset[0]?.MaxDays;
+  if (!maxDays || maxDays <= 0) return null;
+
+  const min = new Date(baseDate);
+  min.setDate(min.getDate() + maxDays);
+  return min;
+}
+
 // Resolve a FinYear.FId from its FName label (e.g. "2026-2027", "FY 2026-27",
 // "AY24-25"). The label is whatever the frontend's Financial Year dropdown
 // happens to display, and that name is free-text — it can contain any
@@ -314,6 +357,17 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
   }
 
   await assertNoMixedItemTypes(pool, poItemsArray);
+
+  if (ExpectedDeliveryDate) {
+    const minDate = await computeMinExpectedDate(pool, PODate, poItemsArray);
+    if (minDate && new Date(ExpectedDeliveryDate) < minDate) {
+      const err = new Error(
+        `Expected Delivery can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
 
   // Enforce: a PO can only be raised against a paid Sale Invoice
   // (Sale Order workflow — Migration 111).
@@ -1007,6 +1061,15 @@ router.put(
       }
 
       await assertNoMixedItemTypes(getPool(), poItemsArray);
+
+      if (ExpectedDeliveryDate) {
+        const minDate = await computeMinExpectedDate(getPool(), PODate, poItemsArray);
+        if (minDate && new Date(ExpectedDeliveryDate) < minDate) {
+          return res.status(400).json({
+            error: `Expected Delivery can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+          });
+        }
+      }
 
       const currentStatus = await getRecordStatus("purchase-orders", id);
       const allowPostApproval = await resolveAllowPostApproval(req, "purchase-orders");
