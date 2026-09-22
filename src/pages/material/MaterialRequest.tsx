@@ -370,6 +370,39 @@ export default function MaterialRequest() {
     return m;
   }, [uoms]);
 
+  // ── Required By Date floor ───────────────────────────────────────────────────
+  // The slowest item in the cart to supply sets how soon the whole request can
+  // realistically be required by: Required By Date >= Request Date + the
+  // longest Days of Supply among the cart's items. The user can still push it
+  // later, just never earlier.
+  const maxDaysOfSupply = useMemo(() => {
+    let max = 0;
+    for (const ci of cart) {
+      const days = Number(itemMap[ci.ItemId]?.DaysOfSupply ?? 0);
+      if (days > max) max = days;
+    }
+    return max;
+  }, [cart, itemMap]);
+
+  const minRequiredByDate = useMemo(() => {
+    if (!maxDaysOfSupply || !header.requestDate) return "";
+    const d = new Date(`${header.requestDate}T00:00:00`);
+    if (isNaN(d.getTime())) return "";
+    d.setDate(d.getDate() + maxDaysOfSupply);
+    return d.toISOString().slice(0, 10);
+  }, [header.requestDate, maxDaysOfSupply]);
+
+  // Keep Required By Date auto-advanced to the floor: fill it in when it's
+  // still blank, and pull it forward if the cart's items (or the request
+  // date) push the floor past whatever was already chosen. Never pulls it
+  // back once the user has picked something later — only forward.
+  useEffect(() => {
+    if (!minRequiredByDate) return;
+    if (!header.requiredByDate || header.requiredByDate < minRequiredByDate) {
+      setH("requiredByDate", minRequiredByDate);
+    }
+  }, [minRequiredByDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Cart helpers ─────────────────────────────────────────────────────────────
 
   const updateCartItem = useCallback(
@@ -1108,10 +1141,16 @@ export default function MaterialRequest() {
                 <input
                   type="date"
                   value={header.requiredByDate}
+                  min={minRequiredByDate || undefined}
                   onChange={(e) => setH("requiredByDate", e.target.value)}
                   className={`${inputCls} pl-8`}
                 />
               </div>
+              {maxDaysOfSupply > 0 && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Earliest possible: {minRequiredByDate} ({maxDaysOfSupply}-day supply lead time)
+                </p>
+              )}
             </Field>
           </div>
 

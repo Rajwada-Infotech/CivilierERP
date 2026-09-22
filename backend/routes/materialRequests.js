@@ -48,6 +48,35 @@ const requireUser = (req, res) => {
   return name;
 };
 
+// The base date + longest lead time (Days of Supply) among the items being
+// requested — RequiredByDate can never be earlier than this, since the
+// slowest item to supply can't arrive any sooner. Mirrors the client-side
+// min-date computation in MaterialRequest.tsx so a direct API call can't
+// bypass it.
+async function computeMinRequiredByDate(pool, baseDate, itemIds) {
+  const hasCol = await pool
+    .request()
+    .query(
+      `SELECT COUNT(1) AS cnt FROM sys.columns
+       WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_DaysOfSupply'`,
+    )
+    .then((r) => r.recordset[0].cnt > 0);
+  if (!hasCol || !itemIds.length) return null;
+
+  const ids = [...new Set(itemIds.map((id) => String(id)))];
+  const result = await pool.request().query(`
+    SELECT MAX(M_DaysOfSupply) AS MaxDays
+    FROM   dbo.Item_Master_Group
+    WHERE  CONVERT(NVARCHAR(50), M_Id) IN (${ids.map((id) => `'${id.replace(/'/g, "''")}'`).join(",")})
+  `);
+  const maxDays = result.recordset[0]?.MaxDays;
+  if (!maxDays || maxDays <= 0) return null;
+
+  const min = new Date(baseDate);
+  min.setDate(min.getDate() + maxDays);
+  return min;
+}
+
 async function ensureTablesExist(pool) {
   // Create MaterialRequests header table if it doesn't exist
   await pool.request().query(`
@@ -149,7 +178,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
       : null;
 
     // Detect optional columns (same pattern as inventoryMaster.js)
-    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate] =
+    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate, hasDaysOfSupply] =
       await Promise.all([
         pool
           .request()
@@ -177,6 +206,13 @@ router.get("/item-options", authenticateToken, async (req, res) => {
           .query(
             `SELECT COUNT(1) AS cnt FROM sys.columns
              WHERE object_id = OBJECT_ID(N'dbo.StockLedger') AND name = N'EntryDate'`,
+          )
+          .then((r) => r.recordset[0].cnt > 0),
+        pool
+          .request()
+          .query(
+            `SELECT COUNT(1) AS cnt FROM sys.columns
+             WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_DaysOfSupply'`,
           )
           .then((r) => r.recordset[0].cnt > 0),
       ]);
@@ -227,6 +263,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
               ${hasUOM ? "img.M_UOM AS DefaultUOM," : "NULL AS DefaultUOM,"}
               uom.UOMName  AS DefaultUOMName,
               uom.Symbol   AS DefaultUOMSymbol,
+              ${hasDaysOfSupply ? "img.M_DaysOfSupply" : "NULL"} AS DaysOfSupply,
               ISNULL(SUM(CASE WHEN sl.Type = 'IN'  THEN sl.Qty ELSE 0 END), 0)
             - ISNULL(SUM(CASE WHEN sl.Type = 'OUT' THEN sl.Qty ELSE 0 END), 0)
               AS AvailableStock
@@ -240,6 +277,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
       WHERE (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
       GROUP BY img.M_Id, img.M_Name, img.M_Type, grp.M_Name
                ${hasUOM ? ", img.M_UOM" : ""},
+               ${hasDaysOfSupply ? "img.M_DaysOfSupply," : ""}
                uom.UOMName, uom.Symbol
       ORDER BY img.M_Name
     `);
@@ -684,6 +722,19 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
     if (!items.length)
       return res.status(400).json({ error: "At least one item required" });
 
+    if (RequiredByDate) {
+      const minDate = await computeMinRequiredByDate(
+        pool,
+        RequestDate || new Date(),
+        items.map((i) => i.ItemId),
+      );
+      if (minDate && new Date(RequiredByDate) < minDate) {
+        return res.status(400).json({
+          error: `Required By Date can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+        });
+      }
+    }
+
     let dtId = clientDocTypeId ? parseInt(clientDocTypeId, 10) : null;
     if (!dtId) {
       try {
@@ -864,6 +915,19 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       return res.status(409).json({
         error: `Cannot edit: ${blockingPO} is linked to this Material Request. Delete it first, then edit the request.`,
       });
+
+    if (RequiredByDate) {
+      const minDate = await computeMinRequiredByDate(
+        pool,
+        RequestDate || new Date(),
+        items.map((i) => i.ItemId),
+      );
+      if (minDate && new Date(RequiredByDate) < minDate) {
+        return res.status(400).json({
+          error: `Required By Date can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+        });
+      }
+    }
 
     // Header update + item replacement must be one atomic unit — previously
     // each ran on the plain pool (auto-committing individually). The item

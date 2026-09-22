@@ -786,6 +786,9 @@ const PurchaseOrderMaster: React.FC = () => {
         // Cost Centre tagged on the item (Item Master) — used to auto-fill
         // this PO's own Cost Centre the first time a tagged item is added.
         costCenterId: i.M_CostCenterId ? String(i.M_CostCenterId) : "",
+        // Days of Supply (Item Master) — used to floor Expected Delivery so
+        // it's never sooner than the slowest item on this PO can arrive.
+        daysOfSupply: i.M_DaysOfSupply != null ? Number(i.M_DaysOfSupply) : null,
       })),
     [itemsRaw, itemsGstById],
   );
@@ -805,6 +808,36 @@ const PurchaseOrderMaster: React.FC = () => {
   }, [lineItems, items]);
   const hasMixedItemTypes =
     itemTypesInCart.has("Goods") && itemTypesInCart.has("Service");
+
+  // Expected Delivery floor — never sooner than PO Date + the longest Days
+  // of Supply among the cart's items, since that's the slowest item's own
+  // lead time. The user can still push it later, just never earlier.
+  const maxDaysOfSupply = useMemo(() => {
+    let max = 0;
+    for (const li of lineItems) {
+      const days = items.find((i) => i.id === li.itemId)?.daysOfSupply ?? 0;
+      if (days > max) max = days;
+    }
+    return max;
+  }, [lineItems, items]);
+
+  const minExpectedDate = useMemo(() => {
+    if (!maxDaysOfSupply || !form.poDate) return "";
+    const d = new Date(`${form.poDate}T00:00:00`);
+    if (isNaN(d.getTime())) return "";
+    d.setDate(d.getDate() + maxDaysOfSupply);
+    return d.toISOString().slice(0, 10);
+  }, [form.poDate, maxDaysOfSupply]);
+
+  // Auto-advance Expected Delivery to the floor: fill it when blank, pull it
+  // forward when the cart or PO Date push the floor past what's already
+  // chosen. Never pulls it back once the user has picked something later.
+  useEffect(() => {
+    if (!minExpectedDate || isReadOnly) return;
+    if (!form.expectedDate || form.expectedDate < minExpectedDate) {
+      setField("expectedDate", minExpectedDate);
+    }
+  }, [minExpectedDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tcRecords = useMemo(
     () =>
@@ -4112,11 +4145,17 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   <input
                     type="date"
                     value={form.expectedDate}
+                    min={minExpectedDate || undefined}
                     onChange={(e) => setField("expectedDate", e.target.value)}
                     readOnly={isReadOnly}
                     className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
                   />
                 </div>
+                {maxDaysOfSupply > 0 && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Earliest possible: {minExpectedDate} ({maxDaysOfSupply}-day supply lead time)
+                  </p>
+                )}
               </div>
 
               {/* Payment Terms — Invoice computes its Due Date from Vendor
