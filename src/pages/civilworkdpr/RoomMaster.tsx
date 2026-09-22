@@ -1,7 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { FileText, Sparkles, Upload, DoorOpen } from "lucide-react";
+import { FileText, Upload, DoorOpen } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
@@ -116,104 +116,47 @@ function BlueprintUploadField({
   );
 }
 
-// Generates real RoomMaster rows for a unit from its BHK layout template
-// (Unit Type -> Room Composition Builder's category x quantity, the same
-// data Work Reporting's synthetic Room dropdown reads) instead of typing
-// each room in by hand. Scoped to Project -> Unit only — Block is implied
-// by the unit, same as the create form above.
-function GenerateFromLayoutPanel({
-  units,
-  onGenerated,
+// Suggests Room Category Master's active aliases (the same list Room
+// Composition Builder and Work Done's Room dropdown read) instead of typing
+// a name from scratch — but stays a real text input, not a strict dropdown,
+// because a unit can have more than one room of the same category
+// ("Bedroom 1", "Bedroom 2", same convention the removed bulk-generator
+// used) and an existing room's saved name still needs to display correctly
+// even once it no longer matches a category alias exactly.
+let roomCategoryOptionsCache: { value: string; label: string }[] | null = null;
+function RoomNameField({
+  value,
+  onChange,
 }: {
-  units: { Id: number; Name: string; ProjectId: number; UnitType?: string | null }[];
-  onGenerated: () => void;
+  value: string | undefined;
+  onChange: (v: unknown) => void;
 }) {
-  const [projectId, setProjectId] = React.useState("");
-  const [unitId, setUnitId] = React.useState("");
-  const [generating, setGenerating] = React.useState(false);
-  const { data: projectOptions = [] } = useQuery({
-    queryKey: ["room-master-project-options"],
-    queryFn: fetchProjectOptions,
+  const { data: categories = [] } = useQuery({
+    queryKey: ["room-master-room-category-options"],
+    queryFn: fetchRoomCategoryOptions,
     staleTime: 5 * 60 * 1000,
+    initialData: roomCategoryOptionsCache ?? undefined,
   });
-
-  const unitOptions = React.useMemo(
-    () => units.filter((u) => (projectId ? String(u.ProjectId) === projectId : true)),
-    [units, projectId],
-  );
-  const selectedUnit = unitOptions.find((u) => String(u.Id) === unitId);
-
-  const handleGenerate = async () => {
-    if (!unitId) return;
-    setGenerating(true);
-    try {
-      const res = await fetchWithAuth(`${API}/generate/${unitId}`, { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Failed to generate rooms");
-      toast.success(body.message || "Rooms generated");
-      if (body.createdCount > 0) onGenerated();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to generate rooms");
-    } finally {
-      setGenerating(false);
-    }
-  };
+  React.useEffect(() => {
+    roomCategoryOptionsCache = categories;
+  }, [categories]);
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
-        <Sparkles size={14} className="text-cyan-600 dark:text-cyan-400" />
-        <span className="text-sm font-heading font-semibold text-foreground">Generate from Unit Layout</span>
-      </div>
-      <div className="p-5 flex flex-col sm:flex-row sm:items-end gap-3">
-        <div className="flex-1 space-y-1">
-          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Project</label>
-          <select
-            value={projectId}
-            onChange={(e) => {
-              setProjectId(e.target.value);
-              setUnitId("");
-            }}
-            className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm"
-          >
-            <option value="">Select project</option>
-            {projectOptions.map((p) => (
-              <option key={p.value} value={p.value}>{p.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex-1 space-y-1">
-          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Unit</label>
-          <select
-            value={unitId}
-            onChange={(e) => setUnitId(e.target.value)}
-            disabled={!projectId}
-            className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm disabled:opacity-50"
-          >
-            <option value="">Select unit</option>
-            {unitOptions.map((u) => (
-              <option key={u.Id} value={u.Id}>
-                {u.Name}{u.UnitType ? ` (${u.UnitType})` : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={!unitId || generating || (!!selectedUnit && !selectedUnit.UnitType)}
-          title={selectedUnit && !selectedUnit.UnitType ? "This unit has no Unit Type set" : undefined}
-          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-4 py-2 h-9 rounded-lg bg-gradient-to-r from-cyan-500 to-teal-400 hover:opacity-90 disabled:opacity-50 transition-all"
-        >
-          <Sparkles size={13} /> {generating ? "Generating…" : "Generate Rooms"}
-        </button>
-      </div>
-      {selectedUnit && !selectedUnit.UnitType && (
-        <p className="px-5 pb-4 -mt-2 text-xs text-amber-600 dark:text-amber-400">
-          This unit has no Unit Type set, so its layout can't be resolved — set one in Unit Master first.
-        </p>
-      )}
-    </div>
+    <>
+      <input
+        type="text"
+        list="room-master-category-suggestions"
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Pick a category or type a name"
+        className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm"
+      />
+      <datalist id="room-master-category-suggestions">
+        {categories.map((c) => (
+          <option key={c.value} value={c.value} />
+        ))}
+      </datalist>
+    </>
   );
 }
 
@@ -231,6 +174,21 @@ async function fetchProjectOptions(): Promise<
   if (!res.ok) throw new Error("Failed to fetch projects");
   const data: { Id: number; Name: string }[] = await res.json().catch(() => []);
   return data.map((p) => ({ value: String(p.Id), label: p.Name }));
+}
+
+// Same active-categories list Room Composition Builder and Work Done's Room
+// dropdown both read (GET /options, ordered by SortOrder) — Room Name now
+// picks from here instead of free text, so a room is always named after one
+// of the categories actually set up in Room Category Master.
+async function fetchRoomCategoryOptions(): Promise<
+  { value: string; label: string }[]
+> {
+  const res = await fetchWithAuth("/api/room-category-master/options");
+  if (!res.ok) throw new Error("Failed to fetch room categories");
+  const data: { id: number; categoryName: string; alias: string }[] = await res
+    .json()
+    .catch(() => []);
+  return data.map((c) => ({ value: c.alias, label: c.alias }));
 }
 
 // ── Fields ────────────────────────────────────────────────────────────────────
@@ -283,8 +241,11 @@ const fields: FieldDef[] = [
   {
     name: "roomName",
     label: "Room Name",
-    type: "text",
+    type: "custom",
     required: true,
+    render: ({ value, onChange }) => (
+      <RoomNameField value={value as string | undefined} onChange={onChange} />
+    ),
   },
   {
     name: "floor",
@@ -458,10 +419,6 @@ const RoomMaster: React.FC = () => {
     <>
       <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Setup", "Room Master"]} />
       <CivilWorkDprShell title="Room Master" icon={DoorOpen}>
-      <GenerateFromLayoutPanel
-        units={allUnits}
-        onGenerated={() => queryClient.invalidateQueries({ queryKey: ["room-master"] })}
-      />
       <MasterPage
         title="Room"
         canCreate={rights.canCreate}
