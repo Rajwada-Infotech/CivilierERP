@@ -93,7 +93,7 @@ async function getHsnRate(pool, hcode) {
 // pre-tax base — not circular, since the bracket only needs pre-tax
 // amounts), then ParkingTotal is re-derived from the now-repriced rows.
 async function recalculateBookingGst(pool, bookingId) {
-  if (!bookingId) return null;
+  if (bookingId == null) return null;
 
   const bookingRow = await pool.request().input("bid", sql.Int, bookingId)
     .query("SELECT TotalValue FROM dbo.CrmBooking WHERE Id = @bid");

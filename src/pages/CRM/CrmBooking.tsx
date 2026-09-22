@@ -282,15 +282,19 @@ const CrmBooking: React.FC = () => {
   React.useEffect(() => {
     if (viewFilter && !deepLinkOpened) {
       const viewId = parseInt(viewFilter, 10);
-      if (viewId > 0) {
+      // 0 is a real booking Id (CrmBooking's identity got reseeded to 0 by
+      // the same corruption already fixed for CrmCustomer/other tables —
+      // see migration 441 and its siblings) — only genuinely non-numeric
+      // input (?view=abc, negative) should be treated as invalid.
+      if (Number.isInteger(viewId) && viewId >= 0) {
         // Valid id — open the detail panel.
         setViewingBookingId(viewId);
       } else {
-        // ?view=0, ?view=abc, or any non-positive id — the detail panel will
-        // never open (viewingBookingId stays null, so {viewingBookingId && …}
-        // is falsy), which means the onClose handler that normally clears the
-        // URL will never run. Actively navigate to the clean URL here so the
-        // stale ?view=0 doesn't sit in the address bar forever.
+        // ?view=abc or a negative id — the detail panel will never open
+        // (viewingBookingId stays null, so {viewingBookingId != null && …}
+        // is falsy), which means the onClose handler that normally clears
+        // the URL will never run. Actively navigate to the clean URL here
+        // so the stale bad param doesn't sit in the address bar forever.
         navigate("/crm/bookings", { replace: true });
       }
       setDeepLinkOpened(true);
@@ -1087,7 +1091,7 @@ const CrmBooking: React.FC = () => {
           still read the old id while deepLinkOpened had already flipped
           back to false, matching the effect's condition and reopening the
           same card immediately after it closed. */}
-      {viewingBookingId && (
+      {viewingBookingId != null && (
         <CrmBookingDetail
           bookingId={viewingBookingId}
           onClose={() => {

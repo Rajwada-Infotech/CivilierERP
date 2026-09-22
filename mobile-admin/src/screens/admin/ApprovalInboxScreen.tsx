@@ -92,7 +92,14 @@ function InboxCard({ item, onPress }: { item: InboxItem; onPress: () => void }) 
         <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 11.5, fontFamily: fonts.body.regular, flex: 1, marginRight: 8 }}>{party}</Text>
         <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular }}>{fmtDate(item.RecordDate)}</Text>
       </View>
-      <Text style={{ color: colors.foreground, fontSize: 13.5, fontFamily: fonts.heading.semibold, marginTop: 4 }}>{formatINR(item.Amount, { decimals: 2 })}</Text>
+      {/* A Material Request has no Amount at all — the backend deliberately
+          sends it as NULL (pricing only enters the picture once a PO is
+          raised against the MR) — formatINR's `Number(null) || 0` used to
+          turn that into a misleading "₹0.00" on every MR card. Only render
+          this line when there's a real amount. */}
+      {item.Amount != null && (
+        <Text style={{ color: colors.foreground, fontSize: 13.5, fontFamily: fonts.heading.semibold, marginTop: 4 }}>{formatINR(item.Amount, { decimals: 2 })}</Text>
+      )}
     </Pressable>
   );
 }

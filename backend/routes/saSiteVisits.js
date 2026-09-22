@@ -81,7 +81,7 @@ router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) 
     const pool = getPool();
     const b = req.body;
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     await pool.request()
       .input("id", sql.Int, id)

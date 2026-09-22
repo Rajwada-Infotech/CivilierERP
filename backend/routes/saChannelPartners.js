@@ -47,7 +47,7 @@ router.get("/:id", requirePageRight("sa-channel-partners", "view"), async (req, 
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [cpResult, leadsResult] = await Promise.all([
       pool.request().input("id", sql.Int, id)
         .query("SELECT * FROM dbo.SaChannelPartner WHERE Id = @id AND IsActive = 1"),
@@ -109,7 +109,7 @@ router.put("/:id", requirePageRight("sa-channel-partners", "edit"), async (req, 
     const pool = getPool();
     const b = req.body;
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     await pool.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.Name || null)

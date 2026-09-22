@@ -48,7 +48,7 @@ router.get("/lead/:leadId", requirePageRight("sa-inquiry", "view"), async (req, 
   try {
     const pool = getPool();
     const lid = parseId(req.params.leadId);
-    if (!lid) return res.status(400).json({ error: "Invalid leadId" });
+    if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
     const req0 = pool.request().input("lid", sql.Int, lid);
     const scope = applyLeadScope(req0, req, "l");
     const lead = await req0.query(`
@@ -89,7 +89,7 @@ router.post("/:leadId/call", requirePageRight("sa-inquiry", "create"), async (re
   try {
     const pool = getPool();
     const lid = parseId(req.params.leadId);
-    if (!lid) return res.status(400).json({ error: "Invalid leadId" });
+    if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
     const b = req.body;
 
     await pool.request()

@@ -46,7 +46,14 @@ function NotificationCard({ item, onPress }: { item: InboxItem; onPress: () => v
         <Text numberOfLines={1} style={{ color: colors.mutedForeground, fontSize: 10.5, marginTop: 1 }}>
           {item.Reference || `#${item.RecordId}`} · {party}
         </Text>
-        <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.body.medium, marginTop: 3 }}>{formatINR(item.Amount, { decimals: 2 })}</Text>
+        {/* A Material Request has no Amount at all — the backend sends it
+            as NULL (pricing only enters the picture once a PO is raised
+            against the MR) — formatINR's `Number(null) || 0` turned that
+            into a misleading "₹0.00" on every MR notification. Same fix as
+            ApprovalInboxScreen.tsx's InboxCard. */}
+        {item.Amount != null && (
+          <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.body.medium, marginTop: 3 }}>{formatINR(item.Amount, { decimals: 2 })}</Text>
+        )}
       </View>
       <View style={{ alignItems: "flex-end", gap: 6 }}>
         <StatusBadge status={item.Status} />

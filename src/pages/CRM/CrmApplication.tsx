@@ -100,7 +100,7 @@ const EMPTY_BANK = {
 // none tagged), same "Deposited To" pattern CrmBooking.tsx, CrmBookingDetail.tsx
 // and CrmPaymentMilestones.tsx all already use for this exact decision.
 async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
-  if (!projectId) return [];
+  if (projectId == null) return [];
   try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchAllBanks(): Promise<any[]> {
@@ -781,7 +781,7 @@ const CrmApplication: React.FC = () => {
   const { data: viewingAppDetail } = useQuery({
     queryKey: ["crm-app-detail", viewingAppId],
     queryFn: () => fetchAppDetail(viewingAppId as number),
-    enabled: !!viewingAppId,
+    enabled: viewingAppId != null,
   });
   // Co-applicants now live in their own list keyed by ApplicationId (see
   // crmCoApplicant.js GET /application/:id) rather than as flat
@@ -792,7 +792,7 @@ const CrmApplication: React.FC = () => {
       const r = await fetchWithAuth(`${CO_APPLICANT_API}/application/${viewingAppId}`);
       return r.ok ? r.json() : [];
     },
-    enabled: !!viewingAppId,
+    enabled: viewingAppId != null,
   });
   // Same shape/endpoint as the wizard's own detailParkingAllotments (see
   // ParkingSelectionStep) but keyed by viewingAppId — the read-only preview
@@ -804,7 +804,7 @@ const CrmApplication: React.FC = () => {
       const r = await fetchWithAuth(`${PARKING_API}/application/${viewingAppId}`);
       return r.ok ? r.json() : [];
     },
-    enabled: !!viewingAppId,
+    enabled: viewingAppId != null,
   });
   // Same shape/endpoint as the wizard's own detailExtraCharges, keyed by
   // viewingAppId for the same reason viewingAppParking above is.
@@ -814,7 +814,7 @@ const CrmApplication: React.FC = () => {
       const r = await fetchWithAuth(`${EXTRA_CHARGE_API}/application/${viewingAppId}`);
       return r.ok ? r.json() : [];
     },
-    enabled: !!viewingAppId,
+    enabled: viewingAppId != null,
   });
   // Invoices for the application's linked booking — same source and shape
   // the Booking Detail page uses, rendered through the shared CrmInvoiceList
@@ -827,7 +827,7 @@ const CrmApplication: React.FC = () => {
       const r = await fetchWithAuth(`/api/crm/bookings/${viewingAppBookingId}/invoices`);
       return r.ok ? r.json() : [];
     },
-    enabled: !!viewingAppBookingId,
+    enabled: viewingAppBookingId != null,
   });
   const { data: customers = [] } = useQuery({ queryKey: ["crm-customers-dropdown"], queryFn: fetchCustomers, staleTime: 60_000 });
   const { data: leads = [] } = useQuery({ queryKey: ["sa-leads-dropdown"], queryFn: fetchLeadOptions, staleTime: 5 * 60_000 });
@@ -857,7 +857,7 @@ const CrmApplication: React.FC = () => {
       const r = await fetchWithAuth(`${PARKING_API}/application/${applicationId}`);
       return r.ok ? r.json() : [];
     },
-    enabled: !!applicationId,
+    enabled: applicationId != null,
   });
   // Pre-tax base (RateSnapshot x Quantity) — for the GST preview box, which
   // needs to compute its own rate/amount from a clean base, not sum a
@@ -870,7 +870,7 @@ const CrmApplication: React.FC = () => {
       const r = await fetchWithAuth(`${EXTRA_CHARGE_API}/application/${applicationId}`);
       return r.ok ? r.json() : [];
     },
-    enabled: !!applicationId,
+    enabled: applicationId != null,
   });
   const detailExtraChargesTotal = (detailExtraCharges as any[]).reduce((s, c) => s + (Number(c.TotalAmount) || 0), 0);
 
@@ -1082,16 +1082,16 @@ const CrmApplication: React.FC = () => {
   // query refetch (same data, new array identity) doesn't re-fire this.
   useEffect(() => {
     const leadId = selectedCustomer?.LeadId ?? null;
-    if (!leadId) return;
+    if (leadId == null) return;
     const lead = (leads as any[]).find((l: any) => l.Id === leadId);
     if (!lead?.SourceType) return;
     setForm((f) => ({
       ...f,
       Source: f.Source || lead.SourceType || "",
-      PlatformId: f.PlatformId || (lead.PlatformId ? String(lead.PlatformId) : ""),
-      CampaignId: f.CampaignId || (lead.CampaignId ? String(lead.CampaignId) : ""),
-      AdId: f.AdId || (lead.AdId ? String(lead.AdId) : ""),
-      ChannelPartnerId: f.ChannelPartnerId || (lead.ChannelPartnerId ? String(lead.ChannelPartnerId) : ""),
+      PlatformId: f.PlatformId || (lead.PlatformId != null ? String(lead.PlatformId) : ""),
+      CampaignId: f.CampaignId || (lead.CampaignId != null ? String(lead.CampaignId) : ""),
+      AdId: f.AdId || (lead.AdId != null ? String(lead.AdId) : ""),
+      ChannelPartnerId: f.ChannelPartnerId || (lead.ChannelPartnerId != null ? String(lead.ChannelPartnerId) : ""),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCustomer?.Id, selectedCustomer?.LeadId]);
@@ -1108,7 +1108,7 @@ const CrmApplication: React.FC = () => {
   // clear a PaymentPlanId that no longer applies — e.g. it was one of the
   // old unit's tags but isn't one of the new unit's.
   useEffect(() => {
-    if (applicationId) return;
+    if (applicationId != null) return;
     if (!form.PaymentPlanId) return;
     const stillValid = applicablePaymentPlans.some((p: any) => String(p.Id) === form.PaymentPlanId);
     if (!stillValid) setForm((f) => ({ ...f, PaymentPlanId: "" }));
@@ -1245,35 +1245,35 @@ const CrmApplication: React.FC = () => {
       setApplicationNo(app.ApplicationNo || null);
       setForm((f) => ({
         ...f,
-        CustomerId: app.CustomerId ? String(app.CustomerId) : "",
-        CompanyId: app.CompanyId ? String(app.CompanyId) : "",
-        ProjectId: app.ProjectId ? String(app.ProjectId) : "",
-        BlockId: app.BlockId ? String(app.BlockId) : "",
-        PreferredUnitId: app.PreferredUnitId ? String(app.PreferredUnitId) : "",
+        CustomerId: app.CustomerId != null ? String(app.CustomerId) : "",
+        CompanyId: app.CompanyId != null ? String(app.CompanyId) : "",
+        ProjectId: app.ProjectId != null ? String(app.ProjectId) : "",
+        BlockId: app.BlockId != null ? String(app.BlockId) : "",
+        PreferredUnitId: app.PreferredUnitId != null ? String(app.PreferredUnitId) : "",
         PaymentPlanId: app.PaymentPlanId != null ? String(app.PaymentPlanId) : "",
         RatePerSqFt: app.RatePerSqFt != null ? String(app.RatePerSqFt) : "",
         DateOfApply: app.DateOfApply ? String(app.DateOfApply).slice(0, 10) : new Date().toISOString().slice(0, 10),
         Source: app.Source || "",
-        PlatformId: app.PlatformId ? String(app.PlatformId) : "",
-        CampaignId: app.CampaignId ? String(app.CampaignId) : "",
-        AdId: app.AdId ? String(app.AdId) : "",
-        ChannelPartnerId: app.ChannelPartnerId ? String(app.ChannelPartnerId) : "",
-        ViaBroker: !!app.BrokerId,
-        BrokerId: app.BrokerId ? String(app.BrokerId) : "",
+        PlatformId: app.PlatformId != null ? String(app.PlatformId) : "",
+        CampaignId: app.CampaignId != null ? String(app.CampaignId) : "",
+        AdId: app.AdId != null ? String(app.AdId) : "",
+        ChannelPartnerId: app.ChannelPartnerId != null ? String(app.ChannelPartnerId) : "",
+        ViaBroker: app.BrokerId != null,
+        BrokerId: app.BrokerId != null ? String(app.BrokerId) : "",
         BrokerageRatePercent: app.BrokerageRatePercent != null ? String(app.BrokerageRatePercent) : "",
         BrokeragePaymentPlan: ["OneTime", "TwoPart", "AgreementOnly"].includes(app.BrokeragePaymentPlan) ? app.BrokeragePaymentPlan : "OneTime",
         Notes: app.Notes || "",
         TokenType: app.TokenType || "Percentage",
         TokenValue: app.TokenValue != null ? String(app.TokenValue) : "",
         PaymentMode: app.PaymentMode || "",
-        DepositBankId: app.DepositBankId ? String(app.DepositBankId) : "",
+        DepositBankId: app.DepositBankId != null ? String(app.DepositBankId) : "",
         ChequeNo: bankDetail?.ChequeNo || "",
         ChequeDate: bankDetail?.ChequeDate ? String(bankDetail.ChequeDate).slice(0, 10) : "",
         TransactionRef: bankDetail?.TransactionRef || "",
       }));
       setWizardAppStatus(app.Status || null);
 
-      const hasProject = !!app.CompanyId && !!app.ProjectId && !!app.PreferredUnitId;
+      const hasProject = app.CompanyId != null && app.ProjectId != null && app.PreferredUnitId != null;
       // Lock the Project/Unit tree the same way Source locks once
       // auto-fetched — there's already a saved pick here, so default to
       // showing it read-only with an Edit control rather than inviting an
@@ -1405,7 +1405,7 @@ const CrmApplication: React.FC = () => {
   // Steps 2-4 save against the real applicationId as staff move forward —
   // each "Next" just persists whatever that step owns.
   const saveApplicationFields = async (patch: Record<string, any>) => {
-    if (!applicationId) return;
+    if (applicationId == null) return;
     const res = await fetchWithAuth(`${API}/${applicationId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -1791,7 +1791,7 @@ const CrmApplication: React.FC = () => {
                       >
                         <XCircle size={12} /> Unit unavailable
                       </span>
-                    ) : !a.PreferredUnitId ? (
+                    ) : a.PreferredUnitId == null ? (
                       <span
                         className="flex items-center gap-1 text-xs px-2 py-1 rounded-md border text-amber-600 border-amber-200 bg-amber-50 font-medium"
                         title="No unit was selected in the application — edit the application and pick a unit first."
@@ -1868,12 +1868,12 @@ const CrmApplication: React.FC = () => {
                 <Clock size={10} /> Not submitted yet — complete the wizard and submit
               </span>
             )}
-            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && !a.PreferredUnitId && (
+            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId == null && (
               <span className="flex items-center gap-1 text-[11px] text-amber-600">
                 <AlertTriangle size={10} /> Submitted but no unit selected — edit to add a unit
               </span>
             )}
-            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && !!a.PreferredUnitId && (
+            {activeStage === "InProcess" && a.Status === CrmStatus.PENDING && a.PreferredUnitId != null && (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                 <Clock size={10} /> Submitted — booking not yet created
               </span>
@@ -2043,7 +2043,7 @@ const CrmApplication: React.FC = () => {
           <div className="flex items-center gap-2 text-xs flex-wrap">
             {["Project/Unit", "Parking", "Extra Charges", "Bank/KYC", "Co-Applicant", "Attachments", "Details"].map((label, i) => {
               const stepNum = i + 1;
-              const reachable = stepNum === 1 || (!!applicationId && stepNum <= maxStepReached);
+              const reachable = stepNum === 1 || (applicationId != null && stepNum <= maxStepReached);
               return (
                 <React.Fragment key={label}>
                   {i > 0 && <div className="flex-1 h-px bg-amber-500/20" />}
@@ -2080,7 +2080,7 @@ const CrmApplication: React.FC = () => {
                   </a>
                 </div>
                 <select value={form.CustomerId} onChange={(e) => setForm((f) => ({ ...f, CustomerId: e.target.value }))}
-                  className={inputCls} disabled={!!applicationId}>
+                  className={inputCls} disabled={applicationId != null}>
                   <option value="">Select customer</option>
                   {(customers as any[]).map((c: any) => (
                     <option key={c.Id} value={String(c.Id)}>{c.CustomerName} · {c.Mobile} · {c.CustomerNo}</option>
@@ -2114,7 +2114,7 @@ const CrmApplication: React.FC = () => {
                 <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-heading font-semibold text-foreground block">Project / Unit (tree)</label>
-                    {!!applicationId && (
+                    {applicationId != null && (
                       canEditUnitSelection ? (
                         unitLocked && (
                           <button type="button" onClick={() => setUnitLocked(false)}
@@ -2132,7 +2132,7 @@ const CrmApplication: React.FC = () => {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className={labelCls}>Company *</label>
-                      <select value={form.CompanyId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                      <select value={form.CompanyId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => {
                           setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
                         }}
@@ -2143,7 +2143,7 @@ const CrmApplication: React.FC = () => {
                     </div>
                     <div>
                       <label className={labelCls}>Project *</label>
-                      <select value={form.ProjectId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                      <select value={form.ProjectId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => {
                           setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
                         }}
@@ -2154,7 +2154,7 @@ const CrmApplication: React.FC = () => {
                     </div>
                     <div>
                       <label className={labelCls}>Block / Tower</label>
-                      <select value={form.BlockId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                      <select value={form.BlockId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => {
                           setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitId: "", PaymentPlanId: "" }));
                         }}
@@ -2165,7 +2165,7 @@ const CrmApplication: React.FC = () => {
                     </div>
                     <div>
                       <label className={labelCls}>Floor</label>
-                      <select value={form.FloorNo} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                      <select value={form.FloorNo} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => {
                           setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitId: "", PaymentPlanId: "" }));
                         }}
@@ -2176,7 +2176,7 @@ const CrmApplication: React.FC = () => {
                     </div>
                     <div className="col-span-2">
                       <label className={labelCls}>Unit *</label>
-                      <select value={form.PreferredUnitId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                      <select value={form.PreferredUnitId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => {
                           // Unit can be picked before Block/Floor are chosen —
                           // the dropdown already falls back to the full
@@ -2274,7 +2274,7 @@ const CrmApplication: React.FC = () => {
                   {form.PreferredUnitId && (
                     <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-2">
                       <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
-                      <select value={form.PaymentPlanId} disabled={!!applicationId && (unitLocked || !canEditUnitSelection)}
+                      <select value={form.PaymentPlanId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => setForm((f) => ({ ...f, PaymentPlanId: e.target.value }))} className={inputCls}>
                         <option value="">Select a payment plan</option>
                         {applicablePaymentPlans.map((p: any) => (
@@ -2427,7 +2427,7 @@ const CrmApplication: React.FC = () => {
             </div>
           )}
 
-          {step === 2 && applicationId && (
+          {step === 2 && applicationId != null && (
             <ParkingSelectionStep
               applicationId={applicationId}
               projectId={form.ProjectId}
@@ -2438,7 +2438,7 @@ const CrmApplication: React.FC = () => {
             />
           )}
 
-          {step === 3 && applicationId && (
+          {step === 3 && applicationId != null && (
             <ExtraWorkSelectionStep
               applicationId={applicationId}
               computedTotal={computedTotal}
@@ -2447,7 +2447,7 @@ const CrmApplication: React.FC = () => {
             />
           )}
 
-          {step === 4 && applicationId && (
+          {step === 4 && applicationId != null && (
             <BankDetailsStep
               applicationId={applicationId}
               applicantName={selectedCustomer?.CustomerName || ""}
@@ -2456,7 +2456,7 @@ const CrmApplication: React.FC = () => {
             />
           )}
 
-          {step === 5 && applicationId && (
+          {step === 5 && applicationId != null && (
             <CoApplicantStep
               applicationId={applicationId}
               applicantName={selectedCustomer?.CustomerName || ""}
@@ -2467,7 +2467,7 @@ const CrmApplication: React.FC = () => {
             />
           )}
 
-          {step === 6 && applicationId && (
+          {step === 6 && applicationId != null && (
             <AttachmentsStep applicationId={applicationId} />
           )}
 
@@ -2559,7 +2559,7 @@ const CrmApplication: React.FC = () => {
               <div className="rounded-lg border border-border p-3 space-y-2.5">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-semibold text-foreground block">Payment Details</label>
-                  {!!applicationId && (
+                  {applicationId != null && (
                     canEditUnitSelection ? (
                       paymentLocked && (
                         <button type="button" onClick={() => setPaymentLocked(false)}
@@ -2583,7 +2583,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Token (Booking) Amount (₹)</label>
-                    <input type="number" value={form.TokenValue} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
+                    <input type="number" value={form.TokenValue} disabled={applicationId != null && (paymentLocked || !canEditUnitSelection)}
                       onChange={(e) => setForm((f) => ({ ...f, TokenValue: e.target.value }))}
                       placeholder={selectedPlanBookingAmount ? String(selectedPlanBookingAmount) : undefined}
                       className={inputCls} />
@@ -2598,7 +2598,7 @@ const CrmApplication: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelCls}>Payment Mode</label>
-                    <select value={form.PaymentMode} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
+                    <select value={form.PaymentMode} disabled={applicationId != null && (paymentLocked || !canEditUnitSelection)}
                       onChange={(e) => setForm((f) => ({ ...f, PaymentMode: e.target.value, ChequeNo: "", ChequeDate: "", TransactionRef: "" }))}
                       className={inputCls}>
                       <option value="">Select</option>
@@ -2616,13 +2616,13 @@ const CrmApplication: React.FC = () => {
                     <>
                       <div>
                         <label className={labelCls}>Cheque Number</label>
-                        <input type="text" value={form.ChequeNo} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
+                        <input type="text" value={form.ChequeNo} disabled={applicationId != null && (paymentLocked || !canEditUnitSelection)}
                           onChange={(e) => setForm((f) => ({ ...f, ChequeNo: e.target.value }))}
                           className={inputCls} />
                       </div>
                       <div>
                         <label className={labelCls}>Cheque Date</label>
-                        <input type="date" value={form.ChequeDate} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
+                        <input type="date" value={form.ChequeDate} disabled={applicationId != null && (paymentLocked || !canEditUnitSelection)}
                           onChange={(e) => setForm((f) => ({ ...f, ChequeDate: e.target.value }))}
                           className={inputCls} />
                       </div>
@@ -2633,7 +2633,7 @@ const CrmApplication: React.FC = () => {
                       <label className={labelCls}>
                         {form.PaymentMode === "Home Loan" ? "Loan Disbursement Ref" : form.PaymentMode === "Other" ? "Reference / Details" : "Transaction Ref / UTR"}
                       </label>
-                      <input type="text" value={form.TransactionRef} disabled={!!applicationId && (paymentLocked || !canEditUnitSelection)}
+                      <input type="text" value={form.TransactionRef} disabled={applicationId != null && (paymentLocked || !canEditUnitSelection)}
                         onChange={(e) => setForm((f) => ({ ...f, TransactionRef: e.target.value }))}
                         className={inputCls} />
                     </div>
@@ -2718,7 +2718,7 @@ const CrmApplication: React.FC = () => {
           tab (In Process/Converted/Not Converted). Read-only summary; the
           actions that actually change something (Resume, Approve/Reject,
           View Booking) stay on the row itself, not here. ── */}
-      <Dialog open={!!viewingAppId} onOpenChange={(o) => { if (!o) closeApplication(); }}>
+      <Dialog open={viewingAppId != null} onOpenChange={(o) => { if (!o) closeApplication(); }}>
         <DialogContent accent="crm" className="max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center gap-2">

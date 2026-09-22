@@ -192,7 +192,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
 
   const deedStatus = t.DeedRegistrationNo ? "Registered"
     : t.DeedExecutedBy ? "Executed"
-    : t.SalesDeedId ? "Drafted"
+    : t.SalesDeedId != null ? "Drafted"
     : null;
 
   const sections: Section[] = [
@@ -345,7 +345,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
           sublabel: "Ownership-transfer document — internal drafting, approvals, execution & registration",
           no: t.DeedNo || null,
           status: deedStatus,
-          isDone: !!t.SalesDeedId,
+          isDone: t.SalesDeedId != null,
           isLocked: !afsGate,
           unlockedHint: "Unlocks once the Agreement for Sale is registered (Visit 1 completed)",
           action: { kind: "navigate", path: "/crm/sales-deed" },
@@ -367,7 +367,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
           no: t.QPNo || null,
           status: t.QueryPaymentStatus || null,
           isDone: t.QueryPaymentStatus === "Confirmed",
-          isLocked: !t.SalesDeedId || t.DeedDirectorApprovalStatus !== "Approved",
+          isLocked: t.SalesDeedId == null || t.DeedDirectorApprovalStatus !== "Approved",
           unlockedHint: "Requires the Sale Deed to be Director Approved first",
           action: { kind: "navigate", path: "/crm/sales-deed?tab=Query+Payment" },
         },
@@ -378,7 +378,7 @@ function buildWorkflowModel(t: any, onManualStep?: (step: string) => void): Work
           no: t.RegNo || null,
           status: t.RegistryStatus || null,
           isDone: t.RegistryStatus === "Completed",
-          isLocked: !t.SalesDeedId || t.QueryPaymentStatus !== "Confirmed",
+          isLocked: t.SalesDeedId == null || t.QueryPaymentStatus !== "Confirmed",
           unlockedHint: "Requires Query Payment to be Confirmed first",
           action: { kind: "navigate", path: "/crm/sales-deed?tab=Registry" },
         },
@@ -659,7 +659,7 @@ const CrmLegalMilestones: React.FC = () => {
   };
 
   const handleStepUpdate = async (step: string, status: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/${step}`, {
         method: "PUT",

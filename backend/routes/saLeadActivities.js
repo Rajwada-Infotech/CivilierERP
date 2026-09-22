@@ -42,7 +42,7 @@ router.get("/lead/:leadId", requirePageRight("sa-lead-activities", "view"), asyn
   try {
     const pool = getPool();
     const lid = parseId(req.params.leadId);
-    if (!lid) return res.status(400).json({ error: "Invalid leadId" });
+    if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
     // Row-level check: verify caller can see this lead
     const req0 = pool.request().input("lid", sql.Int, lid);
     const scope = applyLeadScope(req0, req, "l");
@@ -97,7 +97,7 @@ router.post("/lead/:leadId", requirePageRight("sa-lead-activities", "create"), a
   try {
     const pool = getPool();
     const lid = parseId(req.params.leadId);
-    if (!lid) return res.status(400).json({ error: "Invalid leadId" });
+    if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
     const b   = req.body;
     const actor = actorId(req);
 

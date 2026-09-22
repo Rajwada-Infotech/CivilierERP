@@ -115,7 +115,7 @@ const SLUG_FOR_TAB: Record<AgrTab, string> = {
 // jumps straight to the section that covers it.
 type StepState = "done" | "current" | "upcoming";
 function agreementStepStates(a: any, documents: any[] | undefined): { label: string; state: StepState; tab: AgrTab }[] {
-  const legalAssigned = !!a?.LegalExecutiveId;
+  const legalAssigned = a?.LegalExecutiveId != null;
   const followup = followupProgress(documents);
   const followupDone = followup.required > 0 && followup.percent === 100;
   const senior = a?.SeniorApprovalStatus === CrmStatus.APPROVED;
@@ -239,7 +239,7 @@ function AgreementTimeline({ agreement, bookingId, onJump, canViewAfsPay = true,
     : executed ? "Executed — awaiting AFS registration"
     : agreement?.SentToCustomerAt ? "Sent to customer for approval"
     : agreement?.SeniorApprovalStatus === CrmStatus.APPROVED ? "Senior-approved — ready to send"
-    : agreement?.LegalExecutiveId ? "Drafting / legal review"
+    : agreement?.LegalExecutiveId != null ? "Drafting / legal review"
     : "Not started — assign a Legal Executive";
 
   const allRows: { n: number; title: string; detailText: string; state: TlState; badge?: string; tab: AgrTab }[] = [
@@ -251,7 +251,7 @@ function AgreementTimeline({ agreement, bookingId, onJump, canViewAfsPay = true,
     {
       n: 2, title: "Agreement Papers",
       detailText: "Supporting documents — request, upload and verify",
-      state: executed ? "done" : agreement?.LegalExecutiveId ? "current" : "upcoming",
+      state: executed ? "done" : agreement?.LegalExecutiveId != null ? "current" : "upcoming",
       tab: "Documents",
     },
     {
@@ -768,7 +768,7 @@ const CrmAgreement: React.FC = () => {
   const { data: detail } = useQuery({
     queryKey: ["crm-agreement-detail", selectedId],
     queryFn: () => fetchAgreementDetail(selectedId!),
-    enabled: !!selectedId,
+    enabled: selectedId != null,
     staleTime: 30_000,
   });
   const { data: bookings = [] } = useQuery({ queryKey: ["crm-bookings"], queryFn: fetchBookings, staleTime: 5 * 60_000 });
@@ -776,19 +776,19 @@ const CrmAgreement: React.FC = () => {
   const { data: dateHistory = [] } = useQuery({
     queryKey: ["crm-agreement-date-history", selectedId],
     queryFn: () => fetchDateHistory(selectedId!),
-    enabled: !!selectedId,
+    enabled: selectedId != null,
     staleTime: 30_000,
   });
   const { data: revisions = [] } = useQuery({
     queryKey: ["crm-agreement-revisions", selectedId],
     queryFn: () => fetchRevisions(selectedId!),
-    enabled: !!selectedId,
+    enabled: selectedId != null,
     staleTime: 30_000,
   });
   const { data: welcomeCallsForBkg = [] } = useQuery({
     queryKey: ["crm-welcome-calls-for-bkg", (detail as any)?.BookingId],
     queryFn: () => fetchWelcomeCallsForBooking((detail as any).BookingId),
-    enabled: !!selectedId && !!(detail as any)?.BookingId,
+    enabled: selectedId != null && (detail as any)?.BookingId != null,
     staleTime: 60_000,
   });
   const preferredAgrDate = (() => {
@@ -875,7 +875,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleAddDocument = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     if (!docForm.DocumentUrl.trim()) { toast.error("Enter a URL, or use the upload button to attach a file"); return; }
     setSaving(true);
     try {
@@ -899,7 +899,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleRequestDocument = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/documents/request`, {
@@ -921,7 +921,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleUploadDocFiles = async (files: FileList | null) => {
-    if (!selectedId || !files?.length) return;
+    if (selectedId == null || !files?.length) return;
     setUploadingDocs(true);
     try {
       const formData = new FormData();
@@ -951,7 +951,7 @@ const CrmAgreement: React.FC = () => {
   // guard firing) silently did nothing with no error shown — fixed to
   // actually surface the real outcome.
   const handleDocStatusChange = async (docId: number, status: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/documents/${docId}`, {
         method: "PUT",
@@ -968,7 +968,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleSendToCustomer = async (proposedDate: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/send-to-customer`, {
@@ -992,7 +992,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleProposeDate = async (proposedDate: string) => {
-    if (!selectedId || !proposedDate) { toast.error("Pick a date"); return; }
+    if (selectedId == null || !proposedDate) { toast.error("Pick a date"); return; }
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/propose-date`, {
@@ -1017,7 +1017,7 @@ const CrmAgreement: React.FC = () => {
   // Accept the customer's currently-proposed date as-is — no re-typing it.
   // Only enabled when ProposedDateStatus shows it's the company's turn.
   const handleAcceptDate = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/date/accept`, { method: "PUT" });
@@ -1035,7 +1035,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleAgreementAction = async (action: "mark-executed" | "mark-registered" | "cancel") => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/${action}`, { method: "PUT" });
       const data = await res.json();
@@ -1054,7 +1054,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleMarkRegistered = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     if (!regForm.AfsRegistrationNo.trim()) { toast.error("AFS Registration No. is required"); return; }
     if (!regForm.AfsRegistrationDate) { toast.error("AFS Registration Date is required"); return; }
     setRegSaving(true);
@@ -1092,7 +1092,7 @@ const CrmAgreement: React.FC = () => {
   const [proxySaving, setProxySaving] = useState(false);
 
   const handleProxyCustomerApprove = async (method: ProxyMethod, remarks: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setProxySaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/proxy-customer-approve`, {
@@ -1114,7 +1114,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleProxyDateAccept = async (method: ProxyMethod, remarks: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setProxySaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/proxy-date-accept`, {
@@ -1136,7 +1136,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleProxyCustomerRecheck = async (method: ProxyMethod, remarks: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setProxySaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/proxy-customer-recheck`, {
@@ -1158,7 +1158,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleProxyProposeDate = async (method: ProxyMethod, remarks: string) => {
-    if (!selectedId || !proxyProposedDate) return;
+    if (selectedId == null || !proxyProposedDate) return;
     setProxySaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/proxy-propose-date`, {
@@ -1182,7 +1182,7 @@ const CrmAgreement: React.FC = () => {
 
   const [togglingPortal, setTogglingPortal] = useState(false);
   const handleTogglePortalAccess = async (deactivate: boolean) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setTogglingPortal(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/portal/${deactivate ? "deactivate" : "reactivate"}`, { method: "PUT" });
@@ -1205,7 +1205,7 @@ const CrmAgreement: React.FC = () => {
       PanNo: detail.agreement.PanNo || detail.agreement.CustomerPanNo || "",
       AadhaarNo: detail.agreement.AadhaarNo || detail.agreement.CustomerAadhaarNo || "",
       RevisionReason: "",
-      LegalExecutiveId: detail.agreement.LegalExecutiveId ? String(detail.agreement.LegalExecutiveId) : "",
+      LegalExecutiveId: detail.agreement.LegalExecutiveId != null ? String(detail.agreement.LegalExecutiveId) : "",
     });
     setEditLocked(true);
     setEditDialog(true);
@@ -1218,7 +1218,7 @@ const CrmAgreement: React.FC = () => {
   // shouldn't require unlocking Edit, filling a revision reason, or
   // bumping VersionNo the way a PAN/address fix does.
   const handleAssignLegal = async (legalExecutiveId: string) => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setAssigningLegal(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/assign-legal`, {
@@ -1240,7 +1240,7 @@ const CrmAgreement: React.FC = () => {
   };
 
   const handleSaveEdit = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     if (editForm.PanNo && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(editForm.PanNo.trim())) { toast.error("Invalid PAN format (e.g. ABCDE1234F)"); return; }
     if (editForm.AadhaarNo && !/^\d{12}$/.test(editForm.AadhaarNo.trim())) { toast.error("Aadhaar must be exactly 12 digits"); return; }
     setSaving(true);
@@ -1341,7 +1341,7 @@ const CrmAgreement: React.FC = () => {
 
         {/* Detail */}
         <div className="flex-1 overflow-y-auto thin-scroll space-y-4">
-          {!selectedId ? (
+          {selectedId == null ? (
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
               Select an agreement to view details
             </div>
@@ -1375,7 +1375,7 @@ const CrmAgreement: React.FC = () => {
                       variant = "info";
                       text = "Agreement executed.";
                       subtext = "Record the Sub-Registrar Registration No. to mark it Registered.";
-                    } else if (!a?.LegalExecutiveId) {
+                    } else if (a?.LegalExecutiveId == null) {
                       variant = "warning";
                       text = "No Legal Executive assigned.";
                       subtext = "Assign someone responsible for preparing the paperwork — required before execution (server-enforced).";
@@ -1523,7 +1523,7 @@ const CrmAgreement: React.FC = () => {
                           </span>
                         );
                       }
-                      if (!detail.agreement?.LegalExecutiveId) {
+                      if (detail.agreement?.LegalExecutiveId == null) {
                         // Same order as the backend (LegalExecutiveId before
                         // mandatory docs) and the Next Action banner above.
                         return (
@@ -1769,7 +1769,7 @@ const CrmAgreement: React.FC = () => {
               {agrTab === "Legal & Approval" && (() => {
                 const a = detail.agreement;
                 const cancelled = isBookingCancelled(a);
-                const legalAssigned = !!a?.LegalExecutiveId;
+                const legalAssigned = a?.LegalExecutiveId != null;
                 const seniorStatus = a?.SeniorApprovalStatus;
                 const seniorApproved = seniorStatus === CrmStatus.APPROVED;
                 const seniorPending  = seniorStatus === CrmStatus.PENDING;
@@ -1804,7 +1804,7 @@ const CrmAgreement: React.FC = () => {
                       <div className="px-4 py-3 space-y-2">
                         <p className="text-xs text-muted-foreground">The person responsible for preparing this agreement's paperwork. Required before execution (server-enforced).</p>
                         {/* Locked display when assigned and not actively changing */}
-                        {a?.LegalExecutiveId && !editingLegalExec && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled ? (
+                        {a?.LegalExecutiveId != null && !editingLegalExec && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled ? (
                           <div className="flex items-center gap-2">
                             <div className="flex items-center gap-2 flex-1 bg-muted/40 border border-border rounded-lg px-3 py-1.5">
                               <UserCircle2 size={14} className="text-primary shrink-0" />
@@ -1822,11 +1822,11 @@ const CrmAgreement: React.FC = () => {
                         ) : (
                           <div className="flex items-center gap-2">
                             <select
-                              value={a?.LegalExecutiveId ? String(a.LegalExecutiveId) : ""}
+                              value={a?.LegalExecutiveId != null ? String(a.LegalExecutiveId) : ""}
                               disabled={assigningLegal}
                               onChange={(e) => handleAssignLegal(e.target.value)}
                               className={`flex-1 text-sm border rounded-lg px-2 py-1.5 bg-background disabled:opacity-40 ${
-                                a?.LegalExecutiveId ? "border-border" : "border-amber-300 text-amber-600"}`}>
+                                a?.LegalExecutiveId != null ? "border-border" : "border-amber-300 text-amber-600"}`}>
                               <option value="">— Unassigned —</option>
                               {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
                             </select>
@@ -1839,7 +1839,7 @@ const CrmAgreement: React.FC = () => {
                             )}
                           </div>
                         )}
-                        {!a?.LegalExecutiveId && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled && (
+                        {a?.LegalExecutiveId == null && !["Registered", "Cancelled"].includes(a?.Status) && !cancelled && (
                           <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
                             Assign someone now so they receive an immediate notification and can start preparing the paperwork.
                           </p>

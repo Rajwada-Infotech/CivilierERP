@@ -109,7 +109,7 @@ router.post("/:teamLeadId/members", requirePageRight("sa-teams", "edit"), async 
     const pool = getPool();
     const teamLeadId = parseInt(req.params.teamLeadId);
     const { memberId } = req.body;
-    if (!memberId) return res.status(400).json({ error: "memberId required" });
+    if (memberId === null) return res.status(400).json({ error: "memberId required" });
 
     // Non-admin TL can only manage their own team
     if (!isSaAdmin(req) && actorId(req) !== teamLeadId) {
@@ -154,7 +154,7 @@ router.delete("/:teamLeadId/members/:memberId", requirePageRight("sa-teams", "ed
   try {
     const pool = getPool();
     const teamLeadId = parseId(req.params.teamLeadId);
-    if (!teamLeadId) return res.status(400).json({ error: "Invalid teamLeadId" });
+    if (teamLeadId === null) return res.status(400).json({ error: "Invalid teamLeadId" });
     if (!isSaAdmin(req) && actorId(req) !== teamLeadId) {
       return res.status(403).json({ error: "You can only manage your own team" });
     }
@@ -182,7 +182,7 @@ router.put("/:memberId/transfer", requirePageRight("sa-teams", "edit"), async (r
     if (!newTeamLeadId) return res.status(400).json({ error: "newTeamLeadId required" });
 
     const memberId = parseId(req.params.memberId);
-    if (!memberId) return res.status(400).json({ error: "Invalid memberId" });
+    if (memberId === null) return res.status(400).json({ error: "Invalid memberId" });
 
     // Deactivate current assignment
     await pool.request()
@@ -212,7 +212,7 @@ router.post("/:userId/promote", requirePageRight("sa-teams", "edit"), async (req
   try {
     const pool = getPool();
     const userId = parseId(req.params.userId);
-    if (!userId) return res.status(400).json({ error: "Invalid userId" });
+    if (userId === null) return res.status(400).json({ error: "Invalid userId" });
 
     const userCheck = await pool.request()
       .input("id", sql.Int, userId)
@@ -257,7 +257,7 @@ router.post("/:userId/demote", requirePageRight("sa-teams", "edit"), async (req,
   try {
     const pool = getPool();
     const userId = parseId(req.params.userId);
-    if (!userId) return res.status(400).json({ error: "Invalid userId" });
+    if (userId === null) return res.status(400).json({ error: "Invalid userId" });
 
     const userCheck = await pool.request()
       .input("id", sql.Int, userId)

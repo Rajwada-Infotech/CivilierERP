@@ -856,7 +856,7 @@ export default function ProjectMaster() {
         payload.projectImage = form.projectImage;
       }
 
-      return editId ? updateProject(editId, payload) : createProject(payload);
+      return editId != null ? updateProject(editId, payload) : createProject(payload);
     },
     onSuccess: (result: any) => {
       toast.success(
@@ -1144,7 +1144,7 @@ export default function ProjectMaster() {
                   size="md"
                 />
                 <h2 className="font-heading font-semibold text-foreground">
-                  {editId ? `Edit — ${form.name || "Project"}` : "New Project"}
+                  {editId != null ? `Edit — ${form.name || "Project"}` : "New Project"}
                 </h2>
               </div>
               <button
@@ -1603,7 +1603,7 @@ export default function ProjectMaster() {
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />
                 )}
-                {editId ? "Update Project" : "Create Project"}
+                {editId != null ? "Update Project" : "Create Project"}
               </button>
             </div>
           </div>

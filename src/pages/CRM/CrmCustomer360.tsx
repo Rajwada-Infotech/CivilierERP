@@ -36,7 +36,7 @@ async function fetchCustomerList(filters: Customer360Filters, page: number): Pro
   return { rows: data.rows || [], total: data.total || 0 };
 }
 async function fetchCustomer360(customerId: number): Promise<any> {
-  if (!customerId) return null;
+  if (customerId == null) return null;
   const r = await fetchWithAuth(`${API}/${customerId}`);
   if (!r.ok) return null;
   return r.json();
@@ -121,7 +121,7 @@ const CrmCustomer360: React.FC = () => {
   const { data: listResult, isLoading: listLoading } = useQuery({
     queryKey: ["crm-customer-360-list", listFilters, page],
     queryFn: () => fetchCustomerList(listFilters, page),
-    enabled: !selectedCustomerId,
+    enabled: selectedCustomerId == null,
     staleTime: 30_000,
   });
   const list = listResult?.rows ?? [];
@@ -130,7 +130,7 @@ const CrmCustomer360: React.FC = () => {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["crm-customer-360", selectedCustomerId],
     queryFn: () => fetchCustomer360(selectedCustomerId as number),
-    enabled: !!selectedCustomerId,
+    enabled: selectedCustomerId != null,
     staleTime: 30_000,
   });
 
@@ -144,7 +144,7 @@ const CrmCustomer360: React.FC = () => {
     <>
       <Breadcrumbs items={["Dashboard", "CRM", "Customer 360"]} />
       <CrmShell title="CRM — Applicant Ledger" subtitle="Full customer journey and centralized financial ledger — lead to after-sales, in one view">
-      {!selectedCustomerId ? (
+      {selectedCustomerId == null ? (
         <>
           <div className="flex gap-2 flex-wrap items-center">
             <div className="relative flex-1 min-w-56 max-w-md">

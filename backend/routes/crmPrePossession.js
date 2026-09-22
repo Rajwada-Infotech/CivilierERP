@@ -234,7 +234,7 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
     const pool = getPool();
     const b = req.body;
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     // Fetch the BookingId so we can compute dues clearance in the UPDATE.
     const ppRow = await pool.request().input("id", sql.Int, id)

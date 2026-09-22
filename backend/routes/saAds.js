@@ -661,7 +661,7 @@ router.get("/:id/creatives", requirePageRight("sa-ads", "view"), async (req, res
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("id", sql.Int, id).query(`
       SELECT c.Id, c.MediaType, c.Label, c.FileName, c.FileSize, c.MimeType, c.UploadedAt, u.name AS UploadedByName
       FROM dbo.SaAdCreative c
@@ -715,7 +715,7 @@ router.get("/:id/creatives/file/:creativeId", requirePageRight("sa-ads", "view")
   try {
     const pool = getPool();
     const creativeId = parseId(req.params.creativeId);
-    if (!creativeId) return res.status(400).json({ error: "Invalid creativeId" });
+    if (creativeId === null) return res.status(400).json({ error: "Invalid creativeId" });
     const result = await pool.request().input("id", sql.Int, creativeId)
       .query("SELECT StoredName, FileName, MimeType FROM dbo.SaAdCreative WHERE Id = @id");
     if (!result.recordset.length) return res.status(404).json({ error: "Creative not found" });
@@ -737,7 +737,7 @@ router.delete("/:id/creatives/:creativeId", requirePageRight("sa-ads", "edit"), 
   try {
     const pool = getPool();
     const creativeId = parseId(req.params.creativeId);
-    if (!creativeId) return res.status(400).json({ error: "Invalid creativeId" });
+    if (creativeId === null) return res.status(400).json({ error: "Invalid creativeId" });
     const result = await pool.request().input("id", sql.Int, creativeId)
       .query("SELECT StoredName FROM dbo.SaAdCreative WHERE Id = @id");
     if (!result.recordset.length) return res.status(404).json({ error: "Creative not found" });

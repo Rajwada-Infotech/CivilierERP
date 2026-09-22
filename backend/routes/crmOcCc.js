@@ -167,7 +167,7 @@ router.put("/:id", requirePageRight("crm-oc-cc", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Id, ProjectId, BlockId, Status FROM dbo.CrmOccupancyCertificate WHERE Id = @id");

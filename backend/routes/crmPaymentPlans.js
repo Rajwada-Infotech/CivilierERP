@@ -187,7 +187,7 @@ router.get("/:id", requirePageRight("crm-payment-plans", "view"), async (req, re
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [planRes, itemsRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${PLAN_SELECT} WHERE p.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
@@ -288,7 +288,7 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
 router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, res) => {
   const pool = getPool();
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   const b = req.body;
   const items = Array.isArray(b.Items) ? b.Items : null;
   let namesById = null;
@@ -379,7 +379,7 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
 router.delete("/:id", requirePageRight("crm-payment-plans", "delete"), async (req, res) => {
   const pool = getPool();
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const [bookingUsage, projectUsage] = await Promise.all([
       pool.request().input("id", sql.Int, id)

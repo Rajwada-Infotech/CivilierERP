@@ -155,7 +155,7 @@ const CrmBrokerage: React.FC = () => {
   }, [searchParams, records]);
 
   const handleApprove = async () => {
-    if (!editingId) return;
+    if (editingId == null) return;
     setApproving(true);
     try {
       const token = localStorage.getItem("token");
@@ -183,12 +183,12 @@ const CrmBrokerage: React.FC = () => {
   };
 
   const handleSave = async () => {
-    if (!editingId && (!form.BookingId || !form.BrokerId || !form.RateValue)) { toast.error("Booking, broker and rate are required"); return; }
-    if (editingId && (!form.RateValue || !form.ComputedAmount)) { toast.error("Rate and approved amount are required"); return; }
+    if (editingId == null && (!form.BookingId || !form.BrokerId || !form.RateValue)) { toast.error("Booking, broker and rate are required"); return; }
+    if (editingId != null && (!form.RateValue || !form.ComputedAmount)) { toast.error("Rate and approved amount are required"); return; }
     setSaving(true);
     try {
-      const res = await fetchWithAuth(editingId ? `${API}/${editingId}` : API, {
-        method: editingId ? "PUT" : "POST",
+      const res = await fetchWithAuth(editingId != null ? `${API}/${editingId}` : API, {
+        method: editingId != null ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           ...form,
@@ -200,7 +200,7 @@ const CrmBrokerage: React.FC = () => {
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error);
-      toast.success(editingId ? "Brokerage updated" : "Brokerage recorded");
+      toast.success(editingId != null ? "Brokerage updated" : "Brokerage recorded");
       setDialogOpen(false);
       setForm({ ...EMPTY_FORM });
       setEditingId(null);
@@ -290,7 +290,7 @@ const CrmBrokerage: React.FC = () => {
               <button onClick={() => openEdit(r)} className="text-xs text-primary hover:underline">Customize amount</button>
             )}
             {r.Status === CrmStatus.APPROVED && (
-              <button onClick={() => navigate(r.FinancePaymentId ? `/payments?id=${r.FinancePaymentId}` : "/payments")} className="text-xs text-primary hover:underline">
+              <button onClick={() => navigate(r.FinancePaymentId != null ? `/payments?id=${r.FinancePaymentId}` : "/payments")} className="text-xs text-primary hover:underline">
                 {r.FinancePaymentDocNo ? `Finance: ${r.FinancePaymentDocNo}` : "Sent to Finance"}
               </button>
             )}
@@ -350,11 +350,11 @@ const CrmBrokerage: React.FC = () => {
 
       <Dialog open={dialogOpen} onOpenChange={(o) => { if (!o) { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); } }}>
         <DialogContent accent="crm" className="max-w-md">
-          <DialogHeader><DialogTitle className="font-heading">{editingId ? "Customize Brokerage" : "Add Broker Involvement"}</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-heading">{editingId != null ? "Customize Brokerage" : "Add Broker Involvement"}</DialogTitle></DialogHeader>
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={form.BookingId} disabled={!!editingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
+              <select value={form.BookingId} disabled={editingId != null} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {(bookings as any[]).map((b: any) => (
@@ -364,7 +364,7 @@ const CrmBrokerage: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Broker * (from Broker Master)</label>
-              <select value={form.BrokerId} disabled={!!editingId} onChange={(e) => {
+              <select value={form.BrokerId} disabled={editingId != null} onChange={(e) => {
                   const brokerId = e.target.value;
                   const broker = (brokers as any[]).find((b: any) => String(b.LHeadId) === brokerId);
                   setForm((f) => ({
@@ -433,7 +433,7 @@ const CrmBrokerage: React.FC = () => {
                 </select>
               </div>
             </div>
-            {editingId && (
+            {editingId != null && (
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Approved Amount *</label>
                 <input type="number" value={form.ComputedAmount} onChange={(e) => setForm((f) => ({ ...f, ComputedAmount: e.target.value }))}
@@ -450,9 +450,9 @@ const CrmBrokerage: React.FC = () => {
             <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSave} disabled={saving || approving}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-              {saving ? "Saving..." : editingId ? "Save Changes" : "Add"}
+              {saving ? "Saving..." : editingId != null ? "Save Changes" : "Add"}
             </button>
-            {editingId && editingStatus === CrmStatus.PENDING && isApprover && (
+            {editingId != null && editingStatus === CrmStatus.PENDING && isApprover && (
               <button onClick={handleApprove} disabled={saving || approving}
                 className="px-4 py-1.5 text-sm bg-emerald-600 text-white rounded-lg font-medium hover:bg-emerald-700 disabled:opacity-40">
                 {approving ? "Approving..." : "Approve & Send to Finance"}

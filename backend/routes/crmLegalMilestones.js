@@ -307,7 +307,7 @@ router.put("/:id/:step", requirePageRight("crm-legal-milestones", "edit"), async
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const step = req.params.step;
     if (!STEPS.includes(step)) return res.status(400).json({ error: `Invalid step. Must be one of: ${STEPS.join(", ")}` });
     const b = req.body;

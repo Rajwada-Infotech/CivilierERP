@@ -119,7 +119,7 @@ router.get("/:id", requirePageRight("crm-customer-360", "view"), async (req, res
   try {
     const pool = getPool();
     const customerId = parseInt(req.params.id, 10);
-    if (!customerId) return res.status(400).json({ error: "Invalid customer id" });
+    if (!Number.isFinite(customerId)) return res.status(400).json({ error: "Invalid customer id" });
 
     const customerRes = await pool.request().input("id", sql.Int, customerId).query(`
       SELECT Id, CustomerNo, CustomerName, Mobile, AltMobile, Email, PanNo, Address, City, State, Pincode, LeadId

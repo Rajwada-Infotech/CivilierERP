@@ -133,7 +133,7 @@ router.post("/", requirePageRight("crm-afs-registry", "create"), async (req, res
     const result = await pool.request()
       .input("no",    sql.NVarChar(30), afsRegNo)
       .input("bid",   sql.Int, bookingId)
-      .input("agrid", sql.Int, agr.recordset[0]?.Id || null)
+      .input("agrid", sql.Int, agr.recordset[0]?.Id != null ? agr.recordset[0].Id : null)
       .input("cb",    sql.Int, actorId(req))
       .query(`
         INSERT INTO dbo.CrmAfsRegistry (AfsRegNo, BookingId, AgreementId, Status, CreatedBy, CreatedAt)
@@ -154,7 +154,7 @@ router.put("/:id/schedule", requirePageRight("crm-afs-registry", "edit"), async 
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (!b.ScheduledDate) return res.status(400).json({ error: "ScheduledDate is required" });
 
@@ -188,7 +188,7 @@ router.put("/:id/complete", requirePageRight("crm-afs-registry", "edit"), async 
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmAfsRegistry WHERE Id = @id");

@@ -55,7 +55,7 @@ router.put("/:id", requirePageRight("crm-milestone-master", "edit"), async (req,
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     await pool.request()
       .input("id",   sql.Int,           id)
@@ -83,7 +83,7 @@ router.delete("/:id", requirePageRight("crm-milestone-master", "delete"), async 
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const usage = await pool.request().input("id", sql.Int, id)
       .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentPlanTemplateItem WHERE MilestoneMasterId = @id");
     if (usage.recordset[0].Cnt > 0) {
