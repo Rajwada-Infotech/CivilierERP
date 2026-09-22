@@ -5,7 +5,6 @@ const BASE = "/api/fixed-asset-assignment";
 export interface AssignableAsset {
   AssetId: number;
   FAItemCode: string;
-  FAItemCodeDisplay?: string | null;
   AssetName: string;
   AssetCategory: string | null;
   CompanyId: number | null;
@@ -33,7 +32,6 @@ export interface AssignmentListItem {
   AssetCategory: string | null;
   AssetCode: string | null;
   FAItemCode: string | null;
-  FAItemCodeDisplay?: string | null;
   UserId: number;
   UserName: string | null;
   UserAvatar: string | null;

@@ -8,8 +8,8 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
+const { rebuildFAItemCode } = require("../services/faItemCodeRebuild");
 
-const { annotateFACodeDisplay, displayCodeFor } = require("../services/faDisplayCode");
 router.use(authenticateToken);
 
 function requireUser(req, res) {
@@ -212,7 +212,7 @@ router.get("/transferable-assets", requirePageRight("asset-transfer", "view"), a
       WHERE ${where.join(" AND ")}
       ORDER BY fa.FAItemCode
     `);
-    res.json(await annotateFACodeDisplay(pool, result.recordset));
+    res.json(result.recordset);
   } catch (err) {
     console.error("[assetTransfer] GET /transferable-assets:", err.message);
     res.status(500).json({ error: err.message });
@@ -305,7 +305,7 @@ router.get("/", requirePageRight("asset-transfer", "view"), async (req, res) => 
       ${whereClause}
       ORDER BY h.CreatedAt DESC
     `);
-    res.json(await annotateFACodeDisplay(pool, result.recordset));
+    res.json(result.recordset);
   } catch (err) {
     console.error("[assetTransfer] GET /:", err.message);
     res.status(500).json({ error: err.message });
@@ -338,7 +338,7 @@ router.get("/:id", requirePageRight("asset-transfer", "view"), async (req, res) 
       WHERE h.Id = @Id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
-    res.json(await annotateFACodeDisplay(pool, result.recordset[0]));
+    res.json(result.recordset[0]);
   } catch (err) {
     console.error("[assetTransfer] GET /:id:", err.message);
     res.status(500).json({ error: err.message });
@@ -467,6 +467,10 @@ router.post("/", requirePageRight("asset-transfer", "create"), async (req, res) 
         departmentId: departmentIdVal,
         transferDate: transferDate || docDate || null, email,
       });
+
+      // FA Item Code now reflects the receiving user's department (see
+      // services/faItemCodeRebuild.js).
+      await rebuildFAItemCode(tx, assetIdVal);
 
       await tx.commit();
       await backPatchRecordId(pool, sql, docNo, "AssetTransferHistory", newId);
@@ -623,6 +627,11 @@ router.put("/:id", requirePageRight("asset-transfer", "edit"), async (req, res) 
         transferDate: transferDate || docDate || null, email,
       });
 
+      // FA Item Code now reflects each affected asset's current holder's
+      // department (see services/faItemCodeRebuild.js).
+      if (assetChanged) await rebuildFAItemCode(tx, oldAssetId);
+      await rebuildFAItemCode(tx, assetIdVal);
+
       await tx.commit();
       if (asn) await backPatchRecordId(pool, sql, asn.docNo, "FixedAssetAssignment", asn.assignmentId);
       await bumpCacheVersion("asset-transfer");
@@ -683,6 +692,10 @@ router.delete("/:id", requirePageRight("asset-transfer", "delete"), async (req, 
         // since both the transfer and its linked assignment are gone.)
         await applyCustodian(tx, row.AssetId, row.FromUserId);
       }
+
+      // FA Item Code now reflects whoever holds the asset after this
+      // rollback (see services/faItemCodeRebuild.js).
+      await rebuildFAItemCode(tx, row.AssetId);
 
       await tx.commit();
       await bumpCacheVersion("asset-transfer");

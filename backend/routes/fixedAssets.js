@@ -9,7 +9,6 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { buildReversalPlan, executeReversal } = require("../services/fixedAssetReversal");
-const { annotateFACodeDisplay, displayCodeFor } = require("../services/faDisplayCode");
 const {
   buildPostingPlan: buildDepreciationPlan,
   postDepreciation,
@@ -118,7 +117,7 @@ router.get("/", async (req, res) => {
       ${whereClause}
       ORDER BY fa.CreatedAt DESC
     `);
-    res.json(await annotateFACodeDisplay(pool, result.recordset));
+    res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -170,7 +169,7 @@ router.get("/depreciation-summary", requirePageRight("fixed-asset-record", "view
         co.name, pr.name, fa.DepreciationType, fa.DepreciationRate, fa.PurchaseCost
       ORDER BY fa.FAItemCode
     `);
-    res.json(await annotateFACodeDisplay(pool, result.recordset));
+    res.json(result.recordset);
   } catch (err) {
     console.error("[fixedAssets] GET /depreciation-summary:", err.message);
     res.status(500).json({ error: err.message });
@@ -203,7 +202,7 @@ router.get("/:id", async (req, res) => {
     // never a Fixed Asset — treat it as not-found here exactly like the
     // list above hides it, so it can't be viewed/edited by guessing an id.
     if (!row || !row.AssetCode) return res.status(404).json({ error: "Not found" });
-    res.json(await annotateFACodeDisplay(pool, row));
+    res.json(row);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

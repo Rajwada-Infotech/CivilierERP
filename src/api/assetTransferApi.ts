@@ -26,7 +26,6 @@ export interface TransferableAsset {
   AssetCode: string | null;
   AssetCategory: string;
   FAItemCode: string | null;
-  FAItemCodeDisplay?: string | null;
   CompanyId: number | null;
   ProjectId: number | null;
   FinYear: string | null;
@@ -53,7 +52,6 @@ export interface TransferListItem {
   AssetCode: string | null;
   AssetCategory: string | null;
   FAItemCode: string | null;
-  FAItemCodeDisplay?: string | null;
   FromUserId: number;
   FromUserName: string | null;
   FromUserAvatar: string | null;

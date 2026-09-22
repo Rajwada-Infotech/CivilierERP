@@ -790,7 +790,7 @@ export default function FixedAssetTagging() {
                         <p className="font-medium truncate">{t.AssetName || "—"}</p>
                         <p className="text-[11px] text-muted-foreground font-mono truncate">{t.AssetCode || "—"}</p>
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-yellow-600 dark:text-yellow-400">{t.FAItemCodeDisplay || t.FAItemCode || "—"}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-yellow-600 dark:text-yellow-400">{t.FAItemCode || "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">
                         {t.CompanyName || "—"}{t.ProjectName ? ` / ${t.ProjectName}` : ""}
                       </td>
@@ -847,7 +847,7 @@ export default function FixedAssetTagging() {
           {editTag && (
             <div className="space-y-4 pt-1">
               <p className="text-xs text-muted-foreground -mt-2">
-                {editTag.DocNo} · <span className="font-mono text-yellow-600 dark:text-yellow-400">{editTag.FAItemCodeDisplay || editTag.FAItemCode}</span>
+                {editTag.DocNo} · <span className="font-mono text-yellow-600 dark:text-yellow-400">{editTag.FAItemCode}</span>
               </p>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Date *</label>

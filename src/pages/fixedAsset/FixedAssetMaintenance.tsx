@@ -115,7 +115,7 @@ function FAItemCodeCombobox({
       <PopoverTrigger asChild>
         <Button variant="outline" role="combobox" aria-expanded={open} disabled={disabled}
           className={cn("w-full justify-between font-normal h-9", !selected && "text-muted-foreground")}>
-          <span className="truncate">{selected ? (selected.FAItemCodeDisplay || selected.FAItemCode) : "Select FA Item Code…"}</span>
+          <span className="truncate">{selected ? (selected.FAItemCode) : "Select FA Item Code…"}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -131,7 +131,7 @@ function FAItemCodeCombobox({
                   className="data-[selected=true]:bg-neutral-900 data-[selected=true]:text-neutral-50">
                   <Check className={cn("mr-2 h-4 w-4", String(a.AssetId) === value ? "opacity-100" : "opacity-0")} />
                   <span className="flex flex-col min-w-0">
-                    <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 truncate">{a.FAItemCodeDisplay || a.FAItemCode}</span>
+                    <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 truncate">{a.FAItemCode}</span>
                     <span className="text-xs truncate">{a.AssetName}{a.AssetCategory ? ` (${a.AssetCategory})` : ""}</span>
                   </span>
                 </CommandItem>
@@ -176,7 +176,7 @@ function printMaintenanceVoucher(d: MaintenanceItem) {
     ["Company", d.CompanyName || "—"],
     ["Project", d.ProjectName || "—"],
     ["Item", d.ItemName || "—"],
-    ["FA Item Code", d.FAItemCodeDisplay || d.FAItemCode || "—"],
+    ["FA Item Code", d.FAItemCode || "—"],
     ["Vendor", d.VendorName || "—"],
     ["Repair Expense Type", REPAIR_EXPENSE_LABEL[d.RepairExpenseType] || d.RepairExpenseType],
     ["SAC Code", d.SacCode || "—"],
@@ -433,7 +433,6 @@ export default function FixedAssetMaintenance() {
       r = r.filter((c) =>
         (c.DocNo || "").toLowerCase().includes(s) ||
         (c.FAItemCode || "").toLowerCase().includes(s) ||
-        (c.FAItemCodeDisplay || "").toLowerCase().includes(s) ||
         (c.ItemName || "").toLowerCase().includes(s) ||
         (c.VendorName || "").toLowerCase().includes(s));
     }
@@ -877,7 +876,7 @@ export default function FixedAssetMaintenance() {
                           <span className="block text-[10px] font-sans text-muted-foreground">{fmtDate(c.DocDate)}</span>
                         </td>
                         <td className="px-4 py-3">
-                          <p className="font-mono text-xs text-yellow-600 dark:text-yellow-400 truncate">{c.FAItemCodeDisplay || c.FAItemCode || "—"}</p>
+                          <p className="font-mono text-xs text-yellow-600 dark:text-yellow-400 truncate">{c.FAItemCode || "—"}</p>
                           <p className="text-[11px] text-muted-foreground truncate">{c.ItemName || "—"}</p>
                         </td>
                         <td className="px-4 py-3 text-xs">{c.VendorName || "—"}</td>
@@ -943,7 +942,7 @@ export default function FixedAssetMaintenance() {
                   ["Project", viewDetail.ProjectName],
                   ["Doc Date", fmtDate(viewDetail.DocDate)],
                   ["Item", viewDetail.ItemName],
-                  ["FA Item Code", viewDetail.FAItemCodeDisplay || viewDetail.FAItemCode],
+                  ["FA Item Code", viewDetail.FAItemCode],
                   ["Vendor", viewDetail.VendorName],
                   ["Repair Expense Type", REPAIR_EXPENSE_LABEL[viewDetail.RepairExpenseType]],
                   ["SAC Code", viewDetail.SacCode || "—"],

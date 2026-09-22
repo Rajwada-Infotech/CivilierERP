@@ -102,7 +102,7 @@ function FAItemCodeCombobox({
       <PopoverTrigger asChild>
         <Button variant="outline" role="combobox" aria-expanded={open} disabled={disabled}
           className={cn("w-full justify-between font-normal h-9", !selected && "text-muted-foreground")}>
-          <span className="truncate">{selected ? `${selected.FAItemCodeDisplay || selected.FAItemCode} — ${selected.AssetName}` : "Select FA Item Code…"}</span>
+          <span className="truncate">{selected ? `${selected.FAItemCode} — ${selected.AssetName}` : "Select FA Item Code…"}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -124,7 +124,7 @@ function FAItemCodeCombobox({
                       className="data-[selected=true]:bg-neutral-900 data-[selected=true]:text-neutral-50">
                       <Check className={cn("mr-2 h-4 w-4", String(a.AssetId) === value ? "opacity-100" : "opacity-0")} />
                       <span className="flex flex-col min-w-0">
-                        <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 truncate">{a.FAItemCodeDisplay || a.FAItemCode}</span>
+                        <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 truncate">{a.FAItemCode}</span>
                         <span className="text-xs truncate">{a.AssetName}{a.AssetCategory ? ` (${a.AssetCategory})` : ""}</span>
                       </span>
                     </CommandItem>
@@ -349,7 +349,6 @@ export default function FixedAssetQualityCheck() {
       r = r.filter((c) =>
         (c.DocNo || "").toLowerCase().includes(s) ||
         (c.FAItemCode || "").toLowerCase().includes(s) ||
-        (c.FAItemCodeDisplay || "").toLowerCase().includes(s) ||
         (c.ItemName || "").toLowerCase().includes(s) ||
         (c.CurrentUserName || "").toLowerCase().includes(s) ||
         (c.ResponsibleUserName || "").toLowerCase().includes(s));
@@ -510,7 +509,7 @@ export default function FixedAssetQualityCheck() {
                   <div className="flex items-center justify-between gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/[0.04] px-3 py-2">
                     <div className="min-w-0">
                       <p className="text-sm font-medium truncate">{itemName || editDetail?.ItemName || "—"}</p>
-                      <p className="text-[11px] font-mono text-yellow-600 dark:text-yellow-400 truncate">{editDetail?.FAItemCodeDisplay || editDetail?.FAItemCode || "—"}</p>
+                      <p className="text-[11px] font-mono text-yellow-600 dark:text-yellow-400 truncate">{editDetail?.FAItemCode || "—"}</p>
                     </div>
                     <span className="shrink-0 text-[11px] text-muted-foreground">Fixed for this record</span>
                   </div>
@@ -749,7 +748,7 @@ export default function FixedAssetQualityCheck() {
                         <span className="block text-[10px] font-sans text-muted-foreground">{fmtDate(c.DocDate)}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <p className="font-mono text-xs text-yellow-600 dark:text-yellow-400 truncate">{c.FAItemCodeDisplay || c.FAItemCode || "—"}</p>
+                        <p className="font-mono text-xs text-yellow-600 dark:text-yellow-400 truncate">{c.FAItemCode || "—"}</p>
                         <p className="text-[11px] text-muted-foreground truncate">{c.ItemName || "—"}</p>
                       </td>
                       <td className="px-4 py-3">
@@ -861,7 +860,7 @@ export default function FixedAssetQualityCheck() {
                   {[
                     ["Doc No", viewDetail.DocNo || "—"],
                     ["Check Date", fmtDate(viewDetail.DocDate)],
-                    ["FA Item Code", viewDetail.FAItemCodeDisplay || viewDetail.FAItemCode || "—"],
+                    ["FA Item Code", viewDetail.FAItemCode || "—"],
                     ["Item Name", viewDetail.ItemName || "—"],
                     ["Asset Code", viewDetail.AssetCode || "—"],
                     ["Current User", viewDetail.CurrentUserName || "—"],

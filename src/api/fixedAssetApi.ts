@@ -36,7 +36,6 @@ export interface FixedAssetListItem {
   GodownName: string | null;
   SourceTagId: number | null;
   FAItemCode: string | null;
-  FAItemCodeDisplay?: string | null;
 }
 
 export interface FixedAssetDetail extends FixedAssetListItem {

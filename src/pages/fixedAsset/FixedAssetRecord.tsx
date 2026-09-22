@@ -990,7 +990,7 @@ export default function FixedAssetRecord() {
                     )}
                     {d.FAItemCode && (
                       <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/15 text-xs font-mono font-medium">
-                        <Boxes size={11} /> {d.FAItemCodeDisplay || d.FAItemCode}
+                        <Boxes size={11} /> {d.FAItemCode}
                       </span>
                     )}
                   </div>
@@ -1036,7 +1036,7 @@ export default function FixedAssetRecord() {
             )}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-3 text-sm">
               {[
-                ["FA Item Code",      d.FAItemCodeDisplay || d.FAItemCode],
+                ["FA Item Code",      d.FAItemCode],
                 ["Type of Repairs SAC Code", d.RepairType],
                 ["Brand",             d.Brand],
                 ["Model",             d.Model],
@@ -1642,7 +1642,7 @@ export default function FixedAssetRecord() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className="font-mono text-xs text-yellow-600 dark:text-yellow-400">{a.FAItemCodeDisplay || a.FAItemCode || "—"}</span>
+                      <span className="font-mono text-xs text-yellow-600 dark:text-yellow-400">{a.FAItemCode || "—"}</span>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{a.AssetCategory}</td>
                     <td className="px-4 py-3 text-muted-foreground">

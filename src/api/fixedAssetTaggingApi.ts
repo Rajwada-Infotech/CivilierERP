@@ -18,7 +18,6 @@ export interface TaggingListItem {
   FinYear: string | null;
   TaggedQty: number;
   FAItemCode: string | null;
-  FAItemCodeDisplay?: string | null;
   Remarks: string | null;
   Status: "Tagged" | "Cancelled";
   CreatedBy: string | null;
@@ -46,7 +45,6 @@ export interface TaggingDetail extends TaggingListItem {
 export interface UnassignedFAItemCode {
   TagId: number;
   FAItemCode: string;
-  FAItemCodeDisplay?: string | null;
   DocNo: string | null;
   ItemId: string | null;
   ItemName: string | null;
@@ -122,7 +120,6 @@ export const getFixedAssetTaggings = async (params?: {
 export interface TaggedFAItemCode {
   TagId: number;
   FAItemCode: string;
-  FAItemCodeDisplay?: string | null;
   ItemName: string | null;
   AssetId: number;
   AssetCode: string | null;

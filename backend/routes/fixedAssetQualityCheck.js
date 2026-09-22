@@ -10,7 +10,6 @@ const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { runFollowupReminderCheck } = require("../services/fixedAssetFollowupReminders");
 
-const { annotateFACodeDisplay, displayCodeFor } = require("../services/faDisplayCode");
 router.use(authenticateToken);
 
 const PAGE = "fixed-asset-quality-check";
@@ -57,7 +56,7 @@ router.get("/assets", requirePageRight(PAGE, "view"), async (req, res) => {
       WHERE ${where.join(" AND ")}
       ORDER BY fa.FAItemCode
     `);
-    res.json(await annotateFACodeDisplay(pool, result.recordset));
+    res.json(result.recordset);
   } catch (err) {
     console.error("[faQualityCheck] GET /assets:", err.message);
     res.status(500).json({ error: err.message });
@@ -98,7 +97,6 @@ router.get("/asset-context/:assetId", requirePageRight(PAGE, "view"), async (req
     res.json({
       assetId:      fa.AssetId,
       faItemCode:   fa.FAItemCode,
-      faItemCodeDisplay: await displayCodeFor(pool, fa.FAItemCode),
       itemName:     fa.AssetName,
       companyId:    fa.CompanyId,
       projectId:    fa.ProjectId,
@@ -156,7 +154,7 @@ router.get("/", requirePageRight(PAGE, "view"), async (req, res) => {
     if (req.query.followUpStatus){ request.input("FUS", sql.NVarChar(20), req.query.followUpStatus); where.push("q.FollowUpStatus = @FUS"); }
     if (req.query.overdue === "1") where.push("q.FollowUpStatus = 'Pending' AND q.NextFollowUpDate < CAST(SYSDATETIME() AS DATE)");
     const result = await request.query(`${LIST_SELECT} WHERE ${where.join(" AND ")} ORDER BY q.CreatedAt DESC`);
-    res.json(await annotateFACodeDisplay(pool, result.recordset));
+    res.json(result.recordset);
   } catch (err) {
     console.error("[faQualityCheck] GET /:", err.message);
     res.status(500).json({ error: err.message });
@@ -171,7 +169,7 @@ router.get("/:id", requirePageRight(PAGE, "view"), async (req, res) => {
     const pool = getPool();
     const result = await pool.request().input("Id", sql.Int, id).query(`${LIST_SELECT} WHERE q.QualityCheckId = @Id`);
     if (!result.recordset.length) return res.status(404).json({ error: "Not found" });
-    res.json(await annotateFACodeDisplay(pool, result.recordset[0]));
+    res.json(result.recordset[0]);
   } catch (err) {
     console.error("[faQualityCheck] GET /:id:", err.message);
     res.status(500).json({ error: err.message });

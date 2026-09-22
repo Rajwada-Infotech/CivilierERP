@@ -101,7 +101,7 @@ function FAItemCodeCombobox({
           disabled={disabled}
           className={cn("w-full justify-between font-normal h-9", !selected && "text-muted-foreground")}
         >
-          <span className="truncate">{selected ? `${selected.FAItemCodeDisplay || selected.FAItemCode} — ${selected.AssetName}` : "Select FA Item Code…"}</span>
+          <span className="truncate">{selected ? `${selected.FAItemCode} — ${selected.AssetName}` : "Select FA Item Code…"}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -126,7 +126,7 @@ function FAItemCodeCombobox({
                     >
                       <Check className={cn("mr-2 h-4 w-4", String(a.AssetId) === value ? "opacity-100" : "opacity-0")} />
                       <span className="flex flex-col min-w-0">
-                        <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 truncate">{a.FAItemCodeDisplay || a.FAItemCode}</span>
+                        <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 truncate">{a.FAItemCode}</span>
                         <span className="text-xs truncate">{a.AssetName}{a.AssetCategory ? ` (${a.AssetCategory})` : ""}</span>
                         <span className="text-[11px] text-muted-foreground truncate">{a.CustodianName ? `Held by ${a.CustodianName}` : "No current holder"}</span>
                       </span>
@@ -888,7 +888,7 @@ export default function AssetTransfer() {
                         <p className="font-medium truncate">{t.AssetName || "—"}</p>
                         <p className="text-[11px] text-muted-foreground font-mono truncate">{t.AssetCode || "—"}</p>
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-yellow-600 dark:text-yellow-400">{t.FAItemCodeDisplay || t.FAItemCode || "—"}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-yellow-600 dark:text-yellow-400">{t.FAItemCode || "—"}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5 text-xs">
                           {t.FromUserId && <UserAvatar id={t.FromUserId} name={t.FromUserName || "?"} avatarUrl={t.FromUserAvatar} size={18} />}
@@ -961,7 +961,7 @@ export default function AssetTransfer() {
                   ["Transfer Date",    fmtDate(viewDetail.TransferDate)],
                   ["Financial Year",   viewDetail.FinYear],
                   ["Asset",            viewDetail.AssetName],
-                  ["FA Item Code",     viewDetail.FAItemCodeDisplay || viewDetail.FAItemCode],
+                  ["FA Item Code",     viewDetail.FAItemCode],
                   ["Company",          viewDetail.CompanyName],
                   ["Project",          viewDetail.ProjectName],
                   ["Department",       viewDetail.DepartmentName],

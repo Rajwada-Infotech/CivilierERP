@@ -13,7 +13,6 @@ export const REPAIR_EXPENSE_LABEL: Record<RepairExpenseType, string> = {
 export interface FAMaintAsset {
   AssetId: number;
   FAItemCode: string;
-  FAItemCodeDisplay?: string | null;
   AssetName: string;
   AssetCategory: string | null;
   CompanyId: number | null;
@@ -69,7 +68,6 @@ export interface MaintenanceItem {
   AssetId: number;
   AssetCode: string | null;
   FAItemCode: string | null;
-  FAItemCodeDisplay?: string | null;
   ItemName: string | null;
   VendorId: number;
   VendorName: string | null;
