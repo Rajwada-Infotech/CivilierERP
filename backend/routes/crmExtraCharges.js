@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -290,7 +291,8 @@ async function applyReleaseExtraCharge(pool, id) {
 router.get("/application/:applicationId", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const applicationId = parseInt(req.params.applicationId);
+    const applicationId = parseId(req.params.applicationId);
+    if (!applicationId) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, applicationId).query(`
       SELECT c.*, m.ChargeName AS MasterChargeName
       FROM dbo.CrmExtraCharge c
@@ -315,7 +317,8 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
   const tx = pool.transaction();
   try {
     await tx.begin();
-    const applicationId = parseInt(req.params.applicationId);
+    const applicationId = parseId(req.params.applicationId);
+    if (!applicationId) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await applyAddExtraChargeToApplication(tx, applicationId, req.body, actorId(req));
     await tx.commit();
     res.status(201).json({ success: true, ...result });
@@ -330,7 +333,8 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
 router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId).query(`
       SELECT c.*, m.ChargeName AS MasterChargeName
       FROM dbo.CrmExtraCharge c
@@ -353,7 +357,8 @@ router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, 
 router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
@@ -399,7 +404,8 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
 router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const row = await pool.request().input("id", sql.Int, id)
@@ -461,7 +467,8 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "ed
 router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const reason = req.query.reason || req.body?.Reason;
 
     const row = await pool.request().input("id", sql.Int, id)

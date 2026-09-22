@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -607,7 +608,8 @@ router.get("/available", requireAnyPageRight(["crm-bookings", "crm-parking-booki
 router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query(`${ALLOTMENT_SELECT} WHERE pa.BookingId = @bid AND pa.IsActive = 1 ORDER BY pa.CreatedAt DESC`);
     res.json(result.recordset);
@@ -628,7 +630,8 @@ router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, 
 router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const applicationId = parseInt(req.params.applicationId);
+    const applicationId = parseId(req.params.applicationId);
+    if (!applicationId) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, applicationId)
       .query(`${ALLOTMENT_SELECT} WHERE pa.ApplicationId = @aid AND pa.IsActive = 1 ORDER BY pa.CreatedAt DESC`);
     const allotments = result.recordset.map((r) => ({ ...r, Kind: "Allotment" }));
@@ -810,7 +813,8 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
 router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const holdId = parseInt(req.params.holdId);
+    const holdId = parseId(req.params.holdId);
+    if (!holdId) return res.status(400).json({ error: "Invalid holdId" });
     const row = await pool.request().input("id", sql.Int, holdId)
       .query("SELECT EntityType, ApplicationId FROM dbo.CrmInventoryHold WHERE Id = @id AND Status = 'Active'");
     if (!row.recordset.length || row.recordset[0].EntityType !== "Parking") {
@@ -837,7 +841,8 @@ router.delete("/hold/:holdId", requireAnyPageRight(["crm-bookings", "crm-parking
 router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
@@ -869,7 +874,8 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
 router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
 
     const existing = await pool.request().input("id", sql.Int, id)
@@ -918,7 +924,8 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "
 router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-booking"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const row = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, PaymentStatus FROM dbo.CrmParkingAllotment WHERE Id = @id AND IsActive = 1");
@@ -969,7 +976,8 @@ router.put("/:id/mark-paid", requireAnyPageRight(["crm-bookings", "crm-parking-b
 router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-parking-booking", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const reason = (req.query.reason || req.body?.Reason || "").trim();
 
     const row = await pool.request().input("id", sql.Int, id)

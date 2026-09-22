@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -270,7 +271,8 @@ router.get("/", requirePageRight("crm-sales-deed", "view"), async (req, res) => 
 router.get("/booking/:bookingId/context", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
 
     const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo,
@@ -433,7 +435,8 @@ router.get("/registry", requirePageRight("crm-registry", "view"), async (req, re
 router.get("/registry/booking/:bookingId", requirePageRight("crm-registry", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId, 10);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query(`${REG_SELECT} WHERE r.BookingId = @bid`);
     res.json(result.recordset[0] || null);
@@ -471,7 +474,8 @@ router.get("/registry/eligible-bookings", requirePageRight("crm-registry", "view
 router.get("/registry/:id", requirePageRight("crm-registry", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const [regRes, docRes, logRes] = await Promise.all([
       pool.request().input('id', sql.Int, id).query(`${REG_SELECT} WHERE r.Id = @id`),
       pool.request().input('id', sql.Int, id).query(`
@@ -588,7 +592,8 @@ router.post("/registry", requirePageRight("crm-registry", "create"), validateBod
 router.put("/registry/:id/schedule", requirePageRight("crm-registry", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (!b.ScheduledDate) return res.status(400).json({ error: "ScheduledDate is required" });
 
@@ -625,7 +630,8 @@ router.put("/registry/:id/schedule", requirePageRight("crm-registry", "edit"), a
 router.put("/registry/:id/reschedule", requirePageRight("crm-registry", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (!b.ScheduledDate) return res.status(400).json({ error: "New ScheduledDate is required" });
     if (!b.Reason?.trim()) return res.status(400).json({ error: "A reason for rescheduling is required" });
@@ -664,7 +670,8 @@ router.put("/registry/:id/reschedule", requirePageRight("crm-registry", "edit"),
 router.put("/registry/:id/complete", requirePageRight("crm-registry", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (!b.RegistrationNo?.trim()) return res.status(400).json({ error: "Registration No. is required" });
     if (!b.BuyerAttended || !b.SellerAttended) {
@@ -769,7 +776,8 @@ router.put("/registry/:id/complete", requirePageRight("crm-registry", "edit"), a
 router.put("/registry/:id/cancel", requirePageRight("crm-registry", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const reason = req.body?.Reason;
     if (!reason?.trim()) return res.status(400).json({ error: "A reason is required to cancel" });
 
@@ -810,7 +818,8 @@ router.put("/registry/:id/cancel", requirePageRight("crm-registry", "edit"), asy
 router.post("/registry/:id/documents/upload", requirePageRight("crm-registry", "edit"), upload.array('files'), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const { DocumentType = 'Other', Label, IsMandatory = 0, Remarks } = req.body;
 
     const reg = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRegistry WHERE Id = @id");
@@ -879,7 +888,8 @@ router.post("/registry/:id/documents/upload", requirePageRight("crm-registry", "
 router.post("/registry/:id/documents/request", requirePageRight("crm-registry", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const { DocumentType, Label, IsMandatory = true } = req.body;
     if (!DocumentType?.trim()) return res.status(400).json({ error: "DocumentType is required" });
 
@@ -914,7 +924,8 @@ router.post("/registry/:id/documents/request", requirePageRight("crm-registry", 
 router.put("/registry/:id/documents/:docId", requirePageRight("crm-registry", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const docId = parseInt(req.params.docId, 10);
+    const docId = parseId(req.params.docId);
+    if (!docId) return res.status(400).json({ error: "Invalid docId" });
     const { Status, Remarks } = req.body;
 
     if (Status !== undefined && !["Verified", "Rejected"].includes(Status)) {
@@ -1022,7 +1033,8 @@ router.get("/query-payment", requirePageRight("crm-query-payment", "view"), asyn
 router.get("/query-payment/booking/:bookingId", requirePageRight("crm-query-payment", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId, 10);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query(`${QP_SELECT} WHERE qp.BookingId = @bid`);
     res.json(result.recordset[0] || null);
@@ -1058,7 +1070,8 @@ router.get("/query-payment/eligible-bookings", requirePageRight("crm-query-payme
 router.get("/query-payment/:id", requirePageRight("crm-query-payment", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("id", sql.Int, id).query(`${QP_SELECT} WHERE qp.Id = @id`);
     if (!result.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
 
@@ -1123,7 +1136,8 @@ router.post("/query-payment", requirePageRight("crm-query-payment", "create"), a
 router.put("/query-payment/:id", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status FROM dbo.CrmQueryPayment WHERE Id = @id");
@@ -1157,7 +1171,8 @@ router.put("/query-payment/:id", requirePageRight("crm-query-payment", "edit"), 
 router.post("/query-payment/:id/info", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status FROM dbo.CrmQueryPayment WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Query Payment not found" });
@@ -1224,7 +1239,8 @@ router.post("/query-payment/:id/info", requirePageRight("crm-query-payment", "ed
 router.post("/query-payment/:id/confirm", requirePageRight("crm-query-payment", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id)
@@ -1370,7 +1386,8 @@ router.post("/query-payment/:id/proxy-proof",
 router.get("/query-payment/attachment/:attachId", requirePageRight("crm-query-payment", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const attachId = parseInt(req.params.attachId, 10);
+    const attachId = parseId(req.params.attachId);
+    if (!attachId) return res.status(400).json({ error: "Invalid attachId" });
     const result = await pool.request().input("id", sql.Int, attachId)
       .query("SELECT FileName, MimeType, FileData FROM dbo.CrmQueryPaymentAttachments WHERE AttachmentId = @id");
     const attachment = result.recordset[0];
@@ -1389,7 +1406,8 @@ router.get("/query-payment/attachment/:attachId", requirePageRight("crm-query-pa
 router.get("/:id", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const [deedRes, docRes, logRes] = await Promise.all([
       pool.request().input('id', sql.Int, id).query(`${DEED_SELECT} WHERE d.Id = @id`),
       pool.request().input('id', sql.Int, id).query(`
@@ -1440,7 +1458,8 @@ router.get("/:id/revisions", requirePageRight("crm-sales-deed", "view"), async (
 router.put("/:id/assign-legal", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const { LegalExecutiveId } = req.body;
     const lock = await getDeedBookingLockReason(pool, id);
     if (lock) return res.status(400).json({ error: `Cannot assign legal executive because ${lock}` });
@@ -1461,7 +1480,8 @@ router.put("/:id/assign-legal", requirePageRight("crm-sales-deed", "edit"), asyn
 router.put("/:id/submit", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     if (!(await requireAssignedLegalOrApprover(req, res, pool, id))) return;
     const lock = await getDeedBookingLockReason(pool, id);
     if (lock) return res.status(400).json({ error: `Cannot submit deed because ${lock}` });
@@ -1492,7 +1512,8 @@ router.put("/:id/submit", requirePageRight("crm-sales-deed", "edit"), async (req
 router.put("/:id/approve", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const deedRow = await pool.request().input('id', sql.Int, id).query(`
       SELECT d.*, b.AssignedTo, b.BookingNo, a.ApplicantName
       FROM dbo.CrmSalesDeed d
@@ -1574,7 +1595,8 @@ router.put("/:id/approve", requirePageRight("crm-sales-deed", "edit"), async (re
 router.put("/:id/reject", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const remarks = req.body?.Remarks;
     if (!remarks?.trim()) return res.status(400).json({ error: "Rejection remarks are required" });
 
@@ -1661,7 +1683,8 @@ router.put("/:id/reject", requirePageRight("crm-sales-deed", "edit"), async (req
 router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const deed = await pool.request().input("id", sql.Int, id).query(`
       SELECT d.Id, d.Status, d.SeniorApprovalStatus, ag.Status AS AgreementStatus, d.BookingId
       FROM dbo.CrmSalesDeed d
@@ -1707,7 +1730,8 @@ router.put("/:id/send-to-customer", requirePageRight("crm-sales-deed", "edit"), 
 
 // 11. PUT /:id/director/approve
 router.put("/:id/director/approve", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool0 = getPool();
     const deedBooking = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId, CustomerApprovalStatus, SeniorApprovalStatus FROM dbo.CrmSalesDeed WHERE Id = @id");
@@ -1783,7 +1807,8 @@ router.put("/:id/director/approve", requirePageRight("crm-sales-deed", "edit"), 
 
 // 12. PUT /:id/director/reject
 router.put("/:id/director/reject", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool0 = getPool();
     const deedBooking = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmSalesDeed WHERE Id = @id");
@@ -1811,7 +1836,8 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
   try {
     const pool = getPool();
     const b = req.body;
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const cur = await pool.request().input("id", sql.Int, id).query(`
       SELECT d.RegistrationNo, d.ExecutedBy, d.DeedDate, d.RegistrationDeadline, d.BookingId, d.DeedNo, d.SentToCustomerAt,
@@ -1978,7 +2004,8 @@ router.put("/:id", requirePageRight("crm-sales-deed", "edit"), async (req, res) 
 router.post("/:id/documents/upload", requirePageRight("crm-sales-deed", "edit"), upload.array('files'), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const { DocumentType = 'Other', Label, IsMandatory = 0, Remarks } = req.body;
     if (!(await requireAssignedLegalOrApprover(req, res, pool, id))) return;
     const lock = await getDeedBookingLockReason(pool, id);
@@ -2085,7 +2112,8 @@ router.post("/:id/documents/upload", requirePageRight("crm-sales-deed", "edit"),
 router.post("/:id/documents/request", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const { DocumentType, Label, IsMandatory = true } = req.body;
     if (!DocumentType?.trim()) return res.status(400).json({ error: "DocumentType is required" });
 
@@ -2123,8 +2151,10 @@ router.post("/:id/documents/request", requirePageRight("crm-sales-deed", "edit")
 router.post("/:id/documents/:docId/attach", requirePageRight("crm-sales-deed", "edit"), upload.single('file'), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
-    const docId = parseInt(req.params.docId, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+    const docId = parseId(req.params.docId);
+    if (!docId) return res.status(400).json({ error: "Invalid docId" });
     if (!(await requireAssignedLegalOrApprover(req, res, pool, id))) return;
     const lock = await getDeedBookingLockReason(pool, id);
     if (lock) return res.status(400).json({ error: `Cannot attach file because ${lock}` });
@@ -2191,8 +2221,10 @@ router.get("/documents/file/:docId", requirePageRight("crm-sales-deed", "view"),
 router.put("/:id/documents/:docId", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
-    const docId = parseInt(req.params.docId, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+    const docId = parseId(req.params.docId);
+    if (!docId) return res.status(400).json({ error: "Invalid docId" });
     const { Status, Remarks } = req.body;
 
     if (Status !== undefined && !["Verified", "Rejected"].includes(Status)) {
@@ -2227,8 +2259,10 @@ router.put("/:id/documents/:docId", requirePageRight("crm-sales-deed", "edit"), 
 router.delete("/:id/documents/:docId", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
-    const docId = parseInt(req.params.docId, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+    const docId = parseId(req.params.docId);
+    if (!docId) return res.status(400).json({ error: "Invalid docId" });
     
     const deed = await pool.request().input("id", sql.Int, id).query("SELECT SeniorApprovalStatus FROM dbo.CrmSalesDeed WHERE Id = @id");
     if (!deed.recordset.length) return res.status(404).json({ error: "Deed not found" });
@@ -2465,7 +2499,8 @@ router.put("/:id/proxy-customer-recheck", requirePageRight("crm-sales-deed", "ed
 router.put("/:id/cancel", requirePageRight("crm-sales-deed", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const cur = await pool.request().input("id", sql.Int, id).query(`SELECT Status, BookingId FROM dbo.CrmSalesDeed WHERE Id = @id`);
     if (!cur.recordset.length) return res.status(404).json({ error: "Deed not found" });
@@ -2530,7 +2565,8 @@ router.get("/documents/all", requirePageRight("crm-sales-deed", "view"), async (
 // (mirrors crmAgreements.js GET /documents/:docId/audit).
 router.get("/documents/:docId/audit", requirePageRight("crm-sales-deed", "view"), async (req, res) => {
   try {
-    const docId = parseInt(req.params.docId, 10);
+    const docId = parseId(req.params.docId);
+    if (!docId) return res.status(400).json({ error: "Invalid docId" });
     const result = await getPool().request().input("id", sql.Int, docId).query(`
       SELECT al.Id, al.Field, al.OldValue, al.NewValue, al.ChangedAt, al.ChangedBy, u.name AS ChangedByName
       FROM dbo.CrmAuditLog al

@@ -2,7 +2,16 @@ import React from "react";
 import { createPortal } from "react-dom";
 import { Camera as CameraIcon, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
-import { useCameraCapture } from "@/hooks/useCameraCapture";
+import { useCameraCapture, type CameraError } from "@/hooks/useCameraCapture";
+
+const CAMERA_ERROR_TEXT: Record<CameraError, string> = {
+  denied: "Camera access is blocked. Allow Camera for this site (lock icon in the address bar), then reopen.",
+  "no-device": "No camera was found on this device.",
+  busy: "The camera is in use by another app. Close it and try again.",
+  insecure: "The camera needs a secure (HTTPS) connection.",
+  unsupported: "This browser does not support camera capture.",
+  other: "Camera not available.",
+};
 
 // Live device-camera capture in a modal. Draws the shutter frame to a canvas,
 // downscales it to `maxDim` on the long edge and encodes JPEG at `quality`,
@@ -37,13 +46,14 @@ export function CameraCaptureModal({
   const cam = useCameraCapture();
   const [starting, setStarting] = React.useState(true);
   const [shooting, setShooting] = React.useState(false);
+  const fileRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     let alive = true;
     cam.start().then((ok) => {
       if (alive) {
         setStarting(false);
-        if (!ok) toast.error("Camera unavailable on this device");
+        if (!ok) toast.error("Camera unavailable — you can choose a photo instead");
       }
     });
     return () => cam.stop();
@@ -69,6 +79,20 @@ export function CameraCaptureModal({
     }
   };
 
+  const pickFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const dataUrl = await frameToDataUrl(file, maxDim, quality);
+      cam.stop();
+      onCapture(dataUrl);
+      onClose();
+    } catch {
+      toast.error("Could not read that image — try another file");
+    }
+  };
+
   return createPortal(
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center p-4"
@@ -83,7 +107,10 @@ export function CameraCaptureModal({
           {(starting || cam.unsupported) && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white/70 text-xs">
               {cam.unsupported ? (
-                <><CameraIcon size={22} /> Camera not available</>
+                <>
+                  <CameraIcon size={22} />
+                  <span className="max-w-[16rem] text-center">{CAMERA_ERROR_TEXT[cam.error ?? "other"]}</span>
+                </>
               ) : (
                 <><Loader2 size={20} className="animate-spin" /> Starting camera…</>
               )}
@@ -98,7 +125,8 @@ export function CameraCaptureModal({
             <X size={15} />
           </button>
         </div>
-        <div className="flex items-center justify-center p-4 bg-black">
+        <div className="flex flex-col items-center justify-center gap-3 p-4 bg-black">
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pickFile} />
           <button
             type="button"
             onClick={shutter}
@@ -106,6 +134,13 @@ export function CameraCaptureModal({
             className="w-16 h-16 rounded-full bg-white border-4 border-white/40 hover:border-white/70 transition-colors disabled:opacity-40 flex items-center justify-center"
           >
             {shooting ? <Loader2 size={20} className="animate-spin text-black" /> : <CameraIcon size={22} className="text-black" />}
+          </button>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="text-xs text-white/70 hover:text-white underline underline-offset-2"
+          >
+            Choose a photo instead
           </button>
         </div>
       </div>

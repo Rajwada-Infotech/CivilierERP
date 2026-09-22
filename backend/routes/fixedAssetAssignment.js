@@ -8,6 +8,7 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
+const { rebuildFAItemCode } = require("../services/faItemCodeRebuild");
 
 router.use(authenticateToken);
 
@@ -250,6 +251,11 @@ router.post("/", requirePageRight("fixed-asset-assignment", "create"), async (re
           WHERE AssetId = @AssetId
         `);
 
+      // FA Item Code now reflects this holder's department (see
+      // services/faItemCodeRebuild.js) — the FA Inventory stage's plain
+      // code is what dbo.FixedAssetTagging keeps forever, untouched.
+      await rebuildFAItemCode(tx, assetIdVal);
+
       await tx.commit();
       await backPatchRecordId(pool, sql, docNo, "FixedAssetAssignment", assignmentId);
       await bumpCacheVersion("fixed-asset-assignment");
@@ -378,6 +384,7 @@ router.put("/:id", requirePageRight("fixed-asset-assignment", "edit"), async (re
       `);
 
       await resyncCustodian(tx.request(), row.AssetId, email);
+      await rebuildFAItemCode(tx, row.AssetId);
 
       await tx.commit();
       await bumpCacheVersion("fixed-asset-assignment");
@@ -390,7 +397,9 @@ router.put("/:id", requirePageRight("fixed-asset-assignment", "edit"), async (re
   }
 });
 
-// ── DELETE /:id — soft-delete an assignment ──────────────────────────────────
+// ── DELETE /:id — permanently removes the assignment. Blocked when it was
+// created by a User-Wise Asset Transfer — delete that transfer instead
+// (chain order: Transfer -> Assignment, reverse of how they're created).
 router.delete("/:id", requirePageRight("fixed-asset-assignment", "delete"), async (req, res) => {
   const email = requireUser(req, res);
   if (!email) return;
@@ -403,7 +412,7 @@ router.delete("/:id", requirePageRight("fixed-asset-assignment", "delete"), asyn
       SELECT AssignmentId, AssetId, Status, SourceTransferId FROM dbo.FixedAssetAssignment WHERE AssignmentId = @AssignmentId
     `);
     const row = existing.recordset[0];
-    if (!row || row.Status === "Deleted") return res.status(404).json({ error: "Not found" });
+    if (!row) return res.status(404).json({ error: "Not found" });
     if (row.SourceTransferId) {
       return res.status(400).json({ error: "This assignment was created by a User-Wise Asset Transfer — delete that transfer instead to roll it back." });
     }
@@ -413,9 +422,10 @@ router.delete("/:id", requirePageRight("fixed-asset-assignment", "delete"), asyn
     try {
       await tx.request()
         .input("AssignmentId", sql.Int, id)
-        .query(`UPDATE dbo.FixedAssetAssignment SET Status = 'Deleted' WHERE AssignmentId = @AssignmentId`);
+        .query(`DELETE FROM dbo.FixedAssetAssignment WHERE AssignmentId = @AssignmentId`);
 
       await resyncCustodian(tx.request(), row.AssetId, email);
+      await rebuildFAItemCode(tx, row.AssetId);
 
       await tx.commit();
       await bumpCacheVersion("fixed-asset-assignment");

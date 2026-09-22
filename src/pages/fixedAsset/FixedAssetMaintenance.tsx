@@ -115,7 +115,7 @@ function FAItemCodeCombobox({
       <PopoverTrigger asChild>
         <Button variant="outline" role="combobox" aria-expanded={open} disabled={disabled}
           className={cn("w-full justify-between font-normal h-9", !selected && "text-muted-foreground")}>
-          <span className="truncate">{selected ? selected.FAItemCode : "Select FA Item Code…"}</span>
+          <span className="truncate">{selected ? (selected.FAItemCode) : "Select FA Item Code…"}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
@@ -907,7 +907,7 @@ export default function FixedAssetMaintenance() {
                                 className="p-1.5 rounded-lg text-muted-foreground hover:text-yellow-600 dark:hover:text-yellow-400 hover:bg-muted transition-colors"><Pencil size={14} /></button>
                             )}
                             {rights.canDelete && (
-                              <button onClick={() => setDeleteId(c.MaintenanceId)} title={c.Status === "Posted" ? "Reverse & cancel" : "Cancel"}
+                              <button onClick={() => setDeleteId(c.MaintenanceId)} title={c.Status === "Posted" ? "Reverse & delete" : "Delete"}
                                 className="p-1.5 rounded-lg text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-muted transition-colors"><Trash2 size={14} /></button>
                             )}
                           </div>
@@ -1018,16 +1018,16 @@ export default function FixedAssetMaintenance() {
             <div className="relative bg-background border border-border rounded-2xl p-6 max-w-sm w-full space-y-4">
               <div className="flex items-center gap-2.5 text-red-600 dark:text-red-400">
                 <AlertTriangle size={20} />
-                <h3 className="font-semibold">Cancel this record?</h3>
+                <h3 className="font-semibold">Delete this record?</h3>
               </div>
               <p className="text-sm text-muted-foreground">
-                A posted record will also have its GL voucher reversed. This cannot be undone.
+                This permanently removes it and cannot be undone. A posted record will also have its GL voucher reversed first.
               </p>
               <div className="flex justify-end gap-2">
                 <button onClick={() => setDeleteId(null)} className="px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted">Keep</button>
                 <button onClick={() => deleteMut.mutate(deleteId)} disabled={deleteMut.isPending}
                   className="px-3 py-1.5 text-xs rounded-lg bg-red-600 text-white hover:bg-red-700 disabled:opacity-50">
-                  {deleteMut.isPending ? "Working…" : "Cancel Record"}
+                  {deleteMut.isPending ? "Working…" : "Delete Record"}
                 </button>
               </div>
             </div>

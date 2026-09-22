@@ -105,6 +105,12 @@ function deriveFinYear(docDate: string, finYears: { year: string; startDate: str
 type ViewMode = "list" | "form";
 
 // ── bulk import (Excel/CSV) ────────────────────────────────────────────────────
+// Two modes share one importer: "Bulk" keeps the Quantity column (one row can
+// tag several identical units at once, exactly as before); "Individual" drops
+// it entirely — every row is always exactly one unit, so importing 10
+// laptops means 10 rows instead of one row with Quantity=10.
+type ImportMode = "bulk" | "individual";
+
 const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
   { header: "Company", accessor: "Company" },
   { header: "Project", accessor: "Project" },
@@ -112,6 +118,15 @@ const IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
   { header: "Item", accessor: "Item" },
   { header: "Date", accessor: "Date" },
   { header: "Quantity", accessor: "Quantity" },
+  { header: "Remarks", accessor: "Remarks" },
+];
+
+const INDIVIDUAL_IMPORT_TEMPLATE_COLUMNS: ExportColumn[] = [
+  { header: "Company", accessor: "Company" },
+  { header: "Project", accessor: "Project" },
+  { header: "Godown", accessor: "Godown" },
+  { header: "Item", accessor: "Item" },
+  { header: "Date", accessor: "Date" },
   { header: "Remarks", accessor: "Remarks" },
 ];
 
@@ -156,6 +171,7 @@ export default function FixedAssetTagging() {
 
   // ── bulk import (Excel/CSV) ──
   const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importMode, setImportMode] = useState<ImportMode>("bulk");
   const [importPreview, setImportPreview] = useState<ImportRow[] | null>(null);
   const [importDone, setImportDone] = useState(false);
   const [importSubmitting, setImportSubmitting] = useState(false);
@@ -224,12 +240,8 @@ export default function FixedAssetTagging() {
   );
 
   // ── filtered list ─────────────────────────────────────────────────────────
-  // Cancelled entries are deleted from this view the moment they're
-  // cancelled — the row itself is kept server-side (soft-cancel, see
-  // DELETE /:id) so its FA Item Code and stock stay auditable, but it no
-  // longer clutters the working Tagging Transaction History list.
   const filtered = useMemo(() => {
-    let r = ensureArray<TaggingListItem>(taggings).filter((t) => t.Status !== "Cancelled");
+    let r = ensureArray<TaggingListItem>(taggings);
     if (filterCompany) r = r.filter((t) => String(t.CompanyId) === filterCompany);
     if (filterProject) r = r.filter((t) => String(t.ProjectId) === filterProject);
     if (filterFromDate) r = r.filter((t) => t.DocDate && new Date(t.DocDate) >= new Date(filterFromDate));
@@ -246,7 +258,7 @@ export default function FixedAssetTagging() {
   }, [taggings, filterCompany, filterProject, filterFromDate, filterToDate, search]);
 
   const stats = useMemo(() => {
-    const live = ensureArray<TaggingListItem>(taggings).filter((t) => t.Status !== "Cancelled");
+    const live = ensureArray<TaggingListItem>(taggings);
     return {
       count: live.length,
       totalQty: live.reduce((s, t) => s + (t.TaggedQty || 0), 0),
@@ -284,7 +296,7 @@ export default function FixedAssetTagging() {
   const deleteMut = useMutation({
     mutationFn: deleteFixedAssetTagging,
     onSuccess: () => {
-      toast.success("Tagging entry cancelled");
+      toast.success("Tagging entry deleted");
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
       qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
@@ -312,6 +324,14 @@ export default function FixedAssetTagging() {
   const handleImportClick = () => importFileInputRef.current?.click();
 
   const handleDownloadImportTemplate = () => {
+    if (importMode === "individual") {
+      exportToCsv(
+        [{ Company: "", Project: "", Godown: "", Item: "", Date: "", Remarks: "" }],
+        INDIVIDUAL_IMPORT_TEMPLATE_COLUMNS,
+        "fa-inventory-individual-import-template",
+      );
+      return;
+    }
     exportToCsv(
       [{ Company: "", Project: "", Godown: "", Item: "", Date: "", Quantity: "", Remarks: "" }],
       IMPORT_TEMPLATE_COLUMNS,
@@ -368,7 +388,7 @@ export default function FixedAssetTagging() {
           status: "error",
         };
 
-        if (!companyName || !projectName || !godownName || !itemName || !docDate || !quantityRaw) {
+        if (!companyName || !projectName || !godownName || !itemName || !docDate || (importMode === "bulk" && !quantityRaw)) {
           row.message = "Missing required field(s)";
           results.push(row);
           continue;
@@ -401,11 +421,14 @@ export default function FixedAssetTagging() {
         const finYear = deriveFinYear(docDate, finYears);
         if (!finYear) { row.message = "Date doesn't fall in any configured Financial Year"; results.push(row); continue; }
 
-        const quantity = parseInt(quantityRaw, 10);
-        if (!Number.isFinite(quantity) || quantity <= 0 || String(quantity) !== quantityRaw) {
-          row.message = "Quantity must be a positive whole number";
-          results.push(row);
-          continue;
+        let quantity = 1;
+        if (importMode === "bulk") {
+          quantity = parseInt(quantityRaw, 10);
+          if (!Number.isFinite(quantity) || quantity <= 0 || String(quantity) !== quantityRaw) {
+            row.message = "Quantity must be a positive whole number";
+            results.push(row);
+            continue;
+          }
         }
         row.quantity = quantity;
 
@@ -667,13 +690,25 @@ export default function FixedAssetTagging() {
           <div className="flex items-center gap-2">
             <input ref={importFileInputRef} type="file" accept=".csv"
               onChange={handleImportFileChange} className="hidden" />
+            <div className="inline-flex rounded-lg border border-border p-0.5 text-xs font-heading font-semibold" role="group" aria-label="Import mode">
+              <button type="button" onClick={() => setImportMode("bulk")}
+                title="One row can tag several identical units at once (Quantity column)"
+                className={`px-2.5 py-1 rounded-md transition-colors ${importMode === "bulk" ? "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400" : "text-muted-foreground hover:text-foreground"}`}>
+                Bulk
+              </button>
+              <button type="button" onClick={() => setImportMode("individual")}
+                title="Every row is exactly one unit — no Quantity column"
+                className={`px-2.5 py-1 rounded-md transition-colors ${importMode === "individual" ? "bg-yellow-500/20 text-yellow-700 dark:text-yellow-400" : "text-muted-foreground hover:text-foreground"}`}>
+                Individual
+              </button>
+            </div>
             <button onClick={handleDownloadImportTemplate}
               title="Download a blank CSV import template (opens/edits fine in Excel)"
               className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
               <Download size={13} /> <span className="hidden sm:inline">Template</span>
             </button>
             <button onClick={handleImportClick} disabled={importValidating}
-              title="Bulk import FA Inventory rows from Excel/CSV"
+              title={importMode === "individual" ? "Import FA Inventory rows from Excel/CSV — one row per unit" : "Bulk import FA Inventory rows from Excel/CSV"}
               className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
               {importValidating ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
               {importValidating ? "Validating…" : "Import from Excel"}
@@ -785,7 +820,6 @@ export default function FixedAssetTagging() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {filtered.map((t) => {
-                    const alreadyCancelled = t.Status === "Cancelled";
                     const hasRecord = t.RecordStatus === "Done";
                     return (
                     <tr key={t.TagId} className="hover:bg-muted/30 transition-colors">
@@ -825,8 +859,8 @@ export default function FixedAssetTagging() {
                           {rights.canDelete && (
                             <button
                               onClick={() => setDeleteId(t.TagId)}
-                              disabled={alreadyCancelled || hasRecord}
-                              title={alreadyCancelled ? "Already cancelled" : hasRecord ? "Has a Fixed Asset Record — delete that first" : "Cancel"}
+                              disabled={hasRecord}
+                              title={hasRecord ? "Has a Fixed Asset Record — delete that first" : "Delete"}
                               className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-muted-foreground disabled:cursor-not-allowed">
                               <Trash2 size={13} />
                             </button>
@@ -878,15 +912,15 @@ export default function FixedAssetTagging() {
         </DialogContent>
       </Dialog>
 
-      {/* ── delete (cancel) confirm ── */}
+      {/* ── delete confirm ── */}
       {deleteId && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
             <div className="flex items-start gap-3 mb-4">
               <AlertCircle size={20} className="text-destructive mt-0.5 shrink-0" />
               <div>
-                <p className="font-semibold text-sm">Cancel this tagging entry?</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Its FA Item Code will be released back to untagged stock.</p>
+                <p className="font-semibold text-sm">Delete this tagging entry?</p>
+                <p className="text-xs text-muted-foreground mt-0.5">This permanently removes it and cannot be undone. Its FA Item Code will be released back to untagged stock.</p>
               </div>
             </div>
             <div className="flex gap-2 justify-end">
@@ -896,7 +930,7 @@ export default function FixedAssetTagging() {
               </button>
               <button onClick={() => deleteMut.mutate(deleteId!)} disabled={deleteMut.isPending}
                 className="shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive transition-all disabled:opacity-50">
-                {deleteMut.isPending ? "Cancelling…" : "Cancel Entry"}
+                {deleteMut.isPending ? "Deleting…" : "Delete"}
               </button>
             </div>
           </div>

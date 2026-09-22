@@ -17,6 +17,7 @@
  */
 
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
@@ -298,7 +299,8 @@ router.get(
 router.get("/:id", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     // Check for optional columns that may not be migrated yet
     const colCheckReq = pool.request();
@@ -625,7 +627,8 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
 router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const {
       CompanyId,
       ProjectId,

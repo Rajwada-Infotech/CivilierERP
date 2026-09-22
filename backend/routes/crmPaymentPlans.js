@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -185,7 +186,8 @@ router.get("/", requirePageRight("crm-payment-plans", "view"), async (req, res) 
 router.get("/:id", requirePageRight("crm-payment-plans", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const [planRes, itemsRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${PLAN_SELECT} WHERE p.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
@@ -285,7 +287,8 @@ router.post("/", requirePageRight("crm-payment-plans", "create"), async (req, re
 // created after this edit pick up the new split.
 router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, res) => {
   const pool = getPool();
-  const id = parseInt(req.params.id);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const b = req.body;
   const items = Array.isArray(b.Items) ? b.Items : null;
   let namesById = null;
@@ -375,7 +378,8 @@ router.put("/:id", requirePageRight("crm-payment-plans", "edit"), async (req, re
 // their column names haven't been confirmed.
 router.delete("/:id", requirePageRight("crm-payment-plans", "delete"), async (req, res) => {
   const pool = getPool();
-  const id = parseInt(req.params.id);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const [bookingUsage, projectUsage] = await Promise.all([
       pool.request().input("id", sql.Int, id)

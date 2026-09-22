@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -49,7 +50,8 @@ router.get("/", requirePageRight("crm-project-banks", "view"), async (req, res) 
 router.get("/for-project/:projectId", async (req, res) => {
   try {
     const pool = getPool();
-    const projectId = parseInt(req.params.projectId);
+    const projectId = parseId(req.params.projectId);
+    if (!projectId) return res.status(400).json({ error: "Invalid projectId" });
     // Fetch ALL of this project's tag rows first (not filtered on the
     // tagged bank's own LHeadStatus). Whether we're in branch (1) or (2)
     // above must be decided from "does this project have any tag row at
@@ -102,7 +104,8 @@ router.get("/for-project/:projectId", async (req, res) => {
 router.get("/for-bank/:bankLHeadId", requirePageRight("crm-project-banks", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bankLHeadId = parseInt(req.params.bankLHeadId);
+    const bankLHeadId = parseId(req.params.bankLHeadId);
+    if (!bankLHeadId) return res.status(400).json({ error: "Invalid bankLHeadId" });
     const result = await pool.request().input("bid", sql.Int, bankLHeadId).query(`
       SELECT pb.ProjectId, proj.name AS ProjectName
       FROM dbo.CrmProjectBank pb
@@ -179,7 +182,8 @@ router.post("/", requirePageRight("crm-project-banks", "create"), async (req, re
 router.delete("/:id", requirePageRight("crm-project-banks", "delete"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     await pool.request().input("id", sql.Int, id)
       .query("UPDATE dbo.CrmProjectBank SET IsActive = 0 WHERE Id = @id");
     res.json({ success: true });

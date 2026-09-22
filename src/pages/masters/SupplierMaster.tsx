@@ -254,7 +254,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   },
   { header: "Bank Account No", accessor: "bankAccountNo" },
   { header: "Bank Name", accessor: "bankName" },
-  { header: "Bank Branch Code", accessor: "bankBranchCode" },
+  { header: "Bank Branch Location", accessor: "bankBranchCode" },
   { header: "IFSC Code", accessor: "bankIfscCode" },
 ];
 
@@ -991,7 +991,7 @@ const SupplierMaster: React.FC = () => {
         <tr><td>Status</td><td>${s.LHeadStatus ? "Active" : "Inactive"}</td></tr>
         <tr><td>Bank Account Number</td><td>${s.bankAccountNo || "—"}</td></tr>
         <tr><td>Bank Name</td><td>${s.bankName || "—"}</td></tr>
-        <tr><td>Bank Branch Code</td><td>${s.bankBranchCode || "—"}</td></tr>
+        <tr><td>Bank Branch Location</td><td>${s.bankBranchCode || "—"}</td></tr>
         <tr><td>IFSC Code</td><td>${s.bankIfscCode || "—"}</td></tr>
       </table>
       </body></html>
@@ -1544,14 +1544,14 @@ const SupplierMaster: React.FC = () => {
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
-                    Bank Branch Code
+                    Bank Branch Location
                   </label>
                   <input
                     value={form.bankBranchCode}
                     onChange={(e) =>
                       setForm((p) => ({ ...p, bankBranchCode: e.target.value }))
                     }
-                    placeholder="e.g. BR001"
+                    placeholder="e.g. Mumbai Main Branch"
                     className={`${inputCls} font-mono`}
                   />
                 </div>
@@ -2003,7 +2003,7 @@ const SupplierMaster: React.FC = () => {
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
                 { label: "Bank Account Number", value: viewRecord.bankAccountNo || "—", mono: true },
                 { label: "Bank Name", value: viewRecord.bankName || "—" },
-                { label: "Bank Branch Code", value: viewRecord.bankBranchCode || "—", mono: true },
+                { label: "Bank Branch Location", value: viewRecord.bankBranchCode || "—", mono: true },
                 { label: "IFSC Code", value: viewRecord.bankIfscCode || "—", mono: true },
               ].map(({ label, value, mono }) => (
                 <div key={label}>

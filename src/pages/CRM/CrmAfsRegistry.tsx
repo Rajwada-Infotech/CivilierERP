@@ -138,7 +138,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
   const embedded = embeddedBookingId != null;
   const qc = useQueryClient();
   const navigate = useNavigate();
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = embedded ? null : sp.get("bookingId");
   const { canCreate } = usePageRights("crm-afs-registry");
   const { theme } = useTheme();

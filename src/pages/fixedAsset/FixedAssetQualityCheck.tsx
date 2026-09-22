@@ -915,7 +915,7 @@ export default function FixedAssetQualityCheck() {
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-red-500/10 text-red-600 dark:text-red-400"><AlertTriangle size={16} /></span>
               <p className="font-semibold text-sm">Delete this quality check?</p>
             </div>
-            <p className="text-xs text-muted-foreground">The record is removed from the active list but kept in history for audit. Any pending reminder for it stops.</p>
+            <p className="text-xs text-muted-foreground">This permanently removes it and cannot be undone. Any pending reminder for it stops.</p>
             <div className="flex gap-2 justify-end pt-1">
               <button onClick={() => setDeleteId(null)} className="h-9 px-4 rounded-lg border border-border text-sm hover:bg-muted transition-colors">Cancel</button>
               <button onClick={() => deleteMut.mutate(deleteId)} disabled={deleteMut.isPending}

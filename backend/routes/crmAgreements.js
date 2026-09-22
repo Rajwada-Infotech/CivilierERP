@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const multer = require("multer");
 const router = express.Router();
@@ -351,7 +352,8 @@ router.get("/:id", requirePageRight("crm-agreements", "view"), async (req, res) 
 router.get("/:id/revisions", requirePageRight("crm-agreements", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("id", sql.Int, id).query(`
       SELECT r.*, cu.name AS CreatedByName
       FROM dbo.CrmAgreementRevision r
@@ -534,7 +536,8 @@ router.post("/", requirePageRight("crm-agreements", "create"), async (req, res) 
 // agreement for another approval pass (no role restriction — this is not
 // an approval action).
 router.put("/:id/submit", requirePageRight("crm-agreements", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -566,7 +569,8 @@ router.put("/:id/submit", requirePageRight("crm-agreements", "edit"), async (req
 // inside approvalTransition(). Only reachable from the Admin Approval Inbox
 // now — there is no self-approve button on the agreement page anymore.
 router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -725,7 +729,8 @@ router.put("/:id/approve", requirePageRight("crm-agreements", "edit"), async (re
 
 // PUT /:id/reject — senior rejection. Admin/super_admin/dba only.
 router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -826,7 +831,8 @@ router.put("/:id/reject", requirePageRight("crm-agreements", "edit"), async (req
 // "hardcoded for now, reassignable later with zero code change" pattern
 // used for Senior Approval.
 router.put("/:id/date/approve", requirePageRight("crm-agreements", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -874,7 +880,8 @@ router.put("/:id/date/approve", requirePageRight("crm-agreements", "edit"), asyn
 // proposals are cleared so staff and customer start the date negotiation
 // over, rather than leaving a rejected date sitting on the record.
 router.put("/:id/date/reject", requirePageRight("crm-agreements", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -955,7 +962,8 @@ async function logApprovalHistory(agreementId, action, remarks, actorIdVal, dbCo
 router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const { proposedDate } = req.body;
 
     const lockReason = await getAgreementBookingLockReason(pool, id);
@@ -1047,7 +1055,8 @@ router.put("/:id/send-to-customer", requirePageRight("crm-agreements", "edit"), 
 router.put("/:id/propose-date", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const { proposedDate } = req.body;
     if (!proposedDate) return res.status(400).json({ error: "proposedDate is required" });
 
@@ -1097,7 +1106,8 @@ router.put("/:id/propose-date", requirePageRight("crm-agreements", "edit"), asyn
 router.put("/:id/date/accept", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const lockReason = await getAgreementBookingLockReason(pool, id);
     if (lockReason) return res.status(409).json({ error: `Cannot accept a date — ${lockReason}. Cancel the agreement instead.` });
@@ -1138,7 +1148,8 @@ router.put("/:id/date/accept", requirePageRight("crm-agreements", "edit"), async
 router.get("/:id/date-history", requirePageRight("crm-agreements", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("agid", sql.Int, id).query(`
       SELECT h.*, u.name AS CreatedByName
       FROM dbo.CrmAgreementDateHistory h
@@ -1161,7 +1172,8 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
   try {
     const pool = getPool();
     const b = req.body;
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
 
     const old = await pool.request().input("id", sql.Int, id)
@@ -1278,7 +1290,8 @@ router.put("/:id", requirePageRight("crm-agreements", "edit"), async (req, res) 
 router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
     const newId = req.body?.LegalExecutiveId ? parseInt(req.body.LegalExecutiveId) : null;
 
@@ -1336,7 +1349,8 @@ router.put("/:id/assign-legal", requirePageRight("crm-agreements", "edit"), asyn
 router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
 
     const cur = await pool.request().input("id", sql.Int, id).query(`
@@ -1426,7 +1440,8 @@ router.put("/:id/mark-executed", requirePageRight("crm-agreements", "edit"), asy
 router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
     const { AfsRegistrationNo, AfsRegistrationDate, AfsStampDuty, AfsRegistrationFee } = req.body || {};
 
@@ -1514,7 +1529,8 @@ router.put("/:id/mark-registered", requirePageRight("crm-agreements", "edit"), a
 router.put("/:id/cancel", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
 
     const cur = await pool.request().input("id", sql.Int, id)
@@ -1560,7 +1576,8 @@ router.post("/:id/documents", requirePageRight("crm-documents", "create"), async
   try {
     const pool = getPool();
     const b = req.body;
-    const agreementId = parseInt(req.params.id);
+    const agreementId = parseId(req.params.id);
+    if (!agreementId) return res.status(400).json({ error: "Invalid id" });
     const DOC_TYPES = ["SaleAgreement","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
     if (!DOC_TYPES.includes(b.DocumentType))
       return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
@@ -1623,7 +1640,8 @@ router.post("/:id/documents/request", requirePageRight("crm-documents", "create"
   try {
     const pool = getPool();
     const b = req.body;
-    const agreementId = parseInt(req.params.id);
+    const agreementId = parseId(req.params.id);
+    if (!agreementId) return res.status(400).json({ error: "Invalid id" });
     const DOC_TYPES = ["SaleAgreement","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
     if (!DOC_TYPES.includes(b.DocumentType))
       return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
@@ -1694,7 +1712,8 @@ router.post("/:id/documents/upload", requirePageRight("crm-documents", "create")
     if (err) return res.status(400).json({ error: err.message });
     try {
       const pool = getPool();
-      const agreementId = parseInt(req.params.id);
+      const agreementId = parseId(req.params.id);
+      if (!agreementId) return res.status(400).json({ error: "Invalid id" });
       const docType = req.body?.DocumentType;
       const DOC_TYPES = ["SaleAgreement","PossessionLetter","RegistrationDoc","NOC","IdentityProof","Other"];
       if (!DOC_TYPES.includes(docType)) return res.status(400).json({ error: `Invalid DocumentType. Must be: ${DOC_TYPES.join(", ")}` });
@@ -1772,8 +1791,10 @@ router.post("/:id/documents/:docId/attach", requirePageRight("crm-documents", "c
     if (sigErr) return res.status(400).json({ error: sigErr });
     try {
       const pool = getPool();
-      const agreementId = parseInt(req.params.id);
-      const docId = parseInt(req.params.docId);
+      const agreementId = parseId(req.params.id);
+      if (!agreementId) return res.status(400).json({ error: "Invalid id" });
+      const docId = parseId(req.params.docId);
+      if (!docId) return res.status(400).json({ error: "Invalid docId" });
 
       const cur = await pool.request()
         .input("id", sql.Int, docId).input("agid", sql.Int, agreementId)
@@ -1880,7 +1901,8 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
 // GET /documents/file/:docId — stream a document's file for inline preview/download
 router.get("/documents/file/:docId", requirePageRight("crm-documents", "view"), async (req, res) => {
   try {
-    const id = parseInt(req.params.docId);
+    const id = parseId(req.params.docId);
+    if (!id) return res.status(400).json({ error: "Invalid docId" });
     const result = await getPool().request().input("id", sql.Int, id)
       .query("SELECT FileName, FileBase64, MimeType FROM dbo.CrmAgreementDocument WHERE Id = @id");
     if (!result.recordset.length || !result.recordset[0].FileBase64) return res.status(404).json({ error: "File not found" });
@@ -1903,8 +1925,10 @@ router.put("/:id/documents/:docId", requirePageRight("crm-documents", "edit"), a
   try {
     const pool = getPool();
     const b = req.body;
-    const agreementId = parseInt(req.params.id);
-    const docId = parseInt(req.params.docId);
+    const agreementId = parseId(req.params.id);
+    if (!agreementId) return res.status(400).json({ error: "Invalid id" });
+    const docId = parseId(req.params.docId);
+    if (!docId) return res.status(400).json({ error: "Invalid docId" });
     const actor = actorId(req);
 
     const lockReason = await getAgreementBookingLockReason(pool, agreementId);
@@ -1996,7 +2020,8 @@ const PROXY_METHODS = ["Phone", "InPerson", "Email", "WhatsApp", "Other"];
 router.put("/:id/proxy-customer-approve", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
     const { ProxyMethod, ProxyRemarks } = req.body;
 
@@ -2076,7 +2101,8 @@ router.put("/:id/proxy-customer-approve", requirePageRight("crm-agreements", "ed
 router.put("/:id/proxy-date-accept", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
     const { ProxyMethod, ProxyRemarks } = req.body;
 
@@ -2304,7 +2330,8 @@ router.post("/:id/documents/:docId/proxy-attach",
   async (req, res) => {
     try {
       const pool = getPool();
-      const agreementId = parseInt(req.params.id);
+      const agreementId = parseId(req.params.id);
+      if (!agreementId) return res.status(400).json({ error: "Invalid id" });
       const docId       = parseInt(req.params.docId);
       const actor       = actorId(req);
       const { ProxyMethod, ProxyRemarks } = req.body;
@@ -2401,7 +2428,8 @@ async function setPortalActive(pool, agreementId, isActive) {
 // that bounced through Rejected -> re-uploaded -> Submitted more than once.
 router.get("/documents/:docId/audit", requirePageRight("crm-documents", "view"), async (req, res) => {
   try {
-    const docId = parseInt(req.params.docId);
+    const docId = parseId(req.params.docId);
+    if (!docId) return res.status(400).json({ error: "Invalid docId" });
     const result = await getPool().request().input("id", sql.Int, docId).query(`
       SELECT al.Id, al.Field, al.OldValue, al.NewValue, al.ChangedAt, al.ChangedBy, u.name AS ChangedByName
       FROM dbo.CrmAuditLog al
@@ -2491,7 +2519,8 @@ router.put("/documents/bulk-review", requirePageRight("crm-documents", "edit"), 
 router.put("/:id/portal/deactivate", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await setPortalActive(pool, id, false);
     if (result.error) return res.status(result.status).json({ error: result.error });
     await logCrmAudit(pool, "Agreement", id, actorId(req), [
@@ -2507,7 +2536,8 @@ router.put("/:id/portal/deactivate", requirePageRight("crm-agreements", "edit"),
 router.put("/:id/portal/reactivate", requirePageRight("crm-agreements", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await setPortalActive(pool, id, true);
     if (result.error) return res.status(result.status).json({ error: result.error });
     await logCrmAudit(pool, "Agreement", id, actorId(req), [

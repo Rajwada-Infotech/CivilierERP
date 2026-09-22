@@ -484,7 +484,9 @@ router.post("/:id/post", requirePageRight(PAGE, "edit"), async (req, res) => {
   }
 });
 
-// ── DELETE /:id — Draft: cancel. Posted: reverse GL then cancel ─────────────
+// ── DELETE /:id — permanently removes the maintenance record. Posted: the GL
+// posting is reversed first, then the record itself is deleted (not just
+// cancelled) ──────────────────────────────────────────────────────────────
 router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
   const email = requireUser(req, res);
   if (!email) return;
@@ -495,16 +497,13 @@ router.delete("/:id", requirePageRight(PAGE, "delete"), async (req, res) => {
     const r = await pool.request().input("Id", sql.Int, id)
       .query(`SELECT MaintenanceId, Status FROM dbo.FixedAssetMaintenance WHERE MaintenanceId = @Id`);
     if (!r.recordset.length) return res.status(404).json({ error: "Not found" });
-    if (r.recordset[0].Status === "Cancelled") return res.json({ ok: true });
 
     if (r.recordset[0].Status === "Posted") {
       await reverseMaintenancePosting(pool, id);
     }
     await pool.request()
-      .input("Id", sql.Int, id).input("By", sql.NVarChar(200), email)
-      .query(`UPDATE dbo.FixedAssetMaintenance
-              SET Status = 'Cancelled', UpdatedBy = @By, UpdatedAt = SYSDATETIME()
-              WHERE MaintenanceId = @Id`);
+      .input("Id", sql.Int, id)
+      .query(`DELETE FROM dbo.FixedAssetMaintenance WHERE MaintenanceId = @Id`);
     await bumpCacheVersion("fixed-asset-maintenance");
     await bumpCacheVersion("general-ledger");
     res.json({ ok: true });

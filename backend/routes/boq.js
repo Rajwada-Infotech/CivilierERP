@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -456,7 +457,8 @@ router.post("/", requirePageRight("boq", "create"), async (req, res) => {
 
 // ── PUT /:id  (Update) ────────────────────────────────────────────────────────
 router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const {
     BoqNo,
     BoqDate,
@@ -595,7 +597,8 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
 router.delete("/:id", requirePageRight("boq", "delete"), async (req, res) => {
   let transaction;
   try {
-    const boqID = parseInt(req.params.id, 10);
+    const boqID = parseId(req.params.id);
+    if (!boqID) return res.status(400).json({ error: "Invalid id" });
     const pool = getPool();
 
     // Block deletion if this BOQ is linked to any Work Order
@@ -652,7 +655,8 @@ router.delete("/:id", requirePageRight("boq", "delete"), async (req, res) => {
 
 // Unified transition endpoint used by the BOQ preview panel
 router.post("/:id/transition", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const { action } = req.body;
   try {
     const userEmail = requireUserEmail(req, res);
@@ -671,7 +675,8 @@ router.post("/:id/transition", async (req, res) => {
 });
 
 router.put("/:id/submit", requirePageRight("boq", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -690,7 +695,8 @@ router.put("/:id/submit", requirePageRight("boq", "edit"), async (req, res) => {
 });
 
 router.put("/:id/approve", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -713,7 +719,8 @@ router.put("/:id/approve", async (req, res) => {
 });
 
 router.put("/:id/reject", async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const { note } = req.body;
   try {
     const userEmail = requireUserEmail(req, res);

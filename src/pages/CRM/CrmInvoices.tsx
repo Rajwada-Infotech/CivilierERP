@@ -943,11 +943,18 @@ const CrmInvoices: React.FC = () => {
   // to pre-select that booking in the Generate dialog.
   useEffect(() => {
     const bid = searchParams.get("bookingId");
-    if (bid && rights.canCreate) {
-      setGenBookingId(parseInt(bid, 10));
+    if (bid) {
+      const parsed = parseInt(bid, 10);
+      // Always clear the param from the URL first — whether or not it's valid.
       const next = new URLSearchParams(searchParams);
       next.delete("bookingId");
       setSearchParams(next, { replace: true });
+      // Only open the dialog when the id is a valid positive integer AND the
+      // user has create rights. parseInt("0") === 0 and parseInt("abc") === NaN
+      // are both falsy, so neither should open the dialog with a bad id.
+      if (parsed > 0 && rights.canCreate) {
+        setGenBookingId(parsed);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

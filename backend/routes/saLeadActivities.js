@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -40,7 +41,8 @@ router.get("/", requirePageRight("sa-lead-activities", "view"), async (req, res)
 router.get("/lead/:leadId", requirePageRight("sa-lead-activities", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const lid = parseInt(req.params.leadId);
+    const lid = parseId(req.params.leadId);
+    if (!lid) return res.status(400).json({ error: "Invalid leadId" });
     // Row-level check: verify caller can see this lead
     const req0 = pool.request().input("lid", sql.Int, lid);
     const scope = applyLeadScope(req0, req, "l");
@@ -94,7 +96,8 @@ router.get("/pending-followups", requirePageRight("sa-lead-activities", "view"),
 router.post("/lead/:leadId", requirePageRight("sa-lead-activities", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const lid = parseInt(req.params.leadId);
+    const lid = parseId(req.params.leadId);
+    if (!lid) return res.status(400).json({ error: "Invalid leadId" });
     const b   = req.body;
     const actor = actorId(req);
 

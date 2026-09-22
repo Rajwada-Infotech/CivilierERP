@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -97,7 +98,8 @@ router.get("/", requirePageRight("crm-noc", "view"), async (req, res) => {
 router.get("/booking/:bookingId/context", requirePageRight("crm-noc", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
 
     const booking = await pool.request().input("bid", sql.Int, bookingId).query(`
       SELECT b.Id, b.BookingNo, COALESCE(bn.UnitNo, b.UnitNo) AS UnitNo, a.ApplicantName, a.Mobile,
@@ -300,7 +302,8 @@ router.put("/:id", requirePageRight("crm-noc", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const cur0 = await pool.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
     if (!cur0.recordset.length) return res.status(404).json({ error: "NOC not found" });
@@ -325,7 +328,8 @@ router.put("/:id", requirePageRight("crm-noc", "edit"), async (req, res) => {
 
 // PUT /:id/submit — Rejected -> Pending (resubmit)
 router.put("/:id/submit", requirePageRight("crm-noc", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool0 = getPool();
     const cur0 = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
@@ -346,7 +350,8 @@ router.put("/:id/submit", requirePageRight("crm-noc", "edit"), async (req, res) 
 // PUT /:id/approve — admin/super_admin/marketing_head only, enforced inside
 // approvalTransition().
 router.put("/:id/approve", requirePageRight("crm-noc", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool0 = getPool();
     const cur0 = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
@@ -369,7 +374,8 @@ router.put("/:id/approve", requirePageRight("crm-noc", "edit"), async (req, res)
 
 // PUT /:id/reject — admin/super_admin/marketing_head only.
 router.put("/:id/reject", requirePageRight("crm-noc", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool0 = getPool();
     const cur0 = await pool0.request().input("id", sql.Int, id).query("SELECT BookingId FROM dbo.CrmNoc WHERE Id = @id");
@@ -392,7 +398,8 @@ router.put("/:id/reject", requirePageRight("crm-noc", "edit"), async (req, res) 
 router.put("/:id/mark-issued", requirePageRight("crm-noc", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status, BookingId FROM dbo.CrmNoc WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "NOC not found" });

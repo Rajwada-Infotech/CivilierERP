@@ -7,6 +7,7 @@ export type IncentiveStatus = "Pending" | "Approved" | "Rejected" | "Paid";
 
 export interface IncentiveRow {
   IncentiveId: number;
+  DocumentNo: string;
   EmployeeId: number;
   EmployeeCode: string;
   EmployeeName: string;
@@ -47,7 +48,7 @@ export const addIncentiveRecord = async (payload: IncentivePayload) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
-  return handle<{ message: string }>(res);
+  return handle<{ message: string; documentNo: string }>(res);
 };
 
 export const updateIncentiveRecord = async (id: number, payload: IncentivePayload) => {

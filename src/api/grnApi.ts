@@ -291,7 +291,7 @@ export const getGRNAttachments = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to fetch attachments");
   }
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 export const previewNextGRNNumber = async (

@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -165,7 +166,8 @@ router.post("/", requirePageRight("crm-oc-cc", "create"), async (req, res) => {
 router.put("/:id", requirePageRight("crm-oc-cc", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Id, ProjectId, BlockId, Status FROM dbo.CrmOccupancyCertificate WHERE Id = @id");

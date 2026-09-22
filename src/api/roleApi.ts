@@ -1,4 +1,4 @@
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+﻿import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type { PagePermission } from "@/contexts/types";
 
 // Types
@@ -17,7 +17,7 @@ export interface RoleRecord {
 
 // API Functions
 
-// Lightweight list for dropdowns — any authenticated user can call this.
+// Lightweight list for dropdowns â€” any authenticated user can call this.
 // Uses /api/roles/list which only checks for a valid token (no admin rights needed).
 export const getRolesList = async (): Promise<
   Pick<RoleRecord, "RId" | "RName">[]
@@ -29,13 +29,13 @@ export const getRolesList = async (): Promise<
   return res.json().catch(() => ({}));
 };
 
-// Full role records — requires admin (Rights > Menu > CanView). Use in Role Master only.
+// Full role records â€” requires admin (Rights > Menu > CanView). Use in Role Master only.
 export const getRoles = async (): Promise<RoleRecord[]> => {
   const res = await fetchWithAuth("/api/roles");
   if (!res.ok) {
     throw new Error("Failed to fetch roles");
   }
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 export const addRole = async (data: {
@@ -78,7 +78,7 @@ export const deleteRole = async (id: number): Promise<{ success: boolean }> => {
   return res.json().catch(() => ({}));
 };
 
-// Role-wise page permissions — the baseline every user with this role
+// Role-wise page permissions â€” the baseline every user with this role
 // inherits, merged live with any of their own per-user overrides
 // (see backend getEffectivePagePermissions). Editing this affects every
 // user holding the role immediately, not just future assignments.
@@ -87,7 +87,7 @@ export const getRolePermissions = async (
 ): Promise<PagePermission[]> => {
   const res = await fetchWithAuth(`/api/roles/${roleId}/rights`);
   if (!res.ok) throw new Error("Failed to fetch role permissions");
-  const data = await res.json().catch(() => ({}));
+  const data = await res.json().catch(() => []);
   return Array.isArray(data) ? data : [];
 };
 

@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
@@ -218,7 +219,8 @@ router.get("/suggest", requirePageRight("crm-customers", "view"), async (req, re
 router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const [custRes, appsRes, outstandingRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${CUSTOMER_SELECT} WHERE c.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
@@ -410,7 +412,8 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
 router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email, id);

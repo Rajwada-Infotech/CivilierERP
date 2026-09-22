@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -53,7 +54,8 @@ router.post("/", requirePageRight("crm-milestone-master", "create"), async (req,
 router.put("/:id", requirePageRight("crm-milestone-master", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     await pool.request()
       .input("id",   sql.Int,           id)
@@ -80,7 +82,8 @@ router.put("/:id", requirePageRight("crm-milestone-master", "edit"), async (req,
 router.delete("/:id", requirePageRight("crm-milestone-master", "delete"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const usage = await pool.request().input("id", sql.Int, id)
       .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentPlanTemplateItem WHERE MilestoneMasterId = @id");
     if (usage.recordset[0].Cnt > 0) {

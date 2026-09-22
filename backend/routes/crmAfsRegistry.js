@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -152,7 +153,8 @@ router.post("/", requirePageRight("crm-afs-registry", "create"), async (req, res
 router.put("/:id/schedule", requirePageRight("crm-afs-registry", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (!b.ScheduledDate) return res.status(400).json({ error: "ScheduledDate is required" });
 
@@ -185,7 +187,8 @@ router.put("/:id/schedule", requirePageRight("crm-afs-registry", "edit"), async 
 router.put("/:id/complete", requirePageRight("crm-afs-registry", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmAfsRegistry WHERE Id = @id");

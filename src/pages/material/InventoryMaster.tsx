@@ -1,6 +1,7 @@
 import React from "react";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Warehouse,
@@ -373,6 +374,7 @@ function DeleteDialog({
       qc.invalidateQueries({ queryKey: ["godowns"] });
       onClose();
     },
+    onError: (e: Error) => toast.error(e.message || "Failed to delete godown"),
   });
 
   // Reset stale error state when the dialog opens for a new godown
