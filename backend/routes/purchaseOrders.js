@@ -115,6 +115,49 @@ async function assertNoMixedItemTypes(pool, poItemsArray) {
   }
 }
 
+// The base date + longest lead time (Days of Supply) among the items on this
+// PO — ExpectedDeliveryDate can never be earlier than this, since the
+// slowest item to supply can't arrive any sooner. Mirrors the client-side
+// min-date computation in PurchaseOrderMaster.tsx so a direct API call
+// can't bypass it. Returns null when there's nothing to enforce.
+async function computeMinExpectedDate(pool, baseDate, poItemsArray) {
+  const itemIds = [
+    ...new Set(
+      (Array.isArray(poItemsArray) ? poItemsArray : [])
+        .map((it) => it.itemId)
+        .filter((id) => id && typeof id === "string"),
+    ),
+  ];
+  if (!itemIds.length || !baseDate) return null;
+
+  const hasCol = await pool
+    .request()
+    .query(
+      `SELECT COUNT(1) AS cnt FROM sys.columns
+       WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_DaysOfSupply'`,
+    )
+    .then((r) => r.recordset[0].cnt > 0);
+  if (!hasCol) return null;
+
+  const request = pool.request();
+  const idParams = itemIds.map((id, i) => {
+    const p = `dosItemId${i}`;
+    request.input(p, sql.UniqueIdentifier, id);
+    return `@${p}`;
+  });
+  const result = await request.query(`
+    SELECT MAX(M_DaysOfSupply) AS MaxDays
+    FROM   dbo.Item_Master_Group
+    WHERE  M_Id IN (${idParams.join(",")})
+  `);
+  const maxDays = result.recordset[0]?.MaxDays;
+  if (!maxDays || maxDays <= 0) return null;
+
+  const min = new Date(baseDate);
+  min.setDate(min.getDate() + maxDays);
+  return min;
+}
+
 // Resolve a FinYear.FId from its FName label (e.g. "2026-2027", "FY 2026-27",
 // "AY24-25"). The label is whatever the frontend's Financial Year dropdown
 // happens to display, and that name is free-text — it can contain any
@@ -314,6 +357,17 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
   }
 
   await assertNoMixedItemTypes(pool, poItemsArray);
+
+  if (ExpectedDeliveryDate) {
+    const minDate = await computeMinExpectedDate(pool, PODate, poItemsArray);
+    if (minDate && new Date(ExpectedDeliveryDate) < minDate) {
+      const err = new Error(
+        `Expected Delivery can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+      );
+      err.status = 400;
+      throw err;
+    }
+  }
 
   // Enforce: a PO can only be raised against a paid Sale Invoice
   // (Sale Order workflow — Migration 111).
@@ -699,10 +753,7 @@ const mapRow = (po) => ({
 });
 
 // ── GET /  (List with Pagination) ────────────────────────────────────────────
-router.get(
-  "/",
-  cache("purchase-orders", 300, { shared: true }),
-  async (req, res) => {
+const listPurchaseOrders = async (req, res) => {
     try {
       const pool = getPool();
       const page = Math.max(parseInt(req.query.page) || 1, 1);
@@ -790,8 +841,8 @@ router.get(
       if (res.headersSent) return;
       res.status(500).json({ error: err.message });
     }
-  },
-);
+};
+router.get("/", cache("purchase-orders", 300, { shared: true }), listPurchaseOrders);
 
 // ── GET /service-eligible — POs whose items are all Service items ────────────
 // Backs the Invoice page's "PO" tab: goods must go through a GRN first,
@@ -809,7 +860,7 @@ router.get("/service-eligible", async (req, res) => {
 });
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
-router.get("/:id", async (req, res) => {
+const getPurchaseOrderDetail = async (req, res) => {
   try {
     const id = requireValidId(req, res);
     if (!id) return;
@@ -858,7 +909,8 @@ router.get("/:id", async (req, res) => {
     console.error("GET PurchaseOrder by id error:", err);
     res.status(500).json({ error: err.message });
   }
-});
+};
+router.get("/:id", getPurchaseOrderDetail);
 
 // ── GET /:id/document-chain — PO -> Vehicle In/Out -> GRN tree ───────────────
 router.get("/:id/document-chain", async (req, res) => {
@@ -1009,6 +1061,15 @@ router.put(
       }
 
       await assertNoMixedItemTypes(getPool(), poItemsArray);
+
+      if (ExpectedDeliveryDate) {
+        const minDate = await computeMinExpectedDate(getPool(), PODate, poItemsArray);
+        if (minDate && new Date(ExpectedDeliveryDate) < minDate) {
+          return res.status(400).json({
+            error: `Expected Delivery can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+          });
+        }
+      }
 
       const currentStatus = await getRecordStatus("purchase-orders", id);
       const allowPostApproval = await resolveAllowPostApproval(req, "purchase-orders");
@@ -1547,7 +1608,7 @@ function emitPOMessage(poId, comment) {
 }
 
 // ── GET /:id/comments — PO<->supplier chat thread (staff side) ──────────────
-router.get("/:id/comments", async (req, res) => {
+const listPurchaseOrderComments = async (req, res) => {
   const poId = parseInt(req.params.id, 10);
   if (!poId) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -1563,10 +1624,11 @@ router.get("/:id/comments", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+router.get("/:id/comments", listPurchaseOrderComments);
 
 // ── POST /:id/comment — reply in the PO<->supplier chat (staff side) ────────
-router.post("/:id/comment", async (req, res) => {
+const addPurchaseOrderComment = async (req, res) => {
   const poId = parseInt(req.params.id, 10);
   if (!poId) return res.status(400).json({ error: "Invalid id" });
   const comment = (req.body?.comment || "").trim();
@@ -1602,8 +1664,19 @@ router.post("/:id/comment", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+};
+router.post("/:id/comment", addPurchaseOrderComment);
 
 module.exports = router;
 module.exports.createPurchaseOrderInternal = createPurchaseOrderInternal;
+// Reused by Vehicle In/Out and GRN so their PO pickers / chat work under THEIR
+// page right — this router is gated by the separate Purchase Orders right, which
+// a store user may not have. The gate lives on the router, so these bare handlers
+// are not gated here; the mounting router must enforce its own permission.
+module.exports.poHandlers = {
+  list: listPurchaseOrders,
+  detail: getPurchaseOrderDetail,
+  listComments: listPurchaseOrderComments,
+  addComment: addPurchaseOrderComment,
+};
 

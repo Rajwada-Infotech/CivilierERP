@@ -186,6 +186,8 @@ router.get("/:id", async (req, res, next) => {
       "lh.LCountry",
       "lh.LBelongsTo",
       "lh.LDescription",
+      "lh.LAccountNo",
+      "lh.LIFSCCode",
     ];
     if (hasColumn(columnMeta, "LGSTType")) selectColumns.push("lh.LGSTType");
     if (hasColumn(columnMeta, "LHeadPan")) selectColumns.push("lh.LHeadPan");
@@ -202,6 +204,9 @@ router.get("/:id", async (req, res, next) => {
       selectColumns.push("lh.TdsLimitApplicable");
     if (hasColumn(columnMeta, "InvoiceMode"))
       selectColumns.push("lh.InvoiceMode");
+    if (hasColumn(columnMeta, "LBankName")) selectColumns.push("lh.LBankName");
+    if (hasColumn(columnMeta, "LBranchCode"))
+      selectColumns.push("lh.LBranchCode");
 
     // Login email lives on dbo.users (RoleId -> the 'supplier' row in
     // dbo.Role, LinkedLHeadId -> this row), not on AccountHeadMaster — same
@@ -253,6 +258,8 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       "lh.LDescription",
       "lh.isEdited",
       "lh.Status", // ← approval status
+      "lh.LAccountNo",
+      "lh.LIFSCCode",
     ];
 
     if (hasColumn(columnMeta, "LGSTType")) selectColumns.push("lh.LGSTType");
@@ -270,6 +277,9 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       selectColumns.push("lh.TdsLimitApplicable");
     if (hasColumn(columnMeta, "InvoiceMode"))
       selectColumns.push("lh.InvoiceMode");
+    if (hasColumn(columnMeta, "LBankName")) selectColumns.push("lh.LBankName");
+    if (hasColumn(columnMeta, "LBranchCode"))
+      selectColumns.push("lh.LBranchCode");
     if (hasColumn(columnMeta, "CreatedAt")) selectColumns.push("lh.CreatedAt");
     if (hasColumn(columnMeta, "UpdatedAt")) selectColumns.push("lh.UpdatedAt");
     if (hasColumn(columnMeta, "ApprovedBy"))
@@ -386,6 +396,14 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     TdsLimitApplicable,
     InvoiceMode,
     SupplierPassword: supplierPasswordPlain,
+    // Bank Details section (Vendor Master / Contractor Master) — all four
+    // optional. LAccountNo/LIFSCCode already exist on this table (normally
+    // only written by Bank Master's own routes for LHeadType='B'); reused
+    // as-is here for a Supplier/Contractor's own bank account.
+    LAccountNo,
+    LIFSCCode,
+    LBankName,
+    LBranchCode,
   } = req.body;
 
   try {
@@ -522,7 +540,9 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       .input("LBelongsTo", sql.Int, effectiveLBelongsTo || null)
       .input("LDescription", sql.NVarChar, LDescription || null)
       .input("LHeadType", sql.VarChar(50), LHeadType || "GL")
-      .input("Status", sql.NVarChar(20), "Draft"); // ← always Draft on create
+      .input("Status", sql.NVarChar(20), "Draft") // ← always Draft on create
+      .input("LAccountNo", sql.VarChar(20), LAccountNo || null)
+      .input("LIFSCCode", sql.NVarChar(11), LIFSCCode || null);
 
     const insertColumns = [
       "LHeadName",
@@ -541,6 +561,8 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       "LDescription",
       "LHeadType",
       "Status",
+      "LAccountNo",
+      "LIFSCCode",
     ];
     const insertValues = insertColumns.map((col) => `@${col}`);
 
@@ -590,6 +612,16 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       request.input("InvoiceMode", sql.NVarChar(20), InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice");
       insertColumns.push("InvoiceMode");
       insertValues.push("@InvoiceMode");
+    }
+    if (hasColumn(columnMeta, "LBankName")) {
+      request.input("LBankName", sql.NVarChar(150), LBankName || null);
+      insertColumns.push("LBankName");
+      insertValues.push("@LBankName");
+    }
+    if (hasColumn(columnMeta, "LBranchCode")) {
+      request.input("LBranchCode", sql.NVarChar(20), LBranchCode || null);
+      insertColumns.push("LBranchCode");
+      insertValues.push("@LBranchCode");
     }
     if (hasColumn(columnMeta, "CreatedBy")) {
       request.input("CreatedBy", sql.NVarChar(100), userName);
@@ -898,6 +930,10 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     TdsLimitApplicable,
     InvoiceMode,
     SupplierPassword: supplierPasswordPlain,
+    LAccountNo,
+    LIFSCCode,
+    LBankName,
+    LBranchCode,
   } = req.body;
 
   try {
@@ -1000,8 +1036,12 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
       .input("LHeadCode", sql.NVarChar(20), LHeadCode || null)
       .input("LHeadPhone", sql.VarChar(15), LHeadPhone || null)
       .input("LHeadEmail", sql.NVarChar(100), LHeadEmail || null)
-      .input("LHeadAddress", sql.VarChar(300), LHeadAddress || null)
-      .input("LHeadContactPerson", sql.VarChar(100), LHeadContactPerson || null)
+      // Both columns are NOT NULL — same "N/A" fallback POST / already uses
+      // on create. Falling back to null here (as this used to) 500'd every
+      // edit that left either field blank, since create never wrote a real
+      // null for a row to begin with.
+      .input("LHeadAddress", sql.VarChar(300), LHeadAddress || "N/A")
+      .input("LHeadContactPerson", sql.VarChar(100), LHeadContactPerson || "N/A")
       .input("LHeadStatus", sql.Bit, LHeadStatus !== false ? 1 : 0)
       .input("LHeadPaymentTerms", sql.NVarChar(100), LHeadPaymentTerms || null)
       .input("LBranchName", sql.VarChar(100), LBranchName || null)
@@ -1009,7 +1049,9 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
       .input("LGSTState", sql.VarChar(50), LGSTState || null)
       .input("LCountry", sql.VarChar(50), LCountry || null)
       .input("LBelongsTo", sql.Int, effectiveLBelongsTo || null)
-      .input("LDescription", sql.NVarChar, LDescription || null);
+      .input("LDescription", sql.NVarChar, LDescription || null)
+      .input("LAccountNo", sql.VarChar(20), LAccountNo || null)
+      .input("LIFSCCode", sql.NVarChar(11), LIFSCCode || null);
 
     const updates = [
       "LHeadName=@LHeadName",
@@ -1028,6 +1070,8 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
       "LDescription=@LDescription",
       "isEdited=1",
       "Status='Draft'", // editing resets back to Draft
+      "LAccountNo=@LAccountNo",
+      "LIFSCCode=@LIFSCCode",
     ];
 
     if (hasColumn(columnMeta, "LGSTType")) {
@@ -1057,6 +1101,14 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     if (hasColumn(columnMeta, "InvoiceMode")) {
       request.input("InvoiceMode", sql.NVarChar(20), InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice");
       updates.push("InvoiceMode=@InvoiceMode");
+    }
+    if (hasColumn(columnMeta, "LBankName")) {
+      request.input("LBankName", sql.NVarChar(150), LBankName || null);
+      updates.push("LBankName=@LBankName");
+    }
+    if (hasColumn(columnMeta, "LBranchCode")) {
+      request.input("LBranchCode", sql.NVarChar(20), LBranchCode || null);
+      updates.push("LBranchCode=@LBranchCode");
     }
     if (hasColumn(columnMeta, "UpdatedBy")) {
       request.input("UpdatedBy", sql.NVarChar(100), userName);

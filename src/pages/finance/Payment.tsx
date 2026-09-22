@@ -5660,6 +5660,7 @@ const Payment: React.FC = () => {
                       date: string; docNo: string; pmtId: number; type: "payment" | "bounce_charge" | "debit_note";
                       amount: number; mode: string; bounceReason?: string;
                       isBounced?: boolean;
+                      tdsAmount?: number;
                       accounts: any; isPosted: boolean; jvNo: string | null;
                     };
                     const entries: ChainEntry[] = pmtPostingData.entries;
@@ -5670,20 +5671,32 @@ const Payment: React.FC = () => {
                           const isBounce = entry.type === "bounce_charge";
                           const isDebitNote = entry.type === "debit_note";
                           const isBouncedPayment = isPayment && !!entry.isBounced;
+                          // TDS Payable — only present when this payment actually deducted
+                          // TDS on its own GL split (never for an invoice-linked payment,
+                          // whose TDS was already withheld when the invoice was posted).
+                          // Dr Supplier stays at the full amount; Cr splits into Bank
+                          // (net of TDS) + TDS Payable (the withheld amount) so the
+                          // posting shows where that money actually went.
+                          const tdsAmt = isPayment ? (entry.tdsAmount ?? 0) : 0;
                           const rows = isPayment
                             ? [
-                                { label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const },
-                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const },
+                                { label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const, amount: entry.amount },
+                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const, amount: entry.amount - tdsAmt },
+                                ...(tdsAmt > 0
+                                  ? [{ label: entry.accounts?.tdsPayable?.label ?? "TDS Payable A/c", code: entry.accounts?.tdsPayable?.code, side: "credit" as const, amount: tdsAmt }]
+                                  : []),
                               ]
                             : isDebitNote
                             ? [
-                                { label: entry.accounts?.debitLeg?.label ?? "—", code: entry.accounts?.debitLeg?.code, side: "debit" as const },
-                                { label: entry.accounts?.creditLeg?.label ?? "—", code: entry.accounts?.creditLeg?.code, side: "credit" as const },
+                                { label: entry.accounts?.debitLeg?.label ?? "—", code: entry.accounts?.debitLeg?.code, side: "debit" as const, amount: entry.amount },
+                                { label: entry.accounts?.creditLeg?.label ?? "—", code: entry.accounts?.creditLeg?.code, side: "credit" as const, amount: entry.amount },
                               ]
                             : [
-                                { label: entry.accounts?.bankCharges?.label ?? "Bank Charges (Other Expenses)", code: entry.accounts?.bankCharges?.code, side: "debit" as const },
-                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const },
+                                { label: entry.accounts?.bankCharges?.label ?? "Bank Charges (Other Expenses)", code: entry.accounts?.bankCharges?.code, side: "debit" as const, amount: entry.amount },
+                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const, amount: entry.amount },
                               ];
+                          const totalDebit = rows.filter((r) => r.side === "debit").reduce((s, r) => s + r.amount, 0);
+                          const totalCredit = rows.filter((r) => r.side === "credit").reduce((s, r) => s + r.amount, 0);
 
                           const entryKey = `${entry.pmtId}-${entry.type}`;
 
@@ -5737,17 +5750,17 @@ const Payment: React.FC = () => {
                                       </span>
                                     </div>
                                     <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
-                                      {row.side === "debit" ? fmtAmt(entry.amount) : ""}
+                                      {row.side === "debit" ? fmtAmt(row.amount) : ""}
                                     </span>
                                     <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
-                                      {row.side === "credit" ? fmtAmt(entry.amount) : ""}
+                                      {row.side === "credit" ? fmtAmt(row.amount) : ""}
                                     </span>
                                   </div>
                                 ))}
                                 <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
                                   <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
-                                  <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtAmt(entry.amount)}</span>
-                                  <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtAmt(entry.amount)}</span>
+                                  <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtAmt(totalDebit)}</span>
+                                  <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtAmt(totalCredit)}</span>
                                 </div>
                               </div>
                             </div>

@@ -324,7 +324,7 @@ export const getPurchaseOrders = async (
 ): Promise<PurchaseOrder[]> => {
   const params: Record<string, string> = { limit: "500" };
   if (fyId) params.fyId = String(fyId);
-  const res = await fetch(buildUrl("/api/purchase-orders", params), {
+  const res = await fetch(buildUrl("/api/grns/po-list", params), {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch Purchase Orders");
@@ -334,7 +334,7 @@ export const getPurchaseOrders = async (
 export const getPurchaseOrderById = async (
   id: number | string,
 ): Promise<PurchaseOrder> => {
-  const res = await fetch(`/api/purchase-orders/${id}`, {
+  const res = await fetch(`/api/grns/po/${id}`, {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch PO details");

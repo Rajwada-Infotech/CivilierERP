@@ -36,7 +36,7 @@ const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { transition } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
-const { requirePageRight } = require("../middleware/requirePageRight");
+const { requirePageRight, requireAnyPageAction, hasAnyPageAction } = require("../middleware/requirePageRight");
 const {
   resolveDocTypeId,
   lockNextDocNumber,
@@ -385,6 +385,38 @@ router.get("/", async (req, res) => {
 });
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
+// ── GET /po-options — POs that can be picked on a Vehicle In/Out entry ───────
+// The form's PO picker used to read /api/purchase-orders, which is gated by the
+// separate Purchase Orders page right — so a store user with Vehicle In/Out
+// rights but none on Purchase Orders got an empty "No POs available" list.
+// This serves just what the picker needs, under the Vehicle In/Out right this
+// router already enforces. Must stay above "/:id".
+router.get("/po-options", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT po.PurchaseOrderID, po.PurchaseOrderNo, po.DocNo, po.Status,
+             po.SupplierID, ahm.LHeadName AS SupplierName,
+             po.CompanyId, po.ProjectId
+      FROM dbo.PurchaseOrders po
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = po.SupplierID
+      WHERE po.Status IN ('Approved', 'Pending', 'Received')
+      ORDER BY po.PurchaseOrderID DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("GET vehicle-in-out po-options error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PO <-> supplier chat, under the Vehicle In/Out right ─────────────────────
+// The "Supplier" tab of a Vehicle In/Out entry embeds the PO chat. It used the
+// Purchase Orders routes (separate right); same handlers, gated by this router.
+const poHandlers = () => require("./purchaseOrders").poHandlers;
+router.get("/po-chat/:id/comments", (req, res) => poHandlers().listComments(req, res));
+router.post("/po-chat/:id/comment", (req, res) => poHandlers().addComment(req, res));
+
 // ── GET /pending-summary — POs with goods still outstanding after partial
 // Vehicle In/Out deliveries. Backs the "Pending Vehicle In/Out" widget:
 // PendingQty = ordered - received-so-far (excluding Rejected/Deleted lots),
@@ -1043,7 +1075,16 @@ router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, 
 // VehicleInOutID exists — same flow as ticket attachments. Each row starts
 // with VehicleInOutID = NULL and gets linked once the parent record is
 // actually saved (see linkAttachments() in POST / and PUT /:id above).
-router.post("/upload", requirePageRight("vehicle-in-out", "edit"), upload.array("file", 20), async (req, res) => {
+// Attaching files is part of creating a record as much as editing one, so it needs
+// create OR edit — it used to need edit alone, which refused create-only users.
+const uploadFiles = (req, res, next) =>
+  upload.array("file", 20)(req, res, (err) => {
+    if (!err) return next();
+    const tooBig = err.code === "LIMIT_FILE_SIZE";
+    res.status(400).json({ error: tooBig ? "A file is larger than the 50 MB limit." : err.message || "Upload failed" });
+  });
+
+router.post("/upload", requireAnyPageAction("vehicle-in-out", ["create", "edit"]), uploadFiles, async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -1124,7 +1165,10 @@ router.get("/attachment/:attachId", async (req, res) => {
 // ── DELETE /attachment/:attachId — remove a single attachment ─────────────────
 // Used when the user removes a captured photo / file before saving the form,
 // or removes one from an existing record while editing.
-router.delete("/attachment/:attachId", requirePageRight("vehicle-in-out", "delete"), async (req, res) => {
+// A file that's still un-linked (uploaded on a form that hasn't been saved yet)
+// can be dropped by anyone who could upload it; removing one that's already
+// attached to a saved record still needs the Delete right.
+router.delete("/attachment/:attachId", requireAnyPageAction("vehicle-in-out", ["delete", "create", "edit"]), async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -1134,6 +1178,12 @@ router.delete("/attachment/:attachId", requirePageRight("vehicle-in-out", "delet
       return res.status(400).json({ error: "Invalid attachment id" });
 
     const pool = getPool();
+    const meta = await pool.request().input("AttachmentId", sql.Int, attachId)
+      .query(`SELECT VehicleInOutID FROM dbo.VehicleInOutAttachments WHERE AttachmentId = @AttachmentId`);
+    if (!meta.recordset.length) return res.status(404).json({ error: "Attachment not found" });
+    if (meta.recordset[0].VehicleInOutID !== null && !(await hasAnyPageAction(req, "vehicle-in-out", ["delete"]))) {
+      return res.status(403).json({ error: "Access denied" });
+    }
     const result = await pool
       .request()
       .input("AttachmentId", sql.Int, attachId)
