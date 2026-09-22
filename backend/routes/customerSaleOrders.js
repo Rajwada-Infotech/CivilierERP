@@ -187,7 +187,13 @@ const createSaleOrderInternal = async (pool, payload, userEmail) => {
     err.status = 404;
     throw err;
   }
-  if (custCheck.recordset[0].LHeadType !== "C") {
+  // 'A' is the Customer type everywhere else in this schema (CustomerMaster.tsx,
+  // debitNote.js's PARTY_TYPES) — 'C' means Contractor. This previously checked
+  // 'C', which no real Customer Master entry has, so this validation would have
+  // rejected every genuine customer the moment a frontend actually called this
+  // route. Never reached in production (no frontend page wires up to
+  // CustomerSaleOrders yet), caught while auditing a related area.
+  if (custCheck.recordset[0].LHeadType !== "A") {
     const err = new Error("Selected account is not a Customer.");
     err.status = 400;
     throw err;
