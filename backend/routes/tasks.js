@@ -431,6 +431,11 @@ router.put("/:id", async (req, res) => {
       request.input("assignedTo", sql.Int, assignedTo);
     }
     if (dueDate !== undefined) {
+      // dueDate is mandatory at creation (see the !dueDate check above) —
+      // an empty string here means the field was cleared, which
+      // `new Date("")` turns into Invalid Date and mssql rejects with a
+      // raw driver error instead of a clean 400.
+      if (!dueDate) return res.status(400).json({ error: "Due date is required" });
       updates.push("DueDate = @dueDate");
       request.input("dueDate", sql.Date, new Date(dueDate));
     }

@@ -2611,7 +2611,14 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     const amount = parseFloat(pmt.PAmount) || 0;
     if (amount <= 0) return res.status(400).json({ error: "No amount to post." });
-    const tdsAmount = parseFloat(pmt.TDSAmount) || 0;
+    // Mirrors postPaymentApproval in services/generalLedger.js: for an
+    // invoice-linked payment, pmt.TDSAmount is only an inherited display
+    // snapshot (see resolveInvoiceLinkedTds in services/tds.js) — TDS was
+    // already withheld as its own liability leg when the INVOICE was
+    // posted, so this route's own GL split must not re-deduct it here too.
+    // This route previously skipped that guard, so a manual "Post to GL" on
+    // an invoice-linked payment double-withheld the TDS amount.
+    const tdsAmount = pmt.PExpenseRef ? 0 : parseFloat(pmt.TDSAmount) || 0;
     if (tdsAmount > amount) {
       return res.status(422).json({ error: `TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — re-save the payment before posting.` });
     }

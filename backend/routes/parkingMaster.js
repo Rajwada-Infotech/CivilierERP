@@ -111,7 +111,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
         .request()
         .input("Id", sql.Int, existing.Id)
         .input("Charge", sql.Decimal(18, 2), parseFloat(Charge))
-        .input("Gst", sql.Decimal(5, 2), GstRate != null ? parseFloat(GstRate) : 18)
+        .input("Gst", sql.Decimal(5, 2), GstRate != null && GstRate !== "" ? parseFloat(GstRate) : 18)
         .input("UpdatedBy", sql.Int, createdBy)
         .query(`
           UPDATE dbo.ParkingMaster SET
@@ -129,7 +129,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("BlockId",   sql.Int, BlockId ? parseInt(BlockId) : null)
       .input("Type",      sql.NVarChar(50), ParkingType)
       .input("Charge",    sql.Decimal(18, 2), parseFloat(Charge))
-      .input("Gst",       sql.Decimal(5, 2), GstRate != null ? parseFloat(GstRate) : 18)
+      .input("Gst",       sql.Decimal(5, 2), GstRate != null && GstRate !== "" ? parseFloat(GstRate) : 18)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
       .query(`
@@ -184,7 +184,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("BlockId",    sql.Int, BlockId ? parseInt(BlockId) : null)
       .input("Type",       sql.NVarChar(50), ParkingType)
       .input("Charge",     sql.Decimal(18, 2), parseFloat(Charge))
-      .input("Gst",        sql.Decimal(5, 2), GstRate != null ? parseFloat(GstRate) : 18)
+      .input("Gst",        sql.Decimal(5, 2), GstRate != null && GstRate !== "" ? parseFloat(GstRate) : 18)
       .input("IsActive",   sql.Bit, IsActive !== false ? 1 : 0)
       .input("UpdatedBy",  sql.Int, updatedBy)
       .query(`

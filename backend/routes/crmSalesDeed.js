@@ -1270,7 +1270,7 @@ router.post("/query-payment/:id/confirm", requirePageRight("crm-query-payment", 
 
       await tx.request()
         .input("id", sql.Int, id)
-        .input("amt", sql.Decimal(18,2), b.ConfirmedAmount != null ? parseFloat(b.ConfirmedAmount) : null)
+        .input("amt", sql.Decimal(18,2), b.ConfirmedAmount != null && b.ConfirmedAmount !== "" ? parseFloat(b.ConfirmedAmount) : null)
         .input("rem", sql.NVarChar(sql.MAX), b.Remarks || null)
         .input("ub", sql.Int, actor)
         .query(`

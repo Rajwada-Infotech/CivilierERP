@@ -1152,7 +1152,7 @@ router.post("/booking/:bookingId", requirePageRight("crm-payments", "create"), a
       .input("mno",   sql.Int,           nextNo)
       .input("mname", sql.NVarChar(200), b.MilestoneName.trim())
       .input("due",   sql.Date,          b.DueDate || null)
-      .input("amt",   sql.Decimal(18,2), b.AmountDue != null ? parseFloat(b.AmountDue) : 0)
+      .input("amt",   sql.Decimal(18,2), b.AmountDue != null && b.AmountDue !== "" ? parseFloat(b.AmountDue) : 0)
       .input("rdocs", sql.NVarChar(sql.MAX), b.RequiredDocuments || null)
       .input("dept",  sql.NVarChar(100), b.ResponsibleDepartment || null)
       .input("cb",    sql.Int,           actorId(req))
@@ -1177,8 +1177,8 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     const b = req.body;
     const id = parseInt(req.params.id);
 
-    const paidRaw = b.AmountPaid != null ? parseFloat(b.AmountPaid) : null;
-    const amountDueOverride = b.AmountDue != null ? parseFloat(b.AmountDue) : null;
+    const paidRaw = b.AmountPaid != null && b.AmountPaid !== "" ? parseFloat(b.AmountPaid) : null;
+    const amountDueOverride = b.AmountDue != null && b.AmountDue !== "" ? parseFloat(b.AmountDue) : null;
 
     // Fetch the current row up front — needed for the AmountDue override's
     // %-recompute against the booking's GrandTotal.

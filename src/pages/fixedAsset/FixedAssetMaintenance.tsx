@@ -409,7 +409,7 @@ export default function FixedAssetMaintenance() {
         docNo: d.DocNo || "",
         docDate: d.DocDate?.slice(0, 10) || "",
         itemName: d.ItemName || "",
-        assetId: String(d.AssetId || ""),
+        assetId: String(d.AssetId != null ? d.AssetId : ""),
         remarks: d.Remarks || "",
         vendorId: String(d.VendorId || ""),
         repairExpenseType: d.RepairExpenseType,
@@ -518,7 +518,7 @@ export default function FixedAssetMaintenance() {
   const handleSave = () => {
     const err = validate();
     if (err) return toast.error(err);
-    if (editingId) updateMut.mutate({ id: editingId, data: buildPayload() });
+    if (editingId != null) updateMut.mutate({ id: editingId, data: buildPayload() });
     else createMut.mutate(buildPayload());
   };
 

@@ -131,7 +131,7 @@ export default function DepreciationSetupPage() {
     if (!form.assetCategory)    return toast.error("Asset category is required");
     if (!form.depreciationRate) return toast.error("Depreciation rate is required");
     if (!form.effectiveFrom)    return toast.error("Effective from date is required");
-    if (editingId) updateMut.mutate({ id: editingId, data: form });
+    if (editingId != null) updateMut.mutate({ id: editingId, data: form });
     else           createMut.mutate(form);
   };
 

@@ -1250,7 +1250,7 @@ const CrmApplication: React.FC = () => {
         ProjectId: app.ProjectId ? String(app.ProjectId) : "",
         BlockId: app.BlockId ? String(app.BlockId) : "",
         PreferredUnitId: app.PreferredUnitId ? String(app.PreferredUnitId) : "",
-        PaymentPlanId: app.PaymentPlanId ? String(app.PaymentPlanId) : "",
+        PaymentPlanId: app.PaymentPlanId != null ? String(app.PaymentPlanId) : "",
         RatePerSqFt: app.RatePerSqFt != null ? String(app.RatePerSqFt) : "",
         DateOfApply: app.DateOfApply ? String(app.DateOfApply).slice(0, 10) : new Date().toISOString().slice(0, 10),
         Source: app.Source || "",

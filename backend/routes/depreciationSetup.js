@@ -101,7 +101,7 @@ router.put("/:id", requirePageRight("depreciation-setup", "edit"), async (req, r
       .input("SetupId",          sql.Int,           id)
       .input("AssetCategory",    sql.NVarChar(100), assetCategory || null)
       .input("DepreciationType", sql.NVarChar(50),  depreciationType || null)
-      .input("DepreciationRate", sql.Decimal(5, 2), depreciationRate != null ? parseFloat(depreciationRate) : null)
+      .input("DepreciationRate", sql.Decimal(5, 2), depreciationRate != null && depreciationRate !== "" ? parseFloat(depreciationRate) : null)
       .input("EffectiveFrom",    sql.Date,          effectiveFrom || null)
       .input("Status",           sql.NVarChar(20),  status || null)
       .input("UpdatedBy",        sql.NVarChar(200), req.user?.email || null)

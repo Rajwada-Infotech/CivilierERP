@@ -485,7 +485,7 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
       .input(
         "SourceSaleInvoiceId",
         sql.Int,
-        SourceSaleInvoiceId ? parseInt(SourceSaleInvoiceId, 10) : null,
+        SourceSaleInvoiceId !== undefined && SourceSaleInvoiceId !== null && SourceSaleInvoiceId !== "" ? parseInt(SourceSaleInvoiceId, 10) : null,
       )
       .input(
         "SourceSaleInvoiceDocNo",

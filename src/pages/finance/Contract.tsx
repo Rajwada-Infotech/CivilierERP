@@ -292,7 +292,7 @@ export default function Contract() {
         remarks: form.remarks || undefined,
         parties: selectedParties.length > 0 ? selectedParties : undefined,
       };
-      if (editingId) {
+      if (editingId != null) {
         await updateContract(editingId, payload);
         return { contractId: editingId, docNo: form.docNo };
       } else {
