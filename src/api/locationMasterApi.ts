@@ -1,8 +1,8 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-// Thin client over the Follow-up module's Block/Unit/Room masters — used
-// here only for cascading location dropdowns (Project -> Block -> Unit ->
-// Room), not full CRUD (that lives in src/pages/followup/*).
+// Thin client over the Civil Work DPR Room Master — used here for cascading
+// location dropdowns (Project -> Block -> Unit -> Room). Room Master was
+// moved from the Follow-up/CRM module to Civil Work DPR in migration 382.
 
 async function handle<T = unknown>(res: Response): Promise<T> {
   let data: any = null;
@@ -56,9 +56,12 @@ export const getLocationUnits = async (projectId: number): Promise<UnitOption[]>
   return handle<UnitOption[]>(res);
 };
 
-// No "rooms by unit" endpoint exists yet — fetch the full room list and
-// filter client-side by UnitId, same as the Room Master page does internally.
-export const getLocationRooms = async (): Promise<RoomRecord[]> => {
-  const res = await fetchWithAuth("/api/room-master");
+// Fetch rooms scoped to a specific unit — uses the ?unitId= query param
+// added to GET /api/room-master so only that unit's rooms are loaded.
+// Previously fetched the entire room list and filtered client-side, which
+// scaled badly for large projects (500 units × 6 rooms = 3,000 rows).
+export const getLocationRooms = async (unitId: number): Promise<RoomRecord[]> => {
+  const res = await fetchWithAuth(`/api/room-master?unitId=${unitId}&activeOnly=1`);
   return handle<RoomRecord[]>(res);
 };
+
