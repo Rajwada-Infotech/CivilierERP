@@ -22,16 +22,63 @@ const {
 // showing which level it was actually on or who was meant to act next.
 //
 // This mirrors transition()'s own per-level gate (approvalService.js) so a
-// record only shows up for:
-//  - admin / super_admin (oversight — they can always see everything), or
+// record shows up for:
+//  - admin / super_admin (oversight — they can always see everything),
 //  - whoever is actually allowed to act on the level it's CURRENTLY on: the
 //    role(s)/specific user(s) named on that level in Approval Setup, or —
 //    for a level left uncustomised, or a module with no workflow configured
 //    at all — the module's existing default approver set (today's fallback
-//    behaviour, unchanged).
+//    behaviour, unchanged), or
+//  - anyone named on ANY OTHER level of the same workflow — see the
+//    isNamedOnWorkflow fallback below for why.
+//
+// currentLevel is computed live, on every request, by replaying this
+// record's ApprovalAuditLog against the workflow's CURRENT LevelDefs — there
+// is no stored snapshot of "what the workflow looked like when this record
+// was submitted". So when Approval Setup is edited (a level's named people
+// change, a level is added/removed, etc.) after older Pending records were
+// already partway through approval, those records' *existing* audit rows —
+// recorded under the OLD level layout — get replayed against the NEW one.
+// That can land currentLevel on a level nobody currently reads as "them"
+// (their audit entry now satisfies a level they were never really acting as
+// under today's config), or even past the last level entirely, even though
+// the record's DB Status is still genuinely Pending. Only non-admin viewers
+// ever hit this path (admins bypass it above), so the mismatch is invisible
+// until someone who isn't admin/super_admin — a director, say — reports
+// their inbox is missing older items while new ones (submitted after the
+// reconfiguration, with clean audit history) show up fine. That's exactly
+// this bug: found 2026-09-22 after report of directors (Prashant, Parvin,
+// Bikash) not seeing older Pending MR/PO/JV/etc entries.
+//
+// Fix: don't gate visibility on ONLY the (possibly stale) resolved level —
+// anyone named anywhere in the module's workflow is one of its legitimate
+// approvers and should still be able to see a record that's stuck or
+// mis-resolved, even if they can't act on it from the wrong level. The
+// actual approve/reject gate in transition() is untouched and still checks
+// the real current level — this only widens what shows up in the list.
+function isNamedOnLevel(levelDef, role, viewerUserId) {
+  const hasRoles = Array.isArray(levelDef?.roles) && levelDef.roles.length > 0;
+  const hasUsers = Array.isArray(levelDef?.userIds) && levelDef.userIds.length > 0;
+  if (!hasRoles && !hasUsers) return null; // uncustomised — caller falls back
+  const roleMatch = hasRoles && levelDef.roles.map((r) => String(r).toLowerCase()).includes(role);
+  const userMatch = hasUsers && viewerUserId != null && levelDef.userIds.includes(viewerUserId);
+  return roleMatch || userMatch;
+}
+
+// Returns { visible, canAct, currentLevel?, totalLevels? } rather than a
+// plain boolean — canAct=false means "shown for awareness (named somewhere
+// on this workflow) but this isn't their level yet, so a click on Approve
+// will correctly 403 from transition()'s own per-level gate". The inbox UI
+// uses this to label those rows instead of presenting a live-looking
+// Approve button that's guaranteed to fail. Real production example this
+// was built against: a 2-level Material Request rule (Level 1: Super
+// Admin/Amit, Level 2: Super Admin/Bikash/Parvin) where only 1 of 9 Pending
+// MRs had been approved past Level 1 — before this, Level-2-only approvers
+// correctly couldn't act on the other 8 yet, but also couldn't see them
+// coming, which read as "the inbox is missing records" (2026-09-22).
 async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) {
   const role = (viewerRole || "").toLowerCase();
-  if (role === "admin" || role === "super_admin") return true;
+  if (role === "admin" || role === "super_admin") return { visible: true, canAct: true };
 
   const map = MODULE_MAP[item.Module];
   const fallbackRoles = MODULE_APPROVER_ROLE_OVERRIDES[item.Module] || APPROVER_ROLES;
@@ -42,31 +89,58 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   // (e.g. received-payment, crm-money-receipts — they never went through
   // approvalService.js's level engine) keep today's page-right-only
   // visibility; there's no per-level data to filter on.
-  if (!map) return true;
+  if (!map) return { visible: true, canAct: true };
 
   const workflow = workflowCache.get(item.Module);
-  if (!workflow || !workflow.LevelDefs?.length) return fallbackVisible();
+  if (!workflow || !workflow.LevelDefs?.length) {
+    const visible = await fallbackVisible();
+    return { visible, canAct: visible };
+  }
+
+  const isNamedOnWorkflow = workflow.LevelDefs.some(
+    (l) => isNamedOnLevel(l, role, viewerUserId) === true,
+  );
 
   const tableName = map.table.replace("dbo.", "");
   const recordId = parseInt(item.RecordId, 10);
   const totalLevels = workflow.Levels || workflow.LevelDefs.length;
   const currentLevel = await resolveCurrentLevel(tableName, recordId, totalLevels, workflow.LevelDefs);
-  // Fully approved already (shouldn't normally reach here — every branch of
-  // the aggregator query only selects Pending rows) — nothing left to show.
-  if (currentLevel > totalLevels) return false;
+  if (currentLevel > totalLevels) {
+    // Audit history reads as "fully approved" but the aggregator only ever
+    // selects Pending rows — a genuine Status/computed-level mismatch (see
+    // comment above), not "nothing to show". Surface it to this module's
+    // named approvers rather than silently dropping it for everyone.
+    if (isNamedOnWorkflow) {
+      logger.warn(
+        { module: item.Module, recordId, currentLevel, totalLevels, viewerUserId },
+        "approval-inbox: Pending record resolved past its final level — stale audit history vs current workflow config",
+      );
+    }
+    return { visible: isNamedOnWorkflow, canAct: false, currentLevel, totalLevels };
+  }
 
   const levelDef = workflow.LevelDefs[currentLevel - 1];
-  if (!levelDef) return fallbackVisible();
+  if (!levelDef) {
+    const visible = await fallbackVisible();
+    return { visible, canAct: visible };
+  }
 
-  const hasRoles = Array.isArray(levelDef.roles) && levelDef.roles.length > 0;
-  const hasUsers = Array.isArray(levelDef.userIds) && levelDef.userIds.length > 0;
+  const matched = isNamedOnLevel(levelDef, role, viewerUserId);
   // Level left uncustomised — no named roles or people — falls back to the
   // module's default approver set, exactly like transition()'s own gate does.
-  if (!hasRoles && !hasUsers) return fallbackVisible();
+  if (matched === null) {
+    const visible = await fallbackVisible();
+    return { visible, canAct: visible };
+  }
+  if (matched) return { visible: true, canAct: true, currentLevel, totalLevels };
 
-  const roleMatch = hasRoles && levelDef.roles.map((r) => String(r).toLowerCase()).includes(role);
-  const userMatch = hasUsers && viewerUserId != null && levelDef.userIds.includes(viewerUserId);
-  return roleMatch || userMatch;
+  // Not a match on the level it currently resolved to, but this viewer IS
+  // named somewhere else on the same workflow (normal staged-approval
+  // waiting, OR the stale-audit mismatch described above). Show it — read-
+  // only from their vantage point; transition() still enforces the real
+  // current level for the actual approve/reject action — rather than let it
+  // vanish for one of this module's own approvers.
+  return { visible: isNamedOnWorkflow, canAct: false, currentLevel, totalLevels };
 }
 
 async function filterVisibleToViewer(items, req) {
@@ -84,10 +158,19 @@ async function filterVisibleToViewer(items, req) {
     workflowCache.set(mod, await getWorkflow(mod));
   }
 
-  const flags = await Promise.all(
+  const results = await Promise.all(
     items.map((item) => isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache)),
   );
-  return items.filter((_, i) => flags[i]);
+  const out = [];
+  items.forEach((item, i) => {
+    const r = results[i];
+    if (!r.visible) return;
+    // _canAct is only attached when it's actually informative (false) —
+    // omitted entirely for the common case so existing consumers/tests that
+    // don't know about it are unaffected.
+    out.push(r.canAct === false ? { ...item, _canAct: false, _currentLevel: r.currentLevel, _totalLevels: r.totalLevels } : item);
+  });
+  return out;
 }
 
 // This router previously had no page-level check at all — every other route
@@ -1082,4 +1165,8 @@ router.get("/count", async (req, res) => {
 });
 
 module.exports = router;
+// Exported for testing only — see backend/test/approvalInboxVisibility.test.js.
+module.exports.isVisibleToViewer = isVisibleToViewer;
+module.exports.isNamedOnLevel = isNamedOnLevel;
+module.exports.filterVisibleToViewer = filterVisibleToViewer;
 

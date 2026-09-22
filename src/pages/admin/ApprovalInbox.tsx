@@ -70,6 +70,16 @@ export interface InboxItem {
   SourceTransferDocNo: string | null;
   FromGodownName: string | null;
   ToGodownName: string | null;
+  // Set by the backend's visibility filter (approvalInbox.js) only when the
+  // viewer is named somewhere on this record's workflow but NOT on the
+  // level it's currently sitting at — e.g. a Level-2 approver looking at a
+  // record still waiting on Level 1. It's shown for awareness (so the inbox
+  // doesn't look like it's missing records), but Approve/Reject will
+  // correctly be refused by the backend until it actually reaches their
+  // level. Omitted entirely (undefined) for every normal, actionable row.
+  _canAct?: boolean;
+  _currentLevel?: number;
+  _totalLevels?: number;
 }
 
 // ─── Module config ────────────────────────────────────────────────────────────
@@ -426,6 +436,15 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
 
 export const categoryOf = (mod: string): CategoryId => MODULE_CATEGORY[mod] ?? "admin";
 
+// Within a category, MODULE_CATEGORY's own declaration order above doubles
+// as the module display order — e.g. Material Requests before Purchase
+// Orders before GRNs — so every module's rows stay contiguous instead of
+// interleaving with other modules in the same category by date.
+const MODULE_ORDER: Record<string, number> = Object.fromEntries(
+  Object.keys(MODULE_CATEGORY).map((mod, i) => [mod, i]),
+);
+const moduleOrderOf = (mod: string): number => MODULE_ORDER[mod] ?? Number.MAX_SAFE_INTEGER;
+
 // Modules whose one-click Approve is either guaranteed to fail without a
 // review step first (crm-bookings' Data Review checklist gate) or whose
 // approved amount is only ever editable before approval (crm-brokerage) —
@@ -706,44 +725,58 @@ const InboxRow: React.FC<{
       >
         <Eye size={14} />
       </button>
-      <ApprovalActions
-        status={item.Status}
-        recordId={item.RecordId}
-        endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
-        actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
-        approverRoles={
-          item.Module === "crm-refunds-finance" ? REFUND_FINANCE_APPROVER_ROLES
-          : SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
-          : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
-          : item.Module === "crm-money-receipts" ? MR_APPROVER_ROLES
-          : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
-          : undefined
-        }
-        // crm-applications'/crm-bookings' own PUT /:id/approve routes 400
-        // until every Level-1/Level-2 checklist item is ticked — a one-click
-        // Approve here can never succeed on its own, it can only ever
-        // produce the "Complete the Level-X verification checklist..."
-        // error toast. crm-brokerage's approve CAN succeed one-click (no
-        // checklist gate), but the computed amount is meant to be reviewed
-        // — and is only ever editable — before approval (see crmBrokerage.js
-        // PUT /:id "can only be customized before approval"), so a blind
-        // one-click Approve here skips the one chance to catch/adjust a
-        // wrong figure. All three swap the Approve button for a direct
-        // hand-off to their own review screen instead. Reject is untouched
-        // for all of them — no checklist/review gate applies to rejecting.
-        reviewInstead={
-          REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
-            ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
+      {item.Status === "Pending" && item._canAct === false ? (
+        // Visible for awareness (named on some other level of this
+        // record's workflow) but not their turn yet — Approve/Reject would
+        // just 403 from transition()'s own per-level gate. Say so instead
+        // of offering live-looking buttons that are guaranteed to fail.
+        <span
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium text-muted-foreground bg-muted border border-border whitespace-nowrap"
+          title="Named on this approval workflow, but this record hasn't reached your level yet."
+        >
+          Waiting on Level {item._currentLevel}
+          {item._totalLevels ? ` of ${item._totalLevels}` : ""}
+        </span>
+      ) : (
+        <ApprovalActions
+          status={item.Status}
+          recordId={item.RecordId}
+          endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
+          actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
+          approverRoles={
+            item.Module === "crm-refunds-finance" ? REFUND_FINANCE_APPROVER_ROLES
+            : SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+            : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
+            : item.Module === "crm-money-receipts" ? MR_APPROVER_ROLES
+            : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
             : undefined
-        }
-        restricted={RESTRICTED_MODULES.has(item.Module)}
-        onSuccess={(action) => {
-          if (action === "approve" || action === "reject") {
-            onOptimisticUpdate(item.RecordId, item.Module);
           }
-          onActionDone();
-        }}
-      />
+          // crm-applications'/crm-bookings' own PUT /:id/approve routes 400
+          // until every Level-1/Level-2 checklist item is ticked — a one-click
+          // Approve here can never succeed on its own, it can only ever
+          // produce the "Complete the Level-X verification checklist..."
+          // error toast. crm-brokerage's approve CAN succeed one-click (no
+          // checklist gate), but the computed amount is meant to be reviewed
+          // — and is only ever editable — before approval (see crmBrokerage.js
+          // PUT /:id "can only be customized before approval"), so a blind
+          // one-click Approve here skips the one chance to catch/adjust a
+          // wrong figure. All three swap the Approve button for a direct
+          // hand-off to their own review screen instead. Reject is untouched
+          // for all of them — no checklist/review gate applies to rejecting.
+          reviewInstead={
+            REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
+              ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
+              : undefined
+          }
+          restricted={RESTRICTED_MODULES.has(item.Module)}
+          onSuccess={(action) => {
+            if (action === "approve" || action === "reject") {
+              onOptimisticUpdate(item.RecordId, item.Module);
+            }
+            onActionDone();
+          }}
+        />
+      )}
       {/* The separate "open in preview" arrow is redundant for any module
           with a reviewInstead button while Pending — that button above
           already does the exact same navigation. Once it leaves Pending
@@ -1015,10 +1048,16 @@ const ApprovalInbox: React.FC = () => {
       : allItems
   )
     .filter((i) => !removedKeys.has(`${i.Module}-${i.RecordId}`))
-    // Sorted by the record's own date, not the backend's LastModified order —
-    // a document dated last month that was only just resubmitted shouldn't
+    // Grouped by module first (all Material Requests together, then all
+    // Purchase Orders, then all GRNs, etc. — MODULE_ORDER below) so like
+    // documents sit together instead of interleaving by date across
+    // modules within the same category. Sorted by the record's own date
+    // within each module, not the backend's LastModified order — a
+    // document dated last month that was only just resubmitted shouldn't
     // outrank one genuinely raised yesterday.
     .sort((a, b) => {
+      const moduleDelta = moduleOrderOf(a.Module) - moduleOrderOf(b.Module);
+      if (moduleDelta !== 0) return moduleDelta;
       const da = a.RecordDate ? new Date(a.RecordDate).getTime() : 0;
       const db = b.RecordDate ? new Date(b.RecordDate).getTime() : 0;
       return dateSort === "desc" ? db - da : da - db;
