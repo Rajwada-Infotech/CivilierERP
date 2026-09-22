@@ -1,7 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { FileText, Sparkles, Upload, DoorOpen } from "lucide-react";
+import { FileText, Upload, DoorOpen } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
@@ -116,109 +116,11 @@ function BlueprintUploadField({
   );
 }
 
-// Generates real RoomMaster rows for a unit from its BHK layout template
-// (Unit Type -> Room Composition Builder's category x quantity, the same
-// data Work Reporting's synthetic Room dropdown reads) instead of typing
-// each room in by hand. Scoped to Project -> Unit only — Block is implied
-// by the unit, same as the create form above.
-function GenerateFromLayoutPanel({
-  units,
-  onGenerated,
-}: {
-  units: { Id: number; Name: string; ProjectId: number; UnitType?: string | null }[];
-  onGenerated: () => void;
-}) {
-  const [projectId, setProjectId] = React.useState("");
-  const [unitId, setUnitId] = React.useState("");
-  const [generating, setGenerating] = React.useState(false);
-  const { data: projectOptions = [] } = useQuery({
-    // Use the same key as the MasterPage form's Project field so both panels
-    // share a single React Query cache entry — previously "room-master-project-options"
-    // here vs "room-master-projects" in fields[], causing stale-data races.
-    queryKey: ["room-master-projects"],
-    queryFn: fetchProjectOptions,
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const unitOptions = React.useMemo(
-    () => units.filter((u) => (projectId ? String(u.ProjectId) === projectId : true)),
-    [units, projectId],
-  );
-  const selectedUnit = unitOptions.find((u) => String(u.Id) === unitId);
-
-  const handleGenerate = async () => {
-    if (!unitId) return;
-    setGenerating(true);
-    try {
-      const res = await fetchWithAuth(`${API}/generate/${unitId}`, { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(body.error || "Failed to generate rooms");
-      toast.success(body.message || "Rooms generated");
-      if (body.createdCount > 0) onGenerated();
-    } catch (err: any) {
-      toast.error(err.message || "Failed to generate rooms");
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
-        <Sparkles size={14} className="text-cyan-600 dark:text-cyan-400" />
-        <span className="text-sm font-heading font-semibold text-foreground">Generate from Unit Layout</span>
-      </div>
-      <div className="p-5 flex flex-col sm:flex-row sm:items-end gap-3">
-        <div className="flex-1 space-y-1">
-          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Project</label>
-          <select
-            value={projectId}
-            onChange={(e) => {
-              setProjectId(e.target.value);
-              setUnitId("");
-            }}
-            className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm"
-          >
-            <option value="">Select project</option>
-            {projectOptions.map((p) => (
-              <option key={p.value} value={p.value}>{p.label}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex-1 space-y-1">
-          <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Unit</label>
-          <select
-            value={unitId}
-            onChange={(e) => setUnitId(e.target.value)}
-            disabled={!projectId}
-            className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm disabled:opacity-50"
-          >
-            <option value="">Select unit</option>
-            {unitOptions.map((u) => (
-              <option key={u.Id} value={u.Id}>
-                {u.Name}{u.UnitType ? ` (${u.UnitType})` : ""}
-              </option>
-            ))}
-          </select>
-        </div>
-        <button
-          type="button"
-          onClick={handleGenerate}
-          disabled={!unitId || generating || (!!selectedUnit && !selectedUnit.UnitType)}
-          title={selectedUnit && !selectedUnit.UnitType ? "This unit has no Unit Type set" : undefined}
-          className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-4 py-2 h-9 rounded-lg bg-gradient-to-r from-cyan-500 to-teal-400 hover:opacity-90 disabled:opacity-50 transition-all"
-        >
-          <Sparkles size={13} /> {generating ? "Generating…" : "Generate Rooms"}
-        </button>
-      </div>
-      {selectedUnit && !selectedUnit.UnitType && (
-        <p className="px-5 pb-4 -mt-2 text-xs text-amber-600 dark:text-amber-400">
-          This unit has no Unit Type set, so its layout can't be resolved — set one in Unit Master first.
-        </p>
-      )}
-    </div>
-  );
-}
+// The "Generate from Unit Layout" panel (POST /api/room-master/generate/:id)
+// was removed from this page's UI on request (twice — it was re-added by
+// something else in between; if it reappears again, that's worth tracing
+// down rather than just deleting it a third time). The backend route itself
+// is untouched, still valid infra, just no longer surfaced here.
 
 // Suggests Room Category Master's active aliases (the same list Room
 // Composition Builder and Work Done's Room dropdown read) instead of typing
@@ -568,25 +470,6 @@ const RoomMaster: React.FC = () => {
     <>
       <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Setup", "Room Master"]} />
       <CivilWorkDprShell title="Room Master" icon={DoorOpen}>
-      <GenerateFromLayoutPanel
-        units={allUnits}
-        onGenerated={() => queryClient.invalidateQueries({ queryKey: ["room-master"] })}
-      />
-      {/* UX hint — shown only when the table is completely empty so new
-          admins know to use Generate above rather than adding rows one-by-one */}
-      {mappedData.length === 0 && !isLoading && (
-        <div className="mx-6 mb-4 flex items-start gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-          <DoorOpen size={16} className="mt-0.5 shrink-0 text-primary/60" />
-          <span>
-            No rooms yet.{" "}
-            <span className="font-medium text-foreground">
-              Use "Generate from Layout" above
-            </span>{" "}
-            to auto-create rooms for a unit based on its BHK composition, or add them
-            individually using the + button below.
-          </span>
-        </div>
-      )}
       <MasterPage
         title="Room"
         canCreate={rights.canCreate}
