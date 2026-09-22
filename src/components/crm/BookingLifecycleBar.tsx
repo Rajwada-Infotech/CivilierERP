@@ -36,7 +36,7 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
     queryKey: ["crm-booking-lifecycle", bookingId],
     queryFn: () => fetchLifecycle(bookingId),
     staleTime: 60_000,
-    enabled: !!bookingId,
+    enabled: bookingId != null,
   });
 
   if (isLoading) {

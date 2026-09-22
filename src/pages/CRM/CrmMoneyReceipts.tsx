@@ -286,7 +286,7 @@ function ReceiptDetailRow({ r, canEdit, busy, onPreview, onResubmit, onApprove, 
   r: ReceiptRow; canEdit: boolean; busy: boolean;
   onPreview: () => void; onResubmit: () => void; onApprove: () => void; onBounce: () => void;
 }) {
-  const showResubmit = r.Status === "Bounced" && !r.ReceivedPaymentId;
+  const showResubmit = r.Status === "Bounced" && r.ReceivedPaymentId == null;
   const showApproverActions = canEdit && r.Status === CrmStatus.PENDING;
 
   return (

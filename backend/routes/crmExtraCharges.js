@@ -52,7 +52,7 @@ async function applyAddExtraCharge(pool, bookingId, b, actorUserId) {
   // client-supplied GstRate anymore. ExtraChargeMaster.GstRate is left
   // untouched (other things may still read that column); this route simply
   // stops consuming it, matching "fixed, only editable via HSN Master".
-  if (b.ExtraChargeMasterId) {
+  if (b.ExtraChargeMasterId !== undefined && b.ExtraChargeMasterId !== null && b.ExtraChargeMasterId !== "") {
     const master = await pool.request().input("id", sql.Int, parseInt(b.ExtraChargeMasterId))
       .query("SELECT Id FROM dbo.ExtraChargeMaster WHERE Id = @id AND IsActive = 1");
     if (!master.recordset.length) throw chargeError("Selected charge type is not active");
@@ -63,7 +63,7 @@ async function applyAddExtraCharge(pool, bookingId, b, actorUserId) {
 
   const result = await pool.request()
     .input("bid",  sql.Int, bookingId)
-    .input("mid",  sql.Int, b.ExtraChargeMasterId ? parseInt(b.ExtraChargeMasterId) : null)
+    .input("mid",  sql.Int, b.ExtraChargeMasterId !== undefined && b.ExtraChargeMasterId !== null && b.ExtraChargeMasterId !== "" ? parseInt(b.ExtraChargeMasterId) : null)
     .input("desc", sql.NVarChar(300), b.Description.trim())
     .input("amt",  sql.Decimal(18, 2), amount)
     .input("gstr", sql.Decimal(5, 2), gstRate)
@@ -98,10 +98,10 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
   if (!row.recordset.length) throw chargeError("Extra charge not found", 404);
   const { BookingId, ApplicationId } = row.recordset[0];
 
-  if (BookingId) {
+  if (BookingId != null) {
     const activeErr = await requireActiveBooking(pool, BookingId);
     if (activeErr) throw chargeError(activeErr);
-  } else if (ApplicationId) {
+  } else if (ApplicationId != null) {
     const app = await pool.request().input("aid", sql.Int, ApplicationId)
       .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
     if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.recordset[0].Status)) {
@@ -114,7 +114,7 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
   // charge — keep using ITS Status exactly as before, never touch the new
   // blended model for a booking edited this way. New-shape charges (no
   // linked milestone) fall through to the booking-wide settled check.
-  const milestone = BookingId
+  const milestone = BookingId != null
     ? await pool.request().input("ecid", sql.Int, id)
         .query("SELECT TOP 1 Id, Status FROM dbo.CrmPaymentMilestone WHERE ExtraChargeId = @ecid ORDER BY Id DESC")
     : { recordset: [] };
@@ -122,7 +122,7 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
     if (milestone.recordset[0].Status === CrmStatus.PAID) {
       throw chargeError("This charge has already been paid and cannot be edited", 409);
     }
-  } else if (BookingId && await isBookingFullySettled(pool, BookingId)) {
+  } else if (BookingId != null && await isBookingFullySettled(pool, BookingId)) {
     throw chargeError("This booking is fully paid off — charges can no longer be edited", 409);
   }
 
@@ -143,7 +143,7 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
 
   await pool.request()
     .input("id",   sql.Int, id)
-    .input("mid",  sql.Int, b.ExtraChargeMasterId ? parseInt(b.ExtraChargeMasterId) : null)
+    .input("mid",  sql.Int, b.ExtraChargeMasterId !== undefined && b.ExtraChargeMasterId !== null && b.ExtraChargeMasterId !== "" ? parseInt(b.ExtraChargeMasterId) : null)
     .input("desc", sql.NVarChar(300), b.Description.trim())
     .input("amt",  sql.Decimal(18, 2), amount)
     .input("gstr", sql.Decimal(5, 2), gstRate)
@@ -164,7 +164,7 @@ async function applyEditExtraCharge(pool, id, b, actorUserId) {
       .query(`UPDATE dbo.CrmPaymentMilestone SET MilestoneName = @name, AmountDue = @amt, UpdatedAt = SYSDATETIME() WHERE Id = @mid`);
   }
 
-  if (BookingId) {
+  if (BookingId != null) {
     await rollupBookingTotals(pool, BookingId);
   await logCrmAudit(pool, "Booking", BookingId, actorUserId, [
     { field: "ExtraCharge", oldVal: row.recordset[0].Description, newVal: `${b.Description.trim()} = ₹${totalAmount}` },
@@ -208,7 +208,7 @@ async function applyAddExtraChargeToApplication(pool, applicationId, b, actorUse
 
   const result = await pool.request()
     .input("aid",  sql.Int, applicationId)
-    .input("mid",  sql.Int, b.ExtraChargeMasterId ? parseInt(b.ExtraChargeMasterId) : null)
+    .input("mid",  sql.Int, b.ExtraChargeMasterId !== undefined && b.ExtraChargeMasterId !== null && b.ExtraChargeMasterId !== "" ? parseInt(b.ExtraChargeMasterId) : null)
     .input("desc", sql.NVarChar(300), b.Description.trim())
     .input("amt",  sql.Decimal(18, 2), amount)
     .input("gstr", sql.Decimal(5, 2), gstRate)
@@ -247,8 +247,8 @@ async function applyReleaseExtraCharge(pool, id) {
   // Draft/Pending status instead of requireActiveBooking (which would
   // wrongly report "Booking not found" for a BookingId that was never
   // supposed to exist yet), and there's no milestone/GST rollup to redo.
-  if (!BookingId) {
-    if (ApplicationId) {
+  if (BookingId == null) {
+    if (ApplicationId != null) {
       const app = await pool.request().input("aid", sql.Int, ApplicationId)
         .query("SELECT Status FROM dbo.CrmApplication WHERE Id = @aid AND IsActive = 1");
       if (app.recordset.length && ![CrmStatus.DRAFT, CrmStatus.PENDING, CrmStatus.REJECTED].includes(app.recordset[0].Status)) {
@@ -292,7 +292,7 @@ router.get("/application/:applicationId", requirePageRight("crm-applications", "
   try {
     const pool = getPool();
     const applicationId = parseId(req.params.applicationId);
-    if (!applicationId) return res.status(400).json({ error: "Invalid applicationId" });
+    if (applicationId === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, applicationId).query(`
       SELECT c.*, m.ChargeName AS MasterChargeName
       FROM dbo.CrmExtraCharge c
@@ -318,7 +318,7 @@ router.post("/application/:applicationId", requirePageRight("crm-applications", 
   try {
     await tx.begin();
     const applicationId = parseId(req.params.applicationId);
-    if (!applicationId) return res.status(400).json({ error: "Invalid applicationId" });
+    if (applicationId === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await applyAddExtraChargeToApplication(tx, applicationId, req.body, actorId(req));
     await tx.commit();
     res.status(201).json({ success: true, ...result });
@@ -334,7 +334,7 @@ router.get("/:bookingId", requirePageRight("crm-bookings", "view"), async (req, 
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId).query(`
       SELECT c.*, m.ChargeName AS MasterChargeName
       FROM dbo.CrmExtraCharge c
@@ -358,7 +358,7 @@ router.post("/:bookingId", requirePageRight("crm-bookings", "edit"), async (req,
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
 
     const activeErr = await requireActiveBooking(pool, bookingId);
@@ -405,7 +405,7 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "ed
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const row = await pool.request().input("id", sql.Int, id)
@@ -413,7 +413,7 @@ router.put("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], "ed
     if (!row.recordset.length) return res.status(404).json({ error: "Extra charge not found" });
     const bookingId = row.recordset[0].BookingId;
 
-    if (!bookingId) {
+    if (bookingId == null) {
       const tx0 = pool.transaction();
       try {
         await tx0.begin();
@@ -468,7 +468,7 @@ router.delete("/:id", requireAnyPageRight(["crm-bookings", "crm-applications"], 
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const reason = req.query.reason || req.body?.Reason;
 
     const row = await pool.request().input("id", sql.Int, id)

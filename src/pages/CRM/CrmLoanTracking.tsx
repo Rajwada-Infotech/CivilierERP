@@ -188,7 +188,7 @@ const CrmLoanTracking: React.FC = () => {
   // ── Dialog helpers ──────────────────────────────────────────────────────────
   const openRow = (row: any) => {
     setEditingRow(row);
-    setForm(row.LoanId ? {
+    setForm(row.LoanId != null ? {
       BankName:      row.BankName      || "",
       BranchName:    row.BranchName    || "",
       LoanAmount:    row.LoanAmount    != null ? String(row.LoanAmount) : "",
@@ -199,7 +199,7 @@ const CrmLoanTracking: React.FC = () => {
       RmContact:     row.RmContact     || "",
       Notes:         row.Notes         || "",
     } : { ...EMPTY_FORM });
-    setLocked(!!row.LoanId);
+    setLocked(row.LoanId != null);
   };
 
   const closeDialog = () => {
@@ -363,7 +363,7 @@ const CrmLoanTracking: React.FC = () => {
           <DialogHeader>
             <DialogTitle className="font-heading flex items-center justify-between gap-2 pr-6">
               <span className="flex items-center gap-2"><Landmark size={16} /> Home Loan Details</span>
-              {editingRow?.LoanId && locked && rights.canEdit && (
+              {editingRow?.LoanId != null && locked && rights.canEdit && (
                 <button
                   onClick={() => setLocked(false)}
                   className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium border border-border rounded-lg hover:bg-muted transition-colors shrink-0"
@@ -401,7 +401,7 @@ const CrmLoanTracking: React.FC = () => {
               </div>
 
               {/* Disbursement comparison (only when a loan record exists) */}
-              {editingRow.LoanId && (
+              {editingRow.LoanId != null && (
                 <div className={`rounded-xl border px-4 py-3 text-sm ${
                   editingRow.SanctionStatus === "Disbursed" && editingRow.LoanAmount > 0 &&
                   Math.abs((editingRow.DisbursedAmount || 0) - editingRow.LoanAmount) > 1
@@ -574,7 +574,7 @@ const CrmLoanTracking: React.FC = () => {
                       disabled={saving}
                       className="px-5 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 transition-colors"
                     >
-                      {saving ? "Saving…" : editingRow.LoanId ? "Update" : "Save"}
+                      {saving ? "Saving…" : editingRow.LoanId != null ? "Update" : "Save"}
                     </button>
                   </>
                 )}

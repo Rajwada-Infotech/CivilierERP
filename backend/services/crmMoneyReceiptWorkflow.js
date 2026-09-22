@@ -322,7 +322,7 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
       RPCheckNumber: mrRow.PaymentMode === "Cheque" ? mrRow.ChequeNo : null,
       RPChequeDate: mrRow.PaymentMode === "Cheque" ? mrRow.ChequeDate : null,
       RPRemarks: mrRow.Remarks || `CRM Money Receipt ${mrRow.ReceiptNo} - ${mrRow.BookingNo}`,
-      RPDepositBankId: mrRow.DepositBankId || null,
+      RPDepositBankId: mrRow.DepositBankId != null ? mrRow.DepositBankId : null,
       RPDepositBankName: mrRow.BankName || null,
       CrmMilestoneId: null,
       CrmBookingId: mrRow.BookingId,

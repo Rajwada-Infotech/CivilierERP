@@ -120,7 +120,7 @@ async function fetchCompanyBanks(): Promise<any[]> {
   try { const r = await fetchWithAuth(BANK_MASTER_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
-  if (!projectId) return [];
+  if (projectId == null) return [];
   try {
     const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`);
     return r.ok ? r.json() : [];
@@ -212,14 +212,14 @@ const CrmPaymentMilestones: React.FC = () => {
   const { data: projectBanks = [] } = useQuery({
     queryKey: ["crm-project-banks-for", booking?.ProjectId],
     queryFn: () => fetchProjectBanks(booking?.ProjectId),
-    enabled: !!booking?.ProjectId,
+    enabled: booking?.ProjectId != null,
   });
   // /for-project already resolves the full exclusivity rule server-side
   // (tagged-only, or every untagged bank as the fallback pool) — falling
   // back further to the raw, unfiltered bank list here would silently
   // reintroduce banks tagged exclusively to a DIFFERENT project. Only use
   // the raw list when this booking's Project isn't known yet.
-  const bankOptions = booking?.ProjectId ? projectBanks : companyBanks;
+  const bankOptions = booking?.ProjectId != null ? projectBanks : companyBanks;
 
   const milestone1 = milestones.find((m) => m.MilestoneNo === 1);
   const needsResync = !!(
@@ -286,7 +286,7 @@ const CrmPaymentMilestones: React.FC = () => {
   };
 
   const handleRecordPayment = async () => {
-    if (!editingId) return;
+    if (editingId == null) return;
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${editingId}`, {
@@ -408,7 +408,7 @@ const CrmPaymentMilestones: React.FC = () => {
   const handleConfirmApply = async () => {
     if (!applyDialog) return;
     const milId = applyDialog.milestone?.Id ?? parseInt(applyMilestoneId);
-    if (!milId) { toast.error("Select a milestone to apply to"); return; }
+    if (milId == null || Number.isNaN(milId)) { toast.error("Select a milestone to apply to"); return; }
     const amount = parseFloat(applyDialog.amount);
     if (!amount || amount <= 0) { toast.error("Enter a valid amount"); return; }
     setSaving(true);
@@ -998,7 +998,7 @@ const CrmPaymentMilestones: React.FC = () => {
         )}
 
         {/* Record Payment Dialog */}
-        <Dialog open={!!editingId} onOpenChange={(o) => { if (!o) setEditingId(null); }}>
+        <Dialog open={editingId != null} onOpenChange={(o) => { if (!o) setEditingId(null); }}>
           <DialogContent accent="crm" className="max-w-md">
             <DialogHeader>
               <DialogTitle className="font-heading">Submit Payment for Approval</DialogTitle>

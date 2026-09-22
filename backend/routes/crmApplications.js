@@ -292,7 +292,7 @@ router.get("/:id", requirePageRight("crm-applications", "view"), async (req, res
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [appRes, bookRes, logRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${APP_SELECT} WHERE a.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
@@ -328,7 +328,7 @@ router.get("/:id/pdf", requirePageRight("crm-applications", "view"), async (req,
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const appRow = await pool.request().input("id", sql.Int, id).query(`
       SELECT a.ApplicationNo, a.Status,
              bk.Id AS BookingId, bk.Status AS BookingStatus
@@ -394,13 +394,13 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const pool = getPool();
     const b = req.body;
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
 
     const existing = await pool.request().input("id", sql.Int, id)
       .query("SELECT Id, PreferredUnitId, Status, ProjectId, DepositBankId FROM dbo.CrmApplication WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Application not found" });
-    const existingUnitId = existing.recordset[0].PreferredUnitId || null;
+    const existingUnitId = existing.recordset[0].PreferredUnitId != null ? existing.recordset[0].PreferredUnitId : null;
     const existingStatus = existing.recordset[0].Status;
 
     // Company/Project/Unit/Payment Plan can move freely pre-submission (the
@@ -456,25 +456,25 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     if (b.Source && !SOURCE_TYPES.includes(b.Source))
       return res.status(400).json({ error: `Invalid Source. Must be one of: ${SOURCE_TYPES.join(", ")}` });
 
-    const platformId = b.PlatformId !== undefined ? (b.PlatformId ? parseInt(b.PlatformId) : null) : undefined;
-    const campaignId = b.CampaignId !== undefined ? (b.CampaignId ? parseInt(b.CampaignId) : null) : undefined;
-    const adId       = b.AdId       !== undefined ? (b.AdId       ? parseInt(b.AdId)       : null) : undefined;
+    const platformId = b.PlatformId !== undefined ? (b.PlatformId !== null && b.PlatformId !== "" ? parseInt(b.PlatformId) : null) : undefined;
+    const campaignId = b.CampaignId !== undefined ? (b.CampaignId !== null && b.CampaignId !== "" ? parseInt(b.CampaignId) : null) : undefined;
+    const adId       = b.AdId       !== undefined ? (b.AdId       !== null && b.AdId       !== "" ? parseInt(b.AdId)       : null) : undefined;
     if (platformId !== undefined || campaignId !== undefined || adId !== undefined) {
       const sourceError = await validateSourceChain(pool, { PlatformId: platformId, CampaignId: campaignId, AdId: adId });
       if (sourceError) return res.status(400).json({ error: sourceError });
     }
 
     let projectName = b.InterestedProject || null;
-    let companyId = b.CompanyId ? parseInt(b.CompanyId) : null;
-    if (b.ProjectId) {
+    let companyId = b.CompanyId !== undefined && b.CompanyId !== null && b.CompanyId !== "" ? parseInt(b.CompanyId) : null;
+    if (b.ProjectId !== undefined && b.ProjectId !== null && b.ProjectId !== "") {
       const proj = await pool.request().input("pid", sql.Int, parseInt(b.ProjectId))
         .query("SELECT name, company_id FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");
       if (!proj.recordset.length) return res.status(400).json({ error: "Selected project does not exist" });
       projectName = proj.recordset[0].name;
-      companyId = companyId || proj.recordset[0].company_id || null;
+      companyId = companyId != null ? companyId : (proj.recordset[0].company_id != null ? proj.recordset[0].company_id : null);
     }
     let unitName = b.InterestedUnit || null;
-    if (b.PreferredUnitId) {
+    if (b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "") {
       const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
         .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
       if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
@@ -490,7 +490,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // Application's PreferredUnitId is never changed to something already
     // taken; the old hold is only released afterward, once the new one is
     // confirmed in place.
-    const newUnitId = b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null;
+    const newUnitId = b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : null;
     const unitIsChanging = newUnitId !== null && newUnitId !== existingUnitId;
     if (unitIsChanging) {
       try {
@@ -500,7 +500,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           // Same effectiveProjectId pattern as the deposit-bank check below —
           // b.ProjectId is what's about to be saved by the UPDATE further
           // down, not yet what's in the DB row placeHold would otherwise read.
-          applicationProjectId: b.ProjectId ? parseInt(b.ProjectId) : existing.recordset[0].ProjectId,
+          applicationProjectId: b.ProjectId !== undefined && b.ProjectId !== null && b.ProjectId !== "" ? parseInt(b.ProjectId) : existing.recordset[0].ProjectId,
         });
       } catch (holdErr) {
         return res.status(holdErr.status || 400).json({ error: holdErr.message });
@@ -513,7 +513,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     const pptouched = (b.PaymentPlanId !== undefined || b.PreferredUnitId !== undefined) ? 1 : 0;
     let effectivePaymentPlanId = null;
     if (pptouched) {
-      const effectiveUnitId = b.PreferredUnitId ? parseInt(b.PreferredUnitId) : existingUnitId;
+      const effectiveUnitId = b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : existingUnitId;
       try {
         effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
           preferredUnitId: effectiveUnitId,
@@ -531,11 +531,11 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       return res.status(400).json({ error: `BrokeragePaymentPlan must be one of ${BROKERAGE_PLANS.join(", ")}` });
     }
 
-    const channelPartnerId = b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : null;
-    const bridge = !b.BrokerId && channelPartnerId
+    const channelPartnerId = b.ChannelPartnerId !== undefined && b.ChannelPartnerId !== null && b.ChannelPartnerId !== "" ? parseInt(b.ChannelPartnerId) : null;
+    const bridge = (b.BrokerId === undefined || b.BrokerId === null || b.BrokerId === "") && channelPartnerId != null
       ? await ensureBrokerForChannelPartner(pool, channelPartnerId, actor)
       : null;
-    const brokerId = b.BrokerId ? parseInt(b.BrokerId) : (bridge?.brokerId || null);
+    const brokerId = b.BrokerId !== undefined && b.BrokerId !== null && b.BrokerId !== "" ? parseInt(b.BrokerId) : (bridge?.brokerId != null ? bridge.brokerId : null);
     const brokerageRatePercent = b.BrokerageRatePercent != null && b.BrokerageRatePercent !== ""
       ? parseFloat(b.BrokerageRatePercent)
       : (bridge?.commissionRate ?? null);
@@ -546,8 +546,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("mob",  sql.NVarChar(20),  b.Mobile || null)
       .input("alt",  sql.NVarChar(20),  b.AltMobile || null)
       .input("em",   sql.NVarChar(200), b.Email || null)
-      .input("pid",  sql.Int,           b.ProjectId ? parseInt(b.ProjectId) : null)
-      .input("uid",  sql.Int,           b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null)
+      .input("pid",  sql.Int,           b.ProjectId !== undefined && b.ProjectId !== null && b.ProjectId !== "" ? parseInt(b.ProjectId) : null)
+      .input("uid",  sql.Int,           b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : null)
       .input("cid",  sql.Int,           companyId)
       .input("proj", sql.NVarChar(200), projectName)
       .input("unit", sql.NVarChar(100), unitName)
@@ -566,7 +566,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("tval", sql.Decimal(18,2), b.TokenValue != null && b.TokenValue !== "" ? parseFloat(b.TokenValue) : null)
       .input("bamt", sql.Decimal(18,2), b.BookingAmount != null && b.BookingAmount !== "" ? parseFloat(b.BookingAmount) : null)
       .input("pmode",sql.NVarChar(50),  b.PaymentMode || null)
-      .input("dbid", sql.Int,           b.DepositBankId ? parseInt(b.DepositBankId) : null)
+      .input("dbid", sql.Int,           b.DepositBankId !== undefined && b.DepositBankId !== null && b.DepositBankId !== "" ? parseInt(b.DepositBankId) : null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub",   sql.Int,           actor)
       .input("brkid", sql.Int,          brokerId)
@@ -645,7 +645,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
 // already inserts new Applications straight into 'Pending'.
 router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -878,7 +878,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
       }
     }
 
-    res.json({ success: true, status: result.newStatus, bookingId: booking?.id || null, bookingNo: booking?.BookingNo || null, bookingError });
+    res.json({ success: true, status: result.newStatus, bookingId: booking?.id != null ? booking.id : null, bookingNo: booking?.BookingNo || null, bookingError });
   } catch (e) {
     console.error("[crm-applications] submit error:", e.message);
     res.status(e.status || 400).json({ error: e.message });
@@ -902,7 +902,7 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
 // to retry by hand once the underlying issue is fixed.
 router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const actor = actorId(req);
@@ -965,7 +965,7 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const remarks = req.body?.Remarks || null;
 
     // An Application with an active Booking must be cancelled through the
@@ -1017,7 +1017,7 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
 // pre-booking mistakes/noise that should disappear from the active lists.
 router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const appRes = await pool.request().input("id", sql.Int, id).query(`

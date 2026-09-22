@@ -97,7 +97,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
   try {
     const pool = getPool();
     const bid = parseId(req.params.bookingId);
-    if (!bid) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bid === null) return res.status(400).json({ error: "Invalid bookingId" });
     // FinancingType and Milestone-1 payment status live outside
     // CrmCustomerBankDetail (on CrmBooking/CrmPaymentMilestone) but the
     // dialog needs both — Milestone 1 to decide whether the form should even
@@ -186,7 +186,7 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
   try {
     const pool = getPool();
     const bid = parseId(req.params.bookingId);
-    if (!bid) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bid === null) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
     const actor = actorId(req);
 
@@ -365,7 +365,7 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
   try {
     const pool = getPool();
     const aid = parseId(req.params.applicationId);
-    if (!aid) return res.status(400).json({ error: "Invalid applicationId" });
+    if (aid === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, aid).query(`
       SELECT d.*, vu.name AS BookingStageVerifiedByName
       FROM dbo.CrmCustomerBankDetail d
@@ -403,7 +403,7 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
   try {
     const pool = getPool();
     const aid = parseId(req.params.applicationId);
-    if (!aid) return res.status(400).json({ error: "Invalid applicationId" });
+    if (aid === null) return res.status(400).json({ error: "Invalid applicationId" });
     const b = req.body;
     const actor = actorId(req);
 
@@ -422,8 +422,8 @@ router.put("/application/:applicationId", requirePageRight("crm-customer-bank-de
     // conflict this route pair is prone to.
     const linkedBooking = await pool.request().input("aid", sql.Int, aid)
       .query("SELECT Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1");
-    const linkedBookingId = linkedBooking.recordset[0]?.Id || null;
-    if (linkedBookingId) {
+    const linkedBookingId = linkedBooking.recordset[0]?.Id != null ? linkedBooking.recordset[0].Id : null;
+    if (linkedBookingId != null) {
       const activeErr = await requireApprovedBooking(pool, linkedBookingId);
       if (activeErr) return res.status(400).json({ error: activeErr });
       // Same real freeze point as the Booking-keyed endpoint — this comment

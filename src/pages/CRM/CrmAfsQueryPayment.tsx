@@ -395,7 +395,7 @@ const CrmAfsQueryPayment: React.FC<{
   const { data: detail, refetch: refetchDetail } = useQuery({
     queryKey: ["crm-afs-query-payment-detail", selectedId],
     queryFn: () => fetchDetail(selectedId),
-    enabled: !!selectedId,
+    enabled: selectedId != null,
   });
 
   // Embedded mode: resolve this one booking's AFS QP record id (or null).
@@ -409,13 +409,13 @@ const CrmAfsQueryPayment: React.FC<{
     staleTime: 15_000,
   });
   useEffect(() => {
-    if (embedded && embeddedRecord?.Id && embeddedRecord.Id !== selectedId) setSelectedId(embeddedRecord.Id);
+    if (embedded && embeddedRecord?.Id != null && embeddedRecord.Id !== selectedId) setSelectedId(embeddedRecord.Id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [embedded, embeddedRecord?.Id]);
   const afterChange = () => { refetchEmbedded(); refetchDetail(); onChanged?.(); };
   const [embeddedStarting, setEmbeddedStarting] = useState(false);
   const embeddedStart = async (stampDuty: string, registrationFee: string) => {
-    if (!embeddedBookingId) return;
+    if (embeddedBookingId == null) return;
     setEmbeddedStarting(true);
     try {
       const res = await fetchWithAuth(API, {
@@ -573,7 +573,7 @@ const CrmAfsQueryPayment: React.FC<{
   };
 
   const handleSendInfo = async () => {
-    if (!selectedId || !pendingInfoFiles.length) return;
+    if (selectedId == null || !pendingInfoFiles.length) return;
     setSendingInfo(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/info`, {
@@ -600,7 +600,7 @@ const CrmAfsQueryPayment: React.FC<{
   };
 
   const handleConfirm = async () => {
-    if (!selectedId) return;
+    if (selectedId == null) return;
     setConfirming(true);
     try {
       const res = await fetchWithAuth(`${API}/${selectedId}/confirm`, {
@@ -630,7 +630,7 @@ const CrmAfsQueryPayment: React.FC<{
         promptNextStep(
           navigate,
           "AFS Query Payment confirmed. Next step: start the AFS Registry visit (both parties at Sub-Registrar Office).",
-          confirmedRow?.BookingId ? `/crm/afs-registry?bookingId=${confirmedRow.BookingId}` : "/crm/afs-registry",
+          confirmedRow?.BookingId != null ? `/crm/afs-registry?bookingId=${confirmedRow.BookingId}` : "/crm/afs-registry",
           "Go to AFS Registry",
         );
       }
@@ -939,7 +939,7 @@ const CrmAfsQueryPayment: React.FC<{
       <div className="space-y-4">
         {embeddedLoading ? (
           <div className="p-8 text-center text-sm text-muted-foreground">Loading…</div>
-        ) : selectedId && detail ? (
+        ) : selectedId != null && detail ? (
           InlineDetail()
         ) : registered ? (
           <div className="rounded-xl border border-emerald-200 dark:border-emerald-900/50 bg-emerald-500/[0.05] px-5 py-5 flex items-start gap-4">
@@ -1053,7 +1053,7 @@ const CrmAfsQueryPayment: React.FC<{
             )}
 
             {/* Case B: existing record — show inline workflow */}
-            {deepLinkedRow && selectedId && InlineDetail()}
+            {deepLinkedRow && selectedId != null && InlineDetail()}
 
             {/* Case C: Executed but no record yet — inline start form */}
             {deepLinkedBooking && !deepLinkedRow && deepLinkedBooking.AgreementStatus !== "Registered" && canCreate && (
@@ -1226,7 +1226,7 @@ const CrmAfsQueryPayment: React.FC<{
             </Dialog>
 
             {/* Detail dialog (list-mode: row click → dialog) */}
-            <Dialog open={!!selectedId && !deepLinkBookingId} onOpenChange={(o) => { if (!o) { setSelectedId(null); setAwaitingSendConfirm(false); setPendingInfoFiles([]); } }}>
+            <Dialog open={selectedId != null && !deepLinkBookingId} onOpenChange={(o) => { if (!o) { setSelectedId(null); setAwaitingSendConfirm(false); setPendingInfoFiles([]); } }}>
               <DialogContent accent="crm" className="max-w-lg p-0 gap-0 overflow-hidden rounded-xl">
                 {/* DialogTitle/Description must always be present for a11y */}
                 <DialogTitle className="sr-only">{detail ? `${detail.AfsQPNo} — AFS Query Payment` : "AFS Query Payment"}</DialogTitle>

@@ -37,7 +37,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"),
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     // Include docs uploaded at the Application stage (ApplicationId set, BookingId NULL)
     // by joining through CrmBooking → CrmApplication — so files collected during
     // the application wizard appear here without any data migration.
@@ -75,14 +75,14 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
 
     const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
 
     const booking = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
-    const applicationId = booking.recordset[0]?.ApplicationId || null;
+    const applicationId = booking.recordset[0]?.ApplicationId != null ? booking.recordset[0].ApplicationId : null;
     const b = req.body;
     if (!b.DocumentType?.trim()) return res.status(400).json({ error: "DocumentType is required" });
 
@@ -114,7 +114,7 @@ router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", 
     try {
       const pool = getPool();
       const bookingId = parseId(req.params.bookingId);
-      if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+      if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
@@ -129,7 +129,7 @@ router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", 
 
       const booking = await pool.request().input("bid", sql.Int, bookingId)
         .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid AND IsActive = 1");
-      const applicationId = booking.recordset[0]?.ApplicationId || null;
+      const applicationId = booking.recordset[0]?.ApplicationId != null ? booking.recordset[0].ApplicationId : null;
 
       // One INSERT per file — wrapped so a failure partway through a
       // multi-file upload can't leave some files attached and others
@@ -176,7 +176,7 @@ router.get("/application/:applicationId", requirePageRight("crm-applications", "
   try {
     const pool = getPool();
     const applicationId = parseId(req.params.applicationId);
-    if (!applicationId) return res.status(400).json({ error: "Invalid applicationId" });
+    if (applicationId === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, applicationId).query(`
       SELECT d.Id, d.BookingId, d.ApplicationId, d.DocumentType, d.DocumentUrl, d.FileName,
              d.IsVerified, d.VerifiedBy, d.VerifiedAt, d.Notes, d.CreatedBy, d.CreatedAt,
@@ -201,7 +201,7 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
     try {
       const pool = getPool();
       const applicationId = parseId(req.params.applicationId);
-      if (!applicationId) return res.status(400).json({ error: "Invalid applicationId" });
+      if (applicationId === null) return res.status(400).json({ error: "Invalid applicationId" });
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
@@ -211,7 +211,7 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
       }
       const booking = await pool.request().input("aid", sql.Int, applicationId)
         .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE ApplicationId = @aid AND IsActive = 1 ORDER BY Id DESC");
-      const bookingId = booking.recordset[0]?.Id || null;
+      const bookingId = booking.recordset[0]?.Id != null ? booking.recordset[0].Id : null;
 
       const tx = pool.transaction();
       await tx.begin();
@@ -251,7 +251,7 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
 router.get("/file/:id", requireAnyPageRight(["crm-applications", "crm-welcome-calls", "crm-bookings"], "view"), async (req, res) => {
   try {
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await getPool().request().input("id", sql.Int, id)
       .query("SELECT FileName, FileBase64, MimeType FROM dbo.CrmBookingDocument WHERE Id = @id");
     if (!result.recordset.length || !result.recordset[0].FileBase64) return res.status(404).json({ error: "File not found" });
@@ -274,7 +274,7 @@ router.put("/:id/verify", requirePageRight("crm-welcome-calls", "edit"), async (
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const docRow = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmBookingDocument WHERE Id = @id");
@@ -306,7 +306,7 @@ router.delete("/:id", requireAnyPageRight(["crm-applications", "crm-welcome-call
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const docRow = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmBookingDocument WHERE Id = @id");

@@ -58,7 +58,7 @@ router.get("/lead/:leadId", requirePageRight("sa-lead-tasks", "view"), async (re
   try {
     const pool = getPool();
     const lid = parseId(req.params.leadId);
-    if (!lid) return res.status(400).json({ error: "Invalid leadId" });
+    if (lid === null) return res.status(400).json({ error: "Invalid leadId" });
     const result = await pool.request()
       .input("lid", sql.Int, lid)
       .query(`${LEAD_TASK_SELECT} WHERE t.LeadId = @lid ORDER BY t.DueDate ASC`);

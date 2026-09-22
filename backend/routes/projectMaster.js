@@ -41,7 +41,7 @@ async function acctHeadHasLGSTType(pool) {
 // the compliance fields genuinely haven't been filled in yet. Idempotent:
 // does nothing if the PRJ-{id}-CUST/SUPP heads already exist.
 async function ensureProjectLedgerHeads(pool, projectId, projectName, address, createdBy) {
-  if (!projectId) return;
+  if (projectId === null) return;
 
   const projectRow = await pool
     .request()
@@ -553,7 +553,7 @@ router.put("/:id", adminOnly, async (req, res) => {
     // (same root cause as migration 105-fix-godown-enterprise-id).
     try {
       const projectId = parseId(req.params.id);
-      if (!projectId) return res.status(400).json({ error: "Invalid id" });
+      if (projectId === null) return res.status(400).json({ error: "Invalid id" });
       const resolvedCompanyId = f.companyId ? parseInt(f.companyId) : null;
       await pool
         .request()
@@ -577,7 +577,7 @@ router.put("/:id", adminOnly, async (req, res) => {
     // company didn't have GST on file at creation time but does now.
     try {
       const projectId = parseId(req.params.id);
-      if (!projectId) return res.status(400).json({ error: "Invalid id" });
+      if (projectId === null) return res.status(400).json({ error: "Invalid id" });
       const createdBy = req.user?.name || req.user?.email || "system";
       await ensureProjectLedgerHeads(pool, projectId, f.name, f.addressLine1, createdBy);
     } catch (ledgerErr) {

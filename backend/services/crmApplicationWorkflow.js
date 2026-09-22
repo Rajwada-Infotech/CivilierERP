@@ -122,7 +122,7 @@ async function syncApplicationOnBookingTerminal(pool, bookingId, toStatus, trigg
     const row = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT ApplicationId FROM dbo.CrmBooking WHERE Id = @bid");
     const applicationId = row.recordset[0]?.ApplicationId;
-    if (!applicationId) return;
+    if (applicationId == null) return;
     await advanceApplicationStatus(pool, applicationId, toStatus, trigger, remarks, actorId, { force: true });
   } catch (e) {
     console.error("[crm-application-workflow] syncApplicationOnBookingTerminal failed:", e.message);

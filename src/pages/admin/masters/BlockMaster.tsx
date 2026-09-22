@@ -492,7 +492,7 @@ const BlockMaster: React.FC = () => {
         isDeleteLocked={(row) =>
           row.lockBookingNo
             ? `Has a Unit booked (${row.lockBookingNo as string})`
-            : row.lockHoldId
+            : row.lockHoldId != null
               ? "Has a Unit on hold"
               : null
         }

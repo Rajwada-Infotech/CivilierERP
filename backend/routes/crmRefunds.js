@@ -288,18 +288,18 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
     let dueDate = null;
 
     if (sourceType === "Manual") {
-      customerId = b.CustomerId ? parseInt(b.CustomerId, 10) : null;
-      if (!customerId) return res.status(400).json({ error: "CustomerId is required for a manual refund" });
-      bookingId = b.BookingId ? parseInt(b.BookingId, 10) : null;
-      if (bookingId) {
+      customerId = b.CustomerId !== undefined && b.CustomerId !== null && b.CustomerId !== "" ? parseInt(b.CustomerId, 10) : null;
+      if (customerId == null) return res.status(400).json({ error: "CustomerId is required for a manual refund" });
+      bookingId = b.BookingId !== undefined && b.BookingId !== null && b.BookingId !== "" ? parseInt(b.BookingId, 10) : null;
+      if (bookingId != null) {
         const bk = await pool.request().input("bid", sql.Int, bookingId)
           .query("SELECT CompanyId, ProjectId FROM dbo.CrmBooking WHERE Id = @bid");
         companyId = bk.recordset[0]?.CompanyId ?? null;
         projectId = bk.recordset[0]?.ProjectId ?? null;
       }
     } else {
-      sourceOnAccountId = b.SourceOnAccountId ? parseInt(b.SourceOnAccountId, 10) : null;
-      if (!sourceOnAccountId) return res.status(400).json({ error: "SourceOnAccountId is required for this source" });
+      sourceOnAccountId = b.SourceOnAccountId !== undefined && b.SourceOnAccountId !== null && b.SourceOnAccountId !== "" ? parseInt(b.SourceOnAccountId, 10) : null;
+      if (sourceOnAccountId == null) return res.status(400).json({ error: "SourceOnAccountId is required for this source" });
       const oaRow = await pool.request().input("id", sql.Int, sourceOnAccountId).query(`
         SELECT oa.Id, oa.Amount, oa.AppliedAmount, oa.Status, oa.BookingId, oa.HeldSourceRefId,
                b.CompanyId, b.ProjectId, a.CustomerId
@@ -318,7 +318,7 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
 
       if (sourceType === "CancellationHeldCredit") {
         if (oa.Status !== "Held") return res.status(400).json({ error: "That on-account row is not a held cancellation credit" });
-        sourceCancellationId = oa.HeldSourceRefId || null;
+        sourceCancellationId = oa.HeldSourceRefId != null ? oa.HeldSourceRefId : null;
         deductionPct = await deductionPctForHeld(pool, sourceOnAccountId);
         dueDate = new Date(Date.now() + 45 * 86400000);
       } else {
@@ -327,7 +327,7 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
         }
       }
     }
-    if (!customerId) return res.status(400).json({ error: "Could not resolve the customer for this refund" });
+    if (customerId == null) return res.status(400).json({ error: "Could not resolve the customer for this refund" });
 
     const deductionAmt = Math.round(gross * deductionPct / 100 * 100) / 100;
     const netAmount = Math.max(0, Math.round((gross - deductionAmt) * 100) / 100);
@@ -363,7 +363,7 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
       .input("damt", sql.Decimal(18, 2), deductionAmt)
       .input("net", sql.Decimal(18, 2), netAmount)
       .input("reason", sql.NVarChar(sql.MAX), b.Reason || null)
-      .input("bank", sql.Int, b.RefundBankLHeadId ? parseInt(b.RefundBankLHeadId, 10) : null)
+      .input("bank", sql.Int, b.RefundBankLHeadId !== undefined && b.RefundBankLHeadId !== null && b.RefundBankLHeadId !== "" ? parseInt(b.RefundBankLHeadId, 10) : null)
       .input("cbn", sql.NVarChar(200), cbName)
       .input("cba", sql.NVarChar(50), cbAcc)
       .input("cbi", sql.NVarChar(20), cbIfsc)
@@ -397,7 +397,7 @@ router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => 
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRefund WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Refund not found" });
@@ -407,7 +407,7 @@ router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => 
     await pool.request()
       .input("id", sql.Int, id)
       .input("reason", sql.NVarChar(sql.MAX), b.Reason ?? null)
-      .input("bank", sql.Int, b.RefundBankLHeadId ? parseInt(b.RefundBankLHeadId, 10) : null)
+      .input("bank", sql.Int, b.RefundBankLHeadId !== undefined && b.RefundBankLHeadId !== null && b.RefundBankLHeadId !== "" ? parseInt(b.RefundBankLHeadId, 10) : null)
       .input("cbn", sql.NVarChar(200), b.CustomerBankName ?? null)
       .input("cba", sql.NVarChar(50), b.CustomerAccountNo ?? null)
       .input("cbi", sql.NVarChar(20), b.CustomerIfscCode ?? null)
@@ -434,7 +434,7 @@ router.put("/:id/submit", requirePageRight("crm-refunds", "edit"), async (req, r
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRefund WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Refund not found" });
     if (!["Draft", "Rejected"].includes(cur.recordset[0].Status)) {
@@ -453,7 +453,7 @@ router.put("/:id/submit", requirePageRight("crm-refunds", "edit"), async (req, r
 // ── PUT /:id/approve — CRM checker (admin/marketing_head) -> FinancePending ──
 router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -479,7 +479,7 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
 // ── PUT /:id/reject ────────────────────────────────────────────────────
 router.put("/:id/reject", requirePageRight("crm-refunds", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -503,7 +503,7 @@ router.put("/:id/reject", requirePageRight("crm-refunds", "edit"), async (req, r
 // unchanged for CrmRefunds.tsx's own inline "Finance Approve" button.
 router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("crm-refunds", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const role = (req.user?.role || "").toLowerCase();
@@ -537,8 +537,8 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
         });
       }
     }
-    const bankId = req.body?.RefundBankLHeadId ? parseInt(req.body.RefundBankLHeadId, 10) : rf.RefundBankLHeadId;
-    if (!bankId) return res.status(400).json({ error: "A company bank account (RefundBankLHeadId) is required to disburse this refund" });
+    const bankId = req.body?.RefundBankLHeadId !== undefined && req.body?.RefundBankLHeadId !== null && req.body?.RefundBankLHeadId !== "" ? parseInt(req.body.RefundBankLHeadId, 10) : rf.RefundBankLHeadId;
+    if (bankId == null) return res.status(400).json({ error: "A company bank account (RefundBankLHeadId) is required to disburse this refund" });
     if (!rf.CustomerBankName && !rf.CustomerAccountNo) {
       return res.status(400).json({ error: "Customer bank details are missing — add them to the refund before disbursing" });
     }
@@ -615,7 +615,7 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
 // /:id/finance-approve above.
 router.put(["/:id/finance-reject", "/:id/finance/reject"], requirePageRight("crm-refunds", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const role = (req.user?.role || "").toLowerCase();
@@ -673,7 +673,7 @@ async function markCrmRefundPaid(pool, refundId, newPaymentId, userEmail) {
         );
       }
     }
-    await tx.request().input("id", sql.Int, refundId).input("np", sql.Int, newPaymentId || null)
+    await tx.request().input("id", sql.Int, refundId).input("np", sql.Int, newPaymentId != null ? newPaymentId : null)
       .query(`
         UPDATE dbo.CrmRefund SET
           Status = 'Paid', PaidAt = SYSDATETIME(),
@@ -915,7 +915,7 @@ router.post("/rebooking-transfer", requirePageRight("crm-refunds", "create"), as
       .input("sb", sql.Int, srcBank.recordset[0].BankLHeadId).input("db", sql.Int, dstBank.recordset[0].BankLHeadId)
       .input("amt", sql.Decimal(18, 2), amount)
       .input("nar", sql.NVarChar(500), `CRM re-booking credit transfer — held credit from a cancelled booking moved to BKG #${toBookingId}`)
-      .input("dtid", sql.Int, dtId || null)
+      .input("dtid", sql.Int, dtId != null ? dtId : null)
       .input("cb", sql.NVarChar(150), userEmail)
       .query(`
         INSERT INTO dbo.FundTransfer

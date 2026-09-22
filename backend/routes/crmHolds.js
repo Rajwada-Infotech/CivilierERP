@@ -26,8 +26,8 @@ router.post("/", requirePageRight("crm-bookings", "edit"), async (req, res) => {
     const b = req.body || {};
     const result = await placeHold(pool, {
       entityType: b.EntityType,
-      entityId: b.EntityId ? parseInt(b.EntityId) : null,
-      applicationId: b.ApplicationId ? parseInt(b.ApplicationId) : null,
+      entityId: b.EntityId !== undefined && b.EntityId !== null && b.EntityId !== "" ? parseInt(b.EntityId) : null,
+      applicationId: b.ApplicationId !== undefined && b.ApplicationId !== null && b.ApplicationId !== "" ? parseInt(b.ApplicationId) : null,
       holdDays: b.HoldDays,
       reason: b.Reason,
       userId: actorId(req),
@@ -59,7 +59,7 @@ router.get("/application/:applicationId", requirePageRight("crm-bookings", "view
   try {
     const pool = getPool();
     const applicationId = parseId(req.params.applicationId);
-    if (!applicationId) return res.status(400).json({ error: "Invalid applicationId" });
+    if (applicationId === null) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, applicationId)
       .query(`${HOLD_SELECT} WHERE h.ApplicationId = @aid ORDER BY h.CreatedAt DESC`);
     res.json(result.recordset);

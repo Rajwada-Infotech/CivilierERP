@@ -731,15 +731,15 @@ const CrmSalesDeed: React.FC = () => {
   const { data: deedDetail, refetch: refetchDetail } = useQuery({
     queryKey: ["crm-sale-deed-detail", detailId],
     queryFn: async () => {
-      if (!detailId) return null;
+      if (detailId == null) return null;
       const r = await fetchWithAuth(`${API}/${detailId}`);
       if (!r.ok) return null;
       return r.json();
     },
-    enabled: !!detailId,
+    enabled: detailId != null,
     staleTime: 15_000,
   });
-  
+
   const { data: users = [] } = useQuery({ queryKey: ['legal-executives'], queryFn: fetchUsers, staleTime: 300_000 });
 
   const detail = deedDetail?.deed ?? (detailId != null ? (deeds as any[]).find((d: any) => d.Id === detailId) : null);
@@ -747,7 +747,7 @@ const CrmSalesDeed: React.FC = () => {
   const { data: detailContext } = useQuery({
     queryKey: ["crm-sales-deed-context", detail ? String(detail.BookingId) : ""],
     queryFn: () => fetchBookingContext(String(detail?.BookingId ?? "")),
-    enabled: !!detail?.BookingId,
+    enabled: detail?.BookingId != null,
   });
 
   // Registry tracker for the currently-selected deed's booking — one
@@ -760,19 +760,19 @@ const CrmSalesDeed: React.FC = () => {
       if (!r.ok) return null;
       return r.json();
     },
-    enabled: !!detail?.BookingId,
+    enabled: detail?.BookingId != null,
     staleTime: 15_000,
   });
   const registryId = regByBooking?.Id ?? null;
   const { data: regDetailData, refetch: refetchRegDetail } = useQuery({
     queryKey: ["crm-sales-deed-registry-detail", registryId],
     queryFn: async () => {
-      if (!registryId) return null;
+      if (registryId == null) return null;
       const r = await fetchWithAuth(`${API}/registry/${registryId}`);
       if (!r.ok) return null;
       return r.json();
     },
-    enabled: !!registryId,
+    enabled: registryId != null,
     staleTime: 15_000,
   });
   const { data: regEligibleBookings = [] } = useQuery({
@@ -894,7 +894,7 @@ const CrmSalesDeed: React.FC = () => {
   }, [deepLinkBookingId, deedDeepLinkOpened, deeds]);
 
   useEffect(() => {
-    if (tabDeepLink && detailId) setActiveTab(tabDeepLink as DeedTab);
+    if (tabDeepLink && detailId != null) setActiveTab(tabDeepLink as DeedTab);
   }, [tabDeepLink, detailId]);
 
   useEffect(() => {
@@ -913,12 +913,12 @@ const CrmSalesDeed: React.FC = () => {
     qc.invalidateQueries({ queryKey: ["crm-booking-lifecycle"] });
     qc.invalidateQueries({ queryKey: ["crm-legal-milestones"] });
     qc.invalidateQueries({ queryKey: ["crm-dashboard"] });
-    if (detailId) invalidateDetail();
+    if (detailId != null) invalidateDetail();
   };
 
   // ── Registry handlers ──────────────────────────────────────────────────
   const handleStartRegistry = async () => {
-    if (!detail?.BookingId) return;
+    if (detail?.BookingId == null) return;
     setRegStarting(true);
     try {
       const res = await fetchWithAuth(`${API}/registry`, {
@@ -934,7 +934,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleRegSchedule = async () => {
-    if (!registryId || !regScheduledDate) { toast.error("Date is required"); return; }
+    if (registryId == null || !regScheduledDate) { toast.error("Date is required"); return; }
     const isReschedule = regScheduleOpen === "reschedule";
     if (!isReschedule && !regAppointmentOffice.trim()) { toast.error("Sub-Registrar Office is required"); return; }
     if (isReschedule && !regRescheduleReason.trim()) { toast.error("A reason is required to reschedule"); return; }
@@ -954,7 +954,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleRegComplete = async () => {
-    if (!registryId) return;
+    if (registryId == null) return;
     if (!regCompleteForm.RegistrationNo.trim()) { toast.error("Registration No. is required"); return; }
     if (!regCompleteForm.WitnessNames.trim()) { toast.error("Witness names are required"); return; }
     if (!regCompleteForm.BuyerAttended || !regCompleteForm.SellerAttended) { toast.error("Both parties' attendance must be confirmed"); return; }
@@ -973,7 +973,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleRegCancel = async () => {
-    if (!registryId || !regCancelReason.trim()) { toast.error("A reason is required"); return; }
+    if (registryId == null || !regCancelReason.trim()) { toast.error("A reason is required"); return; }
     try {
       const res = await fetchWithAuth(`${API}/registry/${registryId}/cancel`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
@@ -988,7 +988,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleRegUploadDoc = async (file: File, documentType: string, label?: string) => {
-    if (!registryId) return;
+    if (registryId == null) return;
     setRegUploadingDoc(true);
     try {
       const formData = new FormData();
@@ -1007,7 +1007,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleRegRequestDoc = async (documentType: string, label?: string) => {
-    if (!registryId) return;
+    if (registryId == null) return;
     setRegRequestingDoc(true);
     try {
       const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/request`, {
@@ -1023,7 +1023,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleRegVerifyDoc = async (docId: number) => {
-    if (!registryId) return;
+    if (registryId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/registry/${registryId}/documents/${docId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -1037,7 +1037,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleRegRejectDoc = async (docId: number) => {
-    if (!registryId) return;
+    if (registryId == null) return;
     const remarks = window.prompt("Describe what's wrong with this document (required):");
     if (!remarks?.trim()) return;
     try {
@@ -1225,7 +1225,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const saveFields = async (fields: Record<string, any>) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     const res = await fetchWithAuth(`${API}/${detailId}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(fields),
@@ -1285,7 +1285,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleSendToCustomer = async () => {
-    if (!detailId) return;
+    if (detailId == null) return;
     setSendingToCustomer(true);
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/send-to-customer`, { method: "PUT" });
@@ -1298,7 +1298,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleProxyApprove = async (method: ProxyMethod, remarks: string) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     setProxySaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/proxy-customer-approve`, {
@@ -1315,7 +1315,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleProxyRecheck = async (method: ProxyMethod, remarks: string) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     setProxySaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/proxy-customer-recheck`, {
@@ -1332,7 +1332,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleAssignLegal = async (legalExecutiveId: string) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     setAssigningLegal(true);
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/assign-legal`, {
@@ -1348,7 +1348,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleAttachDoc = async (docId: number, file: File) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -1361,7 +1361,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleUploadDoc = async (file: File, documentType: string, label?: string) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     setUploadingDoc(true);
     try {
       const formData = new FormData();
@@ -1386,7 +1386,7 @@ const CrmSalesDeed: React.FC = () => {
   // was ever consumed by something else, or a rejection needed a genuinely
   // fresh copy.
   const handleRequestDoc = async (documentType: string, label?: string) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     setRequestingDoc(true);
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/documents/request`, {
@@ -1402,7 +1402,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleResubmit = async () => {
-    if (!detailId) return;
+    if (detailId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/submit`, { method: 'PUT' });
       const data = await res.json();
@@ -1413,7 +1413,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleVerifyDoc = async (docId: number) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/documents/${docId}`, {
         method: 'PUT', headers: {'Content-Type': 'application/json'},
@@ -1431,7 +1431,7 @@ const CrmSalesDeed: React.FC = () => {
   // Agreement's own document rejection: remarks describing the mismatch are
   // mandatory, not optional.
   const handleRejectDoc = async (docId: number) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     const remarks = window.prompt("Describe what's wrong with this document (required):");
     if (!remarks?.trim()) return;
     try {
@@ -1447,7 +1447,7 @@ const CrmSalesDeed: React.FC = () => {
   };
 
   const handleCancelDeed = async () => {
-    if (!detailId) return;
+    if (detailId == null) return;
     try {
       const r = await fetchWithAuth(`${API}/${detailId}/cancel`, { method: "PUT" });
       if (!r.ok) {
@@ -1533,7 +1533,7 @@ const CrmSalesDeed: React.FC = () => {
 
           {/* Detail (Right Pane) */}
           <div className="flex-1 overflow-y-auto thin-scroll space-y-4">
-            {!detailId ? (
+            {detailId == null ? (
               <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
                 Select a deed to view details
               </div>

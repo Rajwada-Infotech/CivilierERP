@@ -142,7 +142,7 @@ router.get("/policy", requirePageRight("crm-cancellations", "view"), async (req,
     // Find the matching slab: project-specific first, then global (NULL).
     // A slab matches when daysSince >= Min AND (Max IS NULL OR daysSince <= Max).
     const slabRes = await pool.request()
-      .input("pid", sql.Int, ProjectId || null)
+      .input("pid", sql.Int, ProjectId != null ? ProjectId : null)
       .input("days", sql.Int, daysSince)
       .query(`
         SELECT TOP 1
@@ -288,7 +288,7 @@ router.post("/", requirePageRight("crm-cancellations", "create"), validateBody(c
         ? Math.floor((Date.now() - new Date(BookingDate).getTime()) / 86_400_000)
         : 0;
       const policyRes = await pool.request()
-        .input("pid", sql.Int, pId || null).input("days", sql.Int, daysSince)
+        .input("pid", sql.Int, pId != null ? pId : null).input("days", sql.Int, daysSince)
         .query(`
           SELECT TOP 1 DeductionPercent FROM dbo.CrmCancellationPolicy
           WHERE IsActive = 1
@@ -349,7 +349,7 @@ router.put("/:id", requirePageRight("crm-cancellations", "edit"), async (req, re
     const pool = getPool();
     const b = req.body;
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmCancellation WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
@@ -371,7 +371,7 @@ router.put("/:id", requirePageRight("crm-cancellations", "edit"), async (req, re
 // PUT /:id/submit — Rejected -> Pending (resubmit)
 router.put("/:id/submit", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -405,7 +405,7 @@ router.put("/:id/submit", requirePageRight("crm-cancellations", "edit"), async (
 //      dangling forever as "Pending" is its own kind of clutter/confusion).
 router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -438,7 +438,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       WHERE b.Id = @bid
     `);
     const ctx = ctxRes.recordset[0] || {};
-    const refundNo = ctx.CustomerId ? await getNextDocNumber(pool, "CRFD", "CRFD") : null;
+    const refundNo = ctx.CustomerId != null ? await getNextDocNumber(pool, "CRFD", "CRFD") : null;
 
     // approvalTransition has its own internal transaction and locking — it must
     // run on pool (not on a tx object) BEFORE we open our own transaction.
@@ -726,7 +726,7 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
 // PUT /:id/reject — admin/super_admin/marketing_head only.
 router.put("/:id/reject", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;

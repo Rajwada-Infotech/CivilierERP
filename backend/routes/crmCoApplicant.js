@@ -17,7 +17,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"),
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT * FROM dbo.CrmCoApplicant WHERE BookingId = @bid AND IsActive = 1 ORDER BY CreatedAt");
     res.json(result.recordset);
@@ -76,7 +76,7 @@ router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit")
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
     if (!b.Name?.trim()) return res.status(400).json({ error: "Name is required" });
 
@@ -154,7 +154,7 @@ router.put("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"]
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (!b.Name?.trim()) return res.status(400).json({ error: "Name is required" });
 
@@ -203,7 +203,7 @@ router.delete("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-application
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const row = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmCoApplicant WHERE Id = @id");
     const bookingId = row.recordset[0]?.BookingId;
