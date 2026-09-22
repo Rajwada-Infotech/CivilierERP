@@ -1702,7 +1702,7 @@ export default function FixedAssetRecord() {
               <AlertCircle size={20} className="text-destructive mt-0.5 shrink-0" />
               <div>
                 <p className="font-semibold text-sm">Delete this asset?</p>
-                <p className="text-xs text-muted-foreground mt-0.5">The asset will be marked as deleted and removed from the list.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">This permanently removes it and cannot be undone.</p>
               </div>
             </div>
             <div className="flex gap-2 justify-end">

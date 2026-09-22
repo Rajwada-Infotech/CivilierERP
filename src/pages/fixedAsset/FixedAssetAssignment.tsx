@@ -879,7 +879,7 @@ export default function FixedAssetAssignment() {
               <p className="font-semibold text-sm">Delete this assignment?</p>
             </div>
             <p className="text-xs text-muted-foreground">
-              The assignment record will be removed from history. The asset's current holder is
+              This permanently removes it and cannot be undone. The asset's current holder is
               re-set to its most recent remaining assignment.
             </p>
             <div className="flex gap-2 justify-end pt-1">

@@ -993,7 +993,8 @@ export default function AssetTransfer() {
               <div>
                 <p className="font-semibold text-sm">Are you sure you want to delete this asset transfer?</p>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  The asset's current holder will be recalculated from its remaining transfer history.
+                  This permanently removes it and cannot be undone. The asset's current holder will be
+                  recalculated from its remaining transfer history.
                 </p>
               </div>
             </div>

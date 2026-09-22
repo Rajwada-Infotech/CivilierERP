@@ -132,14 +132,10 @@ async function upsertAssignmentForTransfer(tx, pool, opts) {
   return { assignmentId: ins.recordset[0].AssignmentId, docNo };
 }
 
-async function softDeleteAssignmentForTransfer(tx, transferId) {
+async function deleteAssignmentForTransfer(tx, transferId) {
   await tx.request()
     .input("TransferId", sql.Int, transferId)
-    .query(`
-      UPDATE dbo.FixedAssetAssignment
-      SET Status = 'Deleted'
-      WHERE SourceTransferId = @TransferId AND Status <> 'Deleted'
-    `);
+    .query(`DELETE FROM dbo.FixedAssetAssignment WHERE SourceTransferId = @TransferId`);
 }
 
 // ── GET /users — active users for the From/To pickers ────────────────────────
@@ -640,11 +636,12 @@ router.put("/:id", requirePageRight("asset-transfer", "edit"), async (req, res) 
   }
 });
 
-// ── DELETE /:id — soft-delete a transfer transaction ──────────────────────────
-// Rows are never hard-deleted (audit trail); Status flips to 'Deleted' and
-// the affected asset's current custodian is recalculated from whatever
-// transfer history remains, falling back to the deleted row's own FromUserId
-// (the holder before this transfer ever happened) if none is left.
+// ── DELETE /:id — permanently removes a transfer transaction (chain order:
+// nothing downstream depends on a Transfer, so it deletes freely). Also
+// removes the linked Assignment it auto-created; the affected asset's
+// current custodian is recalculated from whatever transfer history remains,
+// falling back to the deleted row's own FromUserId (the holder before this
+// transfer ever happened) if none is left.
 router.delete("/:id", requirePageRight("asset-transfer", "delete"), async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
@@ -665,32 +662,27 @@ router.delete("/:id", requirePageRight("asset-transfer", "delete"), async (req, 
         `);
       const row = rowRes.recordset[0];
       if (!row) { await tx.rollback(); return res.status(404).json({ error: "Transfer not found" }); }
-      if (row.Status === "Deleted") { await tx.rollback(); return res.status(400).json({ error: "This transfer has already been deleted" }); }
 
       await tx.request()
         .input("AssetId", sql.Int, row.AssetId)
         .query(`SELECT AssetId FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK) WHERE AssetId = @AssetId`);
 
+      // Delete the Assignment this transfer created before the transfer row
+      // itself — FixedAssetAssignment.SourceTransferId is a foreign key into
+      // AssetTransferHistory, so the referencing row must go first.
+      await deleteAssignmentForTransfer(tx, id);
+
       await tx.request()
         .input("Id", sql.Int, id)
-        .input("DeletedBy", sql.NVarChar(200), email)
-        .query(`
-          UPDATE dbo.AssetTransferHistory SET
-            Status = 'Deleted', DeletedBy = @DeletedBy, DeletedAt = SYSDATETIME()
-          WHERE Id = @Id
-        `);
+        .query(`DELETE FROM dbo.AssetTransferHistory WHERE Id = @Id`);
 
       const remainingCustodian = await recomputeCustodianForAsset(tx, row.AssetId);
       if (remainingCustodian == null) {
         // This was the only (remaining) transfer for the asset — restore
-        // whoever held it beforehand.
+        // whoever held it beforehand. (Custodian is now correctly derived
+        // since both the transfer and its linked assignment are gone.)
         await applyCustodian(tx, row.AssetId, row.FromUserId);
       }
-
-      // Roll back the Assignment this transfer created — the previous
-      // holder's assignment becomes Current again automatically (it's
-      // derived from the custodian we just restored above).
-      await softDeleteAssignmentForTransfer(tx, id);
 
       await tx.commit();
       await bumpCacheVersion("asset-transfer");
