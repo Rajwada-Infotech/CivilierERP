@@ -472,9 +472,9 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
                   Extend Hold
                 </button>
               )}
-              <button onClick={() => navigate(slot.BookingId ? `/crm/bookings?applicationId=${slot.ApplicationId}` : `/crm/applications`)}
+              <button onClick={() => navigate(slot.BookingId != null ? `/crm/bookings?applicationId=${slot.ApplicationId}` : `/crm/applications`)}
                 className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
-                {slot.BookingId ? "Open Booking" : "Open Application"}
+                {slot.BookingId != null ? "Open Booking" : "Open Application"}
               </button>
             </>
           ) : isHold ? (
@@ -484,7 +484,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
                 {releasing ? "Releasing..." : "Release Hold"}
               </button>
             )
-          ) : slot.BookingId ? (
+          ) : slot.BookingId != null ? (
             <button onClick={() => navigate(`/crm/bookings?applicationId=${slot.ApplicationId}`)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
               Open Booking

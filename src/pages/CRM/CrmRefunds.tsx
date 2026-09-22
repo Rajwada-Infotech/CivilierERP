@@ -64,7 +64,7 @@ async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchCustomerBankDetail(bookingId?: number | null): Promise<any | null> {
-  if (!bookingId) return null;
+  if (bookingId == null) return null;
   try { const r = await fetchWithAuth(`${CUSTOMER_BANK_API}/booking/${bookingId}`); return r.ok ? r.json() : null; } catch { return null; }
 }
 
@@ -114,7 +114,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
   const { data: customerBank } = useQuery({
     queryKey: ["crm-refund-customer-bank", picked?.BookingId],
     queryFn: () => fetchCustomerBankDetail(picked?.BookingId),
-    enabled: !!picked?.BookingId,
+    enabled: picked?.BookingId != null,
   });
   // Pre-fill the payout bank details from the customer's on-file KYC the
   // moment a source is picked — staff shouldn't have to retype what's
@@ -282,7 +282,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                   <input value={cbAcc} onChange={(e) => setCbAcc(e.target.value)} placeholder="Account No" className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                   <input value={cbIfsc} onChange={(e) => setCbIfsc(e.target.value)} placeholder="IFSC" className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                 </div>
-                {picked?.BookingId && !customerBank?.BankName && !customerBank?.AccountNo && (
+                {picked?.BookingId != null && !customerBank?.BankName && !customerBank?.AccountNo && (
                   <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">No bank details on file for this customer — enter them manually before raising the refund.</p>
                 )}
               </div>

@@ -453,17 +453,17 @@ const CrmParkingBooking: React.FC = () => {
       // Status filter is meaningful only for standalone rows. Unit-linked
       // parking has no independent payment status — the booking is the unit
       // of payment, so Pending/Paid filters should never hide unit-linked rows.
-      const matchStatus = !statusFilter || !!a.BookingId || a.PaymentStatus === statusFilter;
-      const matchLink = !linkFilter || (linkFilter === "linked" ? !!a.BookingId : !a.BookingId);
+      const matchStatus = !statusFilter || a.BookingId != null || a.PaymentStatus === statusFilter;
+      const matchLink = !linkFilter || (linkFilter === "linked" ? a.BookingId != null : a.BookingId == null);
       return matchSearch && matchStatus && matchLink;
     }), [allotments, search, statusFilter, linkFilter]);
 
   const standalonePending = filtered
-    .filter((a) => !a.BookingId && a.PaymentStatus !== CrmStatus.PAID)
+    .filter((a) => a.BookingId == null && a.PaymentStatus !== CrmStatus.PAID)
     .reduce((s, a) => s + Number(a.TotalAmount || 0), 0);
 
   const standalonePaid = filtered
-    .filter((a) => !a.BookingId && a.PaymentStatus === CrmStatus.PAID)
+    .filter((a) => a.BookingId == null && a.PaymentStatus === CrmStatus.PAID)
     .reduce((s, a) => s + Number(a.TotalAmount || 0), 0);
 
   const resetForm = () => { setForm({ ...EMPTY_FORM }); setNewDialogOpen(false); };
@@ -737,7 +737,7 @@ const CrmParkingBooking: React.FC = () => {
             </DialogTitle>
             <DialogDescription className="text-sm leading-relaxed">
               You are about to release slot <strong>{releaseTarget?.SlotNo || releaseTarget?.ParkingSlotNo || "—"}</strong> ({releaseTarget?.CurrentParkingType}) allotted to <strong>{releaseTarget?.ApplicantName}</strong>.
-              {releaseTarget?.BookingId && " The linked booking's grand total and milestones will be recalculated."}
+              {releaseTarget?.BookingId != null && " The linked booking's grand total and milestones will be recalculated."}
               {" "}This action cannot be undone without re-allotting.
             </DialogDescription>
           </DialogHeader>

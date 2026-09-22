@@ -326,18 +326,18 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
   const { data: bookings = [], isLoading: bookingsLoading } = useQuery({
     queryKey: ["crm-bookings-for-invoice-picker"],
     queryFn: fetchBookingsForPicker,
-    enabled: !bookingId,
+    enabled: bookingId == null,
     staleTime: 60_000,
   });
   const { data: bookingDetail } = useQuery({
     queryKey: ["crm-invoice-gen-booking-detail", bookingId],
     queryFn: () => fetchBookingDetail(bookingId as number),
-    enabled: !!bookingId,
+    enabled: bookingId != null,
   });
   const { data: onAccountData } = useQuery({
     queryKey: ["crm-invoice-gen-on-account", bookingId],
     queryFn: () => fetchOnAccount(bookingId as number),
-    enabled: !!bookingId,
+    enabled: bookingId != null,
   });
   const { data: existingInvoices = [], refetch: refetchExisting } = useQuery({
     queryKey: ["crm-invoice-gen-existing", bookingId],
@@ -345,7 +345,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
       const r = await fetchWithAuth(`${BKG_API}/${bookingId}/invoices`);
       return r.ok ? r.json() : [];
     },
-    enabled: !!bookingId,
+    enabled: bookingId != null,
   });
 
   const booking = bookingDetail?.booking;
@@ -473,7 +473,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
   }
 
   async function handleBulkGenerate() {
-    if (!bulkSelected.size || !bookingId) return;
+    if (!bulkSelected.size || bookingId == null) return;
     setBulkBusy(true);
     try {
       const items = Array.from(bulkSelected).map((milestoneId) => ({ bookingId, milestoneId }));
@@ -515,7 +515,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
       <DialogContent accent="crm" className="max-w-xl max-h-[85vh] overflow-y-auto thin-scroll">
         <DialogHeader><DialogTitle className="font-heading">Generate Invoice</DialogTitle></DialogHeader>
 
-        {!bookingId ? (
+        {bookingId == null ? (
           // Single card: free-text search plus three optional narrowing
           // filters, all applied together over one result list — no tabs,
           // no separate "modes" to switch between.
@@ -591,7 +591,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
             <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 space-y-1.5">
               <div className="flex items-center justify-between">
                 <span className="font-mono text-sm font-semibold text-primary">{booking.BookingNo}</span>
-                {!initialBookingId && (
+                {initialBookingId == null && (
                   <button onClick={() => { setBookingId(null); setAckUnlinked(false); setBulkSelected(new Set()); }} className="text-xs text-muted-foreground hover:text-foreground">Change</button>
                 )}
               </div>
@@ -830,7 +830,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
 
         <div className="flex justify-end gap-2 pt-2 border-t border-border">
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-          {bookingId && booking && (
+          {bookingId != null && booking && (
             <button onClick={handleGenerate}
               disabled={saving || (form.InvoiceType === "Milestone" && !form.MilestoneId) || (form.InvoiceType === "OnAccount" && !form.OnAccountPaymentId) || (showUnlinkedWarning && !ackUnlinked)}
               className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
