@@ -2795,7 +2795,7 @@ export default function VehicleInOut() {
             <Button
               variant="destructive"
               onClick={() => {
-                if (deleteId) {
+                if (deleteId != null) {
                   deleteMut.mutate(deleteId);
                   setDeleteId(null);
                 }

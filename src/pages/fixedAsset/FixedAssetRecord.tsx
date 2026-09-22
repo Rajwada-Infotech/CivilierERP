@@ -1695,7 +1695,7 @@ export default function FixedAssetRecord() {
       </div>
 
       {/* ── delete confirm ── */}
-      {deleteId && createPortal(
+      {deleteId != null && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
             <div className="flex items-start gap-3 mb-4">
@@ -1721,7 +1721,7 @@ export default function FixedAssetRecord() {
       )}
 
       {/* ── delete & reverse confirm / blocked ── */}
-      {reverseId && createPortal(
+      {reverseId != null && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-card border border-border rounded-xl p-6 w-[26rem] shadow-xl">
             {loadingReversePlan ? (

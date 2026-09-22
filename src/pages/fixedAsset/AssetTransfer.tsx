@@ -985,7 +985,7 @@ export default function AssetTransfer() {
       </Dialog>
 
       {/* ── delete confirm ── */}
-      {deleteId && createPortal(
+      {deleteId != null && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
             <div className="flex items-start gap-3 mb-4">
