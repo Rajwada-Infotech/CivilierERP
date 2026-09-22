@@ -132,14 +132,14 @@ const CrmCancellations: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           BookingId: parseInt(form.BookingId),
-          Reason: form.Reason || null,
+          Reason: form.Reason.trim() || undefined,
           // Only send DeductionPercent if staff actually changed it from the
           // policy suggestion — omitting it lets the backend re-resolve fresh.
           DeductionPercent: form.DeductionPercent !== "" ? parseFloat(form.DeductionPercent) : undefined,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.message || data.error);
       toast.success(`Cancellation requested — refund amount: ${fmt(data.refundAmt)}`);
       setDialogOpen(false);
       setForm({ BookingId: "", Reason: "", DeductionPercent: "" });

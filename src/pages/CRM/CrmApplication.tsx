@@ -3373,7 +3373,15 @@ const ParkingSelectionStep: React.FC<{
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || `Failed to add ${currentType.ParkingType}`);
-      toast.success(`${currentType.ParkingType} added — ₹${Number(data.TotalAmount).toLocaleString("en-IN")}`);
+      const addedBase = Number(
+        currentType.NeedsRate || (rateEditing && rateOverride)
+          ? rateOverride
+          : currentType.Charge
+      ) || 0;
+      const addedTotal = parkingGstRates
+        ? Math.round((addedBase + (addedBase * computeUnitParkingGst(computedTotal, parkingBase + addedBase, parkingGstRates).rate / 100)) * 100) / 100
+        : Number(data.TotalAmount);
+      toast.success(`${currentType.ParkingType} added — ₹${addedTotal.toLocaleString("en-IN")}`);
       setSelectedType(""); setSelectedSlotId(""); setRateOverride(""); setRateEditing(false);
       refetchAll();
     } catch (e: any) {
@@ -3401,6 +3409,13 @@ const ParkingSelectionStep: React.FC<{
   // Pre-tax base for the GST preview — see RateSnapshot note on the GET
   // /application/:applicationId route (both Allotment and Hold shapes carry it).
   const parkingBase = (allotments as any[]).reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
+  const { data: parkingGstRates } = useGstRates();
+  const parkingGstPreview = parkingGstRates ? computeUnitParkingGst(computedTotal, parkingBase, parkingGstRates) : null;
+  const displayParkingTotal = (a: any) => {
+    const base = (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1);
+    if (!parkingGstPreview) return Number(a.TotalAmount || base);
+    return Math.round((base + (base * parkingGstPreview.rate / 100)) * 100) / 100;
+  };
 
   return (
     <div className="space-y-4">
@@ -3410,7 +3425,7 @@ const ParkingSelectionStep: React.FC<{
         <IndianRupee size={11} className="text-primary shrink-0" />
         Unit ₹{computedTotal.toLocaleString("en-IN")}
         {parkingBase > 0 && ` + Parking base ₹${parkingBase.toLocaleString("en-IN")}`}
-        {" = "}
+        {" + GST = "}
         <span className="font-semibold text-foreground">
           Grand Total <GstGrandTotalText unitValue={computedTotal} parkingBase={parkingBase} />
         </span>
@@ -3440,7 +3455,7 @@ const ParkingSelectionStep: React.FC<{
             {(allotments as any[]).map((a: any) => (
               <div key={`${a.Kind}-${a.Id}`} className="flex items-center justify-between text-xs rounded-md bg-muted/30 px-2.5 py-1.5">
                 <span className="flex items-center gap-1.5">
-                  {a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : `× ${a.Quantity}`} · ₹{Number(a.TotalAmount).toLocaleString("en-IN")}
+                  {a.CurrentParkingType} {a.SlotNo ? `— Slot ${a.SlotNo}` : `× ${a.Quantity}`} · ₹{displayParkingTotal(a).toLocaleString("en-IN")}
                   {a.Kind === "Hold" && (
                     <span title="Reserved — becomes a permanent allotment once this application's booking is created"
                       className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-600">
