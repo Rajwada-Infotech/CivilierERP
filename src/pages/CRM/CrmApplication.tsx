@@ -3410,7 +3410,7 @@ const ParkingSelectionStep: React.FC<{
         <IndianRupee size={11} className="text-primary shrink-0" />
         Unit ₹{computedTotal.toLocaleString("en-IN")}
         {parkingBase > 0 && ` + Parking base ₹${parkingBase.toLocaleString("en-IN")}`}
-        {" = "}
+        {" + GST = "}
         <span className="font-semibold text-foreground">
           Grand Total <GstGrandTotalText unitValue={computedTotal} parkingBase={parkingBase} />
         </span>

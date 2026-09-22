@@ -717,9 +717,10 @@ const CrmPaymentMilestones: React.FC = () => {
             {/* Booking summary card */}
             {booking && (() => {
               const grandTotal = Number(booking.GrandTotal ?? booking.TotalValue ?? 0);
+              const unitGstAmount = Number(booking.UnitGstAmount || 0);
               const parkingTotal = Number(booking.ParkingTotal || 0);
               const extraTotal = Number(booking.ExtraChargesTotal || 0);
-              const hasExtras = parkingTotal > 0 || extraTotal > 0;
+              const hasExtras = unitGstAmount > 0 || parkingTotal > 0 || extraTotal > 0;
               const bkgStatus = booking.BookingStatus;
               return (
                 <div className="rounded-xl border border-border p-4 space-y-4">
@@ -752,6 +753,12 @@ const CrmPaymentMilestones: React.FC = () => {
                           <span className="text-muted-foreground">Unit Value</span>
                           <span className="font-medium tabular-nums">{fmt(booking.TotalValue)}</span>
                         </div>
+                        {unitGstAmount > 0 && (
+                          <div className="flex items-baseline justify-between">
+                            <span className="text-muted-foreground">+ Unit GST</span>
+                            <span className="font-medium tabular-nums">{fmt(unitGstAmount)}</span>
+                          </div>
+                        )}
                         {parkingTotal > 0 && (
                           <div className="flex items-baseline justify-between">
                             <span className="text-muted-foreground">+ Parking</span>
