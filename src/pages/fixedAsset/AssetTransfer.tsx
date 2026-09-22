@@ -423,7 +423,7 @@ export default function AssetTransfer() {
         projectId:    String(d.ProjectId || ""),
         finYear:      d.FinYear || "",
         fromUserId:   String(d.FromUserId || ""),
-        assetId:      String(d.AssetId || ""),
+        assetId:      String(d.AssetId != null ? d.AssetId : ""),
         toUserId:     String(d.ToUserId || ""),
         departmentId: String(d.DepartmentId || ""),
         remarks:      d.Remarks || "",
