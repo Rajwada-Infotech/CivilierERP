@@ -52,7 +52,7 @@ async function rollupBookingTotals(pool, bookingId) {
 // the exact race that was already fixed for Unit bookings in
 // services/crmEntityCreation.js (see the UPDLOCK comment there).
 async function assertSlotAvailable(db, parkingSlotId) {
-  if (!parkingSlotId) return;
+  if (parkingSlotId === null || parkingSlotId === undefined) return;
   const existing = await db.request().input("sid", sql.Int, parkingSlotId)
     .query("SELECT Id FROM dbo.CrmParkingAllotment WITH (UPDLOCK, ROWLOCK) WHERE ParkingSlotId = @sid AND IsActive = 1");
   if (existing.recordset.length) {
@@ -80,7 +80,7 @@ function parkingError(message, status = 400) {
 // (see CrmApplication.tsx ParkingSelectionStep and CrmParkingBooking.tsx)
 // before a request ever reaches this check.
 function assertSlotSelected(parkingType, parkingSlotId) {
-  if (parkingSlotId) return;
+  if (parkingSlotId !== null && parkingSlotId !== undefined) return;
   throw parkingError(`${parkingType} parking must be sold against a specific slot — none is available to select.`);
 }
 
@@ -170,7 +170,7 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
     GstRate = b.GstRate != null ? parseFloat(b.GstRate) : 0;
   }
 
-  const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
+  const parkingSlotId = b.ParkingSlotId !== undefined && b.ParkingSlotId !== null && b.ParkingSlotId !== "" ? parseInt(b.ParkingSlotId) : null;
   assertSlotSelected(ParkingType, parkingSlotId);
 
 
@@ -210,7 +210,7 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
     const result = await tx.request()
       .input("bid",  sql.Int, bookingId)
       .input("aid",  sql.Int, booking.recordset[0].ApplicationId)
-      .input("pmid", sql.Int, b.ParkingMasterId ? parseInt(b.ParkingMasterId) : null)
+      .input("pmid", sql.Int, b.ParkingMasterId !== undefined && b.ParkingMasterId !== null && b.ParkingMasterId !== "" ? parseInt(b.ParkingMasterId) : null)
       .input("sid",  sql.Int, parkingSlotId)
       .input("slot", sql.NVarChar(50), slotNo)
       .input("qty",  sql.Int, qty)
@@ -711,7 +711,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
       GstRate = 0;
     }
 
-    const parkingSlotId = b.ParkingSlotId ? parseInt(b.ParkingSlotId) : null;
+    const parkingSlotId = b.ParkingSlotId !== undefined && b.ParkingSlotId !== null && b.ParkingSlotId !== "" ? parseInt(b.ParkingSlotId) : null;
     assertSlotSelected(ParkingType, parkingSlotId);
 
     const lineAmount = Charge * qty;
@@ -771,7 +771,7 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
 
       const result = await tx.request()
         .input("aid",  sql.Int, parseInt(b.ApplicationId))
-        .input("pmid", sql.Int, b.ParkingMasterId ? parseInt(b.ParkingMasterId) : null)
+        .input("pmid", sql.Int, b.ParkingMasterId !== undefined && b.ParkingMasterId !== null && b.ParkingMasterId !== "" ? parseInt(b.ParkingMasterId) : null)
         .input("sid",  sql.Int, parkingSlotId)
         .input("slot", sql.NVarChar(50), slotNo)
         .input("qty",  sql.Int, qty)

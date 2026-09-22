@@ -217,7 +217,7 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
     if (hasGL)
       req2.input("M_GLHeadId", sql.Int, M_GLHeadId ? parseInt(M_GLHeadId, 10) : null);
     if (hasCC)
-      req2.input("M_CostCenterId", sql.Int, M_CostCenterId ? parseInt(M_CostCenterId, 10) : null);
+      req2.input("M_CostCenterId", sql.Int, M_CostCenterId !== undefined && M_CostCenterId !== null && M_CostCenterId !== "" ? parseInt(M_CostCenterId, 10) : null);
 
     const result = await req2.query(`
       INSERT INTO dbo.Item_Master_Group (
@@ -318,7 +318,7 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
     if (hasGL)
       req2.input("M_GLHeadId", sql.Int, M_GLHeadId ? parseInt(M_GLHeadId, 10) : null);
     if (hasCC)
-      req2.input("M_CostCenterId", sql.Int, M_CostCenterId ? parseInt(M_CostCenterId, 10) : null);
+      req2.input("M_CostCenterId", sql.Int, M_CostCenterId !== undefined && M_CostCenterId !== null && M_CostCenterId !== "" ? parseInt(M_CostCenterId, 10) : null);
 
     const result = await req2.query(`
       UPDATE dbo.Item_Master_Group SET

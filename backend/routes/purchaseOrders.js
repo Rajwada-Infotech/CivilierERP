@@ -228,7 +228,7 @@ const syncLineItems = async (
       .input("Sort", sqlRef.Int, i)
       .input("ReceivedQty", sqlRef.Decimal(18, 4), 0)
       .input("MRItemId", sqlRef.Int, it.mrItemId ? parseInt(it.mrItemId, 10) : null)
-      .input("CostCenterId", sqlRef.Int, it.costCenterId ? parseInt(it.costCenterId, 10) : null)
+      .input("CostCenterId", sqlRef.Int, it.costCenterId !== undefined && it.costCenterId !== null && it.costCenterId !== "" ? parseInt(it.costCenterId, 10) : null)
       .input("Now", sqlRef.DateTime2, new Date()).query(`
         INSERT INTO dbo.PurchaseOrderItems
           (PurchaseOrderID, ItemId, ItemName, ItemCode, Description,
@@ -482,7 +482,7 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
       .input(
         "SourceSaleInvoiceId",
         sql.Int,
-        SourceSaleInvoiceId ? parseInt(SourceSaleInvoiceId, 10) : null,
+        SourceSaleInvoiceId !== undefined && SourceSaleInvoiceId !== null && SourceSaleInvoiceId !== "" ? parseInt(SourceSaleInvoiceId, 10) : null,
       )
       .input("SourceSaleInvoiceDocNo", sql.NVarChar(100), SourceSaleInvoiceDocNo || null)
       .input(
@@ -503,7 +503,7 @@ const createPurchaseOrderInternal = async (pool, payload, userEmail) => {
       )
       .input("FyId", sql.Int, fyId);
 
-    if (hasCC) insertReq.input("CostCenterId", sql.Int, CostCenterId ? parseInt(CostCenterId, 10) : null);
+    if (hasCC) insertReq.input("CostCenterId", sql.Int, CostCenterId !== undefined && CostCenterId !== null && CostCenterId !== "" ? parseInt(CostCenterId, 10) : null);
     if (hasVID) insertReq.input("VendorInvoiceDate", sql.Date, VendorInvoiceDate || null);
     if (hasVIN) insertReq.input("VendorInvoiceNo", sql.NVarChar(100), VendorInvoiceNo || null);
     if (hasPT) insertReq.input("PaymentTermId", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);
@@ -1073,7 +1073,7 @@ router.put(
         .input("GST", sql.NVarChar(sql.MAX), gstJson)
         .input("FyId", sql.Int, fyId);
 
-      if (hasCC) updateReq.input("CostCenterId2", sql.Int, CostCenterId ? parseInt(CostCenterId, 10) : null);
+      if (hasCC) updateReq.input("CostCenterId2", sql.Int, CostCenterId !== undefined && CostCenterId !== null && CostCenterId !== "" ? parseInt(CostCenterId, 10) : null);
       if (hasVID) updateReq.input("VendorInvoiceDate2", sql.Date, VendorInvoiceDate || null);
       if (hasVIN) updateReq.input("VendorInvoiceNo2", sql.NVarChar(100), VendorInvoiceNo || null);
       if (hasPT) updateReq.input("PaymentTermId2", sql.Int, PaymentTermId ? parseInt(PaymentTermId, 10) : null);

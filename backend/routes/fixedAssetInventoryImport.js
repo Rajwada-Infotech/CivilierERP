@@ -268,7 +268,7 @@ router.delete("/:id", requirePageRight("fixed-asset-inventory-import", "delete")
     const importRow = importRes.recordset[0];
     if (!importRow) return res.status(404).json({ error: "Not found" });
     if (importRow.Status === "Reversed") return res.json({ ok: true });
-    if (!importRow.AssetId) return res.status(400).json({ error: "This import has no linked asset to reverse" });
+    if (importRow.AssetId === null || importRow.AssetId === undefined) return res.status(400).json({ error: "This import has no linked asset to reverse" });
 
     const result = await executeReversal(pool, importRow.AssetId, email);
     res.json({ ok: true, ...result });
