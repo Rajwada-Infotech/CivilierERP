@@ -675,22 +675,19 @@ export default function MaterialRequest() {
       id: "ItemCount",
       accessorKey: "ItemCount",
       header: "Items",
-      // 140px wasn't enough room for a QtyByUom string like "1,000.00
-      // Numbers" or "80.00 Square Meter" to fit, and the old markup's
-      // `truncate` sat on an inline span with no defined width to clip
-      // against — inside a fixed-layout table cell that just clips the
-      // overflow raw, mid-character, with no ellipsis at all (the cutoff
-      // in the screenshot). Widened the column and made the qty span an
-      // actual flex item (min-w-0 is what lets `truncate`'s
-      // overflow-hidden/text-ellipsis take effect inside a flex row
-      // instead of the row just growing past its container).
-      size: 220,
+      // Truncating a QtyByUom string like "1,000.00 Numbers" behind a
+      // hover tooltip hid the full breakdown by default — show it in full
+      // instead, wrapping onto extra lines rather than clipping, so every
+      // UOM in the list is visible without hovering. table-layout is fixed
+      // (DataTable.tsx), so a taller cell just grows the row — it doesn't
+      // break the layout.
+      size: 260,
       meta: { className: "hidden lg:table-cell" },
       cell: ({ row }) => (
-        <span className="flex items-baseline gap-1 text-sm min-w-0" title={row.original.QtyByUom || ""}>
+        <span className="flex flex-wrap items-baseline gap-x-1 text-sm py-1">
           <span className="font-semibold shrink-0">{row.original.ItemCount || 0}</span>
           {row.original.QtyByUom && (
-            <span className="text-muted-foreground truncate min-w-0">({row.original.QtyByUom})</span>
+            <span className="text-muted-foreground whitespace-normal break-words">({row.original.QtyByUom})</span>
           )}
         </span>
       ),
