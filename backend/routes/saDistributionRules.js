@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -123,7 +124,8 @@ router.put("/:id/members", requirePageRight("sa-lead-distribution", "edit"), asy
     return res.status(400).json({ error: "At least one member is required" });
   try {
     const pool = getPool();
-    const ruleId = parseInt(req.params.id);
+    const ruleId = parseId(req.params.id);
+    if (!ruleId) return res.status(400).json({ error: "Invalid id" });
     const tx = pool.transaction();
     await tx.begin();
     try {

@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -347,7 +348,8 @@ router.put("/:id", requirePageRight("crm-cancellations", "edit"), async (req, re
   try {
     const pool = getPool();
     const b = req.body;
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmCancellation WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Cancellation request not found" });
@@ -368,7 +370,8 @@ router.put("/:id", requirePageRight("crm-cancellations", "edit"), async (req, re
 
 // PUT /:id/submit — Rejected -> Pending (resubmit)
 router.put("/:id/submit", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -401,7 +404,8 @@ router.put("/:id/submit", requirePageRight("crm-cancellations", "edit"), async (
 //      functions would now reject it anyway, but leaving the request
 //      dangling forever as "Pending" is its own kind of clutter/confusion).
 router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -721,7 +725,8 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
 
 // PUT /:id/reject — admin/super_admin/marketing_head only.
 router.put("/:id/reject", requirePageRight("crm-cancellations", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;

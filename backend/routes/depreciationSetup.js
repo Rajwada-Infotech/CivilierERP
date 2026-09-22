@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests" } }));
@@ -82,7 +83,8 @@ router.post("/", requirePageRight("depreciation-setup", "create"), async (req, r
 
 // PUT /:id — update
 router.put("/:id", requirePageRight("depreciation-setup", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const { assetCategory, depreciationType, depreciationRate, effectiveFrom, status } = req.body;
 
   try {
@@ -126,7 +128,8 @@ router.put("/:id", requirePageRight("depreciation-setup", "edit"), async (req, r
 
 // DELETE /:id — hard delete (only if not referenced)
 router.delete("/:id", requirePageRight("depreciation-setup", "delete"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const inUse = await pool.request()

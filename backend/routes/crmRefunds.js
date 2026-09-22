@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -395,7 +396,8 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
 router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRefund WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Refund not found" });
@@ -431,7 +433,8 @@ router.put("/:id", requirePageRight("crm-refunds", "edit"), async (req, res) => 
 router.put("/:id/submit", requirePageRight("crm-refunds", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRefund WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Refund not found" });
     if (!["Draft", "Rejected"].includes(cur.recordset[0].Status)) {
@@ -449,7 +452,8 @@ router.put("/:id/submit", requirePageRight("crm-refunds", "edit"), async (req, r
 
 // ── PUT /:id/approve — CRM checker (admin/marketing_head) -> FinancePending ──
 router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -474,7 +478,8 @@ router.put("/:id/approve", requirePageRight("crm-refunds", "edit"), async (req, 
 
 // ── PUT /:id/reject ────────────────────────────────────────────────────
 router.put("/:id/reject", requirePageRight("crm-refunds", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -497,7 +502,8 @@ router.put("/:id/reject", requirePageRight("crm-refunds", "edit"), async (req, r
 // director). Purely additive: the original hyphenated path keeps working
 // unchanged for CrmRefunds.tsx's own inline "Finance Approve" button.
 router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("crm-refunds", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const role = (req.user?.role || "").toLowerCase();
@@ -608,7 +614,8 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
 // Also answers /:id/finance/reject — see the matching comment on
 // /:id/finance-approve above.
 router.put(["/:id/finance-reject", "/:id/finance/reject"], requirePageRight("crm-refunds", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const role = (req.user?.role || "").toLowerCase();

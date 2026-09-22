@@ -6,6 +6,7 @@
 // staff don't type an explicit commission override % on the Application/
 // Booking itself (BrokerageRatePercent) — an explicit override always wins.
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 const { getPool, sql } = require("../db");
@@ -62,7 +63,8 @@ router.post("/", requirePageRight("crm-brokerage-rate-tiers", "create"), async (
 router.put("/:id", requirePageRight("crm-brokerage-rate-tiers", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const min = Number(b.MinDealValue);
     const max = b.MaxDealValue != null && b.MaxDealValue !== "" ? Number(b.MaxDealValue) : null;
@@ -94,7 +96,8 @@ router.put("/:id", requirePageRight("crm-brokerage-rate-tiers", "edit"), async (
 router.delete("/:id", requirePageRight("crm-brokerage-rate-tiers", "delete"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     await pool.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmBrokerageRateTier WHERE Id = @id");
     res.json({ success: true });
   } catch (e) {

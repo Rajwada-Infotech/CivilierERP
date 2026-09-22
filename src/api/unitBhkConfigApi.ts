@@ -29,8 +29,16 @@ export interface BhkTemplateDetail {
 }
 
 export interface RoomInstance {
+  /** Synthetic "categoryId-index" key, e.g. "3-1" — ephemeral, not stored in DB */
   key: string;
+  /** Human-readable label, e.g. "Bathroom 1" or "Kitchen" (no index for qty=1) */
   label: string;
+  /**
+   * Real dbo.RoomMaster.Id for this room, or null if "Generate from Layout"
+   * hasn't been run yet for this unit. Use this when you need a stable FK
+   * (e.g. linking work entries to blueprints or Dependency Master records).
+   */
+  roomMasterId: number | null;
 }
 
 async function handle<T>(res: Response): Promise<T> {

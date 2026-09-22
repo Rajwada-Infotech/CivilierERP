@@ -351,17 +351,23 @@ const Payment: React.FC = () => {
     const viewId = searchParams.get("view");
     if (!viewId) return;
     const id = parseInt(viewId, 10);
-    if (!Number.isFinite(id)) return;
+    // Number.isFinite(0) === true — the existing isFinite guard doesn't catch
+    // ?view=0. Add > 0 so an invalid id never fires a real API request.
+    if (!Number.isFinite(id) || id <= 0) {
+      // Invalid param — clear it immediately without making any API call.
+      searchParams.delete("view");
+      setSearchParams(searchParams, { replace: true });
+      return;
+    }
+    // Clear the param synchronously before the async fetch.
+    searchParams.delete("view");
+    setSearchParams(searchParams, { replace: true });
     getPaymentById(id)
       .then((row) => {
         if (row) openViewRec(dbToRecord(row));
         else toast.error(`Payment #${id} not found`);
       })
-      .catch(() => toast.error("Failed to load the linked payment"))
-      .finally(() => {
-        searchParams.delete("view");
-        setSearchParams(searchParams, { replace: true });
-      });
+      .catch(() => toast.error("Failed to load the linked payment"));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

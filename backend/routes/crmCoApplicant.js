@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -15,7 +16,8 @@ router.use(apiRateLimit);
 router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT * FROM dbo.CrmCoApplicant WHERE BookingId = @bid AND IsActive = 1 ORDER BY CreatedAt");
     res.json(result.recordset);
@@ -73,7 +75,8 @@ async function applyAddCoApplicant(pool, bookingId, b, actorUserId) {
 router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
     if (!b.Name?.trim()) return res.status(400).json({ error: "Name is required" });
 
@@ -150,7 +153,8 @@ async function applyEditCoApplicant(pool, id, b, actorUserId) {
 router.put("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (!b.Name?.trim()) return res.status(400).json({ error: "Name is required" });
 
@@ -198,7 +202,8 @@ async function applyRemoveCoApplicant(pool, id) {
 router.delete("/:id", requireAnyPageRight(["crm-welcome-calls", "crm-applications"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const row = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmCoApplicant WHERE Id = @id");
     const bookingId = row.recordset[0]?.BookingId;
