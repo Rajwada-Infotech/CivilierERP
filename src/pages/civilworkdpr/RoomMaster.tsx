@@ -141,22 +141,60 @@ function RoomNameField({
     roomCategoryOptionsCache = categories;
   }, [categories]);
 
+  // Custom suggestion panel instead of a native <datalist> — a datalist's
+  // popup is rendered entirely by the browser (plain white list, no way to
+  // theme it), which looked jarringly out of place against every other
+  // themed dropdown in the app. This keeps the same "pick a suggestion or
+  // type your own" behaviour (still a real text input underneath, so
+  // "Bedroom 1"/"Bedroom 2" etc. still work) with a panel styled to match.
+  const [open, setOpen] = React.useState(false);
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  const query = (value ?? "").trim().toLowerCase();
+  const suggestions = query
+    ? categories.filter((c) => c.label.toLowerCase().includes(query))
+    : categories;
+
   return (
-    <>
+    <div ref={wrapRef} className="relative">
       <input
         type="text"
-        list="room-master-category-suggestions"
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setOpen(true)}
         placeholder="Pick a category or type a name"
-        className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm"
+        className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
       />
-      <datalist id="room-master-category-suggestions">
-        {categories.map((c) => (
-          <option key={c.value} value={c.value} />
-        ))}
-      </datalist>
-    </>
+      {open && suggestions.length > 0 && (
+        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg py-1">
+          {suggestions.map((c) => (
+            <button
+              key={c.value}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onChange(c.value);
+                setOpen(false);
+              }}
+              className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
