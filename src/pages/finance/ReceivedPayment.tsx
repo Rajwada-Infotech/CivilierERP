@@ -437,11 +437,17 @@ export default function ReceivedPaymentPage() {
   useEffect(() => {
     const viewId = searchParams.get("view");
     if (!viewId) return;
-    getReceivedPayment(Number(viewId))
-      .then((row) => setViewingPayment(mapReceivedPaymentRow(row)))
-      .catch(() => toast.error(`Received payment #${viewId} not found`));
+    // Clear the param first — do it synchronously before the async fetch so
+    // a slow network or back-navigation can't retrigger the same open.
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
+    // Number("0") === 0 — a non-positive id is invalid; don't fire a bad request.
+    const id = Number(viewId);
+    if (id > 0) {
+      getReceivedPayment(id)
+        .then((row) => setViewingPayment(mapReceivedPaymentRow(row)))
+        .catch(() => toast.error(`Received payment #${id} not found`));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

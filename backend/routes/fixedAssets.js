@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests" } }));
@@ -458,7 +459,8 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
 // no new code is minted, and Godown-wise Stock's untagged count is untouched
 // since the unit never stopped being tagged.
 router.delete("/:id", requirePageRight("fixed-asset-record", "delete"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const email = requireUser(req, res);
   if (!email) return;
   try {

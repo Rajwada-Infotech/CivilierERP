@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
@@ -1376,7 +1377,8 @@ router.put(
       docTypeId,
       docNo,
     } = req.body;
-    const grnId = parseInt(req.params.id, 10);
+    const grnId = parseId(req.params.id);
+    if (!grnId) return res.status(400).json({ error: "Invalid id" });
 
     // Reject future dates
     const todayStr = new Date().toISOString().slice(0, 10);
@@ -1668,7 +1670,8 @@ router.delete(
   "/:id",
   requirePageRight("grn-master", "delete"),
   async (req, res) => {
-    const grnId = parseInt(req.params.id, 10);
+    const grnId = parseId(req.params.id);
+    if (!grnId) return res.status(400).json({ error: "Invalid id" });
     const pool = getPool();
 
     // ── Guard: linked expense bookings ────────────────────────────────────────
@@ -1799,7 +1802,8 @@ router.put(
   "/:id/submit",
   requirePageRight("grn-master", "edit"),
   async (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     try {
       const userEmail = requireUserEmail(req, res);
       if (!userEmail) return;
@@ -1826,7 +1830,8 @@ router.put(
   "/:id/approve",
   requirePageRight("grn-master", "edit"),
   async (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     try {
       const userEmail = requireUserEmail(req, res);
       if (!userEmail) return;
@@ -1860,7 +1865,8 @@ router.put(
   "/:id/reject",
   requirePageRight("grn-master", "edit"),
   async (req, res) => {
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const { note } = req.body;
     try {
       const userEmail = requireUserEmail(req, res);

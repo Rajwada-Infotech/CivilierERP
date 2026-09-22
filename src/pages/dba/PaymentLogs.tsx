@@ -191,6 +191,7 @@ export default function PaymentLogs() {
       setAddOpen(false);
       setAddForm({ txn_id: "", tenant_id: "", tenant_name: "", amount: "", method: "upi", upi_id: "", bank_ref: "", paid_by: "", paid_on: "", status: "pending", purpose: "", plan: "", renewal_period: "", remarks: "" });
     },
+    onError: (e: Error) => toast.error(e.message || "Failed to add payment log"),
   });
 
   const [selected, setSelected] = useState<PaymentLog | null>(null);

@@ -477,20 +477,25 @@ const VIEW_PARAM_MODULES = new Set([
 // preview mode, instead of dumping the user on a blank list page to hunt
 // for the record themselves.
 export function openInModulePath(item: InboxItem, navPath: string): string {
+  // Guard: a 0 or null RecordId produces ?view=0 which leaves a stuck URL
+  // on the destination page (the panel never opens but the URL never clears).
+  // Fall back to the plain list page when the id is invalid.
+  const hasValidId = parseInt(String(item.RecordId), 10) > 0;
+
   // crm-bookings' navPath (/crm/bookings) opens the real Booking detail
   // dialog via its existing "?view=" deep link — same convention
   // VIEW_PARAM_MODULES below uses, just listed explicitly here since it's
   // CRM-specific rather than shared with the generic modules.
   if (item.Module === "crm-bookings") {
-    return `${navPath}?view=${item.RecordId}`;
+    return hasValidId ? `${navPath}?view=${item.RecordId}` : navPath;
   }
   // crm-agreements/crm-agreement-date use "?id=" (opens the read-only detail
   // dialog directly via CrmApplication.tsx-style searchParams.get("id") effects).
   if (item.Module === "crm-agreements" || item.Module === "crm-agreement-date") {
-    return `${navPath}?id=${item.RecordId}`;
+    return hasValidId ? `${navPath}?id=${item.RecordId}` : navPath;
   }
   if (VIEW_PARAM_MODULES.has(item.Module)) {
-    return `${navPath}?view=${item.RecordId}`;
+    return hasValidId ? `${navPath}?view=${item.RecordId}` : navPath;
   }
   return navPath;
 }

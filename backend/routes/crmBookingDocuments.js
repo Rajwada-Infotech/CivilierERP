@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const multer = require("multer");
 const router = express.Router();
 const { getPool, sql } = require("../db");
@@ -35,7 +36,8 @@ const upload = multer({
 router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     // Include docs uploaded at the Application stage (ApplicationId set, BookingId NULL)
     // by joining through CrmBooking → CrmApplication — so files collected during
     // the application wizard appear here without any data migration.
@@ -72,7 +74,8 @@ router.get("/booking/:bookingId", requirePageRight("crm-welcome-calls", "view"),
 router.post("/booking/:bookingId", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
 
     const activeErr = await requireApprovedBooking(pool, bookingId);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -110,7 +113,8 @@ router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", 
     if (err) return res.status(400).json({ error: err.message });
     try {
       const pool = getPool();
-      const bookingId = parseInt(req.params.bookingId);
+      const bookingId = parseId(req.params.bookingId);
+      if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
@@ -171,7 +175,8 @@ router.post("/booking/:bookingId/upload", requirePageRight("crm-welcome-calls", 
 router.get("/application/:applicationId", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const applicationId = parseInt(req.params.applicationId);
+    const applicationId = parseId(req.params.applicationId);
+    if (!applicationId) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, applicationId).query(`
       SELECT d.Id, d.BookingId, d.ApplicationId, d.DocumentType, d.DocumentUrl, d.FileName,
              d.IsVerified, d.VerifiedBy, d.VerifiedAt, d.Notes, d.CreatedBy, d.CreatedAt,
@@ -195,7 +200,8 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
     if (err) return res.status(400).json({ error: err.message });
     try {
       const pool = getPool();
-      const applicationId = parseInt(req.params.applicationId);
+      const applicationId = parseId(req.params.applicationId);
+      if (!applicationId) return res.status(400).json({ error: "Invalid applicationId" });
       const docType = req.body?.DocumentType?.trim();
       if (!docType) return res.status(400).json({ error: "DocumentType is required" });
       if (!req.files?.length) return res.status(400).json({ error: "No files uploaded" });
@@ -244,7 +250,8 @@ router.post("/application/:applicationId/upload", requirePageRight("crm-applicat
 // GET /file/:id — stream a document's file for inline preview/download
 router.get("/file/:id", requireAnyPageRight(["crm-applications", "crm-welcome-calls", "crm-bookings"], "view"), async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await getPool().request().input("id", sql.Int, id)
       .query("SELECT FileName, FileBase64, MimeType FROM dbo.CrmBookingDocument WHERE Id = @id");
     if (!result.recordset.length || !result.recordset[0].FileBase64) return res.status(404).json({ error: "File not found" });
@@ -266,7 +273,8 @@ router.get("/file/:id", requireAnyPageRight(["crm-applications", "crm-welcome-ca
 router.put("/:id/verify", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const docRow = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmBookingDocument WHERE Id = @id");
@@ -297,7 +305,8 @@ router.put("/:id/verify", requirePageRight("crm-welcome-calls", "edit"), async (
 router.delete("/:id", requireAnyPageRight(["crm-applications", "crm-welcome-calls"], "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const docRow = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmBookingDocument WHERE Id = @id");

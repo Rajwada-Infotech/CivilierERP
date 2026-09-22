@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -162,7 +163,8 @@ const { renderWelcomeCallPdfBuffer } = require("../services/welcomeCallPdf");
 router.get("/:bookingId/pdf", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     
     // Fetch booking & company details
     const bkg = await pool.request().input("bid", sql.Int, bookingId).query(`
@@ -209,7 +211,8 @@ router.get("/:bookingId/pdf", requirePageRight("crm-welcome-calls", "view"), asy
 router.get("/:bookingId", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const state = await loadItems(pool, bookingId);
     const sub = await pool.request().input("bid", sql.Int, bookingId)
       .query("SELECT IsLocked, SubmittedBy, SubmittedAt FROM dbo.CrmWelcomeCallSubmission WHERE BookingId = @bid");
@@ -237,7 +240,8 @@ function assertUnlocked(pool, bookingId) {
 router.put("/:bookingId/items/:itemKey", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const itemKey = req.params.itemKey;
     if (!ITEM_BY_KEY[itemKey]) return res.status(400).json({ error: "Unknown checklist item" });
 
@@ -293,7 +297,8 @@ router.put("/:bookingId/items/:itemKey", requirePageRight("crm-welcome-calls", "
 router.post("/:bookingId/items/:itemKey/recheck", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const itemKey = req.params.itemKey;
     if (!ITEM_BY_KEY[itemKey]) return res.status(400).json({ error: "Unknown checklist item" });
     const reason = String(req.body.Reason || "").trim();
@@ -358,7 +363,8 @@ router.post("/:bookingId/items/:itemKey/recheck", requirePageRight("crm-welcome-
 router.post("/:bookingId/items/:itemKey/resolve", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const itemKey = req.params.itemKey;
     if (!ITEM_BY_KEY[itemKey]) return res.status(400).json({ error: "Unknown checklist item" });
 
@@ -391,7 +397,8 @@ router.post("/:bookingId/items/:itemKey/resolve", requirePageRight("crm-welcome-
 router.post("/:bookingId/submit", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     // Same gate as the rest of the Welcome Call workflow (crmWelcomeCalls.js
     // POST / uses requireApprovedBooking) — this checklist can't be
     // meaningfully "verified" on a booking that isn't itself Approved.
@@ -448,7 +455,8 @@ router.post("/:bookingId/submit", requirePageRight("crm-welcome-calls", "edit"),
 router.post("/:bookingId/reopen", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId).input("by", sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmWelcomeCallSubmission

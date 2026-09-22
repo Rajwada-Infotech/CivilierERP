@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -406,6 +407,7 @@ export default function LoanSanctionPage() {
   usePageRights("loan-sanction");
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showForm, setShowForm] = useState(false);
   const [viewingLoan, setViewingLoan] = useState<LoanSanction | null>(null);
   const [tab, setTab] = useState<"overview" | "exposure" | "schedule" | "chain" | "posting">("overview");
@@ -537,13 +539,24 @@ export default function LoanSanctionPage() {
   });
 
   // Deep-link support for the Reminder Bell ("/loan/sanction?view=<id>")
+  const [deepLinkConsumed, setDeepLinkConsumed] = useState(false);
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const viewId = params.get("view");
-    if (viewId && loans.length) {
-      const match = loans.find((l) => String(l.LoanId) === viewId);
-      if (match) openView(match);
+    // One-shot: only run once after loans load. Using window.location.search
+    // directly meant the effect re-read a stale URL on every loans change and
+    // never cleared the param, leaving ?view=X stuck in the address bar.
+    if (deepLinkConsumed || !loans.length) return;
+    const viewId = searchParams.get("view");
+    if (viewId) {
+      // Clear the param first so back/refresh can't retrigger it.
+      setSearchParams((sp) => { sp.delete("view"); return sp; }, { replace: true });
+      // Guard against ?view=0 — "0" is truthy but String(loanId) === "0" would
+      // match a garbage id. Only search if it looks like a positive integer.
+      if (parseInt(viewId, 10) > 0) {
+        const match = loans.find((l) => String(l.LoanId) === viewId);
+        if (match) openView(match);
+      }
     }
+    setDeepLinkConsumed(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loans]);
 

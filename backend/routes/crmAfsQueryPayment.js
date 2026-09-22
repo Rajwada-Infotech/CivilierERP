@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -116,7 +117,8 @@ router.get("/eligible-bookings", requirePageRight("crm-afs-query-payment", "view
 router.get("/:id", requirePageRight("crm-afs-query-payment", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("id", sql.Int, id).query(`${AQP_SELECT} WHERE aqp.Id = @id`);
     if (!result.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
 
@@ -194,7 +196,8 @@ router.post("/", requirePageRight("crm-afs-query-payment", "create"), async (req
 router.put("/:id", requirePageRight("crm-afs-query-payment", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
@@ -231,7 +234,8 @@ router.put("/:id", requirePageRight("crm-afs-query-payment", "edit"), async (req
 router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status, StampDuty, RegistrationFee FROM dbo.CrmAfsQueryPayment WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "AFS Query Payment not found" });
@@ -312,7 +316,8 @@ router.post("/:id/info", requirePageRight("crm-afs-query-payment", "edit"), asyn
 router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id)
@@ -393,7 +398,8 @@ router.post("/:id/confirm", requirePageRight("crm-afs-query-payment", "edit"), a
 router.get("/attachment/:attachId", requirePageRight("crm-afs-query-payment", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const attachId = parseInt(req.params.attachId, 10);
+    const attachId = parseId(req.params.attachId);
+    if (!attachId) return res.status(400).json({ error: "Invalid attachId" });
     const result = await pool.request().input("id", sql.Int, attachId)
       .query("SELECT FileName, MimeType, FileData FROM dbo.CrmAfsQueryPaymentAttachments WHERE AttachmentId = @id");
     const attachment = result.recordset[0];

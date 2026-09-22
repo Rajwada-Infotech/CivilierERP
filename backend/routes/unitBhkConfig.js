@@ -247,9 +247,37 @@ router.get("/room-instances/:unitId", authMiddleware, async (req, res) => {
     const instances = [];
     for (const row of result.recordset) {
       for (let i = 1; i <= row.quantity; i++) {
-        instances.push({ key: `${row.categoryId}-${i}`, label: `${row.alias} ${i}` });
+        // Mirror the label convention used by POST /generate/:unitId — omit
+        // the numeric suffix when there is only one of this category (e.g.
+        // "Kitchen" not "Kitchen 1"). Previously always appended the index,
+        // so WorkDone's "Kitchen 1" never matched RoomMaster's "Kitchen".
+        instances.push({
+          key: `${row.categoryId}-${i}`,
+          label: row.quantity > 1 ? `${row.alias} ${i}` : row.alias,
+        });
       }
     }
+
+    // SYNC-1 bridge: look up the real dbo.RoomMaster.Id for each synthetic
+    // instance by matching on UnitId + RoomName. This lets callers (e.g.
+    // WorkDone) record the stable integer FK alongside the ephemeral
+    // "categoryId-index" key — enabling blueprints, Dependency Master, and
+    // future features to cross-reference work entries with actual room rows.
+    // roomMasterId will be null if Generate hasn't been run yet for this unit.
+    if (instances.length > 0) {
+      const namesParam = instances.map((_, idx) => `@n${idx}`).join(", ");
+      const rmReq = pool.request().input("unitId", sql.Int, unitId);
+      instances.forEach((inst, idx) => rmReq.input(`n${idx}`, sql.NVarChar(100), inst.label));
+      const rmRes = await rmReq.query(`
+        SELECT Id, RoomName FROM dbo.RoomMaster
+        WHERE UnitId = @unitId AND IsActive = 1 AND RoomName IN (${namesParam})
+      `);
+      const nameToId = new Map(rmRes.recordset.map((r) => [r.RoomName.toLowerCase(), r.Id]));
+      for (const inst of instances) {
+        inst.roomMasterId = nameToId.get(inst.label.toLowerCase()) ?? null;
+      }
+    }
+
     res.json(instances);
   } catch (err) {
     console.error("[unit-bhk-config] GET /room-instances error:", err.message);
@@ -258,3 +286,4 @@ router.get("/room-instances/:unitId", authMiddleware, async (req, res) => {
 });
 
 module.exports = router;
+

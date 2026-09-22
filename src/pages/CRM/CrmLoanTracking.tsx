@@ -131,7 +131,7 @@ function StatusPill({ status }: { status: string }) {
 const CrmLoanTracking: React.FC = () => {
   const qc = useQueryClient();
   const rights = usePageRights("crm-loan-details");
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const deepLinkBookingId = sp.get("bookingId");
 
   const [activeTab, setActiveTab] = useState<string>("All");

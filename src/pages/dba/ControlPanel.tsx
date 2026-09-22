@@ -168,6 +168,7 @@ export default function ControlPanel() {
     },
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: ["dba-control-panel"] }),
+    onError: (e: Error) => toast.error(e.message || "Update failed"),
   });
 
   const [selectedAccess, setSelectedAccess] = useState<TenantAccess | null>(

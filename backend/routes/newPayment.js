@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -1415,7 +1416,8 @@ router.delete("/:id", requirePageRight("new-payment", "delete"), async (req, res
 
 // ── PUT /:id/submit — Draft → Pending ─────────────────────────────────────────
 router.put("/:id/submit", requirePageRight("new-payment", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -1440,7 +1442,8 @@ router.put("/:id/submit", requirePageRight("new-payment", "edit"), async (req, r
 
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
 router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -1823,7 +1826,8 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
 
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
 router.put("/:id/reject", requirePageRight("new-payment", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const { note } = req.body;
   try {
     const userEmail = requireUserEmail(req, res);

@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -95,7 +96,8 @@ router.get("/", requirePageRight("crm-customer-bank-details", "view"), async (re
 router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bid = parseInt(req.params.bookingId);
+    const bid = parseId(req.params.bookingId);
+    if (!bid) return res.status(400).json({ error: "Invalid bookingId" });
     // FinancingType and Milestone-1 payment status live outside
     // CrmCustomerBankDetail (on CrmBooking/CrmPaymentMilestone) but the
     // dialog needs both — Milestone 1 to decide whether the form should even
@@ -183,7 +185,8 @@ router.get("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
 router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bid = parseInt(req.params.bookingId);
+    const bid = parseId(req.params.bookingId);
+    if (!bid) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
     const actor = actorId(req);
 
@@ -361,7 +364,8 @@ router.put("/booking/:bookingId", requirePageRight("crm-customer-bank-details", 
 router.get("/application/:applicationId", requirePageRight("crm-customer-bank-details", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const aid = parseInt(req.params.applicationId);
+    const aid = parseId(req.params.applicationId);
+    if (!aid) return res.status(400).json({ error: "Invalid applicationId" });
     const result = await pool.request().input("aid", sql.Int, aid).query(`
       SELECT d.*, vu.name AS BookingStageVerifiedByName
       FROM dbo.CrmCustomerBankDetail d
@@ -398,7 +402,8 @@ router.get("/application/:applicationId", requirePageRight("crm-customer-bank-de
 router.put("/application/:applicationId", requirePageRight("crm-customer-bank-details", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const aid = parseInt(req.params.applicationId);
+    const aid = parseId(req.params.applicationId);
+    if (!aid) return res.status(400).json({ error: "Invalid applicationId" });
     const b = req.body;
     const actor = actorId(req);
 

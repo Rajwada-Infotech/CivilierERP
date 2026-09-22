@@ -1,4 +1,4 @@
-const BASE_URL = "/api/menu-type";
+﻿const BASE_URL = "/api/menu-type";
 
 const getAuthHeaders = () => ({
   "Content-Type": "application/json",
@@ -23,7 +23,7 @@ export interface MenuType {
 export const getMenuTypes = async (): Promise<MenuType[]> => {
   const res = await fetch(BASE_URL, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 export const addMenuType = async (data: Record<string, unknown>) => {
@@ -69,7 +69,7 @@ export const deleteMenuType = async (id: number) => {
 
 /**
  * Returns a flat, deduplicated list of all non-null menu label strings
- * across all MenuType rows — used as <Select> options in NamedEntryTypeMaster.
+ * across all MenuType rows â€” used as <Select> options in NamedEntryTypeMaster.
  */
 export function flattenMenuOptions(menuTypes: MenuType[]): string[] {
   const keys: (keyof MenuType)[] = [

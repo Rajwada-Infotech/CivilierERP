@@ -181,7 +181,14 @@ const CrmMutation: React.FC = () => {
   useEffect(() => {
     if (!mutationIdFilter || deepLinkOpened || !(rows as any[]).length) return;
     const match = (rows as any[]).find((r: any) => String(r.Id) === mutationIdFilter);
-    if (match) { setDeepLinkOpened(true); selectDetail(match.Id); }
+    if (match) {
+      setDeepLinkOpened(true);
+      selectDetail(match.Id);
+    } else {
+      // mutationId is present but not found in the current list — clear the stale param
+      setDeepLinkOpened(true);
+      setSp((prev) => { prev.delete("mutationId"); return prev; }, { replace: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mutationIdFilter, deepLinkOpened, rows]);
 
