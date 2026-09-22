@@ -182,7 +182,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Company", accessor: "CompanyName" },
   { header: "Project", accessor: "ProjectName" },
   { header: "Item Count", accessor: (r) => Number(r.ItemCount) || 0 },
-  { header: "Total Qty", accessor: (r) => Number(r.TotalQty) || 0 },
+  { header: "Qty (by UOM)", accessor: (r) => (r.QtyByUom as string) || "—" },
   { header: "Requested", accessor: (r) => fmtDate(r.RequestDate as string) },
   { header: "Required By", accessor: (r) => fmtDate(r.RequiredByDate as string) },
   { header: "Status", accessor: "Status" },
@@ -678,9 +678,11 @@ export default function MaterialRequest() {
       size: 140,
       meta: { className: "hidden lg:table-cell" },
       cell: ({ row }) => (
-        <span className="text-sm whitespace-nowrap">
+        <span className="text-sm whitespace-nowrap" title={row.original.QtyByUom || ""}>
           <span className="font-semibold">{row.original.ItemCount || 0}</span>
-          <span className="text-muted-foreground ml-1">({(row.original.TotalQty || 0).toFixed(2)} units)</span>
+          {row.original.QtyByUom && (
+            <span className="text-muted-foreground ml-1 truncate">({row.original.QtyByUom})</span>
+          )}
         </span>
       ),
     },
@@ -1780,18 +1782,35 @@ export default function MaterialRequest() {
                     ))
                   )}
                 </tbody>
-                {items.length > 0 && (
-                  <tfoot className="bg-muted/20 border-t border-border">
-                    <tr>
-                      <td className="px-4 py-2.5 text-xs font-semibold text-muted-foreground">Total</td>
-                      <td className="hidden sm:table-cell" />
-                      <td className="px-4 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                        {items.reduce((s, it) => s + Number(it.Quantity), 0).toFixed(2)}
-                      </td>
-                      <td className="hidden sm:table-cell" />
-                    </tr>
-                  </tfoot>
-                )}
+                {items.length > 0 && (() => {
+                  // Quantities in different UOMs aren't fungible (bags vs.
+                  // metric tons), so a single blind sum across every row was
+                  // meaningless — total per UOM group instead, one row each.
+                  const totalsByUom = new Map<string, number>();
+                  for (const it of items) {
+                    const uom = it.UOMName || it.UOMCode || "—";
+                    totalsByUom.set(uom, (totalsByUom.get(uom) || 0) + Number(it.Quantity));
+                  }
+                  const uomTotals = Array.from(totalsByUom.entries());
+                  return (
+                    <tfoot className="bg-muted/20 border-t border-border">
+                      {uomTotals.map(([uom, qty], i) => (
+                        <tr key={uom}>
+                          <td className="px-4 py-2.5 text-xs font-semibold text-muted-foreground">
+                            {i === 0 ? "Total" : ""}
+                          </td>
+                          <td className="px-4 py-2.5 text-muted-foreground hidden sm:table-cell">
+                            {uomTotals.length > 1 ? uom : ""}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                            {qty.toFixed(2)}{uomTotals.length === 1 ? ` ${uom}` : ""}
+                          </td>
+                          <td className="hidden sm:table-cell" />
+                        </tr>
+                      ))}
+                    </tfoot>
+                  );
+                })()}
               </table>
             </div>
           </div>

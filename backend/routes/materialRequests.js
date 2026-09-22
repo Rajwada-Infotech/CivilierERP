@@ -351,7 +351,20 @@ router.get("/", authenticateToken, async (req, res) => {
         ep.name  AS ProjectName,
         fy.FName AS FinYearName,
         COUNT(mri.MRItemId)      AS ItemCount,
-        SUM(mri.Quantity)        AS TotalQty,
+        -- Quantities in different UOMs aren't fungible (e.g. bags vs. metric
+        -- tons) — a single blind SUM(Quantity) across every line item mixed
+        -- them together into one meaningless number. Sum per UOM instead and
+        -- return it as one "120.00 BAG, 1.50 MT" string.
+        (
+          SELECT STUFF((
+            SELECT ', ' + FORMAT(SUM(mri2.Quantity), 'N2') + ' ' + ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, ''))
+            FROM dbo.MaterialRequestItems mri2
+            LEFT JOIN dbo.UOMMaster u2 ON u2.UOMCode = mri2.UOMCode
+            WHERE mri2.MRId = mr.MRId
+            GROUP BY ISNULL(u2.UOMName, mri2.UOMCode)
+            FOR XML PATH('')
+          ), 1, 2, '')
+        )                        AS QtyByUom,
         COUNT(*)  OVER ()        AS _total
       FROM       dbo.MaterialRequests mr WITH (NOLOCK)
       LEFT JOIN  dbo.enterprise  ec  WITH (NOLOCK) ON ec.id  = mr.CompanyId
