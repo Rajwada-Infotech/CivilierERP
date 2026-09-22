@@ -472,7 +472,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                     {lineItems.map((li, i) => {
                       const name = (li.ItemName ?? li.itemName ?? "—") as string;
                       const qty = Number(li.Quantity ?? li.quantity ?? 0);
-                      const uom = (li.UOMName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string;
+                      const uom = (li.UOMName ?? li.UomName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string;
                       return (
                         <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-muted/20 transition-colors">
                           <span className="font-medium text-foreground">{name}</span>
@@ -490,6 +490,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                         <tr>
                           <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">Item</th>
                           <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
+                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">UOM</th>
                           <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Rate</th>
                           <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Amount</th>
                         </tr>
@@ -498,12 +499,18 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                         {lineItems.map((li, i) => {
                           const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
                           const qty = Number(li.Quantity ?? li.quantity ?? 0);
+                          // Every line-item shape across PO/WO/GRN/etc. spells this
+                          // differently — same fallback chain the Material Request
+                          // list above uses, so a doc missing one field still shows
+                          // whichever of the others it actually carries.
+                          const uom = (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string;
                           const rate = Number(li.Rate ?? li.rate ?? 0);
                           const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
                           return (
                             <tr key={i} className="hover:bg-muted/20 transition-colors">
                               <td className="px-3 py-2 font-medium">{name}</td>
                               <td className="px-3 py-2 text-right">{qty.toLocaleString("en-IN")}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{uom || "—"}</td>
                               <td className="px-3 py-2 text-right">{formatINR(rate)}</td>
                               <td className="px-3 py-2 text-right font-medium">{formatINR(amount)}</td>
                             </tr>
