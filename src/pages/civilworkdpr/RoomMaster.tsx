@@ -132,7 +132,10 @@ function GenerateFromLayoutPanel({
   const [unitId, setUnitId] = React.useState("");
   const [generating, setGenerating] = React.useState(false);
   const { data: projectOptions = [] } = useQuery({
-    queryKey: ["room-master-project-options"],
+    // Use the same key as the MasterPage form's Project field so both panels
+    // share a single React Query cache entry — previously "room-master-project-options"
+    // here vs "room-master-projects" in fields[], causing stale-data races.
+    queryKey: ["room-master-projects"],
     queryFn: fetchProjectOptions,
     staleTime: 5 * 60 * 1000,
   });
@@ -217,6 +220,90 @@ function GenerateFromLayoutPanel({
   );
 }
 
+// Suggests Room Category Master's active aliases (the same list Room
+// Composition Builder and Work Done's Room dropdown read) instead of typing
+// a name from scratch — but stays a real text input, not a strict dropdown,
+// because a unit can have more than one room of the same category
+// ("Bedroom 1", "Bedroom 2", same convention the bulk-generator above also
+// respects — each generated room keeps a plain category name so it still
+// matches these suggestions) and an existing room's saved name still needs
+// to display correctly even once it no longer matches a category alias
+// exactly.
+let roomCategoryOptionsCache: { value: string; label: string }[] | null = null;
+function RoomNameField({
+  value,
+  onChange,
+}: {
+  value: string | undefined;
+  onChange: (v: unknown) => void;
+}) {
+  const { data: categories = [] } = useQuery({
+    queryKey: ["room-master-room-category-options"],
+    queryFn: fetchRoomCategoryOptions,
+    staleTime: 5 * 60 * 1000,
+    initialData: roomCategoryOptionsCache ?? undefined,
+  });
+  React.useEffect(() => {
+    roomCategoryOptionsCache = categories;
+  }, [categories]);
+
+  // Custom suggestion panel instead of a native <datalist> — a datalist's
+  // popup is rendered entirely by the browser (plain white list, no way to
+  // theme it), which looked jarringly out of place against every other
+  // themed dropdown in the app. This keeps the same "pick a suggestion or
+  // type your own" behaviour (still a real text input underneath, so
+  // "Bedroom 1"/"Bedroom 2" etc. still work) with a panel styled to match.
+  const [open, setOpen] = React.useState(false);
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (!open) return;
+    const onClickOutside = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  const query = (value ?? "").trim().toLowerCase();
+  const suggestions = query
+    ? categories.filter((c) => c.label.toLowerCase().includes(query))
+    : categories;
+
+  return (
+    <div ref={wrapRef} className="relative">
+      <input
+        type="text"
+        value={value ?? ""}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setOpen(true)}
+        placeholder="Pick a category or type a name"
+        className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+      />
+      {open && suggestions.length > 0 && (
+        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg py-1">
+          {suggestions.map((c) => (
+            <button
+              key={c.value}
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => {
+                onChange(c.value);
+                setOpen(false);
+              }}
+              className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── API helpers ────────────────────────────────────────────────────────────────
 async function fetchRooms(): Promise<any[]> {
   const res = await fetchWithAuth(API);
@@ -231,6 +318,21 @@ async function fetchProjectOptions(): Promise<
   if (!res.ok) throw new Error("Failed to fetch projects");
   const data: { Id: number; Name: string }[] = await res.json().catch(() => []);
   return data.map((p) => ({ value: String(p.Id), label: p.Name }));
+}
+
+// Same active-categories list Room Composition Builder and Work Done's Room
+// dropdown both read (GET /options, ordered by SortOrder) — Room Name now
+// picks from here instead of free text, so a room is always named after one
+// of the categories actually set up in Room Category Master.
+async function fetchRoomCategoryOptions(): Promise<
+  { value: string; label: string }[]
+> {
+  const res = await fetchWithAuth("/api/room-category-master/options");
+  if (!res.ok) throw new Error("Failed to fetch room categories");
+  const data: { id: number; categoryName: string; alias: string }[] = await res
+    .json()
+    .catch(() => []);
+  return data.map((c) => ({ value: c.alias, label: c.alias }));
 }
 
 // ── Fields ────────────────────────────────────────────────────────────────────
@@ -283,8 +385,11 @@ const fields: FieldDef[] = [
   {
     name: "roomName",
     label: "Room Name",
-    type: "text",
+    type: "custom",
     required: true,
+    render: ({ value, onChange }) => (
+      <RoomNameField value={value as string | undefined} onChange={onChange} />
+    ),
   },
   {
     name: "floor",
@@ -350,7 +455,7 @@ const RoomMaster: React.FC = () => {
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/units`);
       if (!res.ok) throw new Error("Failed to fetch units");
-      return res.json().catch(() => ({}));
+      return res.json().catch(() => []);
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -413,12 +518,17 @@ const RoomMaster: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(toPayload(event.record)),
       });
-      if (!res.ok)
-        throw new Error((await res.json()).error || "Failed to add room");
+      // Read the body ONCE — ReadableStream can only be consumed once.
+      // Previously: error-check path consumed body first, then the success
+      // path tried to read it again and always got {}, so body.id was always
+      // undefined and the blueprint upload received "undefined" as roomId.
       const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((body as any).error || "Failed to add room");
+      const newId = (body as any).id;
+      if (!newId) throw new Error("Server did not return the new room ID");
       toast.success("Room added!");
       try {
-        await uploadBlueprintIfStaged(String(body.id), event.record);
+        await uploadBlueprintIfStaged(String(newId), event.record);
       } catch (err: any) {
         toast.error(`Room saved, but blueprint upload failed: ${err.message}`);
       }
@@ -462,6 +572,21 @@ const RoomMaster: React.FC = () => {
         units={allUnits}
         onGenerated={() => queryClient.invalidateQueries({ queryKey: ["room-master"] })}
       />
+      {/* UX hint — shown only when the table is completely empty so new
+          admins know to use Generate above rather than adding rows one-by-one */}
+      {mappedData.length === 0 && !isLoading && (
+        <div className="mx-6 mb-4 flex items-start gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          <DoorOpen size={16} className="mt-0.5 shrink-0 text-primary/60" />
+          <span>
+            No rooms yet.{" "}
+            <span className="font-medium text-foreground">
+              Use "Generate from Layout" above
+            </span>{" "}
+            to auto-create rooms for a unit based on its BHK composition, or add them
+            individually using the + button below.
+          </span>
+        </div>
+      )}
       <MasterPage
         title="Room"
         canCreate={rights.canCreate}

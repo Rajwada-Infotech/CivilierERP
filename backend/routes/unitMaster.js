@@ -276,7 +276,7 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
         `);
       await syncUnitPaymentPlanTags(pool, existing.Id, planIds);
       await bumpCacheVersion("unit-master");
-      logAudit({ module: "UnitMaster", recordId: existing.Id, recordNo: UnitName, action: "Reactivated", changedBy: req.user?.userId ?? null });
+      await logAudit({ module: "UnitMaster", recordId: existing.Id, recordNo: UnitName, action: "Reactivated", changedBy: req.user?.userId ?? null });
       return res.json({ message: "Unit reactivated successfully" });
     }
 
@@ -302,7 +302,7 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
       `);
     await syncUnitPaymentPlanTags(pool, result.recordset[0].Id, planIds);
     await bumpCacheVersion("unit-master");
-    logAudit({ module: "UnitMaster", recordId: result.recordset[0].Id, recordNo: UnitName, action: "Created", changedBy: req.user?.userId ?? null });
+    await logAudit({ module: "UnitMaster", recordId: result.recordset[0].Id, recordNo: UnitName, action: "Created", changedBy: req.user?.userId ?? null });
     res.json({ message: "Unit added successfully" });
   } catch (err) {
     console.error("[unit-master] POST error:", err.message);
@@ -421,7 +421,7 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
       await syncUnitPaymentPlanTags(pool, parseInt(id), planIds);
     }
     await bumpCacheVersion("unit-master");
-    logAudit({ module: "UnitMaster", recordId: parseInt(id), recordNo: UnitName, action: "Updated", changedBy: req.user?.userId ?? null });
+    await logAudit({ module: "UnitMaster", recordId: parseInt(id), recordNo: UnitName, action: "Updated", changedBy: req.user?.userId ?? null });
     res.json({ message: "Unit updated successfully" });
   } catch (err) {
     console.error("[unit-master] PUT error:", err.message);
@@ -486,7 +486,7 @@ router.delete("/:id", requirePageRight("followup-unit-master", "delete"), async 
 
     await pool.request().input("Id", sql.Int, id).query("DELETE FROM dbo.UnitMaster WHERE Id = @Id");
     await bumpCacheVersion("unit-master");
-    logAudit({ module: "UnitMaster", recordId: id, recordNo: UnitName, action: "Deleted", changedBy: req.user?.userId ?? null });
+    await logAudit({ module: "UnitMaster", recordId: id, recordNo: UnitName, action: "Deleted", changedBy: req.user?.userId ?? null });
     res.json({ message: `Unit "${UnitName}" deleted` });
   } catch (err) {
     console.error("[unit-master] DELETE error:", err.message);

@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -79,7 +80,8 @@ router.put("/:id", requirePageRight("sa-site-visits", "edit"), async (req, res) 
   try {
     const pool = getPool();
     const b = req.body;
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     await pool.request()
       .input("id", sql.Int, id)

@@ -308,7 +308,7 @@ export default function FixedAssetQualityCheck() {
         docDate: d.DocDate?.slice(0, 10) || "",
         companyId: String(d.CompanyId || ""),
         projectId: String(d.ProjectId || ""),
-        assetId: String(d.AssetId || ""),
+        assetId: String(d.AssetId != null ? d.AssetId : ""),
         qualityStatus: d.QualityStatus,
         remarks: d.Remarks || "",
         nextFollowUpDate: d.NextFollowUpDate?.slice(0, 10) || "",
@@ -395,7 +395,7 @@ export default function FixedAssetQualityCheck() {
       ...emptyForm(),
       companyId: String(c.CompanyId || ""),
       projectId: String(c.ProjectId || ""),
-      assetId: String(c.AssetId || ""),
+      assetId: String(c.AssetId != null ? c.AssetId : ""),
       followUpType: "Recheck",
       lastFollowUpDate: (c.NextFollowUpDate || c.DocDate || "").slice(0, 10),
     });
@@ -436,7 +436,7 @@ export default function FixedAssetQualityCheck() {
       lastFollowUpDate: form.lastFollowUpDate || undefined,
       nextActionNotes: form.nextActionNotes || undefined,
     };
-    if (editingId) updateMut.mutate({ id: editingId, data: payload });
+    if (editingId != null) updateMut.mutate({ id: editingId, data: payload });
     else createMut.mutate(payload);
   };
 

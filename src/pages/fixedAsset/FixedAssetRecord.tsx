@@ -629,7 +629,7 @@ export default function FixedAssetRecord() {
   const { data: unassignedCodes = [], isLoading: codesLoading } = useQuery({
     queryKey: ["fa-unassigned-codes"],
     queryFn:  getUnassignedFAItemCodes,
-    enabled:  viewMode === "form" && !editingId,
+    enabled:  viewMode === "form" && editingId == null,
   });
 
   // ── detail query for view/edit ────────────────────────────────────────────
@@ -796,7 +796,7 @@ export default function FixedAssetRecord() {
 
   // Populate form when detail loads for editing
   React.useEffect(() => {
-    if (viewMode === "form" && editingId && detailData) {
+    if (viewMode === "form" && editingId != null && detailData) {
       const d = detailData as FixedAssetDetail;
       setForm({
         docDate:             d.DocDate?.slice(0, 10) || "",
@@ -875,7 +875,7 @@ export default function FixedAssetRecord() {
   };
 
   const handleSave = () => {
-    if (!editingId && !form.sourceTagId) return toast.error("Select an FA Item Code");
+    if (editingId == null && !form.sourceTagId) return toast.error("Select an FA Item Code");
     if (!form.assetName.trim())    return toast.error("Asset name is required");
     if (!form.assetCategory)       return toast.error("Asset category is required");
     if (!form.purchaseCost)        return toast.error("Purchase cost is required");
@@ -886,7 +886,7 @@ export default function FixedAssetRecord() {
       projectId:           form.projectId ? Number(form.projectId) : undefined,
       finYear:             form.finYear || undefined,
       assetName:           form.assetName,
-      sourceTagId:         !editingId && form.sourceTagId ? Number(form.sourceTagId) : undefined,
+      sourceTagId:         editingId == null && form.sourceTagId ? Number(form.sourceTagId) : undefined,
       assetCategory:       form.assetCategory,
       repairType:          form.repairType || null,
       brand:               form.brand || undefined,
@@ -911,7 +911,7 @@ export default function FixedAssetRecord() {
       pictureBase64:       form.pictureBase64 || null,
     };
 
-    if (editingId) updateMut.mutate({ id: editingId, data: payload });
+    if (editingId != null) updateMut.mutate({ id: editingId, data: payload });
     else           createMut.mutate(payload);
   };
 
@@ -1132,7 +1132,7 @@ export default function FixedAssetRecord() {
   if (viewMode === "form") {
     return (
       <GlassShell
-        title={editingId ? "Edit Fixed Asset" : "New Fixed Asset"}
+        title={editingId != null ? "Edit Fixed Asset" : "New Fixed Asset"}
         subtitle="Record a new fixed asset with depreciation details"
         icon={Cpu}
         accentColor="#eab308"
@@ -1207,19 +1207,19 @@ export default function FixedAssetRecord() {
                         </p>
                       )}
                     </div>
-                    {!editingId && (
+                    {editingId == null && (
                       <button type="button" onClick={clearSelectedCode}
                         className="shrink-0 p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" title="Change">
                         <X size={13} />
                       </button>
                     )}
                   </div>
-                ) : editingId ? (
+                ) : editingId != null ? (
                   <input type="text" value={form.assetName} onChange={(e) => setField("assetName", e.target.value)} placeholder="e.g. Dell Latitude 5520" className={inputCls} />
                 ) : (
                   <FAItemCodeCombobox codes={unassignedCodes} value={null} onSelect={handleSelectCode} loading={codesLoading} />
                 )}
-                {!editingId && !form.sourceTagId && (
+                {editingId == null && !form.sourceTagId && (
                   <p className="text-[11px] text-muted-foreground mt-1">
                     Select a previously generated, unassigned FA Item Code from FA Inventory — Item Name, Company, Project and Godown auto-fill.
                   </p>
@@ -1260,7 +1260,7 @@ export default function FixedAssetRecord() {
               </div>
               <div>
                 <label className={labelCls}><Hash size={11} /> Doc No.</label>
-                <input type="text" value={editingId ? (detailData as FixedAssetDetail | undefined)?.DocNo || "" : ""} readOnly
+                <input type="text" value={editingId != null ? (detailData as FixedAssetDetail | undefined)?.DocNo || "" : ""} readOnly
                   placeholder="Auto-generated on save"
                   className={`${inputCls} bg-muted/30 text-muted-foreground`} />
               </div>
@@ -1695,7 +1695,7 @@ export default function FixedAssetRecord() {
       </div>
 
       {/* ── delete confirm ── */}
-      {deleteId && createPortal(
+      {deleteId != null && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
             <div className="flex items-start gap-3 mb-4">
@@ -1721,7 +1721,7 @@ export default function FixedAssetRecord() {
       )}
 
       {/* ── delete & reverse confirm / blocked ── */}
-      {reverseId && createPortal(
+      {reverseId != null && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-card border border-border rounded-xl p-6 w-[26rem] shadow-xl">
             {loadingReversePlan ? (

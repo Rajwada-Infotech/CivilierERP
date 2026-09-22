@@ -22,7 +22,7 @@ import {
 } from "./layoutContexts";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { CompassProvider } from "@/components/compass/CompassProvider";
-import { useSidebarToggleShortcut } from "@/hooks/useGlobalShortcuts";
+import { useSidebarToggleShortcut, useModuleSwitchShortcut } from "@/hooks/useGlobalShortcuts";
 
 // ── Home page detection ───────────────────────────────────────────────────────
 
@@ -66,7 +66,17 @@ function useModuleActivityLogger() {
 
 // ── NavPanel wrapper — auto-expands when module changes ───────────────────────
 
-function NavPanelAutoExpand({ children }: { children: React.ReactNode }) {
+function NavPanelAutoExpand({
+  children,
+  isHome,
+  homeNavOpen,
+  setHomeNavOpen,
+}: {
+  children: React.ReactNode;
+  isHome: boolean;
+  homeNavOpen: boolean;
+  setHomeNavOpen: (v: boolean) => void;
+}) {
   const { activeModule } = useModule();
   const { setCollapsed } = useSidebarState();
   const prevModule = useRef<typeof activeModule>(activeModule);
@@ -81,8 +91,13 @@ function NavPanelAutoExpand({ children }: { children: React.ReactNode }) {
   // Ctrl+B / ⌘B toggles the sidebar from anywhere — mounted here (inside
   // <SidebarContext.Provider>, same as this component's own useSidebarState()
   // call above) so it's wired up once and works identically from every
-  // module rather than needing a per-page listener.
-  useSidebarToggleShortcut();
+  // module rather than needing a per-page listener. On Home (which has no
+  // nav panel/strip by default) it opens/closes the strip instead.
+  useSidebarToggleShortcut({ isHome, homeNavOpen, setHomeNavOpen });
+
+  // Shift+1..9/0, Shift+letter jumps straight to a module from anywhere —
+  // same mount point/rationale as the sidebar toggle above.
+  useModuleSwitchShortcut();
 
   return <>{children}</>;
 }
@@ -156,7 +171,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
     <CompassProvider>
     <SidebarContext.Provider value={sidebarValue}>
       <NavbarCollapseContext.Provider value={navbarValue}>
-        <NavPanelAutoExpand>
+        <NavPanelAutoExpand isHome={isHome} homeNavOpen={homeNavOpen} setHomeNavOpen={setHomeNavOpen}>
           <div className="min-h-screen bg-background" data-module={activeModule ?? undefined}>
             <TopNavbar />
 

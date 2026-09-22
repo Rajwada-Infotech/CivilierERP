@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "b9a83cd0-38ba-4f85-84a9-ef7ac7a5f071"
+      }
+    },
+    "android": {
+      "package": "com.rajwadaino"
+    }
+  }
+}

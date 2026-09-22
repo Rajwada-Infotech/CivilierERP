@@ -267,6 +267,12 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   const effectiveAmount = getEffectiveAmount(item);
   const party = item.SupplierName || item.ContractorName || item.CreatedBy || "—";
   const lineItems = extractLineItems(detail);
+  // A Material Request has no Rate/Amount at all yet — pricing only enters
+  // the picture once a PO is raised against it — so the generic Item/Qty/
+  // Rate/Amount table would just show ₹0.00 in both money columns for
+  // every row. Name + Qty (+ UOM, if the detail response carries it) is all
+  // that's meaningful here.
+  const isMaterialRequest = item.Module === "material-requests";
 
   // TDS — Payments/ExpenseBooking both snapshot TDSId/TDSNature/TDSName/
   // TDSPercentage/TDSAmount onto the record at booking/payment time (same
@@ -461,34 +467,59 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
                   <Package size={10} className="text-emerald-500" /> Items ({lineItems.length})
                 </p>
-                <div className="rounded-xl border border-border overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted/40 border-b border-border">
-                      <tr>
-                        <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">Item</th>
-                        <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
-                        <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Rate</th>
-                        <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border/50">
-                      {lineItems.map((li, i) => {
-                        const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
-                        const qty = Number(li.Quantity ?? li.quantity ?? 0);
-                        const rate = Number(li.Rate ?? li.rate ?? 0);
-                        const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
-                        return (
-                          <tr key={i} className="hover:bg-muted/20 transition-colors">
-                            <td className="px-3 py-2 font-medium">{name}</td>
-                            <td className="px-3 py-2 text-right">{qty.toLocaleString("en-IN")}</td>
-                            <td className="px-3 py-2 text-right">{formatINR(rate)}</td>
-                            <td className="px-3 py-2 text-right font-medium">{formatINR(amount)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                {isMaterialRequest ? (
+                  <div className="rounded-xl border border-border divide-y divide-border/50">
+                    {lineItems.map((li, i) => {
+                      const name = (li.ItemName ?? li.itemName ?? "—") as string;
+                      const qty = Number(li.Quantity ?? li.quantity ?? 0);
+                      const uom = (li.UOMName ?? li.UomName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string;
+                      return (
+                        <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-xs hover:bg-muted/20 transition-colors">
+                          <span className="font-medium text-foreground">{name}</span>
+                          <span className="text-muted-foreground shrink-0">
+                            {qty.toLocaleString("en-IN")}{uom ? ` ${uom}` : ""}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-border overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/40 border-b border-border">
+                        <tr>
+                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">Item</th>
+                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Qty</th>
+                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">UOM</th>
+                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Rate</th>
+                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {lineItems.map((li, i) => {
+                          const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
+                          const qty = Number(li.Quantity ?? li.quantity ?? 0);
+                          // Every line-item shape across PO/WO/GRN/etc. spells this
+                          // differently — same fallback chain the Material Request
+                          // list above uses, so a doc missing one field still shows
+                          // whichever of the others it actually carries.
+                          const uom = (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string;
+                          const rate = Number(li.Rate ?? li.rate ?? 0);
+                          const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
+                          return (
+                            <tr key={i} className="hover:bg-muted/20 transition-colors">
+                              <td className="px-3 py-2 font-medium">{name}</td>
+                              <td className="px-3 py-2 text-right">{qty.toLocaleString("en-IN")}</td>
+                              <td className="px-3 py-2 text-muted-foreground">{uom || "—"}</td>
+                              <td className="px-3 py-2 text-right">{formatINR(rate)}</td>
+                              <td className="px-3 py-2 text-right font-medium">{formatINR(amount)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
 

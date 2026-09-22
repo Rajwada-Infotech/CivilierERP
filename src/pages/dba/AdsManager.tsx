@@ -191,6 +191,7 @@ export default function AdsManager() {
       if (!res.ok) throw new Error("Failed to create ad");
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dba-ads"] }),
+    onError: (e: Error) => toast.error(e.message || "Failed to create ad"),
   });
 
   const [selectedAd, setSelectedAd] = useState<Ad | null>(null);

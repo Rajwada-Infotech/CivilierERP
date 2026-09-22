@@ -383,13 +383,20 @@ const CrmParkingBooking: React.FC = () => {
     setSp((p) => { p.delete("allotmentId"); return p; }, { replace: true });
   };
   useEffect(() => {
-    if (!allotmentIdFilter || allotmentDeepLinkOpened || !(allotments as Allotment[]).length) return;
+    if (!allotmentIdFilter || allotmentDeepLinkOpened) return;
+    // Wait until the allotments query has finished loading before attempting
+    // to match — avoids a false "not found" clear on the initial render.
+    if (isLoading) return;
     const match = (allotments as Allotment[]).find((a) => String(a.Id) === allotmentIdFilter);
     if (match) {
       setAllotmentDeepLinkOpened(true);
       setSelectedAllotment(match);
+    } else {
+      // No record found (deleted / invalid ID) — clear the stale URL param so
+      // it doesn't stay stuck in the address bar forever.
+      setSp((p) => { p.delete("allotmentId"); return p; }, { replace: true });
     }
-  }, [allotmentIdFilter, allotmentDeepLinkOpened, allotments]);
+  }, [allotmentIdFilter, allotmentDeepLinkOpened, allotments, isLoading, setSp]);
   const { data: applications = [] } = useQuery({
     queryKey: ["crm-applications-dropdown"], queryFn: fetchApplications, staleTime: 60_000,
   });

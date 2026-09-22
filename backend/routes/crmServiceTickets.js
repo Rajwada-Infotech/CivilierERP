@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -115,7 +116,8 @@ router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res
 router.get("/booking/:bookingId", requirePageRight("crm-service-tickets", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bid = parseInt(req.params.bookingId);
+    const bid = parseId(req.params.bookingId);
+    if (!bid) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bid)
       .query(`${TICKET_SELECT} WHERE t.BookingId = @bid ORDER BY t.CreatedAt DESC`);
     res.json(result.recordset);
@@ -183,7 +185,8 @@ router.put("/:id", requirePageRight("crm-service-tickets", "edit"), async (req, 
   try {
     const pool = getPool();
     const b = req.body;
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const prev = await pool.request().input("id", sql.Int, id)
       .query("SELECT AssignedTo, TicketNo, Subject, Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
@@ -225,7 +228,8 @@ router.put("/:id", requirePageRight("crm-service-tickets", "edit"), async (req, 
 router.put("/:id/mark-in-progress", requirePageRight("crm-service-tickets", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status, AssignedTo, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Ticket not found" });
@@ -252,7 +256,8 @@ router.put("/:id/mark-in-progress", requirePageRight("crm-service-tickets", "edi
 router.put("/:id/resolve", requirePageRight("crm-service-tickets", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     if (!b.ResolutionNotes?.trim()) return res.status(400).json({ error: "ResolutionNotes is required to resolve a ticket" });
 
@@ -286,7 +291,8 @@ router.put("/:id/resolve", requirePageRight("crm-service-tickets", "edit"), asyn
 router.put("/:id/close", requirePageRight("crm-service-tickets", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT Status, BookingId FROM dbo.CrmServiceTicket WHERE Id = @id");
@@ -299,7 +305,7 @@ router.put("/:id/close", requirePageRight("crm-service-tickets", "edit"), async 
 
     await pool.request()
       .input("id", sql.Int, id)
-      .input("rate", sql.Int, b.CustomerRating != null ? parseInt(b.CustomerRating) : null)
+      .input("rate", sql.Int, b.CustomerRating != null && b.CustomerRating !== "" ? parseInt(b.CustomerRating) : null)
       .input("fb", sql.NVarChar(sql.MAX), b.CustomerFeedback || null)
       .input("ub", sql.Int, actorId(req))
       .query(`
@@ -320,7 +326,8 @@ router.put("/:id/close", requirePageRight("crm-service-tickets", "edit"), async 
 router.put("/:id/reopen", requirePageRight("crm-service-tickets", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     if (!b.Reason?.trim()) return res.status(400).json({ error: "Reason is required to reopen a ticket" });
 

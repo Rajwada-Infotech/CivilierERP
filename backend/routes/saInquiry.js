@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -46,7 +47,8 @@ router.get("/", requirePageRight("sa-inquiry", "view"), async (req, res) => {
 router.get("/lead/:leadId", requirePageRight("sa-inquiry", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const lid = parseInt(req.params.leadId);
+    const lid = parseId(req.params.leadId);
+    if (!lid) return res.status(400).json({ error: "Invalid leadId" });
     const req0 = pool.request().input("lid", sql.Int, lid);
     const scope = applyLeadScope(req0, req, "l");
     const lead = await req0.query(`
@@ -86,7 +88,8 @@ router.get("/lead/:leadId", requirePageRight("sa-inquiry", "view"), async (req, 
 router.post("/:leadId/call", requirePageRight("sa-inquiry", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const lid = parseInt(req.params.leadId);
+    const lid = parseId(req.params.leadId);
+    if (!lid) return res.status(400).json({ error: "Invalid leadId" });
     const b = req.body;
 
     await pool.request()

@@ -13,11 +13,24 @@ const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jp
 
 bumpCacheVersion("room-master").catch(() => {});
 
-// GET all rooms
+// GET all rooms — supports optional ?unitId=X and ?activeOnly=1 filters
+// so callers like locationMasterApi can fetch only the rooms they need
+// instead of loading the entire table (which scales poorly for large projects).
 router.get("/", cache("room-master", 300), async (req, res) => {
+  const unitId    = parseInt(req.query.unitId, 10);
+  const activeOnly = req.query.activeOnly === "1";
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+    const request = pool.request();
+    let where = "WHERE 1=1";
+    if (Number.isFinite(unitId) && unitId > 0) {
+      request.input("UnitId", sql.Int, unitId);
+      where += " AND r.UnitId = @UnitId";
+    }
+    if (activeOnly) {
+      where += " AND r.IsActive = 1";
+    }
+    const result = await request.query(`
       SELECT
         r.Id,
         r.ProjectId,
@@ -37,6 +50,7 @@ router.get("/", cache("room-master", 300), async (req, res) => {
       LEFT JOIN dbo.enterprise  ep ON ep.id = r.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster  b ON b.Id  = r.BlockId
       LEFT JOIN dbo.UnitMaster   u ON u.Id  = r.UnitId
+      ${where}
       ORDER BY ep.name, b.BlockName, u.UnitName, r.RoomName
     `);
     res.json(result.recordset);
@@ -68,7 +82,7 @@ router.get("/projects", cache("room-master-projects", 600), async (req, res) => 
 // Each unit carries its BlockId + BlockName so the frontend can show which
 // block the unit (and therefore the room) belongs to, without letting the
 // user pick the block directly.
-router.get("/units", async (req, res) => {
+router.get("/units", cache("room-master-units", 300), async (req, res) => {
   const projectId = parseInt(req.query.projectId, 10);
   try {
     const pool = getPool();
@@ -353,7 +367,7 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
     `);
     if (!compRes.recordset.length) {
       return res.status(400).json({
-        error: `No room composition template set up for "${unit.UnitType}" yet — set one in Room Composition Builder first.`,
+        error: `No unit composition template set up for "${unit.UnitType}" yet — set one in Unit Composition first.`,
       });
     }
 
@@ -362,14 +376,34 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
       for (let i = 1; i <= row.quantity; i++) names.push(row.quantity > 1 ? `${row.alias} ${i}` : row.alias);
     }
 
+    // Check ALL rooms for this unit — active AND inactive — so we can
+    // reactivate a soft-deleted room rather than inserting a duplicate.
+    // Previously only checked IsActive=1, so soft-deleted rooms would get
+    // a brand-new row inserted on regenerate, leaving two rows with the
+    // same name (one inactive orphan, one new active).
     const existing = await pool.request().input("UnitId", sql.Int, unitId).query(`
-      SELECT RoomName FROM dbo.RoomMaster WHERE UnitId = @UnitId AND IsActive = 1
+      SELECT Id, RoomName, IsActive FROM dbo.RoomMaster WHERE UnitId = @UnitId
     `);
-    const existingLower = new Set(existing.recordset.map((r) => String(r.RoomName).toLowerCase()));
+    const activeSet = new Set(
+      existing.recordset.filter((r) => r.IsActive).map((r) => String(r.RoomName).toLowerCase())
+    );
+    const inactiveMap = new Map(
+      existing.recordset.filter((r) => !r.IsActive).map((r) => [String(r.RoomName).toLowerCase(), r.Id])
+    );
 
     let created = 0;
     for (const name of names) {
-      if (existingLower.has(name.toLowerCase())) continue;
+      const lower = name.toLowerCase();
+      if (activeSet.has(lower)) continue; // already exists and is active
+      if (inactiveMap.has(lower)) {
+        // Reactivate the soft-deleted row — preserves its Id, blueprints, etc.
+        await pool.request()
+          .input("Id", sql.Int, inactiveMap.get(lower))
+          .query(`UPDATE dbo.RoomMaster SET IsActive = 1 WHERE Id = @Id`);
+        created++;
+        continue;
+      }
+      // Brand-new room — insert
       await pool.request()
         .input("ProjectId", sql.Int, unit.ProjectId)
         .input("BlockId", sql.Int, unit.BlockId)

@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests" } }));
@@ -290,7 +291,7 @@ router.post("/", requirePageRight("fixed-asset-record", "create"), async (req, r
         .input("CustodianUserId",     sql.Int,           custodianUserIdVal)
         .input("DepreciationSetupId", sql.Int,           depreciationSetupId ? parseInt(depreciationSetupId, 10) : null)
         .input("DepreciationType",    sql.NVarChar(50),  depreciationType || null)
-        .input("DepreciationRate",    sql.Decimal(5,2),  depreciationRate != null ? parseFloat(depreciationRate) : null)
+        .input("DepreciationRate",    sql.Decimal(5,2),  depreciationRate != null && depreciationRate !== "" ? parseFloat(depreciationRate) : null)
         .input("UsefulLife",          sql.Int,           usefulLife  ? parseInt(usefulLife, 10)  : null)
         .input("Remarks",             sql.NVarChar(sql.MAX), remarks || null)
         .input("PictureBase64",       sql.NVarChar(sql.MAX), pictureBase64 || null)
@@ -377,18 +378,18 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
       .input("ActivationDate",     sql.Date,          activationDate || null)
       .input("PurchaseInvoiceRef", sql.NVarChar(100), purchaseInvoiceRef || null)
       .input("SupplierId",         sql.Int,           supplierId  ? parseInt(supplierId, 10)  : null)
-      .input("PurchaseCost",       sql.Decimal(18,2), purchaseCost != null ? parseFloat(purchaseCost) : null)
-      .input("Quantity",           sql.Decimal(18,3), quantity    != null ? parseFloat(quantity)      : null)
+      .input("PurchaseCost",       sql.Decimal(18,2), purchaseCost != null && purchaseCost !== "" ? parseFloat(purchaseCost) : null)
+      .input("Quantity",           sql.Decimal(18,3), quantity    != null && quantity !== "" ? parseFloat(quantity)      : null)
       .input("Location",           sql.NVarChar(200), location || null)
       .input("Department",         sql.NVarChar(100), department || null)
       .input("Custodian",          sql.NVarChar(200), custodianName)
       .input("CustodianUserId",    sql.Int,           custodianUserIdVal)
       .input("DepreciationSetupId",sql.Int,           depreciationSetupId ? parseInt(depreciationSetupId, 10) : null)
       .input("DepreciationType",   sql.NVarChar(50),  depreciationType || null)
-      .input("DepreciationRate",   sql.Decimal(5,2),  depreciationRate != null ? parseFloat(depreciationRate) : null)
+      .input("DepreciationRate",   sql.Decimal(5,2),  depreciationRate != null && depreciationRate !== "" ? parseFloat(depreciationRate) : null)
       .input("UsefulLife",         sql.Int,           usefulLife  ? parseInt(usefulLife, 10)  : null)
       .input("AssetStatus",        sql.NVarChar(30),  assetStatus || null)
-      .input("SellingPrice",       sql.Decimal(18,2), sellingPrice != null ? parseFloat(sellingPrice) : null)
+      .input("SellingPrice",       sql.Decimal(18,2), sellingPrice != null && sellingPrice !== "" ? parseFloat(sellingPrice) : null)
       .input("SaleDate",           sql.Date,          saleDate || null)
       .input("BuyerName",          sql.NVarChar(200), buyerName || null)
       .input("SaleRemarks",        sql.NVarChar(sql.MAX), saleRemarks || null)
@@ -458,7 +459,8 @@ router.put("/:id", requirePageRight("fixed-asset-record", "edit"), async (req, r
 // no new code is minted, and Godown-wise Stock's untagged count is untouched
 // since the unit never stopped being tagged.
 router.delete("/:id", requirePageRight("fixed-asset-record", "delete"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const email = requireUser(req, res);
   if (!email) return;
   try {

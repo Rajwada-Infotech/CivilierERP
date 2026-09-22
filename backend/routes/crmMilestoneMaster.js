@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -34,7 +35,7 @@ router.post("/", requirePageRight("crm-milestone-master", "create"), async (req,
 
     const result = await pool.request()
       .input("name", sql.NVarChar(200), b.Name.trim())
-      .input("sort", sql.Int,           b.SortOrder != null ? parseInt(b.SortOrder) : 0)
+      .input("sort", sql.Int,           b.SortOrder != null && b.SortOrder !== "" ? parseInt(b.SortOrder) : 0)
       .input("cb",   sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmMilestoneMaster (Name, SortOrder, IsActive, CreatedBy, CreatedAt)
@@ -53,12 +54,13 @@ router.post("/", requirePageRight("crm-milestone-master", "create"), async (req,
 router.put("/:id", requirePageRight("crm-milestone-master", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     await pool.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.Name || null)
-      .input("sort", sql.Int,           b.SortOrder != null ? parseInt(b.SortOrder) : null)
+      .input("sort", sql.Int,           b.SortOrder != null && b.SortOrder !== "" ? parseInt(b.SortOrder) : null)
       .input("active", sql.Bit,        b.IsActive !== false ? 1 : 0)
       .input("ub",   sql.Int,           actorId(req))
       .query(`
@@ -80,7 +82,8 @@ router.put("/:id", requirePageRight("crm-milestone-master", "edit"), async (req,
 router.delete("/:id", requirePageRight("crm-milestone-master", "delete"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const usage = await pool.request().input("id", sql.Int, id)
       .query("SELECT COUNT(*) AS Cnt FROM dbo.CrmPaymentPlanTemplateItem WHERE MilestoneMasterId = @id");
     if (usage.recordset[0].Cnt > 0) {

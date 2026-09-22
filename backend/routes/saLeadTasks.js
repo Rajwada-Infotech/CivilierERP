@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -56,7 +57,8 @@ router.get("/", requirePageRight("sa-lead-tasks", "view"), async (req, res) => {
 router.get("/lead/:leadId", requirePageRight("sa-lead-tasks", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const lid = parseInt(req.params.leadId);
+    const lid = parseId(req.params.leadId);
+    if (!lid) return res.status(400).json({ error: "Invalid leadId" });
     const result = await pool.request()
       .input("lid", sql.Int, lid)
       .query(`${LEAD_TASK_SELECT} WHERE t.LeadId = @lid ORDER BY t.DueDate ASC`);

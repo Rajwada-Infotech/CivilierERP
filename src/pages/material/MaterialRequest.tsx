@@ -613,7 +613,7 @@ export default function MaterialRequest() {
         Remarks: ci.Remarks || null,
       })),
     };
-    if (editingId) {
+    if (editingId != null) {
       updateMutation.mutate(payload);
     } else {
       createMutation.mutate(payload);

@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -232,7 +233,8 @@ router.put("/:id", requirePageRight("crm-pre-possession", "edit"), async (req, r
   try {
     const pool = getPool();
     const b = req.body;
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     // Fetch the BookingId so we can compute dues clearance in the UPDATE.
     const ppRow = await pool.request().input("id", sql.Int, id)

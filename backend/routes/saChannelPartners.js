@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
 const { getPool, sql } = require("../db");
@@ -45,7 +46,8 @@ router.get("/", requirePageRight("sa-channel-partners", "view"), async (req, res
 router.get("/:id", requirePageRight("sa-channel-partners", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const [cpResult, leadsResult] = await Promise.all([
       pool.request().input("id", sql.Int, id)
         .query("SELECT * FROM dbo.SaChannelPartner WHERE Id = @id AND IsActive = 1"),
@@ -81,7 +83,7 @@ router.post("/", requirePageRight("sa-channel-partners", "create"), async (req, 
       .input("em",    sql.NVarChar(200), b.Email || null)
       .input("firm",  sql.NVarChar(200), b.FirmName || null)
       .input("reg",   sql.NVarChar(200), b.Region || null)
-      .input("rate",  sql.Decimal(5, 2), b.CommissionRate != null ? parseFloat(b.CommissionRate) : null)
+      .input("rate",  sql.Decimal(5, 2), b.CommissionRate != null && b.CommissionRate !== "" ? parseFloat(b.CommissionRate) : null)
       .input("bank",  sql.NVarChar(sql.MAX), b.BankDetails || null)
       .input("notes", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cb",    sql.Int,           actorId(req))
@@ -106,7 +108,8 @@ router.put("/:id", requirePageRight("sa-channel-partners", "edit"), async (req, 
   try {
     const pool = getPool();
     const b = req.body;
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     await pool.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.Name || null)
@@ -114,7 +117,7 @@ router.put("/:id", requirePageRight("sa-channel-partners", "edit"), async (req, 
       .input("em",   sql.NVarChar(200), b.Email || null)
       .input("firm", sql.NVarChar(200), b.FirmName || null)
       .input("reg",  sql.NVarChar(200), b.Region || null)
-      .input("rate", sql.Decimal(5, 2), b.CommissionRate != null ? parseFloat(b.CommissionRate) : null)
+      .input("rate", sql.Decimal(5, 2), b.CommissionRate != null && b.CommissionRate !== "" ? parseFloat(b.CommissionRate) : null)
       .input("bank", sql.NVarChar(sql.MAX), b.BankDetails || null)
       .input("notes",sql.NVarChar(sql.MAX), b.Notes || null)
       .input("ub",   sql.Int,           actorId(req))

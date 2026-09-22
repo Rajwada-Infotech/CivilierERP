@@ -988,7 +988,7 @@ export default function VehicleInOut() {
 
   const onSubmit = () => {
     if (!validate()) return;
-    if (editingId) updateMut.mutate(buildPayload());
+    if (editingId != null) updateMut.mutate(buildPayload());
     else createMut.mutate(buildPayload());
   };
 
@@ -2867,7 +2867,7 @@ export default function VehicleInOut() {
             <Button
               variant="destructive"
               onClick={() => {
-                if (deleteId) {
+                if (deleteId != null) {
                   deleteMut.mutate(deleteId);
                   setDeleteId(null);
                 }

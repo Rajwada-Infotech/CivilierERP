@@ -56,7 +56,12 @@ function labelizeKey(key: string): string {
 }
 function extractLineItems(detail: Record<string, unknown> | null): Record<string, unknown>[] {
   if (!detail) return [];
-  for (const key of ["LineItems", "POItems", "Items"]) {
+  // "items" (lowercase) covers Material Requests' own GET /:id response
+  // (materialRequests.js: `{ ...header, items: [...] }`) — missing it meant
+  // this modal's line-items list silently never rendered for MRs at all,
+  // even though the data was right there in `detail`. Same fix as web's
+  // ApprovalInbox.tsx's extractLineItems.
+  for (const key of ["LineItems", "POItems", "Items", "items"]) {
     const v = detail[key];
     if (Array.isArray(v) && v.length > 0) return v as Record<string, unknown>[];
   }
@@ -192,13 +197,20 @@ export function ApprovalInboxDetailModal({
                 {lineItems.map((li, i) => {
                   const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
                   const qty = Number(li.Quantity ?? li.quantity ?? 0);
+                  // Every line-item shape across PO/WO/GRN/MR/etc. spells this
+                  // differently (a real PO's own line items use "UomName",
+                  // mixed case) — same broad fallback chain as web's own
+                  // ApprovalReviewPanel.tsx.
+                  const uom = (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string;
                   const rate = Number(li.Rate ?? li.rate ?? 0);
                   const amount = Number(li.LineAmount ?? li.amount ?? qty * rate);
                   return (
                     <View key={i} className="flex-row items-center justify-between px-3 py-2.5" style={{ borderTopWidth: i === 0 ? 0 : 1, borderTopColor: `${colors.border}66` }}>
                       <View className="flex-1 min-w-0 pr-2">
                         <Text numberOfLines={1} style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.body.medium }}>{name}</Text>
-                        <Text style={{ color: colors.mutedForeground, fontSize: 10.5, marginTop: 1 }}>{qty.toLocaleString("en-IN")} × {formatINR(rate)}</Text>
+                        <Text style={{ color: colors.mutedForeground, fontSize: 10.5, marginTop: 1 }}>
+                          {qty.toLocaleString("en-IN")}{uom ? ` ${uom}` : ""} × {formatINR(rate)}
+                        </Text>
                       </View>
                       <Text style={{ color: colors.foreground, fontSize: 12, fontFamily: fonts.heading.semibold }}>{formatINR(amount)}</Text>
                     </View>

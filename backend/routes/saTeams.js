@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -152,7 +153,8 @@ router.post("/:teamLeadId/members", requirePageRight("sa-teams", "edit"), async 
 router.delete("/:teamLeadId/members/:memberId", requirePageRight("sa-teams", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const teamLeadId = parseInt(req.params.teamLeadId);
+    const teamLeadId = parseId(req.params.teamLeadId);
+    if (!teamLeadId) return res.status(400).json({ error: "Invalid teamLeadId" });
     if (!isSaAdmin(req) && actorId(req) !== teamLeadId) {
       return res.status(403).json({ error: "You can only manage your own team" });
     }
@@ -179,7 +181,8 @@ router.put("/:memberId/transfer", requirePageRight("sa-teams", "edit"), async (r
     const { newTeamLeadId } = req.body;
     if (!newTeamLeadId) return res.status(400).json({ error: "newTeamLeadId required" });
 
-    const memberId = parseInt(req.params.memberId);
+    const memberId = parseId(req.params.memberId);
+    if (!memberId) return res.status(400).json({ error: "Invalid memberId" });
 
     // Deactivate current assignment
     await pool.request()
@@ -208,7 +211,8 @@ router.put("/:memberId/transfer", requirePageRight("sa-teams", "edit"), async (r
 router.post("/:userId/promote", requirePageRight("sa-teams", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const userId = parseInt(req.params.userId);
+    const userId = parseId(req.params.userId);
+    if (!userId) return res.status(400).json({ error: "Invalid userId" });
 
     const userCheck = await pool.request()
       .input("id", sql.Int, userId)
@@ -252,7 +256,8 @@ router.post("/:userId/promote", requirePageRight("sa-teams", "edit"), async (req
 router.post("/:userId/demote", requirePageRight("sa-teams", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const userId = parseInt(req.params.userId);
+    const userId = parseId(req.params.userId);
+    if (!userId) return res.status(400).json({ error: "Invalid userId" });
 
     const userCheck = await pool.request()
       .input("id", sql.Int, userId)

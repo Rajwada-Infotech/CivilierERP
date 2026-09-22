@@ -281,7 +281,18 @@ const CrmBooking: React.FC = () => {
   // Nominee page's own deep link).
   React.useEffect(() => {
     if (viewFilter && !deepLinkOpened) {
-      setViewingBookingId(parseInt(viewFilter, 10));
+      const viewId = parseInt(viewFilter, 10);
+      if (viewId > 0) {
+        // Valid id — open the detail panel.
+        setViewingBookingId(viewId);
+      } else {
+        // ?view=0, ?view=abc, or any non-positive id — the detail panel will
+        // never open (viewingBookingId stays null, so {viewingBookingId && …}
+        // is falsy), which means the onClose handler that normally clears the
+        // URL will never run. Actively navigate to the clean URL here so the
+        // stale ?view=0 doesn't sit in the address bar forever.
+        navigate("/crm/bookings", { replace: true });
+      }
       setDeepLinkOpened(true);
       return;
     }
@@ -1081,11 +1092,11 @@ const CrmBooking: React.FC = () => {
           bookingId={viewingBookingId}
           onClose={() => {
             setViewingBookingId(null);
-            // Previously only cleared ?applicationId= — a booking opened via
-            // ?view=X (row click, or a shared link) left that param stuck in
-            // the address bar after closing, silently reopening the same
-            // card on the next visit/refresh.
-            if (appFilter || viewFilter) navigate("/crm/bookings", { replace: true });
+            // Always clear any ?view= / ?applicationId= param so the URL is
+            // clean after closing — previously conditioned on appFilter ||
+            // viewFilter which meant ?view=0 (an invalid id that never opened
+            // the panel) was never cleaned up since the close path never ran.
+            navigate("/crm/bookings", { replace: true });
           }}
         />
       )}

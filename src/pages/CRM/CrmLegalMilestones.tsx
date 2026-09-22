@@ -617,7 +617,10 @@ const CrmLegalMilestones: React.FC = () => {
     const urlBookingId = sp.get("bookingId");
     if (!urlBookingId || deepLinkResolved) return;
     setDeepLinkResolved(true);
-    fetchTrackerByBooking(urlBookingId).then((t) => { if (t) { setSelectedId(t.Id); setSelectedTracker(t); } });
+    fetchTrackerByBooking(urlBookingId).then((t) => {
+      if (t) { setSelectedId(t.Id); setSelectedTracker(t); }
+      else { setSp((prev) => { prev.delete("bookingId"); return prev; }, { replace: true }); }
+    });
   }, [sp, deepLinkResolved]);
 
   // A regular row click sets both the id and the full row object directly

@@ -1,4 +1,4 @@
-const BASE_URL = "/api/item-master";
+﻿const BASE_URL = "/api/item-master";
 
 const getAuthHeaders = () => ({
   "Content-Type": "application/json",
@@ -10,9 +10,9 @@ export interface DbItem {
   M_Name: string;
   M_Description: string | null;
   M_Type: string | null;
-  M_BelongsTo: string | null; // ← stores item group M_Id (UUID)
-  M_Group: string | null; // ← stores item group Name (string)
-  M_code: string | null; // ← stores short code
+  M_BelongsTo: string | null; // â† stores item group M_Id (UUID)
+  M_Group: string | null; // â† stores item group Name (string)
+  M_code: string | null; // â† stores short code
   M_IdentityCode: boolean;
   M_HSN: string | null;
   M_CGST: number | null;
@@ -22,7 +22,7 @@ export interface DbItem {
   M_CreatedBy: string | null;
   M_CreatedDate: string;
   M_ApprovedBy: string | null;
-  Parent_Id: string; // ← stores item group M_Id (UUID)
+  Parent_Id: string; // â† stores item group M_Id (UUID)
   ParentGroupName: string | null;
   default_supplier_id: number | null;
   DefaultSupplierName: string | null;
@@ -36,7 +36,7 @@ export interface DbItem {
 export const getItems = async (): Promise<DbItem[]> => {
   const res = await fetch(BASE_URL, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 export const addItem = async (data: Record<string, unknown>) => {

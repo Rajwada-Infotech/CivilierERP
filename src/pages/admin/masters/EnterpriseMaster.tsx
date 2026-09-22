@@ -587,7 +587,7 @@ export default function EnterpriseMaster() {
     }
     setSaving(true);
     try {
-      if (editId) {
+      if (editId != null) {
         await updateEnterprise(editId, form);
         toast.success("Enterprise updated");
       } else {

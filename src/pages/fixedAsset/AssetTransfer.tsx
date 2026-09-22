@@ -423,7 +423,7 @@ export default function AssetTransfer() {
         projectId:    String(d.ProjectId || ""),
         finYear:      d.FinYear || "",
         fromUserId:   String(d.FromUserId || ""),
-        assetId:      String(d.AssetId || ""),
+        assetId:      String(d.AssetId != null ? d.AssetId : ""),
         toUserId:     String(d.ToUserId || ""),
         departmentId: String(d.DepartmentId || ""),
         remarks:      d.Remarks || "",
@@ -577,7 +577,7 @@ export default function AssetTransfer() {
       remarks:      form.remarks.trim(),
     };
 
-    if (editingId) updateMut.mutate({ id: editingId, data: payload });
+    if (editingId != null) updateMut.mutate({ id: editingId, data: payload });
     else           createMut.mutate(payload);
   };
 
@@ -985,7 +985,7 @@ export default function AssetTransfer() {
       </Dialog>
 
       {/* ── delete confirm ── */}
-      {deleteId && createPortal(
+      {deleteId != null && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
             <div className="flex items-start gap-3 mb-4">

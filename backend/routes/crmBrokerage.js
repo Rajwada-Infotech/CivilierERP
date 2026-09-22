@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const rateLimit = require("express-rate-limit");
@@ -264,7 +265,8 @@ async function createFinancePaymentForBrokerage(pool, brokerageId, req) {
 router.get("/:id", requirePageRight("crm-brokerage", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const [brRes, payRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${BROKERAGE_SELECT} WHERE br.Id = @id`),
       pool.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmBrokerPayment WHERE BrokerageId = @id ORDER BY PaidDate DESC"),
@@ -414,7 +416,8 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
 router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const cur = await pool.request().input("id", sql.Int, id).query(`
       SELECT br.Status, br.RateType, br.RateValue,
@@ -529,7 +532,8 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
 // approve/reject no longer live on this page at all. A brokerage record
 // must be Approved here before any payment can be recorded against it.
 router.put("/:id/submit", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -542,7 +546,8 @@ router.put("/:id/submit", requirePageRight("crm-brokerage", "edit"), async (req,
 });
 
 router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -595,7 +600,8 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
 // the existing payment if one already exists (createFinancePaymentForBrokerage
 // is idempotent) — safe to call speculatively.
 router.put("/:id/retry-finance-handoff", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const financePayment = await createFinancePaymentForBrokerage(pool, id, req);
@@ -609,7 +615,8 @@ router.put("/:id/retry-finance-handoff", requirePageRight("crm-brokerage", "edit
 
 // PUT /:id/reject — admin/super_admin/dba only.
 router.put("/:id/reject", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;

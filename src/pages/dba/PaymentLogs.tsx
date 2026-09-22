@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -191,6 +192,7 @@ export default function PaymentLogs() {
       setAddOpen(false);
       setAddForm({ txn_id: "", tenant_id: "", tenant_name: "", amount: "", method: "upi", upi_id: "", bank_ref: "", paid_by: "", paid_on: "", status: "pending", purpose: "", plan: "", renewal_period: "", remarks: "" });
     },
+    onError: (e: Error) => toast.error(e.message || "Failed to add payment log"),
   });
 
   const [selected, setSelected] = useState<PaymentLog | null>(null);
