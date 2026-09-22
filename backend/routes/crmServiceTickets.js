@@ -299,7 +299,7 @@ router.put("/:id/close", requirePageRight("crm-service-tickets", "edit"), async 
 
     await pool.request()
       .input("id", sql.Int, id)
-      .input("rate", sql.Int, b.CustomerRating != null ? parseInt(b.CustomerRating) : null)
+      .input("rate", sql.Int, b.CustomerRating != null && b.CustomerRating !== "" ? parseInt(b.CustomerRating) : null)
       .input("fb", sql.NVarChar(sql.MAX), b.CustomerFeedback || null)
       .input("ub", sql.Int, actorId(req))
       .query(`

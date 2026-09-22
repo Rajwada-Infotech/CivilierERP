@@ -293,7 +293,7 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
 // and a material+quantity list. Engineers and materials are always replaced
 // wholesale (delete + reinsert) rather than diffed — both lists are short,
 // so this is simpler and avoids partial-update bugs.
-router.post("/:rungId", authMiddleware, async (req, res) => {
+router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"), async (req, res) => {
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
 
@@ -499,7 +499,7 @@ router.get("/:rungId/blueprint-annotation", authMiddleware, async (req, res) => 
 // in the meantime, so the save is rejected as a conflict rather than
 // silently clobbering it. Allocation and reporting are separate rows (see
 // migration 346) — saving one never touches the other's version or shapes.
-router.put("/:rungId/blueprint-annotation", authMiddleware, async (req, res) => {
+router.put("/:rungId/blueprint-annotation", authMiddleware, requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"), async (req, res) => {
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
 
@@ -668,7 +668,7 @@ router.get("/:rungId/photos/:photoId", authMiddleware, async (req, res) => {
 
 // POST /:rungId/photos — upload one photo. multipart body: file, phase
 // ('before'|'after'), note (optional).
-router.post("/:rungId/photos", authMiddleware, upload.single("file"), async (req, res) => {
+router.post("/:rungId/photos", authMiddleware, requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"), upload.single("file"), async (req, res) => {
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });

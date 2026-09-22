@@ -513,7 +513,9 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       try {
         effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
           preferredUnitId: effectiveUnitId,
-          paymentPlanId: b.PaymentPlanId || null,
+          // b.PaymentPlanId can legitimately be 0 (CrmPaymentPlanTemplate
+          // has a row at Id 0) — `||` would silently drop it.
+          paymentPlanId: b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? b.PaymentPlanId : null,
         });
       } catch (planErr) {
         return res.status(planErr.status || 400).json({ error: planErr.message });
@@ -552,13 +554,13 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("campid", sql.Int, campaignId ?? null)
       .input("adid",   sql.Int, adId ?? null)
       .input("cpid",   sql.Int, channelPartnerId)
-      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null)
+      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
       .input("ppid", sql.Int,           effectivePaymentPlanId)
       .input("pptouched", sql.Bit,      pptouched)
       .input("ttype",sql.NVarChar(20),  b.TokenType || null)
-      .input("tval", sql.Decimal(18,2), b.TokenValue != null ? parseFloat(b.TokenValue) : null)
-      .input("bamt", sql.Decimal(18,2), b.BookingAmount != null ? parseFloat(b.BookingAmount) : null)
+      .input("tval", sql.Decimal(18,2), b.TokenValue != null && b.TokenValue !== "" ? parseFloat(b.TokenValue) : null)
+      .input("bamt", sql.Decimal(18,2), b.BookingAmount != null && b.BookingAmount !== "" ? parseFloat(b.BookingAmount) : null)
       .input("pmode",sql.NVarChar(50),  b.PaymentMode || null)
       .input("dbid", sql.Int,           b.DepositBankId ? parseInt(b.DepositBankId) : null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)

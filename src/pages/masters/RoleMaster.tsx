@@ -268,7 +268,7 @@ const RoleMaster: React.FC = () => {
     if (!(await validate())) return;
 
     try {
-      if (editingId) {
+      if (editingId != null) {
         await updateRole(editingId, toPayload());
         toast.success("Role updated!");
       } else {

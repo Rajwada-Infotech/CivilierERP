@@ -123,7 +123,19 @@ async function ensureCrmCustomerLedgerHead(pool, crmCustomerId, createdBy) {
     .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
     .input("LHeadPan", sql.NVarChar(50), c.PanNo || null)
     .input("LCountry", sql.VarChar(50), "India")
-    .input("LHeadType", sql.VarChar(50), "A")
+    // Deliberately its own type ('RC' — Real-estate/CRM Customer), never
+    // 'A' (the general Customer Master used by Finance for any party the
+    // business invoices — scrap sales, material sales, anything outside
+    // CRM). A CRM customer is specifically someone buying a flat from us;
+    // conflating the two meant every CRM buyer polluted Finance's general
+    // Customer Master list the moment they were created. This was
+    // previously LHeadType='C' (collided with Contractor, fixed by
+    // migration 224 to 'A' — which then collided with the OTHER master
+    // instead). Trial Balance / financial-statement inclusion is driven by
+    // LBelongsTo (Sundry Debtors group, set below), not by this type code,
+    // so GL posting/receivables reporting is unaffected by the type change
+    // — only which UI list these rows show up in.
+    .input("LHeadType", sql.VarChar(50), "RC")
     .input("LHeadStatus", sql.Bit, 1)
     .input("Status", sql.NVarChar(20), "Approved")
     .input("LBelongsTo", sql.Int, groupId)

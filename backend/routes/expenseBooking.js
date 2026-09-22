@@ -158,7 +158,7 @@ async function computeSingleGrnCostCentreBuckets(pool, grnId) {
         WHERE poi.PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), poi.ItemId) IN (${ph2})
       `);
       for (const r of ccRes.recordset) {
-        ccMap[r.ItemId] = r.CostCenterId ? { id: r.CostCenterId, name: r.CostCenterName, code: r.CostCenterCode } : null;
+        ccMap[r.ItemId] = r.CostCenterId != null ? { id: r.CostCenterId, name: r.CostCenterName, code: r.CostCenterCode } : null;
       }
     }
   }
@@ -253,7 +253,7 @@ async function computeGrnItemBreakdown(pool, grnIds) {
           WHERE poi.PurchaseOrderID = @POID AND CONVERT(NVARCHAR(100), poi.ItemId) IN (${ph2})
         `);
         for (const r of ccRes.recordset) {
-          ccMap[r.ItemId] = r.CostCenterId ? { id: r.CostCenterId, name: r.CostCenterName, code: r.CostCenterCode } : null;
+          ccMap[r.ItemId] = r.CostCenterId != null ? { id: r.CostCenterId, name: r.CostCenterName, code: r.CostCenterCode } : null;
         }
       }
     }
