@@ -78,7 +78,7 @@ export default function IDTemplateMaster() {
   const handleDelete = async (r: IDTemplate) => {
     try {
       await deleteIDTemplate(r.id);
-      toast.success("ID template deactivated");
+      toast.success("ID template deleted");
       await invalidate();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed");
@@ -148,7 +148,7 @@ export default function IDTemplateMaster() {
             )}
             {rights.canDelete && r.isActive && (
               <button onClick={() => setDeleting(r)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="Deactivate">
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="Delete">
                 <Trash2 size={13} />
               </button>
             )}
@@ -244,11 +244,11 @@ export default function IDTemplateMaster() {
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle size={16} /> Deactivate Template
+              <AlertTriangle size={16} /> Delete Template
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground pt-1">
-            Deactivate the alias <strong>{deleting?.projectAlias}</strong> for <strong>{deleting?.projectName}</strong>? Codes already generated stay exactly as they are — this only blocks new tagging for this project until re-activated.
+            Delete the alias <strong>{deleting?.projectAlias}</strong> for <strong>{deleting?.projectName}</strong>? This permanently removes it and cannot be undone. Codes already generated stay exactly as they are — this only blocks new tagging for this project.
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => setDeleting(null)} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
@@ -256,7 +256,7 @@ export default function IDTemplateMaster() {
             </button>
             <button onClick={() => deleting && handleDelete(deleting)}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity">
-              Deactivate
+              Delete
             </button>
           </div>
         </DialogContent>

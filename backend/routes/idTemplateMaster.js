@@ -128,21 +128,18 @@ router.put("/:id", requirePageRight("id-template-master", "edit"), async (req, r
   }
 });
 
-// DELETE /:id — soft delete (IsActive = 0), never hard-remove — existing
-// generated FA Item Codes must keep referring to a stable project alias.
+// DELETE /:id — permanently removes the template. Generated FA Item Codes
+// are plain text (the project alias is baked in at generation time, never
+// looked up from this row again), so removing it never affects them.
 router.delete("/:id", requirePageRight("id-template-master", "delete"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
-  const actor = req.user?.email || req.user?.name || "system";
   try {
     const pool = getPool();
-    await pool.request()
-      .input("Id",        sql.Int,           id)
-      .input("UpdatedBy", sql.NVarChar(200), actor)
-      .query(`
-        UPDATE dbo.IDTemplateMaster SET IsActive = 0, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
-        WHERE Id = @Id
-      `);
+    const result = await pool.request()
+      .input("Id", sql.Int, id)
+      .query(`DELETE FROM dbo.IDTemplateMaster WHERE Id = @Id`);
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Not found" });
     res.json({ success: true });
   } catch (err) {
     console.error("[id-template-master] DELETE error:", err.message);
