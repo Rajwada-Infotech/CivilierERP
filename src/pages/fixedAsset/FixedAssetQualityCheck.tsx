@@ -436,7 +436,7 @@ export default function FixedAssetQualityCheck() {
       lastFollowUpDate: form.lastFollowUpDate || undefined,
       nextActionNotes: form.nextActionNotes || undefined,
     };
-    if (editingId) updateMut.mutate({ id: editingId, data: payload });
+    if (editingId != null) updateMut.mutate({ id: editingId, data: payload });
     else createMut.mutate(payload);
   };
 

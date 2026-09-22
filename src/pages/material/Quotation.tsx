@@ -437,7 +437,7 @@ export default function Quotation() {
       return;
     }
     const payload = buildPayload();
-    if (editingId) updateMutation.mutate(payload);
+    if (editingId != null) updateMutation.mutate(payload);
     else createMutation.mutate(payload);
   };
 

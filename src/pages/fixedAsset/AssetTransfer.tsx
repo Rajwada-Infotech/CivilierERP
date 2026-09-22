@@ -577,7 +577,7 @@ export default function AssetTransfer() {
       remarks:      form.remarks.trim(),
     };
 
-    if (editingId) updateMut.mutate({ id: editingId, data: payload });
+    if (editingId != null) updateMut.mutate({ id: editingId, data: payload });
     else           createMut.mutate(payload);
   };
 

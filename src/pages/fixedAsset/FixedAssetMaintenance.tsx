@@ -518,7 +518,7 @@ export default function FixedAssetMaintenance() {
   const handleSave = () => {
     const err = validate();
     if (err) return toast.error(err);
-    if (editingId) updateMut.mutate({ id: editingId, data: buildPayload() });
+    if (editingId != null) updateMut.mutate({ id: editingId, data: buildPayload() });
     else createMut.mutate(buildPayload());
   };
 

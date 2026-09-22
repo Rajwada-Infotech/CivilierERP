@@ -399,7 +399,7 @@ export default function FixedAssetAssignment() {
     if (!form.userId)    return toast.error("User is required");
     if (!form.responsibleUserId) return toast.error("Responsible User is required");
 
-    if (editingId) {
+    if (editingId != null) {
       updateMut.mutate({
         id: editingId,
         data: {

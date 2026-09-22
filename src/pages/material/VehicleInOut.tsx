@@ -976,7 +976,7 @@ export default function VehicleInOut() {
 
   const onSubmit = () => {
     if (!validate()) return;
-    if (editingId) updateMut.mutate(buildPayload());
+    if (editingId != null) updateMut.mutate(buildPayload());
     else createMut.mutate(buildPayload());
   };
 
