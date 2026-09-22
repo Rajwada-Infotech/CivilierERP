@@ -128,7 +128,7 @@ router.get("/:bookingId/checklist", requirePageRight("crm-welcome-calls", "view"
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
 
     const [welcome, callCount, docs, coApplicants, bankDetail, noc, agreement] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId)
@@ -195,7 +195,7 @@ router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "vi
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
 
     const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, recentCallsRes, padRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId).query(`
@@ -506,7 +506,7 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (b.Outcome && !OUTCOMES.includes(b.Outcome))
       return res.status(400).json({ error: `Invalid Outcome. Must be: ${OUTCOMES.join(", ")}` });
@@ -631,7 +631,7 @@ router.put("/:bookingId/financing-type", requirePageRight("crm-welcome-calls", "
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const { FinancingType } = req.body;
 
     if (!["SelfFunded", "LoanFinanced"].includes(FinancingType)) {
@@ -669,7 +669,7 @@ router.get("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls",
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request()
       .input("bid", sql.Int, bookingId)
       .query(`
@@ -691,7 +691,7 @@ router.post("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls"
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const { BankName, Remarks } = req.body;
 
     if (!BankName || !String(BankName).trim()) {
@@ -727,9 +727,9 @@ router.delete("/:bookingId/bank-preferences/:id", requirePageRight("crm-welcome-
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const existing = await pool.request()
       .input("id",  sql.Int, id)
@@ -756,7 +756,7 @@ router.delete("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req,
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const call = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Outcome FROM dbo.CrmWelcomeCall WHERE Id = @id");
     if (!call.recordset.length) return res.status(404).json({ error: "Call log not found" });

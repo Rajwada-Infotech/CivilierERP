@@ -220,7 +220,7 @@ router.get("/:id", requirePageRight("crm-customers", "view"), async (req, res) =
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [custRes, appsRes, outstandingRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${CUSTOMER_SELECT} WHERE c.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
@@ -347,7 +347,7 @@ router.post("/", requirePageRight("crm-customers", "create"), async (req, res) =
     const customerNo = await getNextDocNumber(pool, "CUST", "CUST");
     const result = await pool.request()
       .input("no",       sql.NVarChar(30),  customerNo)
-      .input("lid",       sql.Int,           b.LeadId ? parseInt(b.LeadId) : null)
+      .input("lid",       sql.Int,           b.LeadId !== undefined && b.LeadId !== null && b.LeadId !== "" ? parseInt(b.LeadId) : null)
       .input("name",      sql.NVarChar(200), b.CustomerName?.trim() || null)
       .input("mob",       sql.NVarChar(20),  b.Mobile?.trim() || null)
       .input("altmob",    sql.NVarChar(20),  b.AltMobile || null)
@@ -413,7 +413,7 @@ router.put("/:id", requirePageRight("crm-customers", "edit"), async (req, res) =
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const email = normalizeEmail(b.Email);
     await assertUniqueCustomerEmail(pool, email, id);

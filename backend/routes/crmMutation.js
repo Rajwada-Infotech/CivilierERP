@@ -132,7 +132,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-mutation", "view"), asyn
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.bookingId);
-    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query(`${MUT_SELECT} WHERE m.BookingId = @bid`);
     res.json(result.recordset[0] || null);
@@ -171,7 +171,7 @@ router.get("/:id", requirePageRight("crm-mutation", "view"), async (req, res) =>
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [mutRes, docRes, logRes] = await Promise.all([
       pool.request().input('id', sql.Int, id).query(`${MUT_SELECT} WHERE m.Id = @id`),
       pool.request().input('id', sql.Int, id).query(`
@@ -283,7 +283,7 @@ router.put("/:id", requirePageRight("crm-mutation", "edit"), async (req, res) =>
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmMutation WHERE Id = @id");
@@ -336,7 +336,7 @@ router.put("/:id/query", requirePageRight("crm-mutation", "edit"), async (req, r
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const remarks = req.body?.Remarks;
     if (!remarks?.trim()) return res.status(400).json({ error: "Remarks describing the query are required" });
 
@@ -394,7 +394,7 @@ router.put("/:id/resubmit", requirePageRight("crm-mutation", "edit"), async (req
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT BookingId, Status FROM dbo.CrmMutation WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Mutation record not found" });
@@ -427,7 +427,7 @@ router.put("/:id/approve", requirePageRight("crm-mutation", "edit"), validateBod
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (!b.NewKhataNo?.trim()) return res.status(400).json({ error: "New Khata No. is required" });
 
@@ -498,7 +498,7 @@ router.post("/:id/documents/upload", requirePageRight("crm-mutation", "edit"), u
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const { DocumentType = 'Other', Label, IsMandatory = 0, Remarks } = req.body;
 
     const mut = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmMutation WHERE Id = @id");
@@ -569,7 +569,7 @@ router.post("/:id/documents/request", requirePageRight("crm-mutation", "edit"), 
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const { DocumentType, Label, IsMandatory = true } = req.body;
     if (!DocumentType?.trim()) return res.status(400).json({ error: "DocumentType is required" });
 
@@ -603,9 +603,9 @@ router.put("/:id/documents/:docId", requirePageRight("crm-mutation", "edit"), as
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const docId = parseId(req.params.docId);
-    if (!docId) return res.status(400).json({ error: "Invalid docId" });
+    if (docId === null) return res.status(400).json({ error: "Invalid docId" });
     const { Status, Remarks } = req.body;
 
     if (Status !== undefined && !["Verified", "Rejected"].includes(Status)) {

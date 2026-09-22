@@ -72,7 +72,7 @@ router.get("/:id", requirePageRight("sa-social-media", "view"), async (req, res)
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request()
       .input("Id", sql.Int, id)
       .query(`${PLATFORM_SELECT} WHERE p.Id = @Id`);
@@ -105,7 +105,7 @@ router.post("/:id/test-connection", requirePageRight("sa-social-media", "edit"),
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const platResult = await pool.request()
       .input("Id", sql.Int, id)
       .query("SELECT AccessToken, AdAccountId, PlatformType, ApiEnabled, AccountDetails, PixelId FROM dbo.SaSocialMediaPlatform WHERE Id = @Id");

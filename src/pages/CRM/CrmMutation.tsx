@@ -154,12 +154,12 @@ const CrmMutation: React.FC = () => {
   const { data: detailData } = useQuery({
     queryKey: ["crm-mutation-detail", detailId],
     queryFn: async () => {
-      if (!detailId) return null;
+      if (detailId == null) return null;
       const r = await fetchWithAuth(`${API}/${detailId}`);
       if (!r.ok) return null;
       return r.json();
     },
-    enabled: !!detailId,
+    enabled: detailId != null,
     staleTime: 15_000,
   });
 
@@ -228,7 +228,7 @@ const CrmMutation: React.FC = () => {
   };
 
   const handleQuery = async () => {
-    if (!detailId || !queryRemarks.trim()) { toast.error("Remarks are required"); return; }
+    if (detailId == null || !queryRemarks.trim()) { toast.error("Remarks are required"); return; }
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/query`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
@@ -243,7 +243,7 @@ const CrmMutation: React.FC = () => {
   };
 
   const handleResubmit = async () => {
-    if (!detailId) return;
+    if (detailId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/resubmit`, { method: "PUT" });
       const data = await res.json();
@@ -254,7 +254,7 @@ const CrmMutation: React.FC = () => {
   };
 
   const handleApprove = async () => {
-    if (!detailId) return;
+    if (detailId == null) return;
     if (!approveForm.NewKhataNo.trim()) { toast.error("New Khata No. is required"); return; }
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/approve`, {
@@ -270,7 +270,7 @@ const CrmMutation: React.FC = () => {
   };
 
   const handleUploadDoc = async (file: File, documentType: string, label?: string) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     setUploadingDoc(true);
     try {
       const formData = new FormData();
@@ -289,7 +289,7 @@ const CrmMutation: React.FC = () => {
   };
 
   const handleRequestDoc = async (documentType: string, label?: string) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     setRequestingDoc(true);
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/documents/request`, {
@@ -305,7 +305,7 @@ const CrmMutation: React.FC = () => {
   };
 
   const handleVerifyDoc = async (docId: number) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     try {
       const res = await fetchWithAuth(`${API}/${detailId}/documents/${docId}`, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
@@ -319,7 +319,7 @@ const CrmMutation: React.FC = () => {
   };
 
   const handleRejectDoc = async (docId: number) => {
-    if (!detailId) return;
+    if (detailId == null) return;
     const remarks = window.prompt("Describe what's wrong with this document (required):");
     if (!remarks?.trim()) return;
     try {

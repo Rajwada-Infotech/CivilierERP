@@ -546,7 +546,7 @@ router.put("/blocks/:id", requirePageRight("crm-auto-project-setup", "edit"), as
   const updatedBy = req.user?.userId || null;
   try {
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const name = String(req.body.BlockName || "").trim();
     if (!name) return res.status(400).json({ error: "BlockName is required" });
 
@@ -579,7 +579,7 @@ router.delete("/blocks/:id", requirePageRight("crm-auto-project-setup", "delete"
   const pool = getPool();
   try {
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const existing = await pool.request().input("id", sql.Int, id)
       .query("SELECT Id, BlockName FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Block not found" });
@@ -625,7 +625,7 @@ router.get("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
   const pool = getPool();
   try {
     const blockId = parseId(req.params.id);
-    if (!blockId) return res.status(400).json({ error: "Invalid id" });
+    if (blockId === null) return res.status(400).json({ error: "Invalid id" });
     const items = await pool.request().input("bid", sql.Int, blockId).query(`
       SELECT Id, SortOrder, UnitType, Count, AreaSqFt,
              CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
@@ -653,7 +653,7 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
   const updatedBy = req.user?.userId || null;
   try {
     const blockId = parseId(req.params.id);
-    if (!blockId) return res.status(400).json({ error: "Invalid id" });
+    if (blockId === null) return res.status(400).json({ error: "Invalid id" });
     const items = Array.isArray(req.body.Items) ? req.body.Items : [];
     if (!items.length) return res.status(400).json({ error: "At least one Unit Type row is required" });
     for (const it of items) {
@@ -767,7 +767,7 @@ router.post("/blocks/:id/unit-template/apply", requirePageRight("crm-auto-projec
   const updatedBy = req.user?.userId || null;
   try {
     const blockId = parseId(req.params.id);
-    if (!blockId) return res.status(400).json({ error: "Invalid id" });
+    if (blockId === null) return res.status(400).json({ error: "Invalid id" });
     const totalRes = await pool.request().input("bid", sql.Int, blockId)
       .query("SELECT ISNULL(SUM(Count), 0) AS total FROM dbo.CrmProjectAutoSetupUnitTemplate WHERE BlockId = @bid AND IsActive = 1");
     const total = totalRes.recordset[0].total;
@@ -799,7 +799,7 @@ router.get("/blocks/:id/parking-template", requirePageRight("crm-auto-project-se
   const pool = getPool();
   try {
     const blockId = parseId(req.params.id);
-    if (!blockId) return res.status(400).json({ error: "Invalid id" });
+    if (blockId === null) return res.status(400).json({ error: "Invalid id" });
     const blockRow = await pool.request().input("bid", sql.Int, blockId)
       .query("SELECT ProjectId FROM dbo.BlockMaster WHERE Id = @bid AND IsActive = 1");
     const projectId = blockRow.recordset[0]?.ProjectId ?? null;
@@ -855,7 +855,7 @@ router.put("/blocks/:id/parking-template", requirePageRight("crm-auto-project-se
   const updatedBy = req.user?.userId || null;
   try {
     const blockId = parseId(req.params.id);
-    if (!blockId) return res.status(400).json({ error: "Invalid id" });
+    if (blockId === null) return res.status(400).json({ error: "Invalid id" });
     const items = Array.isArray(req.body.Items) ? req.body.Items : [];
     if (!items.length) return res.status(400).json({ error: "At least one Parking Type row is required" });
     for (const it of items) {
@@ -936,7 +936,7 @@ router.get("/blocks/:id/parking-slots", requirePageRight("crm-auto-project-setup
   const pool = getPool();
   try {
     const blockId = parseId(req.params.id);
-    if (!blockId) return res.status(400).json({ error: "Invalid id" });
+    if (blockId === null) return res.status(400).json({ error: "Invalid id" });
     const block = await pool.request().input("id", sql.Int, blockId)
       .query("SELECT Id FROM dbo.BlockMaster WHERE Id = @id AND IsActive = 1");
     if (!block.recordset.length) return res.status(404).json({ error: "Block not found" });
@@ -1035,7 +1035,7 @@ router.put("/floors/:id", requirePageRight("crm-auto-project-setup", "edit"), as
   const updatedBy = req.user?.userId || null;
   try {
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const existing = await pool.request().input("id", sql.Int, id)
       .query("SELECT Id, IsGenerated, HasUnits, UnitCount FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Floor not found" });
@@ -1076,7 +1076,7 @@ router.delete("/floors/:id", requirePageRight("crm-auto-project-setup", "delete"
   const pool = getPool();
   try {
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const existing = await pool.request().input("id", sql.Int, id)
       .query("SELECT Id, BlockId, FloorNo, FloorLabel FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id AND IsActive = 1");
     if (!existing.recordset.length) return res.status(404).json({ error: "Floor not found" });
@@ -1106,7 +1106,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
   const pool = getPool();
   try {
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const floor = await pool.request().input("id", sql.Int, id)
       .query("SELECT BlockId, FloorNo FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id AND IsActive = 1");
     if (!floor.recordset.length) return res.status(404).json({ error: "Floor not found" });

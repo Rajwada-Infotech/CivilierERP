@@ -64,7 +64,7 @@ router.put("/:id", requirePageRight("crm-brokerage-rate-tiers", "edit"), async (
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const min = Number(b.MinDealValue);
     const max = b.MaxDealValue != null && b.MaxDealValue !== "" ? Number(b.MaxDealValue) : null;
@@ -97,7 +97,7 @@ router.delete("/:id", requirePageRight("crm-brokerage-rate-tiers", "delete"), as
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     await pool.request().input("id", sql.Int, id).query("DELETE FROM dbo.CrmBrokerageRateTier WHERE Id = @id");
     res.json({ success: true });
   } catch (e) {

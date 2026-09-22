@@ -125,7 +125,7 @@ router.put("/:id/members", requirePageRight("sa-lead-distribution", "edit"), asy
   try {
     const pool = getPool();
     const ruleId = parseId(req.params.id);
-    if (!ruleId) return res.status(400).json({ error: "Invalid id" });
+    if (ruleId === null) return res.status(400).json({ error: "Invalid id" });
     const tx = pool.transaction();
     await tx.begin();
     try {

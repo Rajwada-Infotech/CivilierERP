@@ -351,7 +351,30 @@ router.get("/", authenticateToken, async (req, res) => {
         ep.name  AS ProjectName,
         fy.FName AS FinYearName,
         COUNT(mri.MRItemId)      AS ItemCount,
-        SUM(mri.Quantity)        AS TotalQty,
+        -- Quantities in different UOMs aren't fungible (e.g. bags vs. metric
+        -- tons) — a single blind SUM(Quantity) across every line item mixed
+        -- them together into one meaningless number. Sum per UOM instead and
+        -- return it as one "120.00 BAG, 1.50 MT" string.
+        (
+          SELECT STUFF((
+            SELECT ', ' + FORMAT(SUM(mri2.Quantity), 'N2') + ' ' + ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, ''))
+            FROM dbo.MaterialRequestItems mri2
+            LEFT JOIN dbo.UOMMaster u2 ON u2.UOMCode = mri2.UOMCode
+            WHERE mri2.MRId = mr.MRId
+            -- Must match the SELECT's grouping expression exactly (SQL Server
+            -- requires the GROUP BY expression to be textually identical to
+            -- the non-aggregated SELECT expression it covers) — this used to
+            -- read ISNULL(u2.UOMName, mri2.UOMCode), one ISNULL short of the
+            -- SELECT's ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, '')), which
+            -- SQL Server doesn't recognize as the same expression. That
+            -- mismatch 500'd this entire list endpoint outright (error 8120)
+            -- every Material Request list request failed, at every
+            -- page/limit, found via a live "material requests aren't
+            -- fetching" report on 2026-09-22.
+            GROUP BY ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, ''))
+            FOR XML PATH('')
+          ), 1, 2, '')
+        )                        AS QtyByUom,
         COUNT(*)  OVER ()        AS _total
       FROM       dbo.MaterialRequests mr WITH (NOLOCK)
       LEFT JOIN  dbo.enterprise  ec  WITH (NOLOCK) ON ec.id  = mr.CompanyId
@@ -529,19 +552,29 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
 router.get("/pending-summary", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
+    // SQL Server refuses SUM(ISNULL((SELECT SUM(...) ... WHERE correlated), 0))
+    // outright — "Cannot perform an aggregate function on an expression
+    // containing an aggregate or a subquery" — even though the inner
+    // subquery returns one scalar per outer row. OUTER APPLY computes that
+    // same per-item ordered quantity as its own row first, so the outer
+    // SUM(ISNULL(...)) is only ever aggregating a plain column, not a
+    // nested aggregate subquery. Same semantics, just restructured to be
+    // something SQL Server will actually run. Found live: /pending-summary
+    // 500'd on every request, 2026-09-22.
     const result = await pool.request().query(`
       SELECT
         mri.MRId,
         SUM(mri.Quantity) AS TotalRequested,
-        SUM(ISNULL((
-          SELECT SUM(poi.Quantity)
-          FROM dbo.PurchaseOrderItems poi
-          JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
-          WHERE poi.MRItemId = mri.MRItemId
-            AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
-        ), 0)) AS TotalOrdered
+        SUM(ISNULL(ord.OrderedQty, 0)) AS TotalOrdered
       FROM dbo.MaterialRequestItems mri
       JOIN dbo.MaterialRequests mr ON mr.MRId = mri.MRId
+      OUTER APPLY (
+        SELECT SUM(poi.Quantity) AS OrderedQty
+        FROM dbo.PurchaseOrderItems poi
+        JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
+        WHERE poi.MRItemId = mri.MRItemId
+          AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
+      ) ord
       WHERE mr.Status IN ('Approved', 'Partially Fulfilled', 'Completed')
       GROUP BY mri.MRId
     `);

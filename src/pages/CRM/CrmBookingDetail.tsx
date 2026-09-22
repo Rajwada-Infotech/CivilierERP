@@ -487,12 +487,12 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
   const { data: moneyReceipts = [] } = useQuery({
     queryKey: ["crm-booking-money-receipts", bookingId],
     queryFn: () => fetchMoneyReceipts(bookingId),
-    enabled: !!bookingId,
+    enabled: bookingId != null,
   });
   const { data: onAccountData } = useQuery({
     queryKey: ["crm-booking-on-account", bookingId],
     queryFn: () => fetchOnAccount(bookingId),
-    enabled: !!bookingId,
+    enabled: bookingId != null,
   });
   const { data: attachments = [] } = useQuery({
     queryKey: ["crm-booking-attachments", bookingId],
@@ -563,7 +563,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
       const r = await fetchWithAuth(`/api/crm/welcome-checklist/${bookingId}`);
       return r.ok ? r.json() : null;
     },
-    enabled: tab === "Parking & Extra Charges" && !!bookingId,
+    enabled: tab === "Parking & Extra Charges" && bookingId != null,
     staleTime: 30_000,
   });
   const { data: availableParking = { rates: [], unratedTypesWithInventory: [] } } = useQuery({

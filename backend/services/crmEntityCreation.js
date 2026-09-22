@@ -177,9 +177,9 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   // wins outright (its own name/mobile/email become authoritative, even if
   // the request also carries stale raw fields); otherwise fall back to
   // finding/creating one from whatever raw identity the caller supplied.
-  let customerId = b.CustomerId ? parseInt(b.CustomerId) : null;
+  let customerId = b.CustomerId !== undefined && b.CustomerId !== null && b.CustomerId !== "" ? parseInt(b.CustomerId) : null;
   let customerRow = null;
-  if (customerId) {
+  if (customerId != null) {
     const cr = await pool.request().input("cid", sql.Int, customerId)
       .query("SELECT CustomerNo, CustomerName, Mobile, AltMobile, Email FROM dbo.CrmCustomer WHERE Id = @cid AND IsActive = 1");
     if (!cr.recordset.length) throw new CrmCreationError("Selected customer does not exist");
@@ -207,14 +207,14 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     }, actorUserId);
   }
 
-  const platformId = b.PlatformId ? parseInt(b.PlatformId) : (prefill.PlatformId || null);
-  const campaignId = b.CampaignId ? parseInt(b.CampaignId) : (prefill.CampaignId || null);
-  const adId       = b.AdId       ? parseInt(b.AdId)       : (prefill.AdId       || null);
-  const channelPartnerId = b.ChannelPartnerId ? parseInt(b.ChannelPartnerId) : (prefill.ChannelPartnerId || null);
-  const bridge = !b.BrokerId && channelPartnerId
+  const platformId = b.PlatformId !== undefined && b.PlatformId !== null && b.PlatformId !== "" ? parseInt(b.PlatformId) : (prefill.PlatformId != null ? prefill.PlatformId : null);
+  const campaignId = b.CampaignId !== undefined && b.CampaignId !== null && b.CampaignId !== "" ? parseInt(b.CampaignId) : (prefill.CampaignId != null ? prefill.CampaignId : null);
+  const adId       = b.AdId       !== undefined && b.AdId       !== null && b.AdId       !== "" ? parseInt(b.AdId)       : (prefill.AdId       != null ? prefill.AdId       : null);
+  const channelPartnerId = b.ChannelPartnerId !== undefined && b.ChannelPartnerId !== null && b.ChannelPartnerId !== "" ? parseInt(b.ChannelPartnerId) : (prefill.ChannelPartnerId != null ? prefill.ChannelPartnerId : null);
+  const bridge = (b.BrokerId === undefined || b.BrokerId === null || b.BrokerId === "") && channelPartnerId != null
     ? await ensureBrokerForChannelPartner(pool, channelPartnerId, actorUserId)
     : null;
-  const brokerId = b.BrokerId ? parseInt(b.BrokerId) : (bridge?.brokerId || null);
+  const brokerId = b.BrokerId !== undefined && b.BrokerId !== null && b.BrokerId !== "" ? parseInt(b.BrokerId) : (bridge?.brokerId != null ? bridge.brokerId : null);
   const brokerageRatePercent = b.BrokerageRatePercent != null && b.BrokerageRatePercent !== ""
     ? parseFloat(b.BrokerageRatePercent)
     : (bridge?.commissionRate ?? null);
@@ -223,16 +223,16 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   if (sourceError) throw new CrmCreationError(sourceError);
 
   let projectName = b.InterestedProject || null;
-  let companyId = b.CompanyId ? parseInt(b.CompanyId) : null;
-  if (b.ProjectId) {
+  let companyId = b.CompanyId !== undefined && b.CompanyId !== null && b.CompanyId !== "" ? parseInt(b.CompanyId) : null;
+  if (b.ProjectId !== undefined && b.ProjectId !== null && b.ProjectId !== "") {
     const proj = await pool.request().input("pid", sql.Int, parseInt(b.ProjectId))
       .query("SELECT name, company_id FROM dbo.enterprise WHERE id = @pid AND business_type = 'P'");
     if (!proj.recordset.length) throw new CrmCreationError("Selected project does not exist");
     projectName = proj.recordset[0].name;
-    companyId = companyId || proj.recordset[0].company_id || null;
+    companyId = companyId != null ? companyId : (proj.recordset[0].company_id != null ? proj.recordset[0].company_id : null);
   }
   let unitName = b.InterestedUnit || null;
-  if (b.PreferredUnitId) {
+  if (b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "") {
     const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
       .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
     if (!unit.recordset.length) throw new CrmCreationError("Selected unit does not exist or is inactive");
@@ -264,8 +264,8 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     }
   }
   const effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
-    preferredUnitId: b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null,
-    paymentPlanId: b.PaymentPlanId || null,
+    preferredUnitId: b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : null,
+    paymentPlanId: b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? b.PaymentPlanId : null,
   });
 
   // Last-line defense: CrmApplication.ApplicantName is NOT NULL, but every
@@ -286,14 +286,14 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   try {
     result = await pool.request()
       .input("no",   sql.NVarChar(30),  appNo)
-      .input("lid",  sql.Int,           b.LeadId   ? parseInt(b.LeadId)   : null)
+      .input("lid",  sql.Int,           b.LeadId !== undefined && b.LeadId !== null && b.LeadId !== "" ? parseInt(b.LeadId)   : null)
       .input("custid", sql.Int,         customerId)
       .input("name", sql.NVarChar(200), finalName)
       .input("mob",  sql.NVarChar(20),  finalMobile)
       .input("alt",  sql.NVarChar(20),  customerRow?.AltMobile || b.AltMobile || prefill.AltMobile || null)
       .input("em",   sql.NVarChar(200), customerRow?.Email     || b.Email     || prefill.Email     || null)
-      .input("pid",  sql.Int,           b.ProjectId ? parseInt(b.ProjectId) : null)
-      .input("uid",  sql.Int,           b.PreferredUnitId ? parseInt(b.PreferredUnitId) : null)
+      .input("pid",  sql.Int,           b.ProjectId !== undefined && b.ProjectId !== null && b.ProjectId !== "" ? parseInt(b.ProjectId) : null)
+      .input("uid",  sql.Int,           b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : null)
       .input("cid",  sql.Int,           companyId)
       .input("proj", sql.NVarChar(200), projectName)
       .input("unit", sql.NVarChar(100), unitName)
@@ -318,10 +318,10 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       // filed Application form specifically — this shared function stays
       // permissive so the SA->CRM handoff's existing assignment logic keeps
       // working unchanged.
-      .input("asgn", sql.Int,           b.AssignedTo ? parseInt(b.AssignedTo) : actorUserId)
-      .input("asgnby", sql.Int,         b.AssignedBy ? parseInt(b.AssignedBy) : actorUserId)
+      .input("asgn", sql.Int,           b.AssignedTo !== undefined && b.AssignedTo !== null && b.AssignedTo !== "" ? parseInt(b.AssignedTo) : actorUserId)
+      .input("asgnby", sql.Int,         b.AssignedBy !== undefined && b.AssignedBy !== null && b.AssignedBy !== "" ? parseInt(b.AssignedBy) : actorUserId)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
-      .input("refApp", sql.Int,         b.ReferredByApplicationId ? parseInt(b.ReferredByApplicationId) : null)
+      .input("refApp", sql.Int,         b.ReferredByApplicationId !== undefined && b.ReferredByApplicationId !== null && b.ReferredByApplicationId !== "" ? parseInt(b.ReferredByApplicationId) : null)
       .input("cb",   sql.Int,           actorUserId)
       .input("brkid", sql.Int,          brokerId)
       .input("brkpct", sql.Decimal(5,2), brokerageRatePercent)
@@ -659,10 +659,10 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // below is what the Matrix keeps counting down against in the meantime.
   const confirmDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
   const application = appRow.recordset[0];
-  const bookingBridge = !b.BrokerId && !application.BrokerId && application.ChannelPartnerId
+  const bookingBridge = (b.BrokerId === undefined || b.BrokerId === null || b.BrokerId === "") && application.BrokerId == null && application.ChannelPartnerId != null
     ? await ensureBrokerForChannelPartner(pool, application.ChannelPartnerId, actorUserId)
     : null;
-  const bookingBrokerId = b.BrokerId ? parseInt(b.BrokerId) : (application.BrokerId || bookingBridge?.brokerId || null);
+  const bookingBrokerId = b.BrokerId !== undefined && b.BrokerId !== null && b.BrokerId !== "" ? parseInt(b.BrokerId) : (application.BrokerId != null ? application.BrokerId : (bookingBridge?.brokerId != null ? bookingBridge.brokerId : null));
   const bookingBrokerageRatePercent = b.BrokerageRatePercent != null && b.BrokerageRatePercent !== ""
     ? parseFloat(b.BrokerageRatePercent)
     : (application.BrokerageRatePercent ?? bookingBridge?.commissionRate ?? null);
@@ -750,9 +750,9 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       .input("no",    sql.NVarChar(30),  bookingNo)
       .input("appId", sql.Int,           parseInt(b.ApplicationId))
       .input("uid",   sql.Int,           parseInt(b.UnitId))
-      .input("pid",   sql.Int,           unitRow.ProjectId || null)
+      .input("pid",   sql.Int,           unitRow.ProjectId != null ? unitRow.ProjectId : null)
       .input("pname", sql.NVarChar(200), unitRow.ProjectName || b.ProjectName || null)
-      .input("cid",   sql.Int,           unitRow.CompanyId || null)
+      .input("cid",   sql.Int,           unitRow.CompanyId != null ? unitRow.CompanyId : null)
       .input("unit",  sql.NVarChar(100), unitRow.UnitName)
       .input("blk",   sql.NVarChar(100), unitRow.BlockName || b.BlockName || null)
       .input("flr",   sql.NVarChar(100), b.FloorName   || null)

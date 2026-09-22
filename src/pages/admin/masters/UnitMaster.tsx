@@ -396,7 +396,7 @@ const UnitMaster: React.FC = () => {
         ? "Blocked"
         : item.LockBookingNo
           ? "Booked"
-          : item.LockHoldId
+          : item.LockHoldId != null
             ? "On Hold"
             : "Available",
       };
@@ -498,7 +498,7 @@ const UnitMaster: React.FC = () => {
         isRowLocked={(row) =>
           row.lockBookingNo
             ? `Booked (${row.lockBookingNo as string})`
-            : row.lockHoldId
+            : row.lockHoldId != null
               ? "On Hold"
               : null
         }

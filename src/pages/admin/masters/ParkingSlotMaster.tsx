@@ -113,8 +113,8 @@ function computeStatus(item: {
   lockHoldId: number | null;
 }): string {
   if (!item.isActive) return "Blocked";
-  if (item.lockAllotmentId) return "Booked";
-  if (item.lockHoldId) return "On Hold";
+  if (item.lockAllotmentId != null) return "Booked";
+  if (item.lockHoldId != null) return "On Hold";
   return "Available";
 }
 
@@ -194,7 +194,7 @@ const ParkingSlotMaster: React.FC = () => {
         companyId: project ? String(project.company_id) : "",
         projectId: String(item.ProjectId),
         projectName: item.ProjectName ?? "",
-        blockId: item.BlockId ? String(item.BlockId) : "",
+        blockId: item.BlockId != null ? String(item.BlockId) : "",
         blockName: item.BlockName ?? "",
         slotNo: item.SlotNo ?? "",
         parkingType: item.ParkingType ?? "Open",
@@ -284,11 +284,11 @@ const ParkingSlotMaster: React.FC = () => {
           // A Booked or OnHold slot can't be edited OR deleted — it's an
           // individual inventory item, same treatment as Unit Master.
           isRowLocked={(row) =>
-            row.lockAllotmentId
+            row.lockAllotmentId != null
               ? row.lockBookingNo
                 ? `Booked (${row.lockBookingNo as string})`
                 : "Currently allotted"
-              : row.lockHoldId
+              : row.lockHoldId != null
                 ? "Currently on hold"
                 : null
           }
