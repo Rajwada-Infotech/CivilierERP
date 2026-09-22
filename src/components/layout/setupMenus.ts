@@ -385,7 +385,7 @@ export const civilWorkDprSetupItems: SetupItem[] = [
   },
   {
     icon: LayoutGrid,
-    label: "Room Composition",
+    label: "Unit Composition",
     path: "/civilworkdpr/room-composition",
     color: "text-cyan-500",
     pageKey: "room-composition-builder",

@@ -128,11 +128,11 @@ export default function RoomCompositionBuilder() {
       <Breadcrumbs
         items={[
           { label: "Civil Work DPR", path: "/civilworkdpr" },
-          { label: "Room Composition" },
+          { label: "Unit Composition" },
         ]}
       />
       <CivilWorkDprShell
-        title="Room Composition"
+        title="Unit Composition"
         subtitle="One room layout template per type — every unit of that type inherits it automatically"
         icon={Grid3x3}
       >
@@ -229,7 +229,7 @@ export default function RoomCompositionBuilder() {
                 <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
                   <Grid3x3 size={14} className="text-cyan-600 dark:text-cyan-400" />
                   <span className="text-sm font-heading font-semibold text-foreground">
-                    {selectedLabel} Room Composition
+                    {selectedLabel} Unit Composition
                   </span>
                 </div>
                 <div className="p-5 space-y-5">
