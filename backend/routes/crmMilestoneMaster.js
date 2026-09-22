@@ -34,7 +34,7 @@ router.post("/", requirePageRight("crm-milestone-master", "create"), async (req,
 
     const result = await pool.request()
       .input("name", sql.NVarChar(200), b.Name.trim())
-      .input("sort", sql.Int,           b.SortOrder != null ? parseInt(b.SortOrder) : 0)
+      .input("sort", sql.Int,           b.SortOrder != null && b.SortOrder !== "" ? parseInt(b.SortOrder) : 0)
       .input("cb",   sql.Int,           actorId(req))
       .query(`
         INSERT INTO dbo.CrmMilestoneMaster (Name, SortOrder, IsActive, CreatedBy, CreatedAt)
@@ -58,7 +58,7 @@ router.put("/:id", requirePageRight("crm-milestone-master", "edit"), async (req,
     await pool.request()
       .input("id",   sql.Int,           id)
       .input("name", sql.NVarChar(200), b.Name || null)
-      .input("sort", sql.Int,           b.SortOrder != null ? parseInt(b.SortOrder) : null)
+      .input("sort", sql.Int,           b.SortOrder != null && b.SortOrder !== "" ? parseInt(b.SortOrder) : null)
       .input("active", sql.Bit,        b.IsActive !== false ? 1 : 0)
       .input("ub",   sql.Int,           actorId(req))
       .query(`

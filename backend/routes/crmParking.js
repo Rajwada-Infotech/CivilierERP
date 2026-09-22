@@ -132,8 +132,8 @@ const ALLOTMENT_SELECT = `
 // crmBookingAmendments.js when an approver signs off on a queued request.
 
 async function applyAddParking(pool, bookingId, b, actorUserId) {
-  if (!b.ParkingMasterId && !b.ParkingType) throw parkingError("ParkingMasterId or ParkingType is required");
-  const qty = b.Quantity != null ? parseInt(b.Quantity) : 1;
+  if ((b.ParkingMasterId === undefined || b.ParkingMasterId === null || b.ParkingMasterId === "") && !b.ParkingType) throw parkingError("ParkingMasterId or ParkingType is required");
+  const qty = b.Quantity != null && b.Quantity !== "" ? parseInt(b.Quantity) : 1;
   if (!Number.isFinite(qty) || qty < 1) throw parkingError("Quantity must be at least 1");
 
   const activeErr = await requireActiveBooking(pool, bookingId);
@@ -167,7 +167,7 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
     if (b.Charge == null || parseFloat(b.Charge) <= 0) throw parkingError("A price is required for unrated parking types");
     ParkingType = b.ParkingType;
     Charge = parseFloat(b.Charge);
-    GstRate = b.GstRate != null ? parseFloat(b.GstRate) : 0;
+    GstRate = b.GstRate != null && b.GstRate !== "" ? parseFloat(b.GstRate) : 0;
   }
 
   const parkingSlotId = b.ParkingSlotId !== undefined && b.ParkingSlotId !== null && b.ParkingSlotId !== "" ? parseInt(b.ParkingSlotId) : null;
@@ -253,7 +253,7 @@ async function applyAddParking(pool, bookingId, b, actorUserId) {
 }
 
 async function applyEditParking(pool, id, b) {
-  const qty = b.Quantity != null ? parseInt(b.Quantity) : null;
+  const qty = b.Quantity != null && b.Quantity !== "" ? parseInt(b.Quantity) : null;
   if (!qty || qty < 1) throw parkingError("Quantity must be at least 1");
 
   const row = await pool.request().input("id", sql.Int, id)
@@ -672,8 +672,8 @@ router.post("/standalone", requireAnyPageRight(["crm-bookings", "crm-parking-boo
     const pool = getPool();
     const b = req.body;
     if (!b.ApplicationId) return res.status(400).json({ error: "ApplicationId is required — parking must be sold to a real customer/applicant" });
-    if (!b.ParkingMasterId && !b.ParkingType) return res.status(400).json({ error: "ParkingMasterId or ParkingType is required" });
-    const qty = b.Quantity != null ? parseInt(b.Quantity) : 1;
+    if ((b.ParkingMasterId === undefined || b.ParkingMasterId === null || b.ParkingMasterId === "") && !b.ParkingType) return res.status(400).json({ error: "ParkingMasterId or ParkingType is required" });
+    const qty = b.Quantity != null && b.Quantity !== "" ? parseInt(b.Quantity) : 1;
     if (!Number.isFinite(qty) || qty < 1) return res.status(400).json({ error: "Quantity must be at least 1" });
 
     const application = await pool.request().input("aid", sql.Int, parseInt(b.ApplicationId))

@@ -304,12 +304,12 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("campid", sql.Int, campaignId)
       .input("adid",   sql.Int, adId)
       .input("cpid",   sql.Int, channelPartnerId)
-      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null)
+      .input("rate", sql.Decimal(18,2), b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt) : null)
       .input("doa",  sql.Date,          b.DateOfApply || null)
       .input("ppid", sql.Int,           effectivePaymentPlanId != null ? effectivePaymentPlanId : null)
       .input("ttype",sql.NVarChar(20),  b.TokenType || null)
-      .input("tval", sql.Decimal(18,2), b.TokenValue != null ? parseFloat(b.TokenValue) : null)
-      .input("bamt", sql.Decimal(18,2), b.BookingAmount != null ? parseFloat(b.BookingAmount) : null)
+      .input("tval", sql.Decimal(18,2), b.TokenValue != null && b.TokenValue !== "" ? parseFloat(b.TokenValue) : null)
+      .input("bamt", sql.Decimal(18,2), b.BookingAmount != null && b.BookingAmount !== "" ? parseFloat(b.BookingAmount) : null)
       .input("pmode",sql.NVarChar(50),  b.PaymentMode || null)
       // AssignedTo respects an explicit caller value (saHandoff.js passes
       // the lead's already-routed salesperson) or falls back to whoever
@@ -692,15 +692,15 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // AreaSqFt is the single pricing/saleable area. Structural breakdown fields
   // are copied to the booking as descriptive snapshots only.
   const area  = unitRow.AreaSqFt != null ? unitRow.AreaSqFt
-              : (b.AreaSqFt != null ? parseFloat(b.AreaSqFt) : null);
+              : (b.AreaSqFt != null && b.AreaSqFt !== "" ? parseFloat(b.AreaSqFt) : null);
   // Rate: request body wins (editable at booking time); falls back to unit master's defined rate.
-  const rate  = b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt)
+  const rate  = b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt)
               : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
-  const total = b.TotalValue  != null ? parseFloat(b.TotalValue)
+  const total = b.TotalValue  != null && b.TotalValue !== "" ? parseFloat(b.TotalValue)
               : (area && rate ? Math.round(area * rate) : null);
 
   const tokenType = b.TokenType === "Amount" ? "Amount" : "Percentage";
-  const tokenValue = b.TokenValue != null ? parseFloat(b.TokenValue) : null;
+  const tokenValue = b.TokenValue != null && b.TokenValue !== "" ? parseFloat(b.TokenValue) : null;
   // Booking Amount is ALWAYS the fixed ₹ figure set on the tagged Payment
   // Plan itself (see CrmPaymentPlans.tsx) — never derived from a % of
   // TotalValue, and never taken from the Booking form's own Token%/manual
