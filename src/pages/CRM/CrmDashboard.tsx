@@ -24,7 +24,7 @@ import {
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
-  PieChart, Pie,
+  PieChart, Pie, AreaChart, Area,
 } from "recharts";
 
 const API = "/api/crm/dashboard";
@@ -283,6 +283,63 @@ const PieTooltip: React.FC<any> = ({ active, payload }) => {
   );
 };
 
+// --- Mini radial gauge (KPI tiles) ---------------------------------------------
+// Plain SVG rather than recharts' RadialBarChart — at ~52px this needs exact
+// stroke control (rounded caps, a faint background track) that's simpler to
+// get right directly than fighting a full chart container for something
+// this small.
+const MiniGauge: React.FC<{ value: number; color: string; size?: number }> = ({ value, color, size = 52 }) => {
+  const stroke = 5;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const clamped = Math.max(0, Math.min(100, value));
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={stroke} className="text-muted/40" />
+      <circle
+        cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+        strokeDasharray={c} strokeDashoffset={c - (clamped / 100) * c} strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: "stroke-dashoffset 0.6s ease" }}
+      />
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" className="fill-foreground font-heading font-bold" style={{ fontSize: size * 0.26 }}>
+        {clamped}%
+      </text>
+    </svg>
+  );
+};
+
+// --- Mini trend sparkline (KPI tiles) ------------------------------------------
+const MiniSparkline: React.FC<{ data: any[]; dataKey: string; color: string }> = ({ data, dataKey, color }) => {
+  if (!data?.length) return <div className="h-9 flex items-center text-[10px] text-muted-foreground">No trend data</div>;
+  return (
+    <ResponsiveContainer width="100%" height={36}>
+      <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+        <defs>
+          <linearGradient id={`spark-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <Area type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.75} fill={`url(#spark-${dataKey})`} dot={false} isAnimationActive={false} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+};
+
+// --- Mini part/whole ratio bar (KPI tiles) --------------------------------------
+const MiniRatioBar: React.FC<{ part: number; whole: number; color: string; label: string }> = ({ part, whole, color, label }) => {
+  const p = whole > 0 ? Math.min(100, Math.round((part / whole) * 100)) : 0;
+  return (
+    <div className="mt-1">
+      <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
+        <div className="h-full rounded-full transition-all" style={{ width: `${p}%`, background: color }} />
+      </div>
+      <p className="text-[10px] text-muted-foreground mt-1">{label}</p>
+    </div>
+  );
+};
+
 // --- Skeletons ----------------------------------------------------------------
 const AlertSkeleton = () => (
   <div className="rounded-xl border border-border/40 p-3 flex items-center gap-3">
@@ -432,7 +489,12 @@ const CrmDashboard: React.FC = () => {
     },
   ];
 
-  // Key numbers for CrmGlassCard row
+  // Key numbers for CrmGlassCard row — each carries its own mini
+  // chart/gauge so the row reads as a real KPI strip instead of four bare
+  // numbers.
+  const outstandingDemand = Math.max(0, (payments.TotalDue ?? 0) - (payments.TotalPaid ?? 0));
+  const openTicketsCount = sumCount(tickData.filter((t: any) => !["Resolved", "Closed"].includes(t.Status)));
+
   const keyNumbers = [
     {
       label: "Sold This Month",
@@ -441,6 +503,9 @@ const CrmDashboard: React.FC = () => {
       icon: BookOpen,
       accent: "#22c55e",
       route: "/crm/bookings",
+      chart: (
+        <MiniSparkline data={data?.monthlyTrend ?? []} dataKey="Bookings" color="#22c55e" />
+      ),
     },
     {
       label: "Total Collection",
@@ -449,6 +514,7 @@ const CrmDashboard: React.FC = () => {
       icon: IndianRupee,
       accent: "#f59e0b",
       route: "/crm/payments",
+      chart: <MiniGauge value={collPct} color="#f59e0b" />,
     },
     {
       label: "Due Next 30 Days",
@@ -457,14 +523,30 @@ const CrmDashboard: React.FC = () => {
       icon: ArrowUpRight,
       accent: "#f97316",
       route: "/crm/payments",
+      chart: (
+        <MiniRatioBar
+          part={metrics.forwardDue30Days ?? 0}
+          whole={outstandingDemand}
+          color="#f97316"
+          label={`${outstandingDemand > 0 ? Math.min(100, Math.round(((metrics.forwardDue30Days ?? 0) / outstandingDemand) * 100)) : 0}% of outstanding demand`}
+        />
+      ),
     },
     {
       label: "Open Service Tickets",
-      value: sumCount(tickData.filter((t: any) => !["Resolved", "Closed"].includes(t.Status))),
+      value: openTicketsCount,
       sub: `${tickTotal} total tickets`,
       icon: Wrench,
       accent: "#b45309",
       route: "/crm/service-tickets",
+      chart: (
+        <MiniRatioBar
+          part={openTicketsCount}
+          whole={tickTotal}
+          color="#b45309"
+          label={`${tickTotal > 0 ? Math.round((openTicketsCount / tickTotal) * 100) : 0}% of tickets still open`}
+        />
+      ),
     },
   ];
 
@@ -537,7 +619,11 @@ const CrmDashboard: React.FC = () => {
                   icon={s.icon}
                   accentColor={s.accent}
                   onClick={() => navigate(s.route)}
-                />
+                >
+                  <div className="mt-2 pt-2 border-t border-border/30">
+                    {s.chart}
+                  </div>
+                </CrmGlassCard>
               ))}
         </div>
       </CrmSection>
