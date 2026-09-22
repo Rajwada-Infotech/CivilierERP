@@ -42,7 +42,7 @@ function formatHeader(key: string): string {
 }
 
 function formatCell(value: any): string {
-  if (value === null || value === undefined) return "�";
+  if (value === null || value === undefined) return "—";
   if (typeof value === "number") {
     if (Number.isInteger(value)) return String(value);
     return value.toFixed(2);

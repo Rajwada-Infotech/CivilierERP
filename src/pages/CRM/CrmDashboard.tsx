@@ -24,7 +24,7 @@ import {
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, Cell,
-  PieChart, Pie,
+  PieChart, Pie, AreaChart, Area,
 } from "recharts";
 
 const API = "/api/crm/dashboard";
@@ -118,41 +118,47 @@ interface AlertCardProps {
   route: string;
 }
 
+// This app switches themes via a `data-theme` attribute + CSS variables
+// (see ThemeContext.tsx), not Tailwind's `dark` class — so `dark:` variant
+// classes never activate here and the light-mode fallback (solid pastel
+// bg-*-50) always renders, standing out badly against the app's dark
+// themes. Opacity-scaled colors (bg-*-500/10) apply on top of whatever the
+// page background actually is, so they read correctly in every theme.
 const SEVERITY_STYLES = {
   critical: {
-    border: "border-red-300 dark:border-red-800",
-    bg: "bg-red-50 dark:bg-red-950/30",
-    iconBg: "bg-red-100 dark:bg-red-900/40",
-    iconColor: "text-red-600 dark:text-red-400",
-    countColor: "text-red-700 dark:text-red-300",
-    labelColor: "text-red-700 dark:text-red-400",
+    border: "border-red-500/30",
+    bg: "bg-red-500/10",
+    iconBg: "bg-red-500/15",
+    iconColor: "text-red-500",
+    countColor: "text-red-500",
+    labelColor: "text-red-500",
     pulse: true,
   },
   warning: {
-    border: "border-amber-300 dark:border-amber-700",
-    bg: "bg-amber-50 dark:bg-amber-950/30",
-    iconBg: "bg-amber-100 dark:bg-amber-900/40",
-    iconColor: "text-amber-600 dark:text-amber-400",
-    countColor: "text-amber-700 dark:text-amber-300",
-    labelColor: "text-amber-700 dark:text-amber-400",
+    border: "border-amber-500/30",
+    bg: "bg-amber-500/10",
+    iconBg: "bg-amber-500/15",
+    iconColor: "text-amber-500",
+    countColor: "text-amber-500",
+    labelColor: "text-amber-500",
     pulse: false,
   },
   info: {
-    border: "border-blue-200 dark:border-blue-800",
-    bg: "bg-blue-50 dark:bg-blue-950/20",
-    iconBg: "bg-blue-100 dark:bg-blue-900/40",
-    iconColor: "text-blue-600 dark:text-blue-400",
-    countColor: "text-blue-700 dark:text-blue-300",
-    labelColor: "text-blue-700 dark:text-blue-400",
+    border: "border-blue-500/30",
+    bg: "bg-blue-500/10",
+    iconBg: "bg-blue-500/15",
+    iconColor: "text-blue-500",
+    countColor: "text-blue-500",
+    labelColor: "text-blue-500",
     pulse: false,
   },
   ok: {
-    border: "border-green-200 dark:border-green-800",
-    bg: "bg-green-50/60 dark:bg-green-950/20",
-    iconBg: "bg-green-100 dark:bg-green-900/30",
-    iconColor: "text-green-600 dark:text-green-400",
-    countColor: "text-green-700 dark:text-green-300",
-    labelColor: "text-green-600 dark:text-green-500",
+    border: "border-green-500/20",
+    bg: "bg-green-500/5",
+    iconBg: "bg-green-500/10",
+    iconColor: "text-green-500",
+    countColor: "text-green-500",
+    labelColor: "text-green-500",
     pulse: false,
   },
 };
@@ -202,7 +208,7 @@ const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
             key={day.DayDate}
             className={`rounded-xl border p-2.5 text-center transition-all ${
               hasEvents
-                ? "border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/20"
+                ? "border-amber-500/30 bg-amber-500/10"
                 : "border-border bg-card/60"
             }`}
           >
@@ -218,19 +224,19 @@ const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
             <div className="mt-2 space-y-1">
               {day.Handovers > 0 && (
                 <button onClick={() => navigate("/crm/handover")}
-                  className="w-full flex items-center gap-1 text-[10px] text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/30 rounded px-1 py-0.5 hover:opacity-80">
+                  className="w-full flex items-center gap-1 text-[10px] text-green-500 bg-green-500/10 rounded px-1 py-0.5 hover:opacity-80">
                   <Key size={9} /> {day.Handovers}
                 </button>
               )}
               {day.Registries > 0 && (
                 <button onClick={() => navigate("/crm/sales-deed?tab=Registry")}
-                  className="w-full flex items-center gap-1 text-[10px] text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 rounded px-1 py-0.5 hover:opacity-80">
+                  className="w-full flex items-center gap-1 text-[10px] text-blue-500 bg-blue-500/10 rounded px-1 py-0.5 hover:opacity-80">
                   <FileText size={9} /> {day.Registries}
                 </button>
               )}
               {day.MilestonesDue > 0 && (
                 <button onClick={() => navigate("/crm/payments")}
-                  className="w-full flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded px-1 py-0.5 hover:opacity-80">
+                  className="w-full flex items-center gap-1 text-[10px] text-amber-500 bg-amber-500/10 rounded px-1 py-0.5 hover:opacity-80">
                   <IndianRupee size={9} /> {day.MilestonesDue}
                 </button>
               )}
@@ -273,6 +279,63 @@ const PieTooltip: React.FC<any> = ({ active, payload }) => {
     <div className="bg-card border border-border rounded-lg px-3 py-2 text-xs shadow-lg">
       <span className="font-semibold">{payload[0].name}:</span>{" "}
       <span>{payload[0].value}</span>
+    </div>
+  );
+};
+
+// --- Mini radial gauge (KPI tiles) ---------------------------------------------
+// Plain SVG rather than recharts' RadialBarChart — at ~52px this needs exact
+// stroke control (rounded caps, a faint background track) that's simpler to
+// get right directly than fighting a full chart container for something
+// this small.
+const MiniGauge: React.FC<{ value: number; color: string; size?: number }> = ({ value, color, size = 52 }) => {
+  const stroke = 5;
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const clamped = Math.max(0, Math.min(100, value));
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="shrink-0">
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeWidth={stroke} className="text-muted/40" />
+      <circle
+        cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+        strokeDasharray={c} strokeDashoffset={c - (clamped / 100) * c} strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: "stroke-dashoffset 0.6s ease" }}
+      />
+      <text x="50%" y="50%" dominantBaseline="central" textAnchor="middle" className="fill-foreground font-heading font-bold" style={{ fontSize: size * 0.26 }}>
+        {clamped}%
+      </text>
+    </svg>
+  );
+};
+
+// --- Mini trend sparkline (KPI tiles) ------------------------------------------
+const MiniSparkline: React.FC<{ data: any[]; dataKey: string; color: string }> = ({ data, dataKey, color }) => {
+  if (!data?.length) return <div className="h-9 flex items-center text-[10px] text-muted-foreground">No trend data</div>;
+  return (
+    <ResponsiveContainer width="100%" height={36}>
+      <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
+        <defs>
+          <linearGradient id={`spark-${dataKey}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.35} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
+        <Area type="monotone" dataKey={dataKey} stroke={color} strokeWidth={1.75} fill={`url(#spark-${dataKey})`} dot={false} isAnimationActive={false} />
+      </AreaChart>
+    </ResponsiveContainer>
+  );
+};
+
+// --- Mini part/whole ratio bar (KPI tiles) --------------------------------------
+const MiniRatioBar: React.FC<{ part: number; whole: number; color: string; label: string }> = ({ part, whole, color, label }) => {
+  const p = whole > 0 ? Math.min(100, Math.round((part / whole) * 100)) : 0;
+  return (
+    <div className="mt-1">
+      <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
+        <div className="h-full rounded-full transition-all" style={{ width: `${p}%`, background: color }} />
+      </div>
+      <p className="text-[10px] text-muted-foreground mt-1">{label}</p>
     </div>
   );
 };
@@ -426,7 +489,12 @@ const CrmDashboard: React.FC = () => {
     },
   ];
 
-  // Key numbers for CrmGlassCard row
+  // Key numbers for CrmGlassCard row — each carries its own mini
+  // chart/gauge so the row reads as a real KPI strip instead of four bare
+  // numbers.
+  const outstandingDemand = Math.max(0, (payments.TotalDue ?? 0) - (payments.TotalPaid ?? 0));
+  const openTicketsCount = sumCount(tickData.filter((t: any) => !["Resolved", "Closed"].includes(t.Status)));
+
   const keyNumbers = [
     {
       label: "Sold This Month",
@@ -435,6 +503,9 @@ const CrmDashboard: React.FC = () => {
       icon: BookOpen,
       accent: "#22c55e",
       route: "/crm/bookings",
+      chart: (
+        <MiniSparkline data={data?.monthlyTrend ?? []} dataKey="Bookings" color="#22c55e" />
+      ),
     },
     {
       label: "Total Collection",
@@ -443,6 +514,7 @@ const CrmDashboard: React.FC = () => {
       icon: IndianRupee,
       accent: "#f59e0b",
       route: "/crm/payments",
+      chart: <MiniGauge value={collPct} color="#f59e0b" />,
     },
     {
       label: "Due Next 30 Days",
@@ -451,14 +523,30 @@ const CrmDashboard: React.FC = () => {
       icon: ArrowUpRight,
       accent: "#f97316",
       route: "/crm/payments",
+      chart: (
+        <MiniRatioBar
+          part={metrics.forwardDue30Days ?? 0}
+          whole={outstandingDemand}
+          color="#f97316"
+          label={`${outstandingDemand > 0 ? Math.min(100, Math.round(((metrics.forwardDue30Days ?? 0) / outstandingDemand) * 100)) : 0}% of outstanding demand`}
+        />
+      ),
     },
     {
       label: "Open Service Tickets",
-      value: sumCount(tickData.filter((t: any) => !["Resolved", "Closed"].includes(t.Status))),
+      value: openTicketsCount,
       sub: `${tickTotal} total tickets`,
       icon: Wrench,
       accent: "#b45309",
       route: "/crm/service-tickets",
+      chart: (
+        <MiniRatioBar
+          part={openTicketsCount}
+          whole={tickTotal}
+          color="#b45309"
+          label={`${tickTotal > 0 ? Math.round((openTicketsCount / tickTotal) * 100) : 0}% of tickets still open`}
+        />
+      ),
     },
   ];
 
@@ -531,7 +619,11 @@ const CrmDashboard: React.FC = () => {
                   icon={s.icon}
                   accentColor={s.accent}
                   onClick={() => navigate(s.route)}
-                />
+                >
+                  <div className="mt-2 pt-2 border-t border-border/30">
+                    {s.chart}
+                  </div>
+                </CrmGlassCard>
               ))}
         </div>
       </CrmSection>
