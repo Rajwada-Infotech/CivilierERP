@@ -171,7 +171,7 @@ router.get("/:id", requirePageRight("crm-handover", "view"), async (req, res) =>
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [hRes, sRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${HANDOVER_SELECT} WHERE h.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
@@ -287,7 +287,7 @@ router.put("/:id", requirePageRight("crm-handover", "edit"), async (req, res) =>
     const pool = getPool();
     const b = req.body;
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const cur0 = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Status FROM dbo.CrmHandover WHERE Id = @id");
@@ -381,7 +381,7 @@ router.post("/:id/snags", requirePageRight("crm-handover", "create"), async (req
   try {
     const pool = getPool();
     const handoverId = parseId(req.params.id);
-    if (!handoverId) return res.status(400).json({ error: "Invalid id" });
+    if (handoverId === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
 
     const cur0 = await pool.request().input("id", sql.Int, handoverId).query("SELECT BookingId FROM dbo.CrmHandover WHERE Id = @id");

@@ -632,7 +632,7 @@ router.post("/:id/demand", requirePageRight("crm-payments", "edit"), async (req,
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await raiseDemandForMilestone(pool, id, req.body?.Notes);
     res.json({ success: true, ...result });
   } catch (e) {
@@ -649,7 +649,7 @@ router.patch("/:id/demand/undo", requirePageRight("crm-payments", "edit"), async
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT DemandStatus FROM dbo.CrmPaymentMilestone WHERE Id = @id");
     if (!cur.recordset.length) return res.status(404).json({ error: "Milestone not found" });
@@ -675,7 +675,7 @@ router.get("/:id/receipts", requirePageRight("crm-payments", "view"), async (req
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("id", sql.Int, id).query(`
       SELECT r.*, cu.name AS CreatedByName
       FROM dbo.CrmPaymentReceipt r
@@ -801,7 +801,7 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
       RPCheckNumber: data.PaymentMode === "Cheque" ? (data.TransactionRef || null) : null,
       RPChequeDate: data.ChequeDate || null,
       RPRemarks: data.Notes || `CRM — ${targetRow.BookingNo} / ${targetRow.MilestoneName}`,
-      RPDepositBankId: data.DepositBankId || null,
+      RPDepositBankId: data.DepositBankId != null ? data.DepositBankId : null,
       RPDepositBankName: data.DepositBankName || null,
       CrmMilestoneId: milestoneId,
       CrmBookingId: targetRow.BookingId,
@@ -876,7 +876,7 @@ async function applyCrmMilestonePaymentApproval(pool, rp, actorUserId, actorEmai
       .input("tref", sql.NVarChar(200), rp.RPTransactionID || null)
       .input("note", sql.NVarChar(sql.MAX), `Payment for "${targetRow.MilestoneName}" — held On Account until adjusted against a demand/invoice`)
       .input("cb",   sql.Int,           actorUserId)
-      .input("bkid", sql.Int,           rp.RPDepositBankId || null)
+      .input("bkid", sql.Int,           rp.RPDepositBankId != null ? rp.RPDepositBankId : null)
       .input("bkname", sql.NVarChar(200), rp.RPDepositBankName || null)
       .input("srp",  sql.Int,           rp.RPPaymentID)
       .query(`
@@ -946,7 +946,7 @@ async function applyCrmOnAccountPaymentApproval(pool, rp, actorUserId, actorEmai
       .input("tref", sql.NVarChar(200), rp.RPTransactionID || null)
       .input("note", sql.NVarChar(sql.MAX), rp.RPRemarks || null)
       .input("cb",   sql.Int,           actorUserId)
-      .input("bkid", sql.Int,           rp.RPDepositBankId || null)
+      .input("bkid", sql.Int,           rp.RPDepositBankId != null ? rp.RPDepositBankId : null)
       .input("bkname", sql.NVarChar(200), rp.RPDepositBankName || null)
       .input("srp",  sql.Int,           rp.RPPaymentID)
       .query(`
@@ -996,7 +996,7 @@ router.post("/:id/receipts", requirePageRight("crm-payments", "create"), async (
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const actorEmail = req.user?.email || req.user?.name || null;
     const { ReceivedPaymentId, RPDocNo } = await createReceiptForMilestone(pool, id, req.body, actorId(req), actorEmail);
     res.status(201).json({ success: true, submitted: true, ReceivedPaymentId, RPDocNo });
@@ -1079,7 +1079,7 @@ router.get("/booking/:bookingId", requirePageRight("crm-payments", "view"), asyn
   try {
     const pool = getPool();
     const bid = parseId(req.params.bookingId);
-    if (!bid) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bid === null) return res.status(400).json({ error: "Invalid bookingId" });
     const [milRes, bkRes, oaRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bid).query(`
         SELECT m.*, cu.name AS CreatedByName,
@@ -1142,7 +1142,7 @@ router.post("/booking/:bookingId", requirePageRight("crm-payments", "create"), a
   try {
     const pool = getPool();
     const bid = parseId(req.params.bookingId);
-    if (!bid) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bid === null) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
     if (!b.MilestoneName?.trim()) return res.status(400).json({ error: "MilestoneName is required" });
 
@@ -1183,7 +1183,7 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     const pool = getPool();
     const b = req.body;
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const paidRaw = b.AmountPaid != null && b.AmountPaid !== "" ? parseFloat(b.AmountPaid) : null;
     const amountDueOverride = b.AmountDue != null && b.AmountDue !== "" ? parseFloat(b.AmountDue) : null;
@@ -1228,7 +1228,7 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
         ReceivedDate: b.PaidDate || null,
         PaymentMode: b.PaymentMode || null,
         TransactionRef: b.TransactionRef || null,
-        DepositBankId: b.DepositBankId || null,
+        DepositBankId: b.DepositBankId != null ? b.DepositBankId : null,
         DepositBankName: b.DepositBankName || null,
         Notes: b.Remarks || null,
       }, actorId(req), actorEmail);
@@ -1375,7 +1375,7 @@ router.put("/:id/waive", requirePageRight("crm-payments", "edit"), async (req, r
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     if (!b.Reason) return res.status(400).json({ error: "Reason is required to waive a milestone" });
 
@@ -1431,7 +1431,7 @@ router.get("/booking/:bookingId/on-account", requirePageRight("crm-payments", "v
   try {
     const pool = getPool();
     const bid = parseId(req.params.bookingId);
-    if (!bid) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bid === null) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bid).query(`
       SELECT o.*, cu.name AS CreatedByName,
              inv.Id AS InvoiceId, inv.InvoiceNo, inv.InvoiceDate, inv.Status AS InvoiceStatus
@@ -1472,7 +1472,7 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
   try {
     const pool = getPool();
     const bid = parseId(req.params.bookingId);
-    if (!bid) return res.status(400).json({ error: "Invalid bookingId" });
+    if (bid === null) return res.status(400).json({ error: "Invalid bookingId" });
     const b = req.body;
     const amount = parseFloat(b.Amount);
     if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
@@ -1524,7 +1524,7 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
         RPAmount: amount,
         RPTransactionID: b.TransactionRef || null,
         RPRemarks: b.Notes || `CRM on-account deposit — ${booking.BookingNo}`,
-        RPDepositBankId: b.DepositBankId || null,
+        RPDepositBankId: b.DepositBankId != null ? b.DepositBankId : null,
         RPDepositBankName: b.DepositBankName || null,
         CrmBookingId: bid,
         CrmApplicationId: booking.ApplicationId,
@@ -1555,7 +1555,7 @@ router.put("/on-account/:id/apply", requirePageRight("crm-payments", "edit"), as
   try {
     const pool = getPool();
     const onAccountId = parseId(req.params.id);
-    if (!onAccountId) return res.status(400).json({ error: "Invalid id" });
+    if (onAccountId === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const milestoneId = parseInt(b.MilestoneId);
     if (!milestoneId) return res.status(400).json({ error: "MilestoneId is required" });

@@ -8,7 +8,7 @@ const { sql } = require("../db");
 // by hand, sitting alongside every automated system event) instead of only
 // showing manually-logged contact attempts.
 async function logCommunication(pool, { applicationId = null, bookingId = null, direction = "Outbound", subject, summary = null, contactedAt = null, createdBy = null }) {
-  if (!applicationId && !bookingId) return;
+  if (applicationId == null && bookingId == null) return;
   await pool.request()
     .input("aid", sql.Int, applicationId)
     .input("bid", sql.Int, bookingId)

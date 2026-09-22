@@ -179,7 +179,7 @@ router.put("/:id", requirePageRight("crm-possession-notice", "edit"), async (req
     const pool = getPool();
     const b = req.body;
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmPossessionNotice WHERE Id = @id");
@@ -214,7 +214,7 @@ router.put("/:id/mark-sent", requirePageRight("crm-possession-notice", "edit"), 
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const actor = actorId(req);
 
@@ -250,7 +250,7 @@ router.put("/:id/mark-acknowledged", requirePageRight("crm-possession-notice", "
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
 
     const cur = await pool.request().input("id", sql.Int, id)
@@ -280,7 +280,7 @@ router.put("/:id/mark-disputed", requirePageRight("crm-possession-notice", "edit
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const actor = actorId(req);
     if (!b.DisputeReason) return res.status(400).json({ error: "DisputeReason is required" });
@@ -316,7 +316,7 @@ router.put("/:id/retract-dispute", requirePageRight("crm-possession-notice", "ed
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     if (!b.RetractReason?.trim()) {
       return res.status(400).json({ error: "RetractReason is required — document how the dispute was resolved" });

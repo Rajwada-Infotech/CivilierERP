@@ -266,7 +266,7 @@ router.get("/:id", requirePageRight("crm-brokerage", "view"), async (req, res) =
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [brRes, payRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${BROKERAGE_SELECT} WHERE br.Id = @id`),
       pool.request().input("id", sql.Int, id).query("SELECT * FROM dbo.CrmBrokerPayment WHERE BrokerageId = @id ORDER BY PaidDate DESC"),
@@ -360,9 +360,9 @@ router.post("/", requirePageRight("crm-brokerage", "create"), async (req, res) =
         tdsApplicableFlag: !!brokerRow.IsTdsApplicable,
         tdsLimitApplicable: !!brokerRow.TdsLimitApplicable,
         billAmount: computedAmount,
-        companyId: bkRow.CompanyId ? parseInt(bkRow.CompanyId, 10) : null,
+        companyId: bkRow.CompanyId != null ? parseInt(bkRow.CompanyId, 10) : null,
         finYearId,
-        selectedTdsId: b.TDSId ? parseInt(b.TDSId, 10) : null,
+        selectedTdsId: b.TDSId !== undefined && b.TDSId !== null && b.TDSId !== "" ? parseInt(b.TDSId, 10) : null,
       });
     } catch (tdsErr) {
       return res.status(tdsErr.status || 400).json({ error: tdsErr.message });
@@ -417,7 +417,7 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const cur = await pool.request().input("id", sql.Int, id).query(`
       SELECT br.Status, br.RateType, br.RateValue,
@@ -475,7 +475,7 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
         tdsApplicableFlag: !!row.BrokerIsTdsApplicable,
         tdsLimitApplicable: !!row.BrokerTdsLimitApplicable,
         billAmount: computedAmount,
-        companyId: row.CompanyId ? parseInt(row.CompanyId, 10) : null,
+        companyId: row.CompanyId != null ? parseInt(row.CompanyId, 10) : null,
         finYearId,
         selectedTdsId,
       });
@@ -533,7 +533,7 @@ router.put("/:id", requirePageRight("crm-brokerage", "edit"), async (req, res) =
 // must be Approved here before any payment can be recorded against it.
 router.put("/:id/submit", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -547,7 +547,7 @@ router.put("/:id/submit", requirePageRight("crm-brokerage", "edit"), async (req,
 
 router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -601,7 +601,7 @@ router.put("/:id/approve", requirePageRight("crm-brokerage", "edit"), async (req
 // is idempotent) — safe to call speculatively.
 router.put("/:id/retry-finance-handoff", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const financePayment = await createFinancePaymentForBrokerage(pool, id, req);
@@ -616,7 +616,7 @@ router.put("/:id/retry-finance-handoff", requirePageRight("crm-brokerage", "edit
 // PUT /:id/reject — admin/super_admin/dba only.
 router.put("/:id/reject", requirePageRight("crm-brokerage", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;

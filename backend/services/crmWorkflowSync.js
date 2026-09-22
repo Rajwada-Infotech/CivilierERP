@@ -87,8 +87,8 @@ async function getBookingCustomerContext(pool, bookingId) {
 
 async function getBankDetailByWorkflow(pool, { bookingId, applicationId }) {
   const result = await pool.request()
-    .input("bid", sql.Int, bookingId || null)
-    .input("aid", sql.Int, applicationId || null)
+    .input("bid", sql.Int, bookingId != null ? bookingId : null)
+    .input("aid", sql.Int, applicationId != null ? applicationId : null)
     .query(`
       SELECT TOP 1 *
       FROM dbo.CrmCustomerBankDetail
@@ -102,11 +102,11 @@ async function getBankDetailByWorkflow(pool, { bookingId, applicationId }) {
 }
 
 async function linkBankDetailWorkflowKeys(pool, detailId, { bookingId, applicationId }) {
-  if (!detailId) return;
+  if (detailId == null) return;
   await pool.request()
     .input("id", sql.Int, detailId)
-    .input("bid", sql.Int, bookingId || null)
-    .input("aid", sql.Int, applicationId || null)
+    .input("bid", sql.Int, bookingId != null ? bookingId : null)
+    .input("aid", sql.Int, applicationId != null ? applicationId : null)
     .query(`
       UPDATE dbo.CrmCustomerBankDetail SET
         BookingId = COALESCE(BookingId, @bid),
@@ -185,8 +185,8 @@ async function materializeBankDetailFromCustomer(pool, context, actorUserId = nu
   }
 
   const result = await pool.request()
-    .input("bid", sql.Int, context.BookingId || null)
-    .input("aid", sql.Int, context.ApplicationId || null)
+    .input("bid", sql.Int, context.BookingId != null ? context.BookingId : null)
+    .input("aid", sql.Int, context.ApplicationId != null ? context.ApplicationId : null)
     .input("holder", sql.NVarChar(200), context.CustomerName || null)
     .input("pan", sql.NVarChar(20), context.PanNo || null)
     .input("aadh", sql.NVarChar(20), context.AadhaarNo || null)

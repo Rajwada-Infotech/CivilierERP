@@ -201,7 +201,7 @@ router.get("/:id", requirePageRight("crm-money-receipts", "view"), async (req, r
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("id", sql.Int, id).query(`
       SELECT mr.*, mr.Status AS MoneyReceiptStatus,
              rp.RPStatus, rp.RPDocNo, rp.RPRejectionNote,
@@ -231,7 +231,7 @@ router.get("/:id/pdf", requirePageRight("crm-money-receipts", "view"), async (re
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const row = await pool.request().input("id", sql.Int, id).query("SELECT ReceiptNo FROM dbo.CrmMoneyReceipt WHERE Id = @id");
     if (!row.recordset.length) return res.status(404).json({ error: "Money receipt not found" });
     const buffer = await getMoneyReceiptPdfBuffer(pool, id);
@@ -248,8 +248,11 @@ router.get("/:id/pdf", requirePageRight("crm-money-receipts", "view"), async (re
 router.post("/", requirePageRight("crm-money-receipts", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.body?.BookingId || req.body?.bookingId, 10);
-    if (!bookingId) return res.status(400).json({ error: "BookingId is required" });
+    const rawBookingId = req.body?.BookingId !== undefined && req.body?.BookingId !== null && req.body?.BookingId !== ""
+      ? req.body.BookingId
+      : req.body?.bookingId;
+    const bookingId = parseInt(rawBookingId, 10);
+    if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "BookingId is required" });
     const row = await createMoneyReceiptForBooking(pool, bookingId, req.body || {}, actorId(req), { skipIfExists: true });
     res.status(row.existing ? 200 : 201).json({ success: true, ...row });
   } catch (e) {
@@ -261,7 +264,7 @@ router.put("/:id", requirePageRight("crm-money-receipts", "edit"), async (req, r
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     await updateMoneyReceipt(pool, id, req.body || {}, actorId(req));
     res.json({ success: true });
   } catch (e) {
@@ -275,7 +278,7 @@ router.put("/:id/resubmit", requirePageRight("crm-money-receipts", "edit"), asyn
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const row = await resubmitMoneyReceipt(pool, id);
     res.json({ success: true, ...row });
   } catch (e) {
@@ -288,7 +291,7 @@ router.put("/:id/bounce", requirePageRight("crm-money-receipts", "edit"), async 
     if (!requireMoneyReceiptApprover(req, res)) return;
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const row = await bounceMoneyReceipt(pool, id, req.body?.reason || req.body?.Reason || req.body?.remarks, actorId(req));
     res.json({ success: true, ...row });
   } catch (e) {
@@ -304,7 +307,7 @@ router.put("/:id/reject", requirePageRight("crm-money-receipts", "edit"), async 
     if (!requireMoneyReceiptApprover(req, res)) return;
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const reason = req.body?.reason || req.body?.Reason || req.body?.note || req.body?.remarks;
     const row = await bounceMoneyReceipt(pool, id, reason, actorId(req));
     res.json({ success: true, ...row });
@@ -318,7 +321,7 @@ router.put("/:id/approve", requirePageRight("crm-money-receipts", "edit"), async
     if (!requireMoneyReceiptApprover(req, res)) return;
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await approveMoneyReceipt(pool, id, actorId(req), actorEmail(req));
     res.json(result);
   } catch (e) {

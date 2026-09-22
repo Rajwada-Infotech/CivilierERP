@@ -315,7 +315,7 @@ router.get("/:id", requirePageRight("crm-bookings", "view"), async (req, res) =>
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const [bkRes, milRes, wcRes, agRes, custRes, coAppRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${BOOKING_SELECT} WHERE b.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
@@ -410,7 +410,7 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const pool = getPool();
     const b = req.body;
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     if (await assertNotFrozen(pool, id, res)) return;
     const rate  = b.RatePerSqFt != null ? parseFloat(b.RatePerSqFt) : null;
     const actor = actorId(req);
@@ -557,7 +557,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
     if (!isSaAdmin(req)) return res.status(403).json({ error: "Only admin/super_admin/marketing_head can change a booking's unit" });
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     if (await assertNotFrozen(pool, id, res)) return;
     const b = req.body || {};
     if (!b.NewUnitId) return res.status(400).json({ error: "NewUnitId is required" });
@@ -638,9 +638,9 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
       await tx.request()
         .input("id",    sql.Int, id)
         .input("uid",   sql.Int, newUnitId)
-        .input("pid",   sql.Int, unitRow.ProjectId || null)
+        .input("pid",   sql.Int, unitRow.ProjectId != null ? unitRow.ProjectId : null)
         .input("pname", sql.NVarChar(200), unitRow.ProjectName || null)
-        .input("cid",   sql.Int, unitRow.CompanyId || null)
+        .input("cid",   sql.Int, unitRow.CompanyId != null ? unitRow.CompanyId : null)
         .input("unit",  sql.NVarChar(100), unitRow.UnitName)
         .input("blk",   sql.NVarChar(100), unitRow.BlockName || null)
         .input("utype", sql.NVarChar(100), unitRow.UnitType || null)
@@ -670,7 +670,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
       // Rs. 45L GST bracket.
       await recalculateBookingGst(tx, id);
 
-      if (newPlanId) {
+      if (newPlanId != null) {
         // Only the %-based schedule steps get wiped and regenerated — a
         // Parking/Extra-Charge milestone is a fixed line item tied to a real
         // allotment/charge row elsewhere (see the same exclusion in
@@ -686,7 +686,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
 
       await tx.request()
         .input("bid",    sql.Int, id)
-        .input("oldUid", sql.Int, oldUnitId || null)
+        .input("oldUid", sql.Int, oldUnitId != null ? oldUnitId : null)
         .input("newUid", sql.Int, newUnitId)
         .input("reason", sql.NVarChar(sql.MAX), b.Reason.trim())
         .input("cb",     sql.Int, actor)
@@ -705,7 +705,7 @@ router.put("/:id/change-unit", requirePageRight("crm-bookings", "edit"), async (
       throw txErr;
     }
 
-    res.json({ success: true, unitNo: unitRow.UnitName, paymentPlanUpdated: !!newPlanId });
+    res.json({ success: true, unitNo: unitRow.UnitName, paymentPlanUpdated: newPlanId != null });
   } catch (e) {
     console.error("[crm-bookings] change-unit error:", e.message);
     res.status(e.status || 500).json({ error: e.message });
@@ -717,7 +717,7 @@ router.get("/:id/unit-change-log", requirePageRight("crm-bookings", "view"), asy
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("bid", sql.Int, id).query(`
       SELECT l.*, ou.UnitName AS OldUnitName, nu.UnitName AS NewUnitName, u.name AS ChangedByName
       FROM dbo.CrmUnitChangeLog l
@@ -739,7 +739,7 @@ router.get("/:id/unit-change-log", requirePageRight("crm-bookings", "view"), asy
 // Rejected -> Pending resubmit path (ApprovalActions renders Submit there).
 router.put("/:id/submit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -805,7 +805,7 @@ async function checkBookingApprovalReadiness(pool, id) {
 // admin/super_admin/marketing_head that a booking is waiting on them.
 router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     if (await assertNotFrozen(pool, id, res)) return;
@@ -873,7 +873,7 @@ router.put("/:id/ready-for-approval", requirePageRight("crm-bookings", "edit"), 
 // Only usable when no non-Bounced MR exists (skipIfExists handles duplicates).
 router.post("/:id/trigger-money-receipt", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const activeErr = await requireActiveBooking(pool, id);
@@ -909,7 +909,7 @@ async function getBookingApplicationId(pool, bookingId) {
 // GET /:id/checklist — current Data Review checklist state for this booking.
 router.get("/:id/checklist", requirePageRight("crm-bookings", "view"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const bk = await getBookingApplicationId(pool, id);
@@ -929,7 +929,7 @@ router.get("/:id/checklist", requirePageRight("crm-bookings", "view"), async (re
 // while the Booking is at the Review stage. remarks optional (confirming note).
 router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   const { itemKey } = req.params;
   try {
     const pool = getPool();
@@ -963,7 +963,7 @@ router.put("/:id/checklist/:itemKey/check", requirePageRight("crm-bookings", "ed
 // PUT /:id/checklist/:itemKey/uncheck — reviewer retracts their own check.
 router.put("/:id/checklist/:itemKey/uncheck", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   const { itemKey } = req.params;
   try {
     const pool = getPool();
@@ -991,7 +991,7 @@ router.put("/:id/checklist/:itemKey/uncheck", requirePageRight("crm-bookings", "
 // panel other flags already show up in.
 router.put("/:id/checklist/:itemKey/flag", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   const { itemKey } = req.params;
   try {
     if (!req.body?.remarks?.trim()) {
@@ -1026,7 +1026,7 @@ router.put("/:id/checklist/:itemKey/flag", requirePageRight("crm-bookings", "edi
 // the Booking is still at the Review stage.
 router.put("/:id/checklist/:itemKey/resubmit", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   const { itemKey } = req.params;
   try {
     const pool = getPool();
@@ -1056,7 +1056,7 @@ router.put("/:id/checklist/:itemKey/resubmit", requirePageRight("crm-bookings", 
 // longer a gate; its review logic now lives in the booking page checklist.
 router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -1102,7 +1102,7 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
 // PUT /:id/reject — mandatory remarks; bounces back one stage, never cancels.
 router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -1123,7 +1123,7 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
 // FreezeExpiresAt is required — freezes must not be open-ended.
 router.post("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   const { reason, expiresAt } = req.body || {};
   if (!reason || !reason.trim()) return res.status(400).json({ error: "reason is required to freeze a booking" });
   if (!expiresAt) return res.status(400).json({ error: "expiresAt is required — freezes must have an expiry date" });
@@ -1160,7 +1160,7 @@ router.post("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res) 
 // DELETE /:id/freeze (unfreeze) — admin-only. Clears the freeze lock.
 router.delete("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const check = await pool.request().input("id", sql.Int, id)
@@ -1191,7 +1191,7 @@ router.delete("/:id/freeze", allowRoles("admin", "super_admin"), async (req, res
 // records, and audit steps are handled explicitly.
 router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const rowRes = await pool.request().input("id", sql.Int, id).query(`
@@ -1348,7 +1348,7 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
 // booking row since they have no standalone legal standing.
 router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const rowRes = await pool.request().input("id", sql.Int, id).query(`
@@ -1505,7 +1505,7 @@ router.get("/:id/loan", requirePageRight("crm-loan-details", "view"), async (req
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("bid", sql.Int, id)
       .query("SELECT * FROM dbo.CrmLoanDetail WHERE BookingId = @bid");
 
@@ -1538,7 +1538,7 @@ router.put("/:id/loan", requirePageRight("crm-loan-details", "edit"), async (req
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const actor = actorId(req);
 
@@ -1629,7 +1629,7 @@ router.get("/:id/invoices", requirePageRight("crm-bookings", "view"), async (req
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("id", sql.Int, id).query(`
       SELECT inv.*, cu.name AS CreatedByName
       FROM dbo.CrmInvoice inv
@@ -1653,7 +1653,7 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     const type = b.InvoiceType || "Maintenance";
     _diagStep.step = "activeCheck"; _diagStep.type = type; _diagStep.body = b;
@@ -1965,9 +1965,9 @@ router.get("/:id/invoices/:invoiceId/pdf", requirePageRight("crm-bookings", "vie
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.id);
-    if (!bookingId) return res.status(400).json({ error: "Invalid id" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid id" });
     const invoiceId = parseId(req.params.invoiceId);
-    if (!invoiceId) return res.status(400).json({ error: "Invalid invoiceId" });
+    if (invoiceId === null) return res.status(400).json({ error: "Invalid invoiceId" });
     const row = await pool.request().input("iid", sql.Int, invoiceId).input("bid", sql.Int, bookingId)
       .query("SELECT InvoiceNo FROM dbo.CrmInvoice WHERE Id = @iid AND BookingId = @bid");
     if (!row.recordset.length) return res.status(404).json({ error: "Invoice not found" });
@@ -2005,9 +2005,9 @@ router.put("/:id/invoices/:invoiceId/void", requirePageRight("crm-bookings", "ed
     }
     const pool = getPool();
     const bookingId = parseId(req.params.id);
-    if (!bookingId) return res.status(400).json({ error: "Invalid id" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid id" });
     const invoiceId = parseId(req.params.invoiceId);
-    if (!invoiceId) return res.status(400).json({ error: "Invalid invoiceId" });
+    if (invoiceId === null) return res.status(400).json({ error: "Invalid invoiceId" });
     const reason = String(req.body?.reason || req.body?.Reason || "").trim();
     if (!reason) return res.status(400).json({ error: "A reason is required to void an invoice" });
 
@@ -2054,7 +2054,7 @@ router.post("/:id/resync-schedule", requirePageRight("crm-bookings", "edit"), as
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
 
     const activeErr = await requireActiveBooking(pool, id);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -2117,7 +2117,7 @@ router.get("/:id/attachments", requirePageRight("crm-bookings", "view"), async (
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     // Return both booking-level attachments AND application-level KYC documents
     // (uploaded during the Application wizard) in one unified list, so staff
     // see everything in one place without re-uploading.
@@ -2155,7 +2155,7 @@ router.post("/:id/attachments", requirePageRight("crm-bookings", "edit"), upload
   try {
     const pool = getPool();
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const files = req.files || [];
     if (!files.length) return res.status(400).json({ error: "No files uploaded" });
     for (const file of files) {
@@ -2195,9 +2195,9 @@ router.get("/:id/attachments/file/:attId", requirePageRight("crm-bookings", "vie
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.id);
-    if (!bookingId) return res.status(400).json({ error: "Invalid id" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid id" });
     const attId = parseId(req.params.attId);
-    if (!attId) return res.status(400).json({ error: "Invalid attId" });
+    if (attId === null) return res.status(400).json({ error: "Invalid attId" });
     const result = await pool.request().input("id", sql.Int, attId).input("bid", sql.Int, bookingId)
       .query("SELECT FileBase64, FileName, MimeType FROM dbo.CrmBookingAttachment WHERE Id = @id AND BookingId = @bid");
     if (!result.recordset.length || !result.recordset[0].FileBase64) return res.status(404).json({ error: "Attachment not found" });
@@ -2216,9 +2216,9 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
   try {
     const pool = getPool();
     const bookingId = parseId(req.params.id);
-    if (!bookingId) return res.status(400).json({ error: "Invalid id" });
+    if (bookingId === null) return res.status(400).json({ error: "Invalid id" });
     const attId = parseId(req.params.attId);
-    if (!attId) return res.status(400).json({ error: "Invalid attId" });
+    if (attId === null) return res.status(400).json({ error: "Invalid attId" });
     const statusCheck = await pool.request().input("id", sql.Int, bookingId).query("SELECT Status FROM dbo.CrmBooking WHERE Id = @id");
     if ([CrmStatus.CANCELLED,CrmStatus.REJECTED].includes(statusCheck.recordset[0]?.Status)) return res.status(400).json({ error: "Attachments cannot be removed from a cancelled or rejected booking." });
 
@@ -2240,7 +2240,7 @@ router.delete("/:id/attachments/:attId", requirePageRight("crm-bookings", "edit"
 // Confirmed, but readable at any stage.
 router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
 
@@ -2316,7 +2316,7 @@ router.get("/:id/portal-status", requirePageRight("crm-bookings", "view"), async
 // staff can trigger it here without re-running the full approval flow.
 router.post("/:id/provision-portal", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const bkg = await pool.request().input("bid", sql.Int, id)
@@ -2359,21 +2359,21 @@ async function setBookingPortalActive(pool, bookingId, isActive) {
   const { ApplicationId, CustomerId } = bkg.recordset[0];
 
   let portalUserId = null;
-  if (CustomerId) {
+  if (CustomerId != null) {
     try {
       const r = await pool.request().input("cid", sql.Int, CustomerId)
         .query("SELECT Id FROM dbo.CrmCustomerPortalUser WHERE CustomerId = @cid");
       if (r.recordset.length) portalUserId = r.recordset[0].Id;
     } catch (_) {}
   }
-  if (!portalUserId && ApplicationId) {
+  if (portalUserId == null && ApplicationId != null) {
     try {
       const r = await pool.request().input("aid", sql.Int, ApplicationId)
         .query("SELECT Id FROM dbo.CrmCustomerPortalUser WHERE ApplicationId = @aid");
       if (r.recordset.length) portalUserId = r.recordset[0].Id;
     } catch (_) {}
   }
-  if (!portalUserId) return { error: "No portal account exists for this customer yet", status: 404 };
+  if (portalUserId == null) return { error: "No portal account exists for this customer yet", status: 404 };
   await pool.request().input("id", sql.Int, portalUserId).input("act", sql.Bit, isActive ? 1 : 0)
     .query("UPDATE dbo.CrmCustomerPortalUser SET IsActive = @act WHERE Id = @id");
   return { ok: true };
@@ -2381,7 +2381,7 @@ async function setBookingPortalActive(pool, bookingId, isActive) {
 
 router.put("/:id/portal/deactivate", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const result = await setBookingPortalActive(getPool(), id, false);
     if (result.error) return res.status(result.status).json({ error: result.error });
@@ -2394,7 +2394,7 @@ router.put("/:id/portal/deactivate", requirePageRight("crm-bookings", "edit"), a
 
 router.put("/:id/portal/reactivate", requirePageRight("crm-bookings", "edit"), async (req, res) => {
   const id = parseId(req.params.id);
-  if (!id) return res.status(400).json({ error: "Invalid id" });
+  if (id === null) return res.status(400).json({ error: "Invalid id" });
   try {
     const result = await setBookingPortalActive(getPool(), id, true);
     if (result.error) return res.status(result.status).json({ error: result.error });
@@ -2412,7 +2412,7 @@ router.put("/:id/portal/reactivate", requirePageRight("crm-bookings", "edit"), a
 // crmQueryPayment.js, crmRegistry.js, crmMutation.js, crmNoc.js.
 router.get("/:id/lifecycle", requirePageRight("crm-bookings", "view"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  if (!id) return res.status(400).json({ error: "Invalid booking id" });
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid booking id" });
   try {
     const pool = getPool();
 

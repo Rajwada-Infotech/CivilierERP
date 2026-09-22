@@ -1300,9 +1300,9 @@ async function resolveOcCcGate(pool, bookingId, certType = null) {
     WHERE b.Id = @bid
   `);
   const { BlockId, ProjectId } = blockRow.recordset[0] || {};
-  if (!ProjectId) return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
+  if (ProjectId == null) return { received: false, source: null, receivedDate: null, certType: null, certRow: null };
 
-  if (BlockId) {
+  if (BlockId != null) {
     const blockCert = await req().input("bid2", sql.Int, BlockId).query(`
       SELECT TOP 1 oc.* FROM dbo.CrmOccupancyCertificate oc
       WHERE oc.BlockId = @bid2 AND oc.Status = 'Received' ${typeFilter}

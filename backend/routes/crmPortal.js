@@ -164,7 +164,7 @@ router.post("/change-password", async (req, res) => {
 async function resolveAndAssertApplication(pool, req, res) {
   const raw = req.query.applicationId || req.params.applicationId;
   const appId = parseInt(raw, 10);
-  if (!appId || isNaN(appId)) {
+  if (isNaN(appId)) {
     res.status(400).json({ error: "applicationId is required" });
     return null;
   }
@@ -408,7 +408,7 @@ router.get("/invoices/:invoiceId/pdf", async (req, res) => {
     const appId = await resolveAndAssertApplication(pool, req, res);
     if (appId === null) return;
     const invoiceId = parseId(req.params.invoiceId);
-    if (!invoiceId) return res.status(400).json({ error: "Invalid invoiceId" });
+    if (invoiceId === null) return res.status(400).json({ error: "Invalid invoiceId" });
     const row = await pool.request().input("iid", sql.Int, invoiceId).input("aid", sql.Int, appId).query(`
       SELECT inv.InvoiceNo
       FROM dbo.CrmInvoice inv
@@ -460,7 +460,7 @@ router.get("/receipts/:receiptId/pdf", async (req, res) => {
     const appId = await resolveAndAssertApplication(pool, req, res);
     if (appId === null) return;
     const receiptId = parseId(req.params.receiptId);
-    if (!receiptId) return res.status(400).json({ error: "Invalid receiptId" });
+    if (receiptId === null) return res.status(400).json({ error: "Invalid receiptId" });
     const row = await pool.request()
       .input("rid", sql.Int, receiptId)
       .input("aid", sql.Int, appId)
@@ -570,7 +570,7 @@ router.post("/agreement/documents/:docId/upload", (req, res) => {
       const appId = await resolveAndAssertApplication(pool, req, res);
       if (appId === null) return;
       const docId = parseId(req.params.docId);
-      if (!docId) return res.status(400).json({ error: "Invalid docId" });
+      if (docId === null) return res.status(400).json({ error: "Invalid docId" });
 
       // Same early-access carve-out as GET /agreement/documents — IdentityProof
       // uploads don't wait on SentToCustomerAt.
@@ -638,7 +638,7 @@ router.get("/agreement/documents/file/:docId", async (req, res) => {
     const appId = await resolveAndAssertApplication(pool, req, res);
     if (appId === null) return;
     const docId = parseId(req.params.docId);
-    if (!docId) return res.status(400).json({ error: "Invalid docId" });
+    if (docId === null) return res.status(400).json({ error: "Invalid docId" });
     // Same early-access carve-out as GET /agreement/documents — a customer
     // must be able to preview/download an IdentityProof file they already
     // uploaded, even before the agreement itself has been sent.
@@ -949,7 +949,7 @@ router.get("/sales-deed/documents/:docId/download", async (req, res) => {
     const appId = await resolveAndAssertApplication(pool, req, res);
     if (appId === null) return;
     const docId = parseId(req.params.docId);
-    if (!docId) return res.status(400).json({ error: "Invalid docId" });
+    if (docId === null) return res.status(400).json({ error: "Invalid docId" });
 
     const result = await pool.request()
       .input("docId", sql.Int, docId)
@@ -1185,7 +1185,7 @@ router.get("/query-payment/attachment/:attachId/file", async (req, res) => {
     const appId = await resolveAndAssertApplication(pool, req, res);
     if (appId === null) return;
     const attachId = parseId(req.params.attachId);
-    if (!attachId) return res.status(400).json({ error: "Invalid attachId" });
+    if (attachId === null) return res.status(400).json({ error: "Invalid attachId" });
     const result = await pool.request().input("aid", sql.Int, appId).input("said", sql.Int, attachId).query(`
       SELECT att.FileName, att.MimeType, att.FileData
       FROM dbo.CrmQueryPaymentAttachments att
