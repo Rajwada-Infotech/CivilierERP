@@ -118,41 +118,47 @@ interface AlertCardProps {
   route: string;
 }
 
+// This app switches themes via a `data-theme` attribute + CSS variables
+// (see ThemeContext.tsx), not Tailwind's `dark` class — so `dark:` variant
+// classes never activate here and the light-mode fallback (solid pastel
+// bg-*-50) always renders, standing out badly against the app's dark
+// themes. Opacity-scaled colors (bg-*-500/10) apply on top of whatever the
+// page background actually is, so they read correctly in every theme.
 const SEVERITY_STYLES = {
   critical: {
-    border: "border-red-300 dark:border-red-800",
-    bg: "bg-red-50 dark:bg-red-950/30",
-    iconBg: "bg-red-100 dark:bg-red-900/40",
-    iconColor: "text-red-600 dark:text-red-400",
-    countColor: "text-red-700 dark:text-red-300",
-    labelColor: "text-red-700 dark:text-red-400",
+    border: "border-red-500/30",
+    bg: "bg-red-500/10",
+    iconBg: "bg-red-500/15",
+    iconColor: "text-red-500",
+    countColor: "text-red-500",
+    labelColor: "text-red-500",
     pulse: true,
   },
   warning: {
-    border: "border-amber-300 dark:border-amber-700",
-    bg: "bg-amber-50 dark:bg-amber-950/30",
-    iconBg: "bg-amber-100 dark:bg-amber-900/40",
-    iconColor: "text-amber-600 dark:text-amber-400",
-    countColor: "text-amber-700 dark:text-amber-300",
-    labelColor: "text-amber-700 dark:text-amber-400",
+    border: "border-amber-500/30",
+    bg: "bg-amber-500/10",
+    iconBg: "bg-amber-500/15",
+    iconColor: "text-amber-500",
+    countColor: "text-amber-500",
+    labelColor: "text-amber-500",
     pulse: false,
   },
   info: {
-    border: "border-blue-200 dark:border-blue-800",
-    bg: "bg-blue-50 dark:bg-blue-950/20",
-    iconBg: "bg-blue-100 dark:bg-blue-900/40",
-    iconColor: "text-blue-600 dark:text-blue-400",
-    countColor: "text-blue-700 dark:text-blue-300",
-    labelColor: "text-blue-700 dark:text-blue-400",
+    border: "border-blue-500/30",
+    bg: "bg-blue-500/10",
+    iconBg: "bg-blue-500/15",
+    iconColor: "text-blue-500",
+    countColor: "text-blue-500",
+    labelColor: "text-blue-500",
     pulse: false,
   },
   ok: {
-    border: "border-green-200 dark:border-green-800",
-    bg: "bg-green-50/60 dark:bg-green-950/20",
-    iconBg: "bg-green-100 dark:bg-green-900/30",
-    iconColor: "text-green-600 dark:text-green-400",
-    countColor: "text-green-700 dark:text-green-300",
-    labelColor: "text-green-600 dark:text-green-500",
+    border: "border-green-500/20",
+    bg: "bg-green-500/5",
+    iconBg: "bg-green-500/10",
+    iconColor: "text-green-500",
+    countColor: "text-green-500",
+    labelColor: "text-green-500",
     pulse: false,
   },
 };
@@ -202,7 +208,7 @@ const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
             key={day.DayDate}
             className={`rounded-xl border p-2.5 text-center transition-all ${
               hasEvents
-                ? "border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/20"
+                ? "border-amber-500/30 bg-amber-500/10"
                 : "border-border bg-card/60"
             }`}
           >
@@ -218,19 +224,19 @@ const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
             <div className="mt-2 space-y-1">
               {day.Handovers > 0 && (
                 <button onClick={() => navigate("/crm/handover")}
-                  className="w-full flex items-center gap-1 text-[10px] text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-950/30 rounded px-1 py-0.5 hover:opacity-80">
+                  className="w-full flex items-center gap-1 text-[10px] text-green-500 bg-green-500/10 rounded px-1 py-0.5 hover:opacity-80">
                   <Key size={9} /> {day.Handovers}
                 </button>
               )}
               {day.Registries > 0 && (
                 <button onClick={() => navigate("/crm/sales-deed?tab=Registry")}
-                  className="w-full flex items-center gap-1 text-[10px] text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/30 rounded px-1 py-0.5 hover:opacity-80">
+                  className="w-full flex items-center gap-1 text-[10px] text-blue-500 bg-blue-500/10 rounded px-1 py-0.5 hover:opacity-80">
                   <FileText size={9} /> {day.Registries}
                 </button>
               )}
               {day.MilestonesDue > 0 && (
                 <button onClick={() => navigate("/crm/payments")}
-                  className="w-full flex items-center gap-1 text-[10px] text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 rounded px-1 py-0.5 hover:opacity-80">
+                  className="w-full flex items-center gap-1 text-[10px] text-amber-500 bg-amber-500/10 rounded px-1 py-0.5 hover:opacity-80">
                   <IndianRupee size={9} /> {day.MilestonesDue}
                 </button>
               )}
