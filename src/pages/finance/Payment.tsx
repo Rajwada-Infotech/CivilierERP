@@ -152,6 +152,9 @@ const Payment: React.FC = () => {
   const [dateFromFilter, setDateFromFilter] = useState("");
   const [dateToFilter, setDateToFilter] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  // Register tab: All vs. TDS-only (payments with a TDS head linked / an
+  // amount actually deducted).
+  const [tdsOnlyFilter, setTdsOnlyFilter] = useState(false);
   // Direct Expense Payment (migration 303) — a payment mode with no linked
   // invoice/party, paid straight against one or more Expense Heads instead.
   const [showExpenseHeadPayment, setShowExpenseHeadPayment] = useState(false);
@@ -742,6 +745,7 @@ const Payment: React.FC = () => {
       docNumberFilter,
       dateFromFilter,
       dateToFilter,
+      tdsOnlyFilter,
     ],
     queryFn: () =>
       getPayments(
@@ -758,6 +762,7 @@ const Payment: React.FC = () => {
         "",
         dateFromFilter,
         dateToFilter,
+        tdsOnlyFilter,
       ),
     staleTime: 0,
   });
@@ -4635,6 +4640,37 @@ const Payment: React.FC = () => {
               );
             })()}
 
+            {/* Register tabs — All vs. TDS (payments with a TDS head linked /
+                amount deducted on their own GL posting). */}
+            <div className="flex items-center gap-1 mb-3">
+              <button
+                onClick={() => {
+                  setTdsOnlyFilter(false);
+                  setPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-heading font-semibold transition-colors ${
+                  !tdsOnlyFilter
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                All Payments
+              </button>
+              <button
+                onClick={() => {
+                  setTdsOnlyFilter(true);
+                  setPage(1);
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-heading font-semibold transition-colors ${
+                  tdsOnlyFilter
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                TDS
+              </button>
+            </div>
+
             {isLoading && (
               <div className="text-center py-16 text-muted-foreground text-sm">
                 <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -4766,22 +4802,32 @@ const Payment: React.FC = () => {
                   <table className="w-full text-sm table-fixed">
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
-                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
+                        <th className={`px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[18%]" : "w-[22%]"}`}>
                           Payment Purpose
                         </th>
-                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
+                        <th className={`px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[13%]" : "w-[16%]"}`}>
                           Doc No
                         </th>
-                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
+                        <th className={`px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[16%]" : "w-[22%]"}`}>
                           Expense Ref
                         </th>
-                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%]">
+                        <th className={`px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[9%]" : "w-[10%]"}`}>
                           Amount
                         </th>
-                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
+                        {tdsOnlyFilter && (
+                          <>
+                            <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%]">
+                              TDS Amt
+                            </th>
+                            <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                              Net Payable (After TDS)
+                            </th>
+                          </>
+                        )}
+                        <th className={`px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[11%]" : "w-[14%]"}`}>
                           Status
                         </th>
-                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
+                        <th className={`px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground ${tdsOnlyFilter ? "w-[11%]" : "w-[16%]"}`}>
                           Actions
                         </th>
                       </tr>
@@ -4790,7 +4836,7 @@ const Payment: React.FC = () => {
                       {records.length === 0 && (
                         <tr>
                           <td
-                            colSpan={6}
+                            colSpan={tdsOnlyFilter ? 8 : 6}
                             className="text-center py-14 text-muted-foreground text-sm"
                           >
                             <AlertCircle
@@ -4865,6 +4911,30 @@ const Payment: React.FC = () => {
                           <td className="px-4 py-4 font-mono text-xs font-semibold text-right whitespace-nowrap">
                             {formatINR(rec.amount ?? 0)}
                           </td>
+                          {tdsOnlyFilter && (
+                            <>
+                              {/* TDS Amt — only meaningful when a TDS head is actually linked */}
+                              <td className="px-4 py-4 font-mono text-xs text-right whitespace-nowrap">
+                                {(rec.tdsAmount || 0) > 0 ? (
+                                  <span className="text-amber-600 dark:text-amber-400 font-semibold">
+                                    {formatINR(rec.tdsAmount || 0)}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </td>
+                              {/* Net Payable (After TDS) */}
+                              <td className="px-4 py-4 font-mono text-xs font-semibold text-right whitespace-nowrap">
+                                {(rec.tdsAmount || 0) > 0 ? (
+                                  <span className="text-emerald-600 dark:text-emerald-400">
+                                    {formatINR(Math.max(0, (rec.amount ?? 0) - (rec.tdsAmount || 0)))}
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground">—</span>
+                                )}
+                              </td>
+                            </>
+                          )}
                           {/* Status */}
                           <td className="px-4 py-4">
                             <div className="flex flex-col gap-1">
