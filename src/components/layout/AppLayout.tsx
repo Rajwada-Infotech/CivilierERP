@@ -22,7 +22,7 @@ import {
 } from "./layoutContexts";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { CompassProvider } from "@/components/compass/CompassProvider";
-import { useSidebarToggleShortcut } from "@/hooks/useGlobalShortcuts";
+import { useSidebarToggleShortcut, useModuleSwitchShortcut } from "@/hooks/useGlobalShortcuts";
 
 // ── Home page detection ───────────────────────────────────────────────────────
 
@@ -94,6 +94,10 @@ function NavPanelAutoExpand({
   // module rather than needing a per-page listener. On Home (which has no
   // nav panel/strip by default) it opens/closes the strip instead.
   useSidebarToggleShortcut({ isHome, homeNavOpen, setHomeNavOpen });
+
+  // Shift+1..9/0, Shift+letter jumps straight to a module from anywhere —
+  // same mount point/rationale as the sidebar toggle above.
+  useModuleSwitchShortcut();
 
   return <>{children}</>;
 }

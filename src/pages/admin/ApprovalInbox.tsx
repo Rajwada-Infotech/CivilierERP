@@ -674,7 +674,11 @@ export function labelizeKey(key: string): string {
 // other array, so a reviewer approving a PO actually sees what's on it.
 export function extractLineItems(detail: Record<string, unknown> | null): Record<string, unknown>[] {
   if (!detail) return [];
-  for (const key of ["LineItems", "POItems", "Items"]) {
+  // "items" (lowercase) covers Material Requests' own GET /:id response
+  // (materialRequests.js: `{ ...header, items: [...] }`) — missing it meant
+  // the review panel's line-items table silently never rendered for MRs at
+  // all, even though the data was right there in `detail`.
+  for (const key of ["LineItems", "POItems", "Items", "items"]) {
     const v = detail[key];
     if (Array.isArray(v) && v.length > 0) return v as Record<string, unknown>[];
   }
