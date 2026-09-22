@@ -207,7 +207,7 @@ router.get("/balance-sheet", async (req, res) => {
     const asOf = req.query.asOf || new Date().toISOString().slice(0, 10);
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const costCenterId = req.query.costCenterId ? parseInt(req.query.costCenterId, 10) : null;
+    const costCenterId = req.query.costCenterId !== undefined && req.query.costCenterId !== null && req.query.costCenterId !== "" ? parseInt(req.query.costCenterId, 10) : null;
 
     const groupMap = await loadGroups(pool);
     const rootIds = await resolveRootIds(pool);
@@ -774,7 +774,7 @@ router.get("/profit-loss", async (req, res) => {
     const to = req.query.to || `${fyYear + 1}-03-31`;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const costCenterId = req.query.costCenterId ? parseInt(req.query.costCenterId, 10) : null;
+    const costCenterId = req.query.costCenterId !== undefined && req.query.costCenterId !== null && req.query.costCenterId !== "" ? parseInt(req.query.costCenterId, 10) : null;
 
     const groupMap = await loadGroups(pool);
     const rootIds = await resolveRootIds(pool);
@@ -995,7 +995,7 @@ router.get("/monthly-income", async (req, res) => {
     const to = `${fyYear + 1}-03-31`;
     const companyId = req.query.companyId ? parseInt(req.query.companyId, 10) : null;
     const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-    const costCenterId = req.query.costCenterId ? parseInt(req.query.costCenterId, 10) : null;
+    const costCenterId = req.query.costCenterId !== undefined && req.query.costCenterId !== null && req.query.costCenterId !== "" ? parseInt(req.query.costCenterId, 10) : null;
 
     const groupMap = await loadGroups(pool);
     const rootIds = await resolveRootIds(pool);

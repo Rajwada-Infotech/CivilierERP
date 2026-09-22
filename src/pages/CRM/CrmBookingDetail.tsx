@@ -1604,7 +1604,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="text-sm font-semibold flex items-center gap-1.5"><ClipboardCheck size={15} className="text-amber-600 dark:text-amber-400" /> Payment Plan</h3>
                     {!planEditOpen && canEdit && booking.Status !== CrmStatus.APPROVED && (
-                      <button onClick={() => { setPlanEditOpen(true); setPlanEditValue(booking.PaymentPlanId ? String(booking.PaymentPlanId) : ""); }}
+                      <button onClick={() => { setPlanEditOpen(true); setPlanEditValue(booking.PaymentPlanId != null ? String(booking.PaymentPlanId) : ""); }}
                         className="text-xs text-amber-600 dark:text-amber-400 hover:underline shrink-0">
                         Edit
                       </button>

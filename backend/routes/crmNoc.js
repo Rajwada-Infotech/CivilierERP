@@ -259,7 +259,7 @@ router.post("/", requirePageRight("crm-noc", "create"), async (req, res) => {
       .input("reason", sql.NVarChar(500), b.Reason || null)
       .input("bank", sql.NVarChar(255), b.BankName || null)
       .input("acc",  sql.NVarChar(100), b.LoanAccountNo || null)
-      .input("lamt", sql.Decimal(18,2), b.LoanAmount != null ? parseFloat(b.LoanAmount) : null)
+      .input("lamt", sql.Decimal(18,2), b.LoanAmount != null && b.LoanAmount !== "" ? parseFloat(b.LoanAmount) : null)
       .input("note", sql.NVarChar(sql.MAX), b.Notes || null)
       .input("cb",   sql.Int,           actorId(req))
       .query(`

@@ -221,7 +221,7 @@ router.post("/", requirePageRight("item-master", "create"), async (req, res) => 
     if (hasGL)
       req2.input("M_GLHeadId", sql.Int, M_GLHeadId ? parseInt(M_GLHeadId, 10) : null);
     if (hasCC)
-      req2.input("M_CostCenterId", sql.Int, M_CostCenterId ? parseInt(M_CostCenterId, 10) : null);
+      req2.input("M_CostCenterId", sql.Int, M_CostCenterId !== undefined && M_CostCenterId !== null && M_CostCenterId !== "" ? parseInt(M_CostCenterId, 10) : null);
     if (hasDOS2)
       req2.input("M_DaysOfSupply", sql.Int, M_DaysOfSupply != null && M_DaysOfSupply !== "" ? parseInt(M_DaysOfSupply, 10) : null);
 
@@ -327,7 +327,7 @@ router.put("/:id", requirePageRight("item-master", "edit"), async (req, res) => 
     if (hasGL)
       req2.input("M_GLHeadId", sql.Int, M_GLHeadId ? parseInt(M_GLHeadId, 10) : null);
     if (hasCC)
-      req2.input("M_CostCenterId", sql.Int, M_CostCenterId ? parseInt(M_CostCenterId, 10) : null);
+      req2.input("M_CostCenterId", sql.Int, M_CostCenterId !== undefined && M_CostCenterId !== null && M_CostCenterId !== "" ? parseInt(M_CostCenterId, 10) : null);
     if (hasDOS2)
       req2.input("M_DaysOfSupply", sql.Int, M_DaysOfSupply != null && M_DaysOfSupply !== "" ? parseInt(M_DaysOfSupply, 10) : null);
 

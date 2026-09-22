@@ -286,7 +286,7 @@ export default function FixedAssetAssignment() {
         companyId: String(d.CompanyId || ""),
         projectId: String(d.ProjectId || ""),
         finYear:   d.FinYear || "",
-        assetId:   String(d.AssetId || ""),
+        assetId:   String(d.AssetId != null ? d.AssetId : ""),
         userId:    String(d.UserId || ""),
         responsibleUserId: String(d.ResponsibleUserId || ""),
         remarks:   d.Remarks || "",
@@ -399,7 +399,7 @@ export default function FixedAssetAssignment() {
     if (!form.userId)    return toast.error("User is required");
     if (!form.responsibleUserId) return toast.error("Responsible User is required");
 
-    if (editingId) {
+    if (editingId != null) {
       updateMut.mutate({
         id: editingId,
         data: {
