@@ -1127,7 +1127,7 @@ router.post("/:id/certificate", requirePageRight("account-head", "edit"), (req, 
     try {
       if (!req.file) return res.status(400).json({ error: "No file uploaded" });
       const id = parseId(req.params.id);
-      if (!id) return res.status(400).json({ error: "Invalid id" });
+      if (id === null) return res.status(400).json({ error: "Invalid id" });
       const pool = getPool();
       const row = await pool.request().input("id", sql.Int, id)
         .query("SELECT LHeadType FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
@@ -1162,7 +1162,7 @@ router.post("/:id/certificate", requirePageRight("account-head", "edit"), (req, 
 router.get("/:id/certificate/file", requirePageRight("account-head", "view"), async (req, res) => {
   try {
     const id = parseId(req.params.id);
-    if (!id) return res.status(400).json({ error: "Invalid id" });
+    if (id === null) return res.status(400).json({ error: "Invalid id" });
     const result = await getPool().request().input("id", sql.Int, id)
       .query("SELECT LHeadCertificateUrl, LHeadCertificateFileName FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
     if (!result.recordset.length || !result.recordset[0].LHeadCertificateUrl) return res.status(404).json({ error: "Certificate not found" });
