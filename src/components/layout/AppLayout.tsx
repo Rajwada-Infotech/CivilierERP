@@ -22,6 +22,7 @@ import {
 } from "./layoutContexts";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { CompassProvider } from "@/components/compass/CompassProvider";
+import { useSidebarToggleShortcut } from "@/hooks/useGlobalShortcuts";
 
 // ── Home page detection ───────────────────────────────────────────────────────
 
@@ -76,6 +77,12 @@ function NavPanelAutoExpand({ children }: { children: React.ReactNode }) {
     }
     prevModule.current = activeModule;
   }, [activeModule, setCollapsed]);
+
+  // Ctrl+B / ⌘B toggles the sidebar from anywhere — mounted here (inside
+  // <SidebarContext.Provider>, same as this component's own useSidebarState()
+  // call above) so it's wired up once and works identically from every
+  // module rather than needing a per-page listener.
+  useSidebarToggleShortcut();
 
   return <>{children}</>;
 }
