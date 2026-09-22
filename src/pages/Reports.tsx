@@ -211,6 +211,20 @@ const ALL_REPORTS: ReportDef[] = [
           r.TaxableAmount != null ? fmt(r.TaxableAmount as number) : "—",
       },
       {
+        header: "TDS Amt",
+        accessor: (r) =>
+          r.TDSAmount != null && Number(r.TDSAmount) > 0
+            ? fmt(r.TDSAmount as number)
+            : "—",
+      },
+      {
+        header: "Net Payable (After TDS)",
+        accessor: (r) =>
+          r.TDSAmount != null && Number(r.TDSAmount) > 0
+            ? fmt(Math.max(0, (Number(r.PAmount) || 0) - Number(r.TDSAmount)))
+            : "—",
+      },
+      {
         header: "Fin Year",
         accessor: (r) => (r.EBFinYear ?? "—") as string,
       },

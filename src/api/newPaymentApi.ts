@@ -58,13 +58,7 @@ export const getPayments = async (
   // creation date / exact payment date respectively) since a from/to range
   // is what the list UI actually exposes.
   dateFrom = "",
-  dateTo = "",
-  // TDS tab — payments that actually deducted TDS on their own posting
-  // (np.TDSAmount > 0). See generalLedger.js: only standalone/direct
-  // payments split TDS out of their own leg; invoice-linked payments carry
-  // TDSAmount only as an inherited display snapshot, so this still matches
-  // "TDS shown on this payment record" either way.
-  tdsOnly = false
+  dateTo = ""
 ) => {
   const params = new URLSearchParams({
     page: String(page),
@@ -81,7 +75,6 @@ export const getPayments = async (
   if (remarks) params.set("remarks", remarks);
   if (dateFrom) params.set("from", dateFrom);
   if (dateTo) params.set("to", dateTo);
-  if (tdsOnly) params.set("tdsOnly", "1");
 
   const res = await fetchWithAuth(`${BASE_URL}?${params.toString()}`);
   if (!res.ok)
