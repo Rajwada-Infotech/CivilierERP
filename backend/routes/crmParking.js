@@ -14,7 +14,7 @@ const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
-const { recalculateBookingGst } = require("../services/crmGst");
+const { recalculateBookingGst, getHsnRate, UNIT_PARKING_THRESHOLD, AFFORDABLE_HSN_CODE, OTHER_RESIDENTIAL_HSN_CODE } = require("../services/crmGst");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -642,22 +642,52 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
       JOIN dbo.ParkingSlot s ON s.Id = h.EntityId
       WHERE h.EntityType = 'Parking' AND h.ApplicationId = @aid AND h.Status = '${CrmStatus.ACTIVE}' AND h.HoldUntil >= SYSDATETIME()
     `);
-    const holds = [];
+
+    // Same fixed bracket rule as recalculateBookingGst (crmGst.js) — Parking
+    // has no independent GST rate any more (ParkingMaster.GstRate is a
+    // legacy column, pre-detach), it shares whichever rate the combined
+    // Unit + Parking (pre-tax) base resolves to. A Hold has no CrmBooking
+    // yet to read/reprice, so this preview has to resolve the same bracket
+    // itself from the Application's own Unit price plus every currently
+    // held/allotted parking base — otherwise a Hold shows the stale 18%
+    // independent rate while the wizard's own GST preview (and the real
+    // rate the Booking will get) correctly shows 1%/5%.
+    const holdLineAmounts = [];
     for (const h of holdRows.recordset) {
       const rate = await resolveParkingRateForSlot(pool, h.ParkingSlotId);
       // A staff-typed RateOverride (see POST /standalone) always wins over
       // the master rate — same "defaults but overridable" figure the real
       // allotment will snapshot once this hold converts at booking creation.
       const lineAmount = h.RateOverride != null ? Number(h.RateOverride) : (rate ? rate.Charge : 0);
-      const gstRate = rate ? rate.GstRate : 0;
-      const gstAmount = Math.round((lineAmount * gstRate) / 100 * 100) / 100;
-      holds.push({
+      holdLineAmounts.push({ h, lineAmount });
+    }
+
+    let unitParkingRate = 0;
+    if (holdLineAmounts.length) {
+      const appRow = await pool.request().input("aid", sql.Int, applicationId).query(`
+        SELECT a.RatePerSqFt, um.AreaSqFt
+        FROM dbo.CrmApplication a
+        LEFT JOIN dbo.UnitMaster um ON um.Id = a.PreferredUnitId
+        WHERE a.Id = @aid AND a.IsActive = 1
+      `);
+      const appR = appRow.recordset[0];
+      const unitTotal = appR && appR.RatePerSqFt && appR.AreaSqFt ? Math.round(Number(appR.AreaSqFt) * Number(appR.RatePerSqFt)) : 0;
+      const allotmentBase = allotments.reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
+      const holdBase = holdLineAmounts.reduce((s, x) => s + x.lineAmount, 0);
+      const combinedBase = unitTotal + allotmentBase + holdBase;
+      const hsnCode = combinedBase <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE;
+      unitParkingRate = await getHsnRate(pool, hsnCode);
+    }
+
+    const holds = holdLineAmounts.map(({ h, lineAmount }) => {
+      const gstAmount = Math.round((lineAmount * unitParkingRate) / 100 * 100) / 100;
+      return {
         Id: h.Id, Kind: "Hold", ParkingSlotId: h.ParkingSlotId, SlotNo: h.SlotNo,
         CurrentParkingType: h.ParkingType, Quantity: 1,
-        RateSnapshot: lineAmount, DefaultRate: rate ? rate.Charge : 0,
+        RateSnapshot: lineAmount, DefaultRate: lineAmount,
         TotalAmount: lineAmount + gstAmount, HoldUntil: h.HoldUntil,
-      });
-    }
+      };
+    });
 
     res.json([...allotments, ...holds]);
   } catch (e) {
