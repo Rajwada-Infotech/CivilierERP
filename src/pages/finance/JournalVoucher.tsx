@@ -153,9 +153,13 @@ export default function JournalVoucher() {
   useEffect(() => {
     const viewId = searchParams.get("view");
     if (!viewId) return;
-    openJVDetail(Number(viewId));
+    // Always clear the param first so it can't reopen on a back/refresh.
     searchParams.delete("view");
     setSearchParams(searchParams, { replace: true });
+    // Number("0") === 0 — a non-positive id is invalid; skip the API call
+    // rather than sending a request for JV id=0 which will 400/404.
+    const id = Number(viewId);
+    if (id > 0) openJVDetail(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

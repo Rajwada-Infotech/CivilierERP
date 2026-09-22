@@ -132,7 +132,10 @@ function GenerateFromLayoutPanel({
   const [unitId, setUnitId] = React.useState("");
   const [generating, setGenerating] = React.useState(false);
   const { data: projectOptions = [] } = useQuery({
-    queryKey: ["room-master-project-options"],
+    // Use the same key as the MasterPage form's Project field so both panels
+    // share a single React Query cache entry — previously "room-master-project-options"
+    // here vs "room-master-projects" in fields[], causing stale-data races.
+    queryKey: ["room-master-projects"],
     queryFn: fetchProjectOptions,
     staleTime: 5 * 60 * 1000,
   });
@@ -350,7 +353,7 @@ const RoomMaster: React.FC = () => {
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/units`);
       if (!res.ok) throw new Error("Failed to fetch units");
-      return res.json().catch(() => ({}));
+      return res.json().catch(() => []);
     },
     staleTime: 5 * 60 * 1000,
   });
@@ -413,12 +416,17 @@ const RoomMaster: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(toPayload(event.record)),
       });
-      if (!res.ok)
-        throw new Error((await res.json()).error || "Failed to add room");
+      // Read the body ONCE — ReadableStream can only be consumed once.
+      // Previously: error-check path consumed body first, then the success
+      // path tried to read it again and always got {}, so body.id was always
+      // undefined and the blueprint upload received "undefined" as roomId.
       const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error((body as any).error || "Failed to add room");
+      const newId = (body as any).id;
+      if (!newId) throw new Error("Server did not return the new room ID");
       toast.success("Room added!");
       try {
-        await uploadBlueprintIfStaged(String(body.id), event.record);
+        await uploadBlueprintIfStaged(String(newId), event.record);
       } catch (err: any) {
         toast.error(`Room saved, but blueprint upload failed: ${err.message}`);
       }
@@ -462,6 +470,21 @@ const RoomMaster: React.FC = () => {
         units={allUnits}
         onGenerated={() => queryClient.invalidateQueries({ queryKey: ["room-master"] })}
       />
+      {/* UX hint — shown only when the table is completely empty so new
+          admins know to use Generate above rather than adding rows one-by-one */}
+      {mappedData.length === 0 && !isLoading && (
+        <div className="mx-6 mb-4 flex items-start gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+          <DoorOpen size={16} className="mt-0.5 shrink-0 text-primary/60" />
+          <span>
+            No rooms yet.{" "}
+            <span className="font-medium text-foreground">
+              Use "Generate from Layout" above
+            </span>{" "}
+            to auto-create rooms for a unit based on its BHK composition, or add them
+            individually using the + button below.
+          </span>
+        </div>
+      )}
       <MasterPage
         title="Room"
         canCreate={rights.canCreate}

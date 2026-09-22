@@ -1,4 +1,4 @@
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+﻿import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type {
   ApprovalLevel,
   ApprovalWorkflow,
@@ -11,7 +11,7 @@ export type { ApprovalWorkflow, ApprovalLevel };
 export async function getApprovalWorkflows(): Promise<ApprovalWorkflow[]> {
   const res = await fetchWithAuth(BASE);
   if (!res.ok) throw new Error("Failed to fetch approval workflows");
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 }
 
 export async function getApprovalWorkflowsByModule(
@@ -21,7 +21,7 @@ export async function getApprovalWorkflowsByModule(
     `${BASE}?module=${encodeURIComponent(module)}`,
   );
   if (!res.ok) throw new Error("Failed to fetch workflows for module");
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 }
 
 export async function createApprovalWorkflow(

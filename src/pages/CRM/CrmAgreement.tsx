@@ -688,7 +688,10 @@ const CrmAgreement: React.FC = () => {
   const navigate = useNavigate();
   const [sp, setSp] = useSearchParams();
   const bkgFilter = sp.get("bookingId") || "";
-  const idFilter = sp.get("id") ? parseInt(sp.get("id")!, 10) : null;
+  // parseInt("0") === 0 — falsy, so the detail panel ({selectedId && ...})
+  // would never open for ?id=0, but the URL would stay dirty. Guard with > 0.
+  const rawIdFilter = sp.get("id") ? parseInt(sp.get("id")!, 10) : null;
+  const idFilter = rawIdFilter !== null && rawIdFilter > 0 ? rawIdFilter : null;
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [cpb, setCpb] = useState<CrmCompanyProjectBlockValue>({ companyId: "", projectId: "", blockId: "" });

@@ -5,6 +5,7 @@
 // queued change by replaying it through the exact same apply* functions the
 // direct (pre-legal) path uses — never duplicated logic.
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -101,7 +102,8 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
 router.get("/booking/:bookingId", requirePageRight("crm-bookings", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request().input("bid", sql.Int, bookingId)
       .query(`${LIST_SELECT} WHERE r.BookingId = @bid AND r.Status = '${CrmStatus.PENDING}' ORDER BY r.RequestedAt DESC`);
     res.json(result.recordset);
@@ -121,7 +123,8 @@ router.put("/:id/approve", requirePageRight("crm-bookings", "edit"), async (req,
     return res.status(403).json({ error: "You are not authorised to approve booking amendments" });
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const notes = req.body?.Notes || null;
 
     const row = await pool.request().input("id", sql.Int, id)
@@ -220,7 +223,8 @@ router.put("/:id/reject", requirePageRight("crm-bookings", "edit"), async (req, 
     return res.status(403).json({ error: "You are not authorised to reject booking amendments" });
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const notes = req.body?.Notes || null;
 
     const row = await pool.request().input("id", sql.Int, id)

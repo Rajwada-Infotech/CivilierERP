@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -177,7 +178,8 @@ router.put("/:id", requirePageRight("crm-possession-notice", "edit"), async (req
   try {
     const pool = getPool();
     const b = req.body;
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const cur = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId FROM dbo.CrmPossessionNotice WHERE Id = @id");
@@ -211,7 +213,8 @@ router.put("/:id", requirePageRight("crm-possession-notice", "edit"), async (req
 router.put("/:id/mark-sent", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const actor = actorId(req);
 
@@ -246,7 +249,8 @@ router.put("/:id/mark-sent", requirePageRight("crm-possession-notice", "edit"), 
 router.put("/:id/mark-acknowledged", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
 
     const cur = await pool.request().input("id", sql.Int, id)
@@ -275,7 +279,8 @@ router.put("/:id/mark-acknowledged", requirePageRight("crm-possession-notice", "
 router.put("/:id/mark-disputed", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     const actor = actorId(req);
     if (!b.DisputeReason) return res.status(400).json({ error: "DisputeReason is required" });
@@ -310,7 +315,8 @@ router.put("/:id/mark-disputed", requirePageRight("crm-possession-notice", "edit
 router.put("/:id/retract-dispute", requirePageRight("crm-possession-notice", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body || {};
     if (!b.RetractReason?.trim()) {
       return res.status(400).json({ error: "RetractReason is required — document how the dispute was resolved" });

@@ -33,7 +33,7 @@ export const getUsers = async (): Promise<User[]> => {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch users");
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 export const addUser = async (user: {

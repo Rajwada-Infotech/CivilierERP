@@ -28,6 +28,7 @@
 "use strict";
 
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 
@@ -474,7 +475,8 @@ router.get("/pending-summary", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("ID", sql.Int, id).query(`
         SELECT
           v.*,
@@ -778,7 +780,8 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
   const email = userEmail(req, res);
   if (!email) return;
 
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   const {
     docDate,
     companyId,
@@ -969,7 +972,8 @@ router.delete("/:id", requirePageRight("vehicle-in-out", "delete"), async (req, 
   const email = userEmail(req, res);
   if (!email) return;
 
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const check = await pool

@@ -550,8 +550,14 @@ const CrmCustomers: React.FC = () => {
     if (custDeepLinkOpened) return;
     const customerId = searchParams.get("customerId");
     if (!customerId) return;
-    setCustDeepLinkOpened(true);
-    setEditingId(parseInt(customerId));
+    const id = parseInt(customerId, 10);
+    if (id > 0) {
+      setCustDeepLinkOpened(true);
+      setEditingId(id);
+    } else {
+      // Invalid param (0 or NaN) — clear it so the URL doesn't stay dirty
+      setSearchParams((sp) => { sp.delete("customerId"); return sp; }, { replace: true });
+    }
   }, [searchParams, custDeepLinkOpened]);
 
   // Converted leads not yet linked to another (active) customer — the

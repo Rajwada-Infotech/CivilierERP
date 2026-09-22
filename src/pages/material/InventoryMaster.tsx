@@ -373,6 +373,7 @@ function DeleteDialog({
       qc.invalidateQueries({ queryKey: ["godowns"] });
       onClose();
     },
+    onError: (e: Error) => toast.error(e.message || "Failed to delete godown"),
   });
 
   // Reset stale error state when the dialog opens for a new godown

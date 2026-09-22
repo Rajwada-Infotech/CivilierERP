@@ -18,7 +18,7 @@ function safeArray<T>(raw: unknown): T[] {
 export const getWorkOrders = async () => {
   const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
-  return res.json().catch(() => ({}));
+  return res.json().catch(() => []);
 };
 
 export const getWorkOrder = async (id: number) => {

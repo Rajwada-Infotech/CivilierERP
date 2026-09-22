@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const apiRateLimit = require("../middleware/apiRateLimit");
@@ -126,7 +127,8 @@ router.get("/queue", requirePageRight("crm-welcome-calls", "view"), async (req, 
 router.get("/:bookingId/checklist", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
 
     const [welcome, callCount, docs, coApplicants, bankDetail, noc, agreement] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId)
@@ -192,7 +194,8 @@ router.get("/:bookingId/checklist", requirePageRight("crm-welcome-calls", "view"
 router.get("/:bookingId/call-context", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
 
     const [bkRes, custRes, milRes, invRes, loanRes, oaRes, mrRes, recentCallsRes, padRes] = await Promise.all([
       pool.request().input("bid", sql.Int, bookingId).query(`
@@ -502,7 +505,8 @@ router.post("/", requirePageRight("crm-welcome-calls", "create"), async (req, re
 router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const b = req.body;
     if (b.Outcome && !OUTCOMES.includes(b.Outcome))
       return res.status(400).json({ error: `Invalid Outcome. Must be: ${OUTCOMES.join(", ")}` });
@@ -626,7 +630,8 @@ router.put("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, re
 router.put("/:bookingId/financing-type", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const { FinancingType } = req.body;
 
     if (!["SelfFunded", "LoanFinanced"].includes(FinancingType)) {
@@ -663,7 +668,8 @@ router.put("/:bookingId/financing-type", requirePageRight("crm-welcome-calls", "
 router.get("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const result = await pool.request()
       .input("bid", sql.Int, bookingId)
       .query(`
@@ -684,7 +690,8 @@ router.get("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls",
 router.post("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls", "create"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
     const { BankName, Remarks } = req.body;
 
     if (!BankName || !String(BankName).trim()) {
@@ -719,8 +726,10 @@ router.post("/:bookingId/bank-preferences", requirePageRight("crm-welcome-calls"
 router.delete("/:bookingId/bank-preferences/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const bookingId = parseInt(req.params.bookingId);
-    const id = parseInt(req.params.id);
+    const bookingId = parseId(req.params.bookingId);
+    if (!bookingId) return res.status(400).json({ error: "Invalid bookingId" });
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const existing = await pool.request()
       .input("id",  sql.Int, id)
@@ -746,7 +755,8 @@ router.delete("/:bookingId/bank-preferences/:id", requirePageRight("crm-welcome-
 router.delete("/:id", requirePageRight("crm-welcome-calls", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const call = await pool.request().input("id", sql.Int, id)
       .query("SELECT BookingId, Outcome FROM dbo.CrmWelcomeCall WHERE Id = @id");
     if (!call.recordset.length) return res.status(404).json({ error: "Call log not found" });

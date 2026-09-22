@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -250,7 +251,8 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
   try {
     const pool = getPool();
     const b = req.body;
-    const leadId = parseInt(req.params.id);
+    const leadId = parseId(req.params.id);
+    if (!leadId) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
 
     // Fetch current state for transition validation + audit comparison
@@ -439,7 +441,8 @@ router.put("/:id", requirePageRight("sa-leads", "edit"), async (req, res) => {
 router.get("/:id/audit", requirePageRight("sa-leads", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const leadId = parseInt(req.params.id, 10);
+    const leadId = parseId(req.params.id);
+    if (!leadId) return res.status(400).json({ error: "Invalid id" });
     // Verify caller has scope access to this lead before returning its audit trail
     if (!isSaAdmin(req)) {
       const scopeReq = pool.request();
@@ -481,7 +484,8 @@ router.delete("/:id", requirePageRight("sa-leads", "view"), async (req, res) => 
 router.put("/:id/convert", requirePageRight("sa-leads", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const scopeReq = pool.request().input("id", sql.Int, id);
     const scope = applyLeadScope(scopeReq, req, "l");
     const owned = await scopeReq.query(`SELECT Id FROM dbo.SaLead l WHERE l.Id = @id AND (${scope})`);
@@ -498,7 +502,8 @@ router.put("/:id/convert", requirePageRight("sa-leads", "edit"), async (req, res
 router.post("/:id/promote-followup", requirePageRight("sa-leads", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const scopeReq = pool.request().input("id", sql.Int, id);
     const scope = applyLeadScope(scopeReq, req, "l");
     const owned = await scopeReq.query(`SELECT Id FROM dbo.SaLead l WHERE l.Id = @id AND (${scope})`);

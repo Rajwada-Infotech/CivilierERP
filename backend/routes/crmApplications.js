@@ -1,4 +1,5 @@
 const express = require("express");
+const { parseId } = require("../middleware/validateRequest");
 const { CrmStatus } = require("../constants/crmStatuses");
 const router = express.Router();
 const { getPool, sql } = require("../db");
@@ -290,7 +291,8 @@ router.get("/stage-counts", requirePageRight("crm-applications", "view"), async 
 router.get("/:id", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const [appRes, bookRes, logRes] = await Promise.all([
       pool.request().input("id", sql.Int, id).query(`${APP_SELECT} WHERE a.Id = @id`),
       pool.request().input("id", sql.Int, id).query(`
@@ -325,7 +327,8 @@ router.get("/:id", requirePageRight("crm-applications", "view"), async (req, res
 router.get("/:id/pdf", requirePageRight("crm-applications", "view"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id, 10);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const appRow = await pool.request().input("id", sql.Int, id).query(`
       SELECT a.ApplicationNo, a.Status,
              bk.Id AS BookingId, bk.Status AS BookingStatus
@@ -390,7 +393,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
   try {
     const pool = getPool();
     const b = req.body;
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
 
     const existing = await pool.request().input("id", sql.Int, id)
@@ -640,7 +644,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
 // no-op branch below runs for every normal first-time submit since POST /
 // already inserts new Applications straight into 'Pending'.
 router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
@@ -896,7 +901,8 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
 // failed (unit taken in the interim, plan unresolved, etc.) and staff need
 // to retry by hand once the underlying issue is fixed.
 router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const actor = actorId(req);
@@ -958,7 +964,8 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
 router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
     const remarks = req.body?.Remarks || null;
 
     // An Application with an active Booking must be cancelled through the
@@ -1009,7 +1016,8 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
 // booking must be handled from the booking side; this endpoint is only for
 // pre-booking mistakes/noise that should disappear from the active lists.
 router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
-  const id = parseInt(req.params.id, 10);
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
     const pool = getPool();
     const appRes = await pool.request().input("id", sql.Int, id).query(`
