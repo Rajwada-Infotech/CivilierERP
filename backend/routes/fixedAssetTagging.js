@@ -440,7 +440,10 @@ router.put("/:id", requirePageRight("fixed-asset-tagging", "edit"), async (req, 
   }
 });
 
-// ── DELETE /:id — soft-cancel, frees the tagged qty back to the batch ────────
+// ── DELETE /:id — permanently removes the tag, frees the tagged qty back to
+// the batch. Blocked if a Fixed Asset Record was already cut from this tag —
+// that record must be deleted first (chain order: Assignment/Transfer ->
+// Record -> Tagging, reverse of how they're created).
 router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
@@ -461,16 +464,15 @@ router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (
       `);
       const tag = tagRes.recordset[0];
       if (!tag) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
-      if (tag.Status === "Cancelled") { await tx.rollback(); return res.json({ ok: true }); }
 
       // A tag that's already been completed into a Fixed Asset Record
-      // can't be cancelled out from under it — that would leave a live
-      // asset record referencing a "Cancelled" tag in its own history.
+      // can't be removed out from under it — that would leave a live
+      // asset record referencing a tag that no longer exists.
       // Delete the Fixed Asset Record first (frees the FA Item Code back
-      // to "unassigned"), then the tag can be cancelled.
+      // to "unassigned"), then the tag can be deleted.
       const recordRes = await tx.request().input("TagId", sql.Int, id).query(`
         SELECT AssetId FROM dbo.FixedAssetRecord WITH (UPDLOCK, HOLDLOCK)
-        WHERE SourceTagId = @TagId AND Status <> 'Deleted'
+        WHERE SourceTagId = @TagId
       `);
       if (recordRes.recordset.length > 0) {
         await tx.rollback();
@@ -478,13 +480,8 @@ router.delete("/:id", requirePageRight("fixed-asset-tagging", "delete"), async (
       }
 
       await tx.request()
-        .input("TagId",     sql.Int, id)
-        .input("UpdatedBy", sql.NVarChar(200), email)
-        .query(`
-          UPDATE dbo.FixedAssetTagging
-          SET Status = 'Cancelled', UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
-          WHERE TagId = @TagId
-        `);
+        .input("TagId", sql.Int, id)
+        .query(`DELETE FROM dbo.FixedAssetTagging WHERE TagId = @TagId`);
 
       // Freeing this qty means the batch can no longer be fully tagged —
       // revert it to Pending if it had been auto-flipped to Active.

@@ -43,6 +43,7 @@ import {
   Lock,
 } from "lucide-react";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
+import { printStatusLabel } from "@/utils/printStatus";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { ExportMenu } from "@/components/ExportMenu";
 import {
@@ -86,7 +87,7 @@ const GRN_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "PO Number", accessor: "PONumber" },
   { header: "Company", accessor: "CompanyName" },
   { header: "Project", accessor: "ProjectName" },
-  { header: "Status", accessor: "Status" },
+  { header: "Status", accessor: (r) => printStatusLabel(r.Status as string) },
 ];
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -1322,7 +1323,7 @@ export default function GRN() {
     }
     setLoadingPO(true);
     try {
-      const res = await fetchWithAuth(`/api/purchase-orders/${poId}`);
+      const res = await fetchWithAuth(`/api/grns/po/${poId}`);
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 
@@ -1493,7 +1494,7 @@ export default function GRN() {
 
     setLoadingPO(true);
     try {
-      const res = await fetchWithAuth(`/api/purchase-orders/${pending.poId}`);
+      const res = await fetchWithAuth(`/api/grns/po/${pending.poId}`);
       if (!res.ok) throw new Error("Failed to fetch PO details");
       const po = await res.json();
 

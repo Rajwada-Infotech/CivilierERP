@@ -44,6 +44,7 @@ import {
   Download,
   Upload,
   Loader2,
+  Landmark,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
 import {
@@ -127,6 +128,11 @@ interface Contractor {
   GroupName: string | null;
   isTdsApplicable: boolean;
   tdsLimitApplicable: boolean;
+  // Bank Details — all optional
+  bankAccountNo: string | null;
+  bankIfscCode: string | null;
+  bankName: string | null;
+  bankBranchCode: string | null;
 }
 
 interface AccountGroup {
@@ -153,6 +159,11 @@ interface ContractorForm {
   LHeadStatus: boolean;
   isTdsApplicable: boolean;
   tdsLimitApplicable: boolean;
+  // Bank Details — all optional
+  bankAccountNo: string;
+  bankIfscCode: string;
+  bankName: string;
+  bankBranchCode: string;
 }
 
 const EMPTY_FORM: ContractorForm = {
@@ -175,6 +186,10 @@ const EMPTY_FORM: ContractorForm = {
   // the rare contractor this doesn't apply to.
   isTdsApplicable: true,
   tdsLimitApplicable: true,
+  bankAccountNo: "",
+  bankIfscCode: "",
+  bankName: "",
+  bankBranchCode: "",
 };
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
@@ -189,13 +204,17 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Payment Terms", accessor: "LHeadPaymentTerms" },
   {
     header: "Group",
-    accessor: (r) => (r.LBelongsTo != null ? String(r.LBelongsTo) : "—"),
+    accessor: (r) => (r.GroupName as string) || "—",
   },
   { header: "Address", accessor: "LHeadAddress" },
   {
     header: "Status",
     accessor: (r) => (r.LHeadStatus ? "Active" : "Inactive"),
   },
+  { header: "Bank Account No", accessor: "bankAccountNo" },
+  { header: "Bank Name", accessor: "bankName" },
+  { header: "Bank Branch Location", accessor: "bankBranchCode" },
+  { header: "IFSC Code", accessor: "bankIfscCode" },
 ];
 
 // ─── CSV template / import column mapping ─────────────────────────────────────
@@ -480,6 +499,10 @@ const ContractorMaster: React.FC = () => {
       GroupName: item.GroupName ?? null,
       isTdsApplicable: Boolean(item.IsTdsApplicable),
       tdsLimitApplicable: item.TdsLimitApplicable == null ? true : Boolean(item.TdsLimitApplicable),
+      bankAccountNo: item.LAccountNo || null,
+      bankIfscCode: item.LIFSCCode || null,
+      bankName: item.LBankName || null,
+      bankBranchCode: item.LBranchCode || null,
     }));
   }, [rawData]);
 
@@ -507,6 +530,10 @@ const ContractorMaster: React.FC = () => {
     LDescription: null,
     IsTdsApplicable: f.isTdsApplicable,
     TdsLimitApplicable: f.tdsLimitApplicable,
+    LAccountNo: f.bankAccountNo || null,
+    LIFSCCode: f.bankIfscCode || null,
+    LBankName: f.bankName || null,
+    LBranchCode: f.bankBranchCode || null,
   });
 
   const createMut = useMutation({
@@ -674,6 +701,11 @@ const ContractorMaster: React.FC = () => {
             LHeadStatus: isActive,
             isTdsApplicable: true,
             tdsLimitApplicable: true,
+            // CSV template has no bank-details columns — always blank on import.
+            bankAccountNo: "",
+            bankIfscCode: "",
+            bankName: "",
+            bankBranchCode: "",
           };
 
           await addRecord(buildPayload(rowForm), CONTRACTOR_TYPE);
@@ -746,6 +778,10 @@ const ContractorMaster: React.FC = () => {
       LHeadStatus: c.LHeadStatus,
       isTdsApplicable: c.isTdsApplicable,
       tdsLimitApplicable: c.tdsLimitApplicable,
+      bankAccountNo: c.bankAccountNo ?? "",
+      bankIfscCode: c.bankIfscCode ?? "",
+      bankName: c.bankName ?? "",
+      bankBranchCode: c.bankBranchCode ?? "",
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -795,6 +831,10 @@ const ContractorMaster: React.FC = () => {
         <tr><td>Group</td><td>${c.LBelongsTo != null ? (accountGroups.find((g) => g._id === String(c.LBelongsTo))?.name ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${c.LHeadAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${c.LHeadStatus ? "Active" : "Inactive"}</td></tr>
+        <tr><td>Bank Account Number</td><td>${c.bankAccountNo || "—"}</td></tr>
+        <tr><td>Bank Name</td><td>${c.bankName || "—"}</td></tr>
+        <tr><td>Bank Branch Location</td><td>${c.bankBranchCode || "—"}</td></tr>
+        <tr><td>IFSC Code</td><td>${c.bankIfscCode || "—"}</td></tr>
       </table>
       </body></html>
     `);
@@ -1270,6 +1310,76 @@ const ContractorMaster: React.FC = () => {
               </div>
             </div>
 
+            {/* ── Section: Bank Details — all fields optional ── */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <Landmark size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Bank Details
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-6 gap-y-5">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Bank Account Number
+                  </label>
+                  <input
+                    value={form.bankAccountNo}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, bankAccountNo: e.target.value }))
+                    }
+                    placeholder="e.g. 123456789012"
+                    className={`${inputCls} font-mono`}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Bank Name
+                  </label>
+                  <input
+                    value={form.bankName}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, bankName: e.target.value }))
+                    }
+                    placeholder="e.g. State Bank of India"
+                    className={inputCls}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Bank Branch Location
+                  </label>
+                  <input
+                    value={form.bankBranchCode}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, bankBranchCode: e.target.value }))
+                    }
+                    placeholder="e.g. Mumbai Main Branch"
+                    className={`${inputCls} font-mono`}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    IFSC Code
+                  </label>
+                  <input
+                    value={form.bankIfscCode}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        bankIfscCode: e.target.value.toUpperCase(),
+                      }))
+                    }
+                    placeholder="e.g. SBIN0001234"
+                    maxLength={11}
+                    className={`${inputCls} font-mono`}
+                  />
+                </div>
+              </div>
+            </div>
+
             {/* ── Status toggle ── */}
             <div className="flex items-center gap-3 pt-1">
               <button
@@ -1616,6 +1726,10 @@ const ContractorMaster: React.FC = () => {
                 { label: "TDS Applicable", value: viewRecord.isTdsApplicable ? "Yes" : "No" },
                 { label: "TDS Limit", value: viewRecord.isTdsApplicable ? (viewRecord.tdsLimitApplicable ? "Applied" : "Deduct on every bill") : "—" },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
+                { label: "Bank Account Number", value: viewRecord.bankAccountNo || "—", mono: true },
+                { label: "Bank Name", value: viewRecord.bankName || "—" },
+                { label: "Bank Branch Location", value: viewRecord.bankBranchCode || "—", mono: true },
+                { label: "IFSC Code", value: viewRecord.bankIfscCode || "—", mono: true },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">

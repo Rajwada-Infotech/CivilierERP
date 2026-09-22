@@ -7,6 +7,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { transition } = require("../services/approvalService");
 
 router.use(checkPermissionForMethod("Material", "StockTransfer"));
 
@@ -77,14 +78,14 @@ router.get("/", cache("stock-transfers", 60), async (req, res) => {
 });
 
 // ─── POST create transfer ─────────────────────────────────────────────────────
-// This is the core warehouse transfer logic:
-//   1. Validate stock availability in FromGodown
-//   2. Insert OUT entries in StockLedger for FromGodown
-//   3. Insert IN  entries in StockLedger for ToGodown
-//   4. Record the StockTransfer header
+// Validates stock availability up front (fast feedback), but no longer moves
+// any stock here — the record is created as a Draft and auto-submitted for
+// approval; the actual StockLedger IN/OUT rows are only written once the
+// transfer is fully approved (see PUT /:id/approve below), so an approval
+// workflow configured for it genuinely gates the stock movement instead of
+// the movement already having happened before anyone could approve it.
 router.post("/", requirePageRight("stock-transfers", "create"), async (req, res) => {
   const pool = getPool();
-  const transaction = pool.transaction();
   try {
     const {
       FromGodownID,
@@ -112,15 +113,17 @@ router.post("/", requirePageRight("stock-transfers", "create"), async (req, res)
     const userEmail = req.user?.email || null;
     const tDate = TransferDate || new Date().toISOString().slice(0, 10);
 
-    await transaction.begin();
-
     // ── Validate available stock per item in FromGodown ──────────────────────
+    // Informational at this stage — the authoritative check happens again at
+    // approval time, since availability can change while this is Pending.
     for (const item of items) {
       const { itemId, qty } = item;
       if (!itemId || !(Number(qty) > 0))
-        throw new Error(`Invalid item entry: itemId=${itemId} qty=${qty}`);
+        return res
+          .status(400)
+          .json({ error: `Invalid item entry: itemId=${itemId} qty=${qty}` });
 
-      const avail = await transaction
+      const avail = await pool
         .request()
         .input("itemId", sql.NVarChar(100), String(itemId))
         .input("godownId", sql.Int, parseInt(FromGodownID)).query(`
@@ -131,13 +134,13 @@ router.post("/", requirePageRight("stock-transfers", "create"), async (req, res)
 
       const available = Number(avail.recordset[0].Available || 0);
       if (available < Number(qty))
-        throw new Error(
-          `Insufficient stock for item ${item.itemName || itemId}: available=${available}, requested=${qty}`,
-        );
+        return res.status(400).json({
+          error: `Insufficient stock for item ${item.itemName || itemId}: available=${available}, requested=${qty}`,
+        });
     }
 
     // ── Build a doc number (simple sequential: TRF-YYYYMMDD-N) ──────────────
-    const countRes = await transaction.request().query(`
+    const countRes = await pool.request().query(`
       SELECT COUNT(1)+1 AS N FROM dbo.StockTransfers
       WHERE CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE)
     `);
@@ -145,39 +148,8 @@ router.post("/", requirePageRight("stock-transfers", "create"), async (req, res)
     const ymd = tDate.replace(/-/g, "");
     const docNo = `TRF-${ymd}-${seq}`;
 
-    // ── Insert StockLedger rows ──────────────────────────────────────────────
-    for (const item of items) {
-      const itemId = String(item.itemId);
-      const qty = Number(item.qty);
-      const uom = item.uom || null;
-
-      // OUT from source
-      await transaction
-        .request()
-        .input("ItemID", sql.NVarChar(50), itemId)
-        .input("Qty", sql.Decimal(18, 2), qty)
-        .input("UOM", sql.NVarChar(20), uom)
-        .input("GodownID", sql.Int, parseInt(FromGodownID))
-        .input("DocNo", sql.NVarChar(100), docNo).query(`
-          INSERT INTO dbo.StockLedger (ItemID,Qty,UOM,Type,RefType,RefID,GodownID,DocNo,CreatedDate)
-          VALUES (@ItemID,@Qty,@UOM,'OUT','TRF',0,@GodownID,@DocNo,GETDATE())
-        `);
-
-      // IN to destination
-      await transaction
-        .request()
-        .input("ItemID", sql.NVarChar(50), itemId)
-        .input("Qty", sql.Decimal(18, 2), qty)
-        .input("UOM", sql.NVarChar(20), uom)
-        .input("GodownID", sql.Int, parseInt(ToGodownID))
-        .input("DocNo", sql.NVarChar(100), docNo).query(`
-          INSERT INTO dbo.StockLedger (ItemID,Qty,UOM,Type,RefType,RefID,GodownID,DocNo,CreatedDate)
-          VALUES (@ItemID,@Qty,@UOM,'IN','TRF',0,@GodownID,@DocNo,GETDATE())
-        `);
-    }
-
-    // ── Insert StockTransfers header ─────────────────────────────────────────
-    const insertRes = await transaction
+    // ── Insert StockTransfers header — Draft, no ledger rows yet ─────────────
+    const insertRes = await pool
       .request()
       .input("DocNo", sql.NVarChar(100), docNo)
       .input("TransferDate", sql.Date, tDate)
@@ -190,24 +162,168 @@ router.post("/", requirePageRight("stock-transfers", "create"), async (req, res)
           (DocNo, TransferDate, FromGodownID, ToGodownID, TransferItems, Remarks, Status, CreatedBy)
         OUTPUT INSERTED.TransferID
         VALUES
-          (@DocNo, @TransferDate, @FromGodownID, @ToGodownID, @TransferItems, @Remarks, 'Completed', @CreatedBy)
+          (@DocNo, @TransferDate, @FromGodownID, @ToGodownID, @TransferItems, @Remarks, 'Draft', @CreatedBy)
       `);
+    const transferId = insertRes.recordset[0].TransferID;
 
-    await transaction.commit();
     await bumpCacheVersion("stock-transfers");
-    await bumpCacheVersion("inventory-master");
+
+    // Auto-submit: transition Draft → Pending immediately so no manual
+    // "Submit" step is required after creation (same pattern as Material
+    // Requests / Vehicle In-Out). Non-fatal — record is saved either way.
+    try {
+      await transition("stock-transfers", transferId, "Pending", userEmail, req.user?.role);
+    } catch (submitErr) {
+      console.warn("[stock-transfers] auto-submit failed (non-fatal):", submitErr.message);
+    }
 
     res.status(201).json({
-      TransferID: insertRes.recordset[0].TransferID,
+      TransferID: transferId,
       DocNo: docNo,
-      message: "Stock transfer completed successfully",
+      message: "Stock transfer created and submitted for approval",
     });
   } catch (err) {
-    try {
-      await transaction.rollback();
-    } catch {}
     console.error("[stock-transfers] POST /:", err.message);
     res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/submit — Draft/Rejected → Pending ────────────────────────────────
+// Records are auto-submitted on creation; this is only needed to re-submit
+// after a rejection (or as a fallback if auto-submit failed).
+router.put("/:id/submit", requirePageRight("stock-transfers", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const result = await transition("stock-transfers", id, "Pending", req.user?.email, req.user?.role);
+    await bumpCacheVersion("stock-transfers");
+    res.json({ message: "Submitted for approval", ...result });
+  } catch (err) {
+    res.status(err.status || (err.message.includes("not authorized") ? 403 : 400)).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve — posts stock on final approval ──────────────────────────
+router.put("/:id/approve", requirePageRight("stock-transfers", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  const pool = getPool();
+  try {
+    const result = await transition("stock-transfers", id, "Approved", req.user?.email, req.user?.role, null, req.user?.userId ?? req.user?.id ?? null);
+
+    // Only once the record is genuinely fully approved (transition() itself
+    // is the authority on this — it already accounts for multi-level and
+    // "everyone must approve" steps) does the actual stock movement happen.
+    let postWarning = null;
+    if (result.newStatus === "Approved") {
+      const transaction = pool.transaction();
+      await transaction.begin();
+      try {
+        // Lock the row so two concurrent final approvals can't both see
+        // PostedToStock=0 and both post (double OUT/IN movement).
+        const headerRes = await transaction
+          .request()
+          .input("id", sql.Int, id)
+          .query(
+            `SELECT TransferID, DocNo, FromGodownID, ToGodownID, TransferItems, PostedToStock
+             FROM dbo.StockTransfers WITH (UPDLOCK, HOLDLOCK) WHERE TransferID=@id`,
+          );
+        const header = headerRes.recordset[0];
+        if (!header) throw new Error("Stock transfer not found");
+
+        if (!header.PostedToStock) {
+          const items = parseItems(header.TransferItems);
+
+          // Re-validate availability — time has passed since submission and
+          // stock could have moved elsewhere in the meantime.
+          for (const item of items) {
+            const { itemId, qty } = item;
+            const avail = await transaction
+              .request()
+              .input("itemId", sql.NVarChar(100), String(itemId))
+              .input("godownId", sql.Int, header.FromGodownID).query(`
+                SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
+                FROM dbo.StockLedger
+                WHERE ItemID = @itemId AND GodownID = @godownId
+              `);
+            const available = Number(avail.recordset[0].Available || 0);
+            if (available < Number(qty))
+              throw new Error(
+                `Insufficient stock for item ${item.itemName || itemId}: available=${available}, requested=${qty}`,
+              );
+          }
+
+          for (const item of items) {
+            const itemId = String(item.itemId);
+            const qty = Number(item.qty);
+            const uom = item.uom || null;
+
+            await transaction
+              .request()
+              .input("ItemID", sql.NVarChar(50), itemId)
+              .input("Qty", sql.Decimal(18, 2), qty)
+              .input("UOM", sql.NVarChar(20), uom)
+              .input("GodownID", sql.Int, header.FromGodownID)
+              .input("DocNo", sql.NVarChar(100), header.DocNo)
+              .input("RefID", sql.Int, id).query(`
+                INSERT INTO dbo.StockLedger (ItemID,Qty,UOM,Type,RefType,RefID,GodownID,DocNo,CreatedDate)
+                VALUES (@ItemID,@Qty,@UOM,'OUT','TRF',@RefID,@GodownID,@DocNo,GETDATE())
+              `);
+
+            await transaction
+              .request()
+              .input("ItemID", sql.NVarChar(50), itemId)
+              .input("Qty", sql.Decimal(18, 2), qty)
+              .input("UOM", sql.NVarChar(20), uom)
+              .input("GodownID", sql.Int, header.ToGodownID)
+              .input("DocNo", sql.NVarChar(100), header.DocNo)
+              .input("RefID", sql.Int, id).query(`
+                INSERT INTO dbo.StockLedger (ItemID,Qty,UOM,Type,RefType,RefID,GodownID,DocNo,CreatedDate)
+                VALUES (@ItemID,@Qty,@UOM,'IN','TRF',@RefID,@GodownID,@DocNo,GETDATE())
+              `);
+          }
+
+          await transaction
+            .request()
+            .input("id", sql.Int, id)
+            .query(`UPDATE dbo.StockTransfers SET PostedToStock = 1 WHERE TransferID = @id`);
+        }
+
+        await transaction.commit();
+      } catch (postErr) {
+        try {
+          await transaction.rollback();
+        } catch {}
+        // The approval itself already committed via transition() above — do
+        // not fail the request over this, but surface it clearly so it can
+        // be reconciled (same tolerance the GL-posting modules use for a
+        // post-approval posting failure).
+        console.error(`[stock-transfers] stock posting failed for #${id} after approval:`, postErr.message);
+        postWarning = `Approved, but stock could not be posted: ${postErr.message}`;
+      }
+    }
+
+    await bumpCacheVersion("stock-transfers");
+    await bumpCacheVersion("inventory-master");
+    res.json({ message: "Stock transfer approved", ...result, ...(postWarning ? { warning: postWarning } : {}) });
+  } catch (err) {
+    res.status(err.status || (err.message.includes("not authorized") ? 403 : 400)).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject ────────────────────────────────────────────────────────────
+// Nothing was ever posted to StockLedger before approval, so there is
+// nothing to reverse here.
+router.put("/:id/reject", requirePageRight("stock-transfers", "edit"), async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const { note } = req.body || {};
+    const result = await transition("stock-transfers", id, "Rejected", req.user?.email, req.user?.role, note || null, req.user?.userId ?? req.user?.id ?? null);
+    await bumpCacheVersion("stock-transfers");
+    res.json({ message: "Stock transfer rejected", ...result });
+  } catch (err) {
+    res.status(err.status || (err.message.includes("not authorized") ? 403 : 400)).json({ error: err.message });
   }
 });
 

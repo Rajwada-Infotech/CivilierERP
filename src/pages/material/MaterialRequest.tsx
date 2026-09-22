@@ -182,7 +182,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Company", accessor: "CompanyName" },
   { header: "Project", accessor: "ProjectName" },
   { header: "Item Count", accessor: (r) => Number(r.ItemCount) || 0 },
-  { header: "Total Qty", accessor: (r) => Number(r.TotalQty) || 0 },
+  { header: "Qty (by UOM)", accessor: (r) => (r.QtyByUom as string) || "—" },
   { header: "Requested", accessor: (r) => fmtDate(r.RequestDate as string) },
   { header: "Required By", accessor: (r) => fmtDate(r.RequiredByDate as string) },
   { header: "Status", accessor: "Status" },
@@ -370,6 +370,39 @@ export default function MaterialRequest() {
     return m;
   }, [uoms]);
 
+  // ── Required By Date floor ───────────────────────────────────────────────────
+  // The slowest item in the cart to supply sets how soon the whole request can
+  // realistically be required by: Required By Date >= Request Date + the
+  // longest Days of Supply among the cart's items. The user can still push it
+  // later, just never earlier.
+  const maxDaysOfSupply = useMemo(() => {
+    let max = 0;
+    for (const ci of cart) {
+      const days = Number(itemMap[ci.ItemId]?.DaysOfSupply ?? 0);
+      if (days > max) max = days;
+    }
+    return max;
+  }, [cart, itemMap]);
+
+  const minRequiredByDate = useMemo(() => {
+    if (!maxDaysOfSupply || !header.requestDate) return "";
+    const d = new Date(`${header.requestDate}T00:00:00`);
+    if (isNaN(d.getTime())) return "";
+    d.setDate(d.getDate() + maxDaysOfSupply);
+    return d.toISOString().slice(0, 10);
+  }, [header.requestDate, maxDaysOfSupply]);
+
+  // Keep Required By Date auto-advanced to the floor: fill it in when it's
+  // still blank, and pull it forward if the cart's items (or the request
+  // date) push the floor past whatever was already chosen. Never pulls it
+  // back once the user has picked something later — only forward.
+  useEffect(() => {
+    if (!minRequiredByDate) return;
+    if (!header.requiredByDate || header.requiredByDate < minRequiredByDate) {
+      setH("requiredByDate", minRequiredByDate);
+    }
+  }, [minRequiredByDate]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Cart helpers ─────────────────────────────────────────────────────────────
 
   const updateCartItem = useCallback(
@@ -458,8 +491,12 @@ export default function MaterialRequest() {
 
   const updateMutation = useMutation({
     mutationFn: (p: any) => mrApi.updateMaterialRequest(editingId!, p),
-    onSuccess: () => {
-      toast.success("Material Request updated");
+    onSuccess: (res: any) => {
+      toast.success(
+        res?.resubmitted
+          ? "Material Request updated and re-submitted for approval"
+          : "Material Request updated",
+      );
       invalidate();
       setSaved(true);
       setTimeout(() => {
@@ -638,12 +675,23 @@ export default function MaterialRequest() {
       id: "ItemCount",
       accessorKey: "ItemCount",
       header: "Items",
-      size: 140,
+      // 140px wasn't enough room for a QtyByUom string like "1,000.00
+      // Numbers" or "80.00 Square Meter" to fit, and the old markup's
+      // `truncate` sat on an inline span with no defined width to clip
+      // against — inside a fixed-layout table cell that just clips the
+      // overflow raw, mid-character, with no ellipsis at all (the cutoff
+      // in the screenshot). Widened the column and made the qty span an
+      // actual flex item (min-w-0 is what lets `truncate`'s
+      // overflow-hidden/text-ellipsis take effect inside a flex row
+      // instead of the row just growing past its container).
+      size: 220,
       meta: { className: "hidden lg:table-cell" },
       cell: ({ row }) => (
-        <span className="text-sm whitespace-nowrap">
-          <span className="font-semibold">{row.original.ItemCount || 0}</span>
-          <span className="text-muted-foreground ml-1">({(row.original.TotalQty || 0).toFixed(2)} units)</span>
+        <span className="flex items-baseline gap-1 text-sm min-w-0" title={row.original.QtyByUom || ""}>
+          <span className="font-semibold shrink-0">{row.original.ItemCount || 0}</span>
+          {row.original.QtyByUom && (
+            <span className="text-muted-foreground truncate min-w-0">({row.original.QtyByUom})</span>
+          )}
         </span>
       ),
     },
@@ -725,8 +773,9 @@ export default function MaterialRequest() {
             </button>
 
             {/* Update — Draft or Approved (post-approval edits get logged
-                as amendments), or any status for admins */}
-            {rights.canEdit && status !== "Short Closed" && (status === "Draft" || status === "Approved" || isAdmin) && (
+                as amendments), Rejected (saving re-submits it from level 1),
+                or any status for admins */}
+            {rights.canEdit && status !== "Short Closed" && (status === "Draft" || status === "Approved" || status === "Rejected" || isAdmin) && (
               <button
                 type="button"
                 onClick={() => handleEdit(row.original)}
@@ -736,7 +785,9 @@ export default function MaterialRequest() {
                     ? "Edit this request"
                     : status === "Approved"
                       ? "Edit (will be logged as an amendment)"
-                      : "Edit (admin override)"
+                      : status === "Rejected"
+                        ? "Edit and re-submit for approval"
+                        : "Edit (admin override)"
                 }
               >
                 <Edit3 size={15} />
@@ -1101,10 +1152,16 @@ export default function MaterialRequest() {
                 <input
                   type="date"
                   value={header.requiredByDate}
+                  min={minRequiredByDate || undefined}
                   onChange={(e) => setH("requiredByDate", e.target.value)}
                   className={`${inputCls} pl-8`}
                 />
               </div>
+              {maxDaysOfSupply > 0 && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Earliest possible: {minRequiredByDate} ({maxDaysOfSupply}-day supply lead time)
+                </p>
+              )}
             </Field>
           </div>
 
@@ -1630,7 +1687,7 @@ export default function MaterialRequest() {
               >
                 <Printer size={13} /><span className="hidden sm:inline">Print</span>
               </button>
-            {rights.canEdit && viewingRecord.Status !== "Short Closed" && (viewingRecord.Status === "Draft" || viewingRecord.Status === "Approved" || isAdmin) && (
+            {rights.canEdit && viewingRecord.Status !== "Short Closed" && (viewingRecord.Status === "Draft" || viewingRecord.Status === "Approved" || viewingRecord.Status === "Rejected" || isAdmin) && (
               <button
                 onClick={() => { closeOverlay(); handleEdit(viewingRecord); }}
                 className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
@@ -1734,18 +1791,35 @@ export default function MaterialRequest() {
                     ))
                   )}
                 </tbody>
-                {items.length > 0 && (
-                  <tfoot className="bg-muted/20 border-t border-border">
-                    <tr>
-                      <td className="px-4 py-2.5 text-xs font-semibold text-muted-foreground">Total</td>
-                      <td className="hidden sm:table-cell" />
-                      <td className="px-4 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                        {items.reduce((s, it) => s + Number(it.Quantity), 0).toFixed(2)}
-                      </td>
-                      <td className="hidden sm:table-cell" />
-                    </tr>
-                  </tfoot>
-                )}
+                {items.length > 0 && (() => {
+                  // Quantities in different UOMs aren't fungible (bags vs.
+                  // metric tons), so a single blind sum across every row was
+                  // meaningless — total per UOM group instead, one row each.
+                  const totalsByUom = new Map<string, number>();
+                  for (const it of items) {
+                    const uom = it.UOMName || it.UOMCode || "—";
+                    totalsByUom.set(uom, (totalsByUom.get(uom) || 0) + Number(it.Quantity));
+                  }
+                  const uomTotals = Array.from(totalsByUom.entries());
+                  return (
+                    <tfoot className="bg-muted/20 border-t border-border">
+                      {uomTotals.map(([uom, qty], i) => (
+                        <tr key={uom}>
+                          <td className="px-4 py-2.5 text-xs font-semibold text-muted-foreground">
+                            {i === 0 ? "Total" : ""}
+                          </td>
+                          <td className="px-4 py-2.5 text-muted-foreground hidden sm:table-cell">
+                            {uomTotals.length > 1 ? uom : ""}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                            {qty.toFixed(2)}{uomTotals.length === 1 ? ` ${uom}` : ""}
+                          </td>
+                          <td className="hidden sm:table-cell" />
+                        </tr>
+                      ))}
+                    </tfoot>
+                  );
+                })()}
               </table>
             </div>
           </div>

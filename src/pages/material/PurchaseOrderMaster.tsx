@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
+import { printStatusLabel } from "@/utils/printStatus";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -242,7 +243,7 @@ const PO_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Company", accessor: "companyName" },
   { header: "Project", accessor: "projectName" },
   { header: "Total Amount", accessor: (r) => Number(r.totalAmount) || 0 },
-  { header: "Status", accessor: "status" },
+  { header: "Status", accessor: (r) => printStatusLabel(r.status as string) },
   { header: "Type", accessor: "poType" },
 ];
 
@@ -612,6 +613,17 @@ const PurchaseOrderMaster: React.FC = () => {
     const compState = normalizeState(companyDetails?.state);
     return !supState || !compState || supState === compState;
   }, [supplierDetails?.LGSTState, companyDetails?.state]);
+  // A non-GST (Unregistered) supplier can't charge GST at all — an item's
+  // own HSN/item-master rate never applies, regardless of what it's tagged
+  // with. LGSTType is explicit when set; for older rows saved before it
+  // existed (null), fall back to inferring from whether a GST number is on
+  // file, same as SupplierMaster.tsx's own normalizeGSTType.
+  const supplierIsGstRegistered = useMemo(() => {
+    if (!supplierDetails) return true; // no supplier picked yet — don't block entry
+    if (supplierDetails.LGSTType === "Unregistered") return false;
+    if (supplierDetails.LGSTType) return true;
+    return !!supplierDetails.LGST?.trim();
+  }, [supplierDetails]);
   // Reuses CompanyDetails shape — the enterprise table holds Project rows
   // too, so the same getCompanyDetails() lookup gives us the project's
   // address to show as the PO's delivery address.
@@ -774,6 +786,9 @@ const PurchaseOrderMaster: React.FC = () => {
         // Cost Centre tagged on the item (Item Master) — used to auto-fill
         // this PO's own Cost Centre the first time a tagged item is added.
         costCenterId: i.M_CostCenterId ? String(i.M_CostCenterId) : "",
+        // Days of Supply (Item Master) — used to floor Expected Delivery so
+        // it's never sooner than the slowest item on this PO can arrive.
+        daysOfSupply: i.M_DaysOfSupply != null ? Number(i.M_DaysOfSupply) : null,
       })),
     [itemsRaw, itemsGstById],
   );
@@ -793,6 +808,36 @@ const PurchaseOrderMaster: React.FC = () => {
   }, [lineItems, items]);
   const hasMixedItemTypes =
     itemTypesInCart.has("Goods") && itemTypesInCart.has("Service");
+
+  // Expected Delivery floor — never sooner than PO Date + the longest Days
+  // of Supply among the cart's items, since that's the slowest item's own
+  // lead time. The user can still push it later, just never earlier.
+  const maxDaysOfSupply = useMemo(() => {
+    let max = 0;
+    for (const li of lineItems) {
+      const days = items.find((i) => i.id === li.itemId)?.daysOfSupply ?? 0;
+      if (days > max) max = days;
+    }
+    return max;
+  }, [lineItems, items]);
+
+  const minExpectedDate = useMemo(() => {
+    if (!maxDaysOfSupply || !form.poDate) return "";
+    const d = new Date(`${form.poDate}T00:00:00`);
+    if (isNaN(d.getTime())) return "";
+    d.setDate(d.getDate() + maxDaysOfSupply);
+    return d.toISOString().slice(0, 10);
+  }, [form.poDate, maxDaysOfSupply]);
+
+  // Auto-advance Expected Delivery to the floor: fill it when blank, pull it
+  // forward when the cart or PO Date push the floor past what's already
+  // chosen. Never pulls it back once the user has picked something later.
+  useEffect(() => {
+    if (!minExpectedDate || isReadOnly) return;
+    if (!form.expectedDate || form.expectedDate < minExpectedDate) {
+      setField("expectedDate", minExpectedDate);
+    }
+  }, [minExpectedDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tcRecords = useMemo(
     () =>
@@ -871,7 +916,7 @@ const PurchaseOrderMaster: React.FC = () => {
       rejected: { bg: "#fef2f2", color: "#991b1b", border: "#fca5a5" },
     };
     const sc = statusColors[poStatus.toLowerCase()] ?? statusColors.draft;
-    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${escapeHtml(poStatus.toUpperCase())}</span>`;
+    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${escapeHtml(printStatusLabel(poStatus).toUpperCase())}</span>`;
 
     const itemRows = lineItems
       .map(
@@ -1606,13 +1651,17 @@ const PurchaseOrderMaster: React.FC = () => {
     // CGST+SGST; different state → IGST. This is why the identical item can
     // price out differently on two POs raised against two different-state
     // suppliers.
-    const { cgstRate, sgstRate, igstRate, gstRate } = resolveLineGstSplit(
-      Number(item.cgst ?? 0),
-      Number(item.sgst ?? 0),
-      Number(item.igst ?? 0),
-      item.resolvedGstRate ?? 0,
-      isIntraState,
-    );
+    // Skip the HSN/item-master GST rate entirely for a non-GST supplier —
+    // see supplierIsGstRegistered above.
+    const { cgstRate, sgstRate, igstRate, gstRate } = supplierIsGstRegistered
+      ? resolveLineGstSplit(
+          Number(item.cgst ?? 0),
+          Number(item.sgst ?? 0),
+          Number(item.igst ?? 0),
+          item.resolvedGstRate ?? 0,
+          isIntraState,
+        )
+      : { cgstRate: 0, sgstRate: 0, igstRate: 0, gstRate: 0 };
 
     updateLine(idx, {
       itemId,
@@ -1954,7 +2003,7 @@ const PurchaseOrderMaster: React.FC = () => {
       rejected: { bg: "#fef2f2", color: "#991b1b", border: "#fca5a5" },
     };
     const sc = statusColors[poStatus.toLowerCase()] ?? statusColors.draft;
-    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${poStatus.toUpperCase()}</span>`;
+    const statusHtml = `<span style="display:inline-block;margin-top:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sc.bg};color:${sc.color};border:1px solid ${sc.border};letter-spacing:0.05em;">${printStatusLabel(poStatus).toUpperCase()}</span>`;
 
     const lineItemsArr: any[] = Array.isArray(viewingPO.LineItems)
       ? viewingPO.LineItems
@@ -4096,11 +4145,17 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                   <input
                     type="date"
                     value={form.expectedDate}
+                    min={minExpectedDate || undefined}
                     onChange={(e) => setField("expectedDate", e.target.value)}
                     readOnly={isReadOnly}
                     className={`${inputCls} pl-8 ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""} [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
                   />
                 </div>
+                {maxDaysOfSupply > 0 && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Earliest possible: {minExpectedDate} ({maxDaysOfSupply}-day supply lead time)
+                  </p>
+                )}
               </div>
 
               {/* Payment Terms — Invoice computes its Due Date from Vendor

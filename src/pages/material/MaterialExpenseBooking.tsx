@@ -111,6 +111,7 @@ import { ExpenseBookingStatCards } from "./ExpenseBooking/ExpenseBookingStatCard
 import { BookingListToolbar } from "./ExpenseBooking/BookingListToolbar";
 import { BookingPagination } from "./ExpenseBooking/BookingPagination";
 import { DocSelectorPanel } from "./ExpenseBooking/DocSelectorPanel";
+import { PayablePartyCombobox, type PayablePartyGroup } from "./ExpenseBooking/PayablePartyCombobox";
 import { StatusBadge } from "@/components/StatusBadge";
 import { linkSupplierToInvoice } from "./ExpenseBooking/linkSupplierToInvoice";
 import { resolveGstRates, parseGRNItemsFromRaw, derivePOGst } from "./ExpenseBooking/helpers";
@@ -276,12 +277,20 @@ export default function MaterialExpenseBooking() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // A project is available to a company if it's the project's primary
+  // (owning) company, or the company is tagged onto the project via
+  // Project Master's multi-company tagging (dbo.ProjectCompanies).
+  const isProjectVisibleToCompany = useCallback(
+    (p: ProjectOption, companyId: string | number) =>
+      Number(p.company_id) === Number(companyId) ||
+      (p.tagged_company_ids?.split(",") ?? []).includes(String(companyId)),
+    [],
+  );
+
   const filteredProjectOptions = useMemo(() => {
     if (!form.companyId) return projectOptions;
-    return projectOptions.filter(
-      (p) => Number(p.company_id) === Number(form.companyId),
-    );
-  }, [projectOptions, form.companyId]);
+    return projectOptions.filter((p) => isProjectVisibleToCompany(p, form.companyId));
+  }, [projectOptions, form.companyId, isProjectVisibleToCompany]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteBlockInfo, setDeleteBlockInfo] =
     useState<DeleteBlockInfo | null>(null);
@@ -314,10 +323,8 @@ export default function MaterialExpenseBooking() {
   // filter panel (independent of the create/edit form's own company field).
   const filterProjectOptions = useMemo(() => {
     if (!companyFilter) return projectOptions;
-    return projectOptions.filter(
-      (p) => Number(p.company_id) === Number(companyFilter),
-    );
-  }, [projectOptions, companyFilter]);
+    return projectOptions.filter((p) => isProjectVisibleToCompany(p, companyFilter));
+  }, [projectOptions, companyFilter, isProjectVisibleToCompany]);
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
   const [liveEmiSchedule, setLiveEmiSchedule] = useState<
@@ -377,6 +384,16 @@ export default function MaterialExpenseBooking() {
     if (partnerHeads.some((p) => p.id === id)) return `p:${id}`;
     return "";
   }, [form.supplierLHeadId, supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads]);
+  const payablePartyGroups: PayablePartyGroup[] = useMemo(
+    () => [
+      { prefix: "s", label: "Suppliers", options: supplierHeads },
+      { prefix: "c", label: "Contractors", options: contractorHeads },
+      { prefix: "b", label: "Brokers", options: brokerHeads },
+      { prefix: "a", label: "Customers", options: customerHeads },
+      { prefix: "p", label: "Partners", options: partnerHeads },
+    ],
+    [supplierHeads, contractorHeads, brokerHeads, customerHeads, partnerHeads],
+  );
   const [, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [costCenterOptions, setCostCenterOptions] = useState<CostCenterOption[]>([]);
   const [paymentTermOptions, setPaymentTermOptions] = useState<{ Id: number; TermName: string; CreditDays: number | null }[]>([]);
@@ -392,7 +409,7 @@ export default function MaterialExpenseBooking() {
     setCompanyFilter(val);
     if (projectFilter && val) {
       const stillValid = projectOptions.some(
-        (p) => p.label === projectFilter && Number(p.company_id) === Number(val),
+        (p) => p.label === projectFilter && isProjectVisibleToCompany(p, val),
       );
       if (!stillValid) setProjectFilter("");
     }
@@ -1906,18 +1923,10 @@ export default function MaterialExpenseBooking() {
                           />
                         </div>
                       ) : (
-                        <Select
+                        <PayablePartyCombobox
+                          groups={payablePartyGroups}
                           value={supplierSelectValue}
-                          onValueChange={(key) => {
-                            const [prefix, idStr] = key.split(":");
-                            const id = Number(idStr);
-                            const list =
-                              prefix === "s" ? supplierHeads
-                              : prefix === "c" ? contractorHeads
-                              : prefix === "a" ? customerHeads
-                              : prefix === "p" ? partnerHeads
-                              : brokerHeads;
-                            const head = list.find((h) => h.id === id);
+                          onChange={(key, head) => {
                             const name = head?.label ?? "";
                             set("supplier", name);
                             set("supplierLHeadId", head?.id ?? null);
@@ -1949,53 +1958,7 @@ export default function MaterialExpenseBooking() {
                               set("vendorInvoiceDate", new Date().toISOString().split("T")[0]);
                             }
                           }}
-                        >
-                          <SelectTrigger className={selectTriggerCls}>
-                            <SelectValue placeholder="Select Payable Party" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {supplierHeads.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel>Suppliers</SelectLabel>
-                                {supplierHeads.map((s) => (
-                                  <SelectItem key={`s-${s.id}`} value={`s:${s.id}`}>{s.label}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            )}
-                            {contractorHeads.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel>Contractors</SelectLabel>
-                                {contractorHeads.map((c) => (
-                                  <SelectItem key={`c-${c.id}`} value={`c:${c.id}`}>{c.label}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            )}
-                            {brokerHeads.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel>Brokers</SelectLabel>
-                                {brokerHeads.map((b) => (
-                                  <SelectItem key={`b-${b.id}`} value={`b:${b.id}`}>{b.label}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            )}
-                            {customerHeads.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel>Customers</SelectLabel>
-                                {customerHeads.map((cu) => (
-                                  <SelectItem key={`a-${cu.id}`} value={`a:${cu.id}`}>{cu.label}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            )}
-                            {partnerHeads.length > 0 && (
-                              <SelectGroup>
-                                <SelectLabel>Partners</SelectLabel>
-                                {partnerHeads.map((p) => (
-                                  <SelectItem key={`p-${p.id}`} value={`p:${p.id}`}>{p.label}</SelectItem>
-                                ))}
-                              </SelectGroup>
-                            )}
-                          </SelectContent>
-                        </Select>
+                        />
                       )}
                       {selectedDoc?.vendorLabel && (
                         <p className="text-[10px] text-muted-foreground">

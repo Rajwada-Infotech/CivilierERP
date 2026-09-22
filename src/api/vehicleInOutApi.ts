@@ -20,6 +20,8 @@ export interface VehicleAttachment {
   url: string;
 }
 
+export type VehicleInOutItemQuality = "Excellent" | "Good" | "Bad";
+
 /** One line item as saved on this Vehicle In/Out record (GET /:id and GET /:id/items). */
 export interface VehicleInOutLineItem {
   VehicleInOutItemID: number;
@@ -30,6 +32,8 @@ export interface VehicleInOutLineItem {
   ReceivedQty: number;
   /** Real-time photo captured beside "Qty This Lot" at entry time, base64 data URL. */
   PhotoBase64: string | null;
+  /** Quick inspection grade for this line, set at entry time. */
+  Quality: VehicleInOutItemQuality | null;
 }
 
 /** A PO line item together with how much has already been received across
@@ -94,7 +98,12 @@ export interface VehicleInOutPayload {
   remarks: string;
   /** Quantity received against each PO line item in THIS lot — validated
    *  server-side against what's left to receive on the PO before saving. */
-  items: { poItemId: number; receivedQty: number; photoBase64?: string | null }[];
+  items: {
+    poItemId: number;
+    receivedQty: number;
+    photoBase64?: string | null;
+    quality?: VehicleInOutItemQuality | null;
+  }[];
 }
 
 export interface VehicleInOutListResponse {

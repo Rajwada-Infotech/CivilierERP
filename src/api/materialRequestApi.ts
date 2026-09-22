@@ -27,7 +27,9 @@ export interface MaterialRequest {
   ProjectName?: string;
   FinYearName?: string;
   ItemCount?: number;
-  TotalQty?: number;
+  // "120.00 BAG, 1.50 MT" — per-UOM totals, since quantities in different
+  // UOMs can't be blindly summed into one number.
+  QtyByUom?: string;
   CreatedBy?: string;
   CreatedAt?: string;
   items?: MRLineItem[];

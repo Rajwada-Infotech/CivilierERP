@@ -49,6 +49,35 @@ const requireUser = (req, res) => {
   return name;
 };
 
+// The base date + longest lead time (Days of Supply) among the items being
+// requested — RequiredByDate can never be earlier than this, since the
+// slowest item to supply can't arrive any sooner. Mirrors the client-side
+// min-date computation in MaterialRequest.tsx so a direct API call can't
+// bypass it.
+async function computeMinRequiredByDate(pool, baseDate, itemIds) {
+  const hasCol = await pool
+    .request()
+    .query(
+      `SELECT COUNT(1) AS cnt FROM sys.columns
+       WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_DaysOfSupply'`,
+    )
+    .then((r) => r.recordset[0].cnt > 0);
+  if (!hasCol || !itemIds.length) return null;
+
+  const ids = [...new Set(itemIds.map((id) => String(id)))];
+  const result = await pool.request().query(`
+    SELECT MAX(M_DaysOfSupply) AS MaxDays
+    FROM   dbo.Item_Master_Group
+    WHERE  CONVERT(NVARCHAR(50), M_Id) IN (${ids.map((id) => `'${id.replace(/'/g, "''")}'`).join(",")})
+  `);
+  const maxDays = result.recordset[0]?.MaxDays;
+  if (!maxDays || maxDays <= 0) return null;
+
+  const min = new Date(baseDate);
+  min.setDate(min.getDate() + maxDays);
+  return min;
+}
+
 async function ensureTablesExist(pool) {
   // Create MaterialRequests header table if it doesn't exist
   await pool.request().query(`
@@ -150,7 +179,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
       : null;
 
     // Detect optional columns (same pattern as inventoryMaster.js)
-    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate] =
+    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate, hasDaysOfSupply] =
       await Promise.all([
         pool
           .request()
@@ -178,6 +207,13 @@ router.get("/item-options", authenticateToken, async (req, res) => {
           .query(
             `SELECT COUNT(1) AS cnt FROM sys.columns
              WHERE object_id = OBJECT_ID(N'dbo.StockLedger') AND name = N'EntryDate'`,
+          )
+          .then((r) => r.recordset[0].cnt > 0),
+        pool
+          .request()
+          .query(
+            `SELECT COUNT(1) AS cnt FROM sys.columns
+             WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_DaysOfSupply'`,
           )
           .then((r) => r.recordset[0].cnt > 0),
       ]);
@@ -228,6 +264,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
               ${hasUOM ? "img.M_UOM AS DefaultUOM," : "NULL AS DefaultUOM,"}
               uom.UOMName  AS DefaultUOMName,
               uom.Symbol   AS DefaultUOMSymbol,
+              ${hasDaysOfSupply ? "img.M_DaysOfSupply" : "NULL"} AS DaysOfSupply,
               ISNULL(SUM(CASE WHEN sl.Type = 'IN'  THEN sl.Qty ELSE 0 END), 0)
             - ISNULL(SUM(CASE WHEN sl.Type = 'OUT' THEN sl.Qty ELSE 0 END), 0)
               AS AvailableStock
@@ -241,6 +278,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
       WHERE (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
       GROUP BY img.M_Id, img.M_Name, img.M_Type, grp.M_Name
                ${hasUOM ? ", img.M_UOM" : ""},
+               ${hasDaysOfSupply ? "img.M_DaysOfSupply," : ""}
                uom.UOMName, uom.Symbol
       ORDER BY img.M_Name
     `);
@@ -313,7 +351,30 @@ router.get("/", authenticateToken, async (req, res) => {
         ep.name  AS ProjectName,
         fy.FName AS FinYearName,
         COUNT(mri.MRItemId)      AS ItemCount,
-        SUM(mri.Quantity)        AS TotalQty,
+        -- Quantities in different UOMs aren't fungible (e.g. bags vs. metric
+        -- tons) — a single blind SUM(Quantity) across every line item mixed
+        -- them together into one meaningless number. Sum per UOM instead and
+        -- return it as one "120.00 BAG, 1.50 MT" string.
+        (
+          SELECT STUFF((
+            SELECT ', ' + FORMAT(SUM(mri2.Quantity), 'N2') + ' ' + ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, ''))
+            FROM dbo.MaterialRequestItems mri2
+            LEFT JOIN dbo.UOMMaster u2 ON u2.UOMCode = mri2.UOMCode
+            WHERE mri2.MRId = mr.MRId
+            -- Must match the SELECT's grouping expression exactly (SQL Server
+            -- requires the GROUP BY expression to be textually identical to
+            -- the non-aggregated SELECT expression it covers) — this used to
+            -- read ISNULL(u2.UOMName, mri2.UOMCode), one ISNULL short of the
+            -- SELECT's ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, '')), which
+            -- SQL Server doesn't recognize as the same expression. That
+            -- mismatch 500'd this entire list endpoint outright (error 8120)
+            -- every Material Request list request failed, at every
+            -- page/limit, found via a live "material requests aren't
+            -- fetching" report on 2026-09-22.
+            GROUP BY ISNULL(u2.UOMName, ISNULL(mri2.UOMCode, ''))
+            FOR XML PATH('')
+          ), 1, 2, '')
+        )                        AS QtyByUom,
         COUNT(*)  OVER ()        AS _total
       FROM       dbo.MaterialRequests mr WITH (NOLOCK)
       LEFT JOIN  dbo.enterprise  ec  WITH (NOLOCK) ON ec.id  = mr.CompanyId
@@ -491,19 +552,29 @@ router.get("/by-docno/:docNo", authenticateToken, async (req, res) => {
 router.get("/pending-summary", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
+    // SQL Server refuses SUM(ISNULL((SELECT SUM(...) ... WHERE correlated), 0))
+    // outright — "Cannot perform an aggregate function on an expression
+    // containing an aggregate or a subquery" — even though the inner
+    // subquery returns one scalar per outer row. OUTER APPLY computes that
+    // same per-item ordered quantity as its own row first, so the outer
+    // SUM(ISNULL(...)) is only ever aggregating a plain column, not a
+    // nested aggregate subquery. Same semantics, just restructured to be
+    // something SQL Server will actually run. Found live: /pending-summary
+    // 500'd on every request, 2026-09-22.
     const result = await pool.request().query(`
       SELECT
         mri.MRId,
         SUM(mri.Quantity) AS TotalRequested,
-        SUM(ISNULL((
-          SELECT SUM(poi.Quantity)
-          FROM dbo.PurchaseOrderItems poi
-          JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
-          WHERE poi.MRItemId = mri.MRItemId
-            AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
-        ), 0)) AS TotalOrdered
+        SUM(ISNULL(ord.OrderedQty, 0)) AS TotalOrdered
       FROM dbo.MaterialRequestItems mri
       JOIN dbo.MaterialRequests mr ON mr.MRId = mri.MRId
+      OUTER APPLY (
+        SELECT SUM(poi.Quantity) AS OrderedQty
+        FROM dbo.PurchaseOrderItems poi
+        JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
+        WHERE poi.MRItemId = mri.MRItemId
+          AND ISNULL(po.Status, '') NOT IN ('Deleted', 'Rejected')
+      ) ord
       WHERE mr.Status IN ('Approved', 'Partially Fulfilled', 'Completed')
       GROUP BY mri.MRId
     `);
@@ -685,6 +756,19 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
     if (!items.length)
       return res.status(400).json({ error: "At least one item required" });
 
+    if (RequiredByDate) {
+      const minDate = await computeMinRequiredByDate(
+        pool,
+        RequestDate || new Date(),
+        items.map((i) => i.ItemId),
+      );
+      if (minDate && new Date(RequiredByDate) < minDate) {
+        return res.status(400).json({
+          error: `Required By Date can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+        });
+      }
+    }
+
     let dtId = clientDocTypeId ? parseInt(clientDocTypeId, 10) : null;
     if (!dtId) {
       try {
@@ -834,9 +918,12 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       items = [],
     } = req.body;
 
-    // Guard against editing a Pending/Rejected MR — Draft is normal editing,
-    // Approved is allowed too (logged as an amendment below) so an approved
-    // request doesn't become permanently frozen.
+    // Guard against editing a Pending MR (mid-approval — reject it first) —
+    // Draft is normal editing, Approved is allowed too (logged as an
+    // amendment below) so an approved request doesn't become permanently
+    // frozen, and Rejected is allowed so a corrected request doesn't have to
+    // be recreated from scratch under a new doc number: saving it here
+    // re-submits it automatically (below), restarting approval at level 1.
     const statusCheck = await pool
       .request()
       .input("id", sql.Int, id)
@@ -844,11 +931,12 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     if (!statusCheck.recordset.length)
       return res.status(404).json({ error: "Not found" });
     const currentMRStatus = statusCheck.recordset[0].Status;
-    if (!["Draft", "Approved"].includes(currentMRStatus))
+    if (!["Draft", "Approved", "Rejected"].includes(currentMRStatus))
       return res.status(409).json({
-        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft or Approved requests can be edited.`,
+        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Approved, or Rejected requests can be edited.`,
       });
     const wasApproved = currentMRStatus === "Approved";
+    const wasRejected = currentMRStatus === "Rejected";
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialRequests", "MRId", id)
       : null;
@@ -861,6 +949,19 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       return res.status(409).json({
         error: `Cannot edit: ${blockingPO} is linked to this Material Request. Delete it first, then edit the request.`,
       });
+
+    if (RequiredByDate) {
+      const minDate = await computeMinRequiredByDate(
+        pool,
+        RequestDate || new Date(),
+        items.map((i) => i.ItemId),
+      );
+      if (minDate && new Date(RequiredByDate) < minDate) {
+        return res.status(400).json({
+          error: `Required By Date can't be earlier than ${minDate.toISOString().slice(0, 10)} — the slowest item to supply needs that long.`,
+        });
+      }
+    }
 
     // Header update + item replacement must be one atomic unit — previously
     // each ran on the plain pool (auto-committing individually). The item
@@ -895,7 +996,7 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
               RequestDate=@RequestDate, RequiredByDate=@RequiredByDate,
               Priority=@Priority, Reason=@Reason, Remarks=@Remarks,
               Status=COALESCE(@Status, Status), UpdatedBy=@UpdatedBy, UpdatedAt=GETDATE()
-          WHERE MRId=@id AND Status IN ('Draft', 'Approved')
+          WHERE MRId=@id AND Status IN ('Draft', 'Approved', 'Rejected')
         `);
 
       // Race-condition guard: if another request approved/submitted this MR
@@ -958,7 +1059,33 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       }
     }
 
-    res.json({ message: "Material request updated" });
+    // A corrected, previously-Rejected MR goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which (via
+    // approvalService.js's currentCycleCutoffSql) makes any levels approved
+    // BEFORE the rejection stop counting: the edited request is genuinely
+    // re-reviewed starting at level 1, not resumed from wherever it was
+    // rejected.
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("material-requests", id, "Pending", user, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[material-requests] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Material request updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: resubmitted
+        ? "Material request updated and re-submitted for approval"
+        : "Material request updated",
+      resubmitted,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1183,6 +1310,8 @@ router.put("/:id/approve", authenticateToken, async (req, res) => {
       "Approved",
       user,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("material-requests");
     res.json({ message: "Material Request approved", ...result });
@@ -1209,6 +1338,7 @@ router.put("/:id/reject", authenticateToken, async (req, res) => {
       user,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await bumpCacheVersion("material-requests");
     res.json({ message: "Material Request rejected", ...result });

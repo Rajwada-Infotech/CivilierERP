@@ -617,6 +617,11 @@ router.delete("/:id", requirePageRight("general-ledger", "delete"), async (req, 
     res.json({ message: "General ledger account deleted successfully" });
   } catch (err) {
     console.error("GL DELETE ERROR:", err.message);
+    if (err.number === 547) {
+      return res.status(409).json({
+        error: "This ledger account cannot be deleted — it already has ledger entries or transactions posted against it.",
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });

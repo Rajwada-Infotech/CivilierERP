@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
+import { PanelLeftOpen } from "lucide-react";
 import { TopNavbar } from "./TopNavbar";
 import { AppSidebar } from "./AppSidebar";
 import { ModuleStrip } from "./ModuleStrip";
@@ -20,6 +21,8 @@ import {
   useSidebarState,
 } from "./layoutContexts";
 import ErrorBoundary from "@/components/ErrorBoundary";
+import { CompassProvider } from "@/components/compass/CompassProvider";
+import { useSidebarToggleShortcut, useModuleSwitchShortcut } from "@/hooks/useGlobalShortcuts";
 
 // ── Home page detection ───────────────────────────────────────────────────────
 
@@ -63,7 +66,17 @@ function useModuleActivityLogger() {
 
 // ── NavPanel wrapper — auto-expands when module changes ───────────────────────
 
-function NavPanelAutoExpand({ children }: { children: React.ReactNode }) {
+function NavPanelAutoExpand({
+  children,
+  isHome,
+  homeNavOpen,
+  setHomeNavOpen,
+}: {
+  children: React.ReactNode;
+  isHome: boolean;
+  homeNavOpen: boolean;
+  setHomeNavOpen: (v: boolean) => void;
+}) {
   const { activeModule } = useModule();
   const { setCollapsed } = useSidebarState();
   const prevModule = useRef<typeof activeModule>(activeModule);
@@ -74,6 +87,17 @@ function NavPanelAutoExpand({ children }: { children: React.ReactNode }) {
     }
     prevModule.current = activeModule;
   }, [activeModule, setCollapsed]);
+
+  // Ctrl+B / ⌘B toggles the sidebar from anywhere — mounted here (inside
+  // <SidebarContext.Provider>, same as this component's own useSidebarState()
+  // call above) so it's wired up once and works identically from every
+  // module rather than needing a per-page listener. On Home (which has no
+  // nav panel/strip by default) it opens/closes the strip instead.
+  useSidebarToggleShortcut({ isHome, homeNavOpen, setHomeNavOpen });
+
+  // Shift+1..9/0, Shift+letter jumps straight to a module from anywhere —
+  // same mount point/rationale as the sidebar toggle above.
+  useModuleSwitchShortcut();
 
   return <>{children}</>;
 }
@@ -89,12 +113,23 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const isHome = useIsHomePage();
   const location = useLocation();
 
+  // Home hides the strip/nav panel by default (full-width dashboard), but
+  // that also hides the only way to reach every other module from there —
+  // this lets a toggle button temporarily reveal them without leaving
+  // Home. Resets whenever the user actually navigates away, so it's never
+  // left stuck open if they come back to Home later.
+  const [homeNavOpen, setHomeNavOpen] = useState(false);
+  useEffect(() => {
+    if (!isHome) setHomeNavOpen(false);
+  }, [isHome]);
+  const effectiveIsHome = isHome && !homeNavOpen;
+
   // Pages that have their own sidebar content even without an activeModule
   const SPECIAL_SIDEBAR_PREFIXES = ["/admin", "/dba", "/superadmin", "/user/profile", "/masters/named-entry-type", "/masters/type-of-doc"];
   const isSpecialSidebarPage = SPECIAL_SIDEBAR_PREFIXES.some((p) => location.pathname.startsWith(p));
 
   // Hide nav panel when no module is selected and we're not on a special page
-  const hideNavPanel = isHome || (!activeModule && !isSpecialSidebarPage);
+  const hideNavPanel = effectiveIsHome || (!activeModule && !isSpecialSidebarPage);
 
   useModuleActivityLogger();
 
@@ -118,10 +153,13 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
     [navCollapsed],
   );
 
-  // Strip = 76px, NavPanel = 200px, total = 276px
+  // Strip = 76px, NavPanel = 200px, total = 276px. Home renders full-width
+  // with no side rail at all — neither the module strip nor the nav panel
+  // — so it isn't squeezed into the same left gutter every module page
+  // uses; TopNavbar (fixed, full-width) is its only chrome.
   const STRIP_W = 76;
   const NAV_W = 200;
-  const mainML = isMobile
+  const mainML = isMobile || effectiveIsHome
     ? 0
     : hideNavPanel
       ? STRIP_W
@@ -130,15 +168,48 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
         : STRIP_W + NAV_W;
 
   return (
+    <CompassProvider>
     <SidebarContext.Provider value={sidebarValue}>
       <NavbarCollapseContext.Provider value={navbarValue}>
-        <NavPanelAutoExpand>
+        <NavPanelAutoExpand isHome={isHome} homeNavOpen={homeNavOpen} setHomeNavOpen={setHomeNavOpen}>
           <div className="min-h-screen bg-background" data-module={activeModule ?? undefined}>
             <TopNavbar />
 
+            {/* ── Home-only toggle — the only way back to the module strip
+                from a page that otherwise renders with none at all. Once
+                open, the strip itself (plus clicking outside it) is how
+                you close it — no separate close button sitting on top of
+                the strip's own icons. ── */}
+            {!isMobile && isHome && !homeNavOpen && (
+              <button
+                onClick={() => setHomeNavOpen(true)}
+                title="Open modules"
+                className="fixed z-50 flex items-center justify-center w-9 h-9 rounded-xl border border-border/60 bg-card/80 backdrop-blur-sm text-muted-foreground hover:text-foreground hover:border-primary/40 transition-colors shadow-sm"
+                style={{ top: 66, left: 14 }}
+              >
+                <PanelLeftOpen size={16} />
+              </button>
+            )}
+
             {!isMobile && (
               <>
-                {/* ── Module strip — always visible on desktop ── */}
+                {/* Click-outside-to-close catcher — present while the drawer
+                    is open on Home. Fully transparent: it only exists to
+                    catch the click, not to dim/fade the Home page behind it. */}
+                <AnimatePresence>
+                  {isHome && homeNavOpen && (
+                    <motion.div
+                      key="home-nav-backdrop"
+                      onClick={() => setHomeNavOpen(false)}
+                      style={{ position: "fixed", inset: 0, top: 56, background: "transparent", zIndex: 39 }}
+                    />
+                  )}
+                </AnimatePresence>
+
+                {/* ── Module strip — visible on every desktop page except
+                    Home, where it's hidden by default and only shown while
+                    the toggle above has temporarily revealed it. ── */}
+                {!effectiveIsHome && (
                 <motion.div
                   key="module-strip"
                   initial={{ x: -STRIP_W, opacity: 0 }}
@@ -156,6 +227,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
                 >
                   <ModuleStrip />
                 </motion.div>
+                )}
 
                 {/* ── Nav panel — only on module pages, not home.
                     Stays mounted across collapse/expand toggles (only the
@@ -205,12 +277,12 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               {/* Page-curve wrapper: 8px top gap + rounded-tl to mirror strip/sidebar shape */}
               <div
                 className={
-                  !isHome && !isMobile ? "pt-2 min-h-[calc(100vh-56px)]" : ""
+                  !effectiveIsHome && !isMobile ? "pt-2 min-h-[calc(100vh-56px)]" : ""
                 }
               >
                 <div
                   className={
-                    !isHome && !isMobile
+                    !effectiveIsHome && !isMobile
                       ? "rounded-tl-[20px] min-h-[calc(100vh-64px)] p-4 md:p-6 transition-opacity duration-300 bg-background"
                       : "p-4 md:p-6 transition-opacity duration-300"
                   }
@@ -242,5 +314,6 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
         </NavPanelAutoExpand>
       </NavbarCollapseContext.Provider>
     </SidebarContext.Provider>
+    </CompassProvider>
   );
 };

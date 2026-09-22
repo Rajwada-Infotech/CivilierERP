@@ -76,6 +76,7 @@ interface Item {
   defaultSupplierId: string;
   glHeadId: string;
   costCenterId: string;
+  daysOfSupply: string;
 }
 
 function dbToItem(row: DbItem): Item {
@@ -96,6 +97,8 @@ function dbToItem(row: DbItem): Item {
       : "",
     glHeadId: row.M_GLHeadId ? String(row.M_GLHeadId) : "",
     costCenterId: row.M_CostCenterId ? String(row.M_CostCenterId) : "",
+    daysOfSupply:
+      row.M_DaysOfSupply != null ? String(row.M_DaysOfSupply) : "",
   };
 }
 
@@ -119,6 +122,7 @@ function itemToPayload(form: Omit<Item, "_id">, groupName: string) {
       : null,
     M_GLHeadId: form.glHeadId ? parseInt(form.glHeadId) : null,
     M_CostCenterId: form.costCenterId ? parseInt(form.costCenterId) : null,
+    M_DaysOfSupply: form.daysOfSupply ? parseInt(form.daysOfSupply) : null,
   };
 }
 
@@ -136,6 +140,7 @@ const EMPTY_FORM: Omit<Item, "_id"> = {
   defaultSupplierId: "",
   glHeadId: "",
   costCenterId: "",
+  daysOfSupply: "",
 };
 
 // ── CSV template / import column mapping ─────────────────────────────────────
@@ -882,6 +887,10 @@ const ItemMaster: React.FC = () => {
               defaultSupplierId,
               glHeadId,
               costCenterId,
+              // No Days of Supply column in the CSV format — same
+              // empty-default this field already gets on the manual Add
+              // form (EMPTY_FORM below).
+              daysOfSupply: "",
             },
             group.description,
           );
@@ -1088,6 +1097,16 @@ const ItemMaster: React.FC = () => {
           <span className="text-sm text-muted-foreground">{cc?.label || "-"}</span>
         );
       },
+    },
+    {
+      accessorKey: "daysOfSupply",
+      header: "Days of Supply",
+      size: 130,
+      cell: ({ row }) => (
+        <span className="text-sm text-muted-foreground">
+          {row.original.daysOfSupply || "-"}
+        </span>
+      ),
     },
     {
       accessorKey: "hsnCode",
@@ -1435,6 +1454,18 @@ const ItemMaster: React.FC = () => {
                 ))}
               </select>
             </Field>
+            {/* Days of Supply — numeric field */}
+            <Field label="Days of Supply">
+              <input
+                type="number"
+                min={0}
+                step={1}
+                value={form.daysOfSupply}
+                onChange={(e) => set("daysOfSupply", e.target.value)}
+                className={inputCls()}
+                placeholder="e.g. 30"
+              />
+            </Field>
           </div>
 
           {/* ── Tax Rates ── */}
@@ -1666,6 +1697,10 @@ const ItemMaster: React.FC = () => {
                       { label: "SGST", value: `${viewRow.sgst}%` },
                       { label: "IGST", value: `${viewRow.igst}%` },
                       { label: "UOM", value: uomLabel },
+                      {
+                        label: "Days of Supply",
+                        value: viewRow.daysOfSupply,
+                      },
                       { label: "Description", value: viewRow.description },
                     ].map(({ label, value, mono }) => (
                       <div key={label}>

@@ -9,6 +9,7 @@ import { getSuppliers, getCompanies, getProjects } from "@/api/purchaseOrdersApi
 import { getTCRecords } from "@/api/tcMasterApi";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
+import { printStatusLabel } from "@/utils/printStatus";
 import {
   CalendarDays,
   FileText,
@@ -86,7 +87,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Date", accessor: (r) => fmtDate(r.DocDate as string) },
   { header: "Suppliers", accessor: (r) => Number(r.SupplierCount) || 0 },
   { header: "Items", accessor: (r) => Number(r.ItemCount) || 0 },
-  { header: "Status", accessor: "Status" },
+  { header: "Status", accessor: (r) => printStatusLabel(r.Status as string) },
 ];
 
 const SectionHeader = ({ icon: Icon, title, sub }: { icon: React.ElementType; title: string; sub?: string }) => (
@@ -990,7 +991,7 @@ export default function Quotation() {
   @media print{body{padding:0}}
 </style></head><body>
 <h1>Request for Quotation</h1>
-<div class="sub">${esc(r.DocNo)} &nbsp;·&nbsp; ${esc(r.Status)}</div>
+<div class="sub">${esc(r.DocNo)} &nbsp;·&nbsp; ${esc(printStatusLabel(r.Status))}</div>
 <div class="meta">
   <div class="meta-item"><label>Company</label><span>${esc(r.CompanyName || "—")}</span></div>
   <div class="meta-item"><label>Project</label><span>${esc(r.ProjectName || "—")}</span></div>

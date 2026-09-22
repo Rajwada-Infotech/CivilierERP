@@ -162,6 +162,21 @@ const ALL_ROUTES = [
   { path: "/api/payment-reason-master", file: "./routes/paymentReasonMaster" },
   { path: "/api/loan-sanction", file: "./routes/loanSanction" },
   { path: "/api/cost-center", file: "./routes/costCenter" },
+  { path: "/api/employee-master", file: "./routes/employeeMaster" },
+  { path: "/api/designation-master", file: "./routes/designationMaster" },
+  { path: "/api/candidate-master", file: "./routes/candidateMaster" },
+  { path: "/api/shift-master", file: "./routes/shiftMaster" },
+  { path: "/api/grace-time-master", file: "./routes/graceTimeMaster" },
+  { path: "/api/holiday-master", file: "./routes/holidayMaster" },
+  { path: "/api/deduction-addition-master", file: "./routes/deductionAdditionMaster" },
+  { path: "/api/salary-structure", file: "./routes/salaryStructure" },
+  { path: "/api/payroll-run", file: "./routes/payrollRun" },
+  { path: "/api/attendance-record", file: "./routes/attendanceRecord" },
+  { path: "/api/leave-record", file: "./routes/leaveRecord" },
+  { path: "/api/overtime-record", file: "./routes/overtimeRecord" },
+  { path: "/api/incentive-record", file: "./routes/incentiveRecord" },
+  { path: "/api/interviews", file: "./routes/interview" },
+  { path: "/api/offer-letter", file: "./routes/offerLetter" },
   { path: "/api/payment-terms", file: "./routes/vendorPaymentTerm" },
   { path: "/api/profit-center", file: "./routes/profitCenter" },
   { path: "/api/document-type", file: "./routes/document-type" },
@@ -497,6 +512,9 @@ async function createApp() {
   // Version number is not sensitive — served publicly so the Login/Landing
   // footers (pre-auth) can show the real DB-driven version, not "…".
   app.use("/api/app-version", require("./routes/appVersion"));
+  // "New: X just launched" badge on the Login page — public/pre-auth for
+  // the same reason as app-version above.
+  app.use("/api/feature-announcement", require("./routes/featureAnnouncement"));
   // Customer portal manages its own auth entirely (public /login using the
   // separate CrmCustomerPortalUser table + JWT, then portalAuth for
   // everything past that) — same reason /api/users is registered here

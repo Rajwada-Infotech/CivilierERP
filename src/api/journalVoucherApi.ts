@@ -40,6 +40,15 @@ export interface JournalVoucherSummary {
   CreatedAt: string;
   TotalAmount: number | null;
   PostedToGL?: boolean;
+  /** Payment mode + settlement detail (all null on a plain journal). */
+  Mode?: string | null;
+  BankId?: number | null;
+  BankName?: string | null;
+  ChequeLotId?: number | null;
+  ChequeLotNumber?: string | null;
+  ChequeNo?: string | null;
+  ChequeDate?: string | null;
+  DigitalRefNumber?: string | null;
 }
 
 export interface JournalVoucherLedgerOption {
@@ -47,6 +56,9 @@ export interface JournalVoucherLedgerOption {
   label: string;
   code: string | null;
   type: "GL" | "C" | "S" | "B" | string;
+  /** Picker group computed by the server (Landlord/Cash/Partner/Project ledger…
+   *  LHeadType alone can't tell those apart). See journalVoucher/ledgerGroups.ts. */
+  group: string;
   /** Last 4 digits of the bank account number — Bank ("B") heads only, null otherwise. */
   accountNoLast4: string | null;
 }
@@ -66,6 +78,12 @@ export interface JournalVoucherPayload {
   CompanyId?: number | null;
   ProjectId?: number | null;
   lines: JournalVoucherLine[];
+  Mode?: string | null;
+  BankId?: number | null;
+  ChequeLotId?: number | null;
+  ChequeNo?: string | null;
+  ChequeDate?: string | null;
+  DigitalRefNumber?: string | null;
 }
 
 export interface JournalVoucherFilters {
@@ -112,6 +130,11 @@ export const updateJournalVoucher = async (id: number, payload: JournalVoucherPa
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  return handleResponse(res);
+};
+
+export const deleteJournalVoucher = async (id: number) => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   return handleResponse(res);
 };
 

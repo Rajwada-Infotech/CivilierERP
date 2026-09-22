@@ -214,6 +214,14 @@ async function insertStockLedgerEntries(
 // Reads receivedQty + rate from GRNItems JSON, HSN/GST% from ItemMaster,
 // vendor/company states from the linked PO + supplier + enterprise tables.
 // Must be declared before /:id to avoid being swallowed by the param route.
+// ── PO list + detail for the GRN form, under the GRN right ───────────────────
+// The GRN form's PO picker read /api/purchase-orders, which is gated by the
+// separate Purchase Orders right — so a store user with GRN rights but none on
+// Purchase Orders saw an empty PO list. Same handlers, gated by this router.
+// Must stay above "/:id".
+router.get("/po-list", (req, res) => require("./purchaseOrders").poHandlers.list(req, res));
+router.get("/po/:id", (req, res) => require("./purchaseOrders").poHandlers.detail(req, res));
+
 router.get("/grn-gst-data", async (req, res) => {
   const grnId = parseInt(req.query.grnId, 10);
   if (isNaN(grnId)) return res.status(400).json({ error: "grnId is required" });
@@ -233,6 +241,8 @@ router.get("/grn-gst-data", async (req, res) => {
           p.PurchaseOrderNo  AS PONo,
           s.LHeadName        AS SupplierName,
           s.LGSTState        AS VendorState,
+          s.LGSTType         AS SupplierGstType,
+          s.LGST             AS SupplierGst,
           company.state      AS CompanyState,
           p.CompanyId
         FROM GoodsReceiptNotes grn
@@ -246,6 +256,14 @@ router.get("/grn-gst-data", async (req, res) => {
       return res.status(404).json({ error: "GRN not found" });
 
     const hdr = headerResult.recordset[0];
+    // A non-GST (Unregistered) supplier can't charge GST at all — the
+    // item's own HSN/item-master rate never applies.
+    const supplierIsGstRegistered =
+      hdr.SupplierGstType === "Unregistered"
+        ? false
+        : hdr.SupplierGstType
+          ? true
+          : !!(hdr.SupplierGst && String(hdr.SupplierGst).trim());
     const grnItems = parseGRNItems(hdr.GRNItems);
 
     if (grnItems.length === 0)
@@ -285,8 +303,12 @@ router.get("/grn-gst-data", async (req, res) => {
         : "igst";
 
     // ── 3. Fetch HSN/GST% for every itemId present in GRN items ─────────────
-    //    Items store GST% directly when saved, but we re-fetch from ItemMaster
-    //    as the authoritative source for accuracy.
+    //    Items store GST% directly when saved, but we re-fetch from the item
+    //    master (joined to the HSN master, the authoritative rate source —
+    //    same join buildGrnGstData.js uses) for accuracy. dbo.ItemMaster
+    //    doesn't exist — the real table is dbo.Item_Master_Group, keyed by
+    //    M_Id and carrying only the HSN code (M_HSN); the GST% itself lives
+    //    on dbo.HSN, matched by HCode.
     const itemIds = [...new Set(grnItems.map((i) => i.itemId).filter(Boolean))];
 
     let hsnMap = {}; // itemId → { hsnCode, gstPercent }
@@ -294,13 +316,17 @@ router.get("/grn-gst-data", async (req, res) => {
       // Build parameterised list  @p0, @p1, …
       const req2 = pool.request();
       const placeholders = itemIds.map((id, idx) => {
-        req2.input(`p${idx}`, sql.NVarChar(50), String(id));
+        req2.input(`p${idx}`, sql.NVarChar(100), String(id));
         return `@p${idx}`;
       });
       const hsnResult = await req2.query(`
-        SELECT ItemId, HSNCode, GSTPercent
-        FROM   dbo.ItemMaster
-        WHERE  ItemId IN (${placeholders.join(",")})
+        SELECT
+          CONVERT(NVARCHAR(100), img.M_Id) AS ItemId,
+          img.M_HSN                        AS HSNCode,
+          ISNULL(h.HIGST, ISNULL(h.HCGST, 0) + ISNULL(h.HSGST, 0)) AS GSTPercent
+        FROM   dbo.Item_Master_Group img
+        LEFT JOIN dbo.HSN h ON h.HCode = img.M_HSN AND h.HStatus = 1
+        WHERE  CONVERT(NVARCHAR(100), img.M_Id) IN (${placeholders.join(",")})
       `);
       for (const row of hsnResult.recordset) {
         hsnMap[String(row.ItemId)] = {
@@ -318,9 +344,12 @@ router.get("/grn-gst-data", async (req, res) => {
       const unitRate = Number(item.unitRate || item.rate || 0);
       const itemId = item.itemId ? String(item.itemId) : null;
 
-      // GST%: prefer ItemMaster lookup; fall back to what was saved on the item
+      // GST%: prefer ItemMaster lookup; fall back to what was saved on the
+      // item — unless the supplier is non-GST, in which case neither applies.
       const hsnInfo = itemId ? hsnMap[itemId] || {} : {};
-      const gstPercent = Number(hsnInfo.gstPercent ?? item.gstPercent ?? 0);
+      const gstPercent = supplierIsGstRegistered
+        ? Number(hsnInfo.gstPercent ?? item.gstPercent ?? 0)
+        : 0;
       const hsnCode = hsnInfo.hsnCode ?? item.hsnCode ?? null;
 
       if (gstPercent > dominantGstPct) dominantGstPct = gstPercent;
@@ -1306,6 +1335,7 @@ router.put(
   validateBody(grnBodySchema),
   async (req, res) => {
     let wasApproved = false;
+    let wasRejected = false;
     let beforeSnapshot = null;
     try {
       const currentStatus = await getRecordStatus("goods-receipt", req.params.id);
@@ -1327,6 +1357,7 @@ router.put(
       }
 
       wasApproved = currentStatus === "Approved";
+      wasRejected = currentStatus === "Rejected";
       if (wasApproved) {
         beforeSnapshot = await snapshotRow(getPool(), "dbo.GoodsReceiptNotes", "GRNID", req.params.id);
       }
@@ -1493,7 +1524,29 @@ router.put(
         }
       }
 
-      res.json({ message: "GRN updated successfully" });
+      // A corrected, previously-Rejected GRN goes straight back into the
+      // approval queue on save — no separate "Submit" click. transition()'s
+      // Pending branch writes a fresh Level=0 marker, which restarts
+      // approval at level 1 regardless of what was approved before the
+      // rejection (see approvalService.js's currentCycleCutoffSql).
+      let resubmitted = false;
+      if (wasRejected) {
+        try {
+          await transition("goods-receipt", grnId, "Pending", req.user?.email, req.user?.role);
+          resubmitted = true;
+        } catch (resubmitErr) {
+          console.error("[grns] auto-resubmit after edit failed:", resubmitErr.message);
+          return res.status(207).json({
+            message: "GRN updated, but could not be re-submitted for approval — submit it manually.",
+            resubmitError: resubmitErr.message,
+          });
+        }
+      }
+
+      res.json({
+        message: resubmitted ? "GRN updated and re-submitted for approval" : "GRN updated successfully",
+        resubmitted,
+      });
     } catch (err) {
       await transaction.rollback().catch(() => {});
       console.error("UPDATE GRN ERROR:", err);
@@ -1789,6 +1842,8 @@ router.put(
         "Approved",
         userEmail,
         req.user?.role,
+        null,
+        req.user?.userId ?? req.user?.id ?? null,
       );
       // On full approval, transition()'s GL_POSTERS hook already ran
       // postGRNApproval — the one place StockLedger gets credited for this
@@ -1824,6 +1879,7 @@ router.put(
         userEmail,
         req.user?.role,
         note || null,
+        req.user?.userId ?? req.user?.id ?? null,
       );
 
       // Reversal — normally a no-op today (reject only fires from Pending,
@@ -1859,16 +1915,30 @@ router.get("/:id/gst-breakdown", async (req, res) => {
   try {
     const pool = getPool();
 
-    // Fetch GRN row for its items JSON
+    // Fetch GRN row for its items JSON + supplier GST registration
     const grnResult = await pool
       .request()
       .input("GRNID", sql.Int, grnId)
-      .query("SELECT GRNItems FROM dbo.GoodsReceiptNotes WHERE GRNID = @GRNID");
+      .query(`
+        SELECT grn.GRNItems, s.LGSTType AS SupplierGstType, s.LGST AS SupplierGst
+        FROM dbo.GoodsReceiptNotes grn
+        LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
+        WHERE grn.GRNID = @GRNID
+      `);
 
     if (!grnResult.recordset.length)
       return res.status(404).json({ error: "GRN not found" });
 
-    const rawItems = parseGRNItems(grnResult.recordset[0].GRNItems);
+    const grnRow = grnResult.recordset[0];
+    // A non-GST (Unregistered) supplier can't charge GST at all.
+    const supplierIsGstRegistered =
+      grnRow.SupplierGstType === "Unregistered"
+        ? false
+        : grnRow.SupplierGstType
+          ? true
+          : !!(grnRow.SupplierGst && String(grnRow.SupplierGst).trim());
+
+    const rawItems = parseGRNItems(grnRow.GRNItems);
     const receivedItems = rawItems.filter((it) => {
       const receivedQty = Number(it.receivedQty || it.ReceivedQty || 0);
       const billingQty = Number(it.quantity || it.Quantity || 0);
@@ -1950,9 +2020,11 @@ router.get("/:id/gst-breakdown", async (req, res) => {
       // only if the line has no gstPct recorded.
       const lineGstPct = Number(it.gstPct ?? it.GstPct ?? NaN);
       const masterGstPct = master.cgstRate + master.sgstRate;
-      const totalGSTRate = Number.isFinite(lineGstPct)
-        ? lineGstPct
-        : masterGstPct;
+      const totalGSTRate = !supplierIsGstRegistered
+        ? 0
+        : Number.isFinite(lineGstPct)
+          ? lineGstPct
+          : masterGstPct;
 
       // Split the line's total GST rate between CGST/SGST using the master's
       // ratio when available (defaults to a 50/50 split).

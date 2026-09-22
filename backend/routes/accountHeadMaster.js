@@ -78,6 +78,17 @@ const SALT_ROUNDS = 12;
 // endpoint's optional SupplierPassword field.
 const DEFAULT_SUPPLIER_PASSWORD = "123456";
 
+// A Supplier Portal login only ever makes sense for a real Supplier —
+// LHeadType='S' also covers Landlord (Vendor Master's Type field has no
+// dedicated LHeadType/column of its own for Landlord, see
+// SupplierMaster.tsx's lheadTypeForVendorType comment; Vendor gets its own
+// LHeadType='V' and never reaches this check at all). Without the category
+// check here, saving a Landlord silently created portal credentials nobody
+// asked for.
+function isSupplierPortalHead(LHeadType, LHeadCategory) {
+  return LHeadType === "S" && LHeadCategory !== "Landlord";
+}
+
 // ── Auto-generate a unique Supplier Portal login email ─────────────────────
 // Format: <sanitized supplier name>@civilier.in. Collisions (two suppliers
 // with the same/very similar name) get a numeric suffix before the @ —
@@ -176,6 +187,8 @@ router.get("/:id", async (req, res, next) => {
       "lh.LCountry",
       "lh.LBelongsTo",
       "lh.LDescription",
+      "lh.LAccountNo",
+      "lh.LIFSCCode",
     ];
     if (hasColumn(columnMeta, "LGSTType")) selectColumns.push("lh.LGSTType");
     if (hasColumn(columnMeta, "LHeadPan")) selectColumns.push("lh.LHeadPan");
@@ -192,6 +205,9 @@ router.get("/:id", async (req, res, next) => {
       selectColumns.push("lh.TdsLimitApplicable");
     if (hasColumn(columnMeta, "InvoiceMode"))
       selectColumns.push("lh.InvoiceMode");
+    if (hasColumn(columnMeta, "LBankName")) selectColumns.push("lh.LBankName");
+    if (hasColumn(columnMeta, "LBranchCode"))
+      selectColumns.push("lh.LBranchCode");
 
     // Login email lives on dbo.users (RoleId -> the 'supplier' row in
     // dbo.Role, LinkedLHeadId -> this row), not on AccountHeadMaster — same
@@ -243,6 +259,8 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       "lh.LDescription",
       "lh.isEdited",
       "lh.Status", // ← approval status
+      "lh.LAccountNo",
+      "lh.LIFSCCode",
     ];
 
     if (hasColumn(columnMeta, "LGSTType")) selectColumns.push("lh.LGSTType");
@@ -260,6 +278,9 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       selectColumns.push("lh.TdsLimitApplicable");
     if (hasColumn(columnMeta, "InvoiceMode"))
       selectColumns.push("lh.InvoiceMode");
+    if (hasColumn(columnMeta, "LBankName")) selectColumns.push("lh.LBankName");
+    if (hasColumn(columnMeta, "LBranchCode"))
+      selectColumns.push("lh.LBranchCode");
     if (hasColumn(columnMeta, "CreatedAt")) selectColumns.push("lh.CreatedAt");
     if (hasColumn(columnMeta, "UpdatedAt")) selectColumns.push("lh.UpdatedAt");
     if (hasColumn(columnMeta, "ApprovedBy"))
@@ -311,6 +332,12 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       if (req.query.type === "C") {
         conditions.push("ISNULL(lh.LHeadCode, '') NOT LIKE '%CUST%'");
       }
+      // A project's auto-created Supplier ledger head (LHeadCode 'PRJ-<id>-SUPP',
+      // named "<Project> (<Company>)") is an internal inter-company ledger, not a
+      // real vendor — keep it out of Vendor Master and every typed picker. It is
+      // still a normal head for the ledger / Trial Balance / Inter-Company Stock
+      // Transfer, which look it up directly rather than through this list.
+      conditions.push(`ISNULL(lh.LHeadCode, '') NOT LIKE 'PRJ-%-SUPP'`);
       // Partner Master gives every Partner TWO heads (Capital + Current
       // Account) — a party picker asking for type=P wants one row per
       // Partner, not two. Always resolves to the Current Account head; the
@@ -370,6 +397,14 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     TdsLimitApplicable,
     InvoiceMode,
     SupplierPassword: supplierPasswordPlain,
+    // Bank Details section (Vendor Master / Contractor Master) — all four
+    // optional. LAccountNo/LIFSCCode already exist on this table (normally
+    // only written by Bank Master's own routes for LHeadType='B'); reused
+    // as-is here for a Supplier/Contractor's own bank account.
+    LAccountNo,
+    LIFSCCode,
+    LBankName,
+    LBranchCode,
   } = req.body;
 
   try {
@@ -395,7 +430,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // so creating a supplier never blocks on picking a password up front.
     // An admin can still set/override it here or change it later via the
     // edit endpoint below. Only validated (min length) when explicitly given.
-    if (LHeadType === "S" && supplierPasswordPlain && supplierPasswordPlain.length < 6) {
+    if (isSupplierPortalHead(LHeadType, LHeadCategory) && supplierPasswordPlain && supplierPasswordPlain.length < 6) {
       return res.status(400).json({
         error: "Supplier password must be at least 6 characters.",
         code: "INVALID_SUPPLIER_PASSWORD",
@@ -472,7 +507,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // suppliers.
     let supplierLoginEmail = null;
     let supplierPasswordHash = null;
-    if (LHeadType === "S") {
+    if (isSupplierPortalHead(LHeadType, LHeadCategory)) {
       supplierLoginEmail = await generateSupplierLoginEmail(pool, LHeadName);
       supplierPasswordHash = await bcrypt.hash(supplierPasswordPlain || DEFAULT_SUPPLIER_PASSWORD, SALT_ROUNDS);
     }
@@ -506,7 +541,9 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       .input("LBelongsTo", sql.Int, effectiveLBelongsTo || null)
       .input("LDescription", sql.NVarChar, LDescription || null)
       .input("LHeadType", sql.VarChar(50), LHeadType || "GL")
-      .input("Status", sql.NVarChar(20), "Draft"); // ← always Draft on create
+      .input("Status", sql.NVarChar(20), "Draft") // ← always Draft on create
+      .input("LAccountNo", sql.VarChar(20), LAccountNo || null)
+      .input("LIFSCCode", sql.NVarChar(11), LIFSCCode || null);
 
     const insertColumns = [
       "LHeadName",
@@ -525,6 +562,8 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       "LDescription",
       "LHeadType",
       "Status",
+      "LAccountNo",
+      "LIFSCCode",
     ];
     const insertValues = insertColumns.map((col) => `@${col}`);
 
@@ -575,6 +614,16 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       insertColumns.push("InvoiceMode");
       insertValues.push("@InvoiceMode");
     }
+    if (hasColumn(columnMeta, "LBankName")) {
+      request.input("LBankName", sql.NVarChar(150), LBankName || null);
+      insertColumns.push("LBankName");
+      insertValues.push("@LBankName");
+    }
+    if (hasColumn(columnMeta, "LBranchCode")) {
+      request.input("LBranchCode", sql.NVarChar(20), LBranchCode || null);
+      insertColumns.push("LBranchCode");
+      insertValues.push("@LBranchCode");
+    }
     if (hasColumn(columnMeta, "CreatedBy")) {
       request.input("CreatedBy", sql.NVarChar(100), userName);
       insertColumns.push("CreatedBy");
@@ -601,7 +650,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
     // migrations/260702/157-quotation-l1-supplier-portal.sql. Without this,
     // the supplier's new email/password would be stored but could never
     // actually log in anywhere.
-    if (LHeadType === "S") {
+    if (isSupplierPortalHead(LHeadType, LHeadCategory)) {
       const roleRow = await tx
         .request()
         .query("SELECT TOP 1 RId FROM dbo.Role WHERE LOWER(RName) = 'supplier'");
@@ -634,7 +683,7 @@ router.post("/", requirePageRight("account-head", "create"), async (req, res) =>
       message: "Ledger head added successfully",
       LHeadId: newLHeadId,
       ...(supplierLoginEmail ? { SupplierLoginEmail: supplierLoginEmail } : {}),
-      ...(LHeadType === "S" && !supplierPasswordPlain
+      ...(isSupplierPortalHead(LHeadType, LHeadCategory) && !supplierPasswordPlain
         ? { SupplierPasswordDefaulted: true, SupplierDefaultPassword: DEFAULT_SUPPLIER_PASSWORD }
         : {}),
     });
@@ -672,6 +721,7 @@ router.get("/options", async (req, res) => {
                  LHeadContactPerson AS contactPerson, RTRIM(LHeadType) AS type
                  FROM dbo.AccountHeadMaster
                  WHERE LHeadStatus = 1 AND ISNULL(LHeadCode, '') NOT LIKE '%CUST%'
+                   AND ISNULL(LHeadCode, '') NOT LIKE 'PRJ-%-SUPP'
                    AND (LHeadType <> 'P' OR LHeadCode LIKE '%-CUR')`;
     const request = pool.request();
     if (req.query.type) {
@@ -881,6 +931,10 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     TdsLimitApplicable,
     InvoiceMode,
     SupplierPassword: supplierPasswordPlain,
+    LAccountNo,
+    LIFSCCode,
+    LBankName,
+    LBranchCode,
   } = req.body;
 
   try {
@@ -898,7 +952,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     // Password is optional on edit (only mandatory at creation) — an admin
     // resetting it types a new one; leaving it blank keeps the existing
     // hash untouched on both AccountHeadMaster and the linked dbo.users row.
-    if (LHeadType === "S" && supplierPasswordPlain && supplierPasswordPlain.length < 6) {
+    if (isSupplierPortalHead(LHeadType, LHeadCategory) && supplierPasswordPlain && supplierPasswordPlain.length < 6) {
       return res.status(400).json({
         error: "Supplier password must be at least 6 characters.",
         code: "MISSING_SUPPLIER_PASSWORD",
@@ -969,7 +1023,7 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     }
 
     let newSupplierPasswordHash = null;
-    if (LHeadType === "S" && supplierPasswordPlain) {
+    if (isSupplierPortalHead(LHeadType, LHeadCategory) && supplierPasswordPlain) {
       newSupplierPasswordHash = await bcrypt.hash(supplierPasswordPlain, SALT_ROUNDS);
     }
 
@@ -983,8 +1037,12 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
       .input("LHeadCode", sql.NVarChar(20), LHeadCode || null)
       .input("LHeadPhone", sql.VarChar(15), LHeadPhone || null)
       .input("LHeadEmail", sql.NVarChar(100), LHeadEmail || null)
-      .input("LHeadAddress", sql.VarChar(300), LHeadAddress || null)
-      .input("LHeadContactPerson", sql.VarChar(100), LHeadContactPerson || null)
+      // Both columns are NOT NULL — same "N/A" fallback POST / already uses
+      // on create. Falling back to null here (as this used to) 500'd every
+      // edit that left either field blank, since create never wrote a real
+      // null for a row to begin with.
+      .input("LHeadAddress", sql.VarChar(300), LHeadAddress || "N/A")
+      .input("LHeadContactPerson", sql.VarChar(100), LHeadContactPerson || "N/A")
       .input("LHeadStatus", sql.Bit, LHeadStatus !== false ? 1 : 0)
       .input("LHeadPaymentTerms", sql.NVarChar(100), LHeadPaymentTerms || null)
       .input("LBranchName", sql.VarChar(100), LBranchName || null)
@@ -992,7 +1050,9 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
       .input("LGSTState", sql.VarChar(50), LGSTState || null)
       .input("LCountry", sql.VarChar(50), LCountry || null)
       .input("LBelongsTo", sql.Int, effectiveLBelongsTo || null)
-      .input("LDescription", sql.NVarChar, LDescription || null);
+      .input("LDescription", sql.NVarChar, LDescription || null)
+      .input("LAccountNo", sql.VarChar(20), LAccountNo || null)
+      .input("LIFSCCode", sql.NVarChar(11), LIFSCCode || null);
 
     const updates = [
       "LHeadName=@LHeadName",
@@ -1011,6 +1071,8 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
       "LDescription=@LDescription",
       "isEdited=1",
       "Status='Draft'", // editing resets back to Draft
+      "LAccountNo=@LAccountNo",
+      "LIFSCCode=@LIFSCCode",
     ];
 
     if (hasColumn(columnMeta, "LGSTType")) {
@@ -1040,6 +1102,14 @@ router.put("/:id", requirePageRight("account-head", "edit"), async (req, res) =>
     if (hasColumn(columnMeta, "InvoiceMode")) {
       request.input("InvoiceMode", sql.NVarChar(20), InvoiceMode === "Invoice" ? "Invoice" : "NonInvoice");
       updates.push("InvoiceMode=@InvoiceMode");
+    }
+    if (hasColumn(columnMeta, "LBankName")) {
+      request.input("LBankName", sql.NVarChar(150), LBankName || null);
+      updates.push("LBankName=@LBankName");
+    }
+    if (hasColumn(columnMeta, "LBranchCode")) {
+      request.input("LBranchCode", sql.NVarChar(20), LBranchCode || null);
+      updates.push("LBranchCode=@LBranchCode");
     }
     if (hasColumn(columnMeta, "UpdatedBy")) {
       request.input("UpdatedBy", sql.NVarChar(100), userName);
@@ -1114,6 +1184,11 @@ router.delete("/:id", requirePageRight("account-head", "delete"), async (req, re
     res.json({ message: "Ledger head deleted" });
   } catch (err) {
     console.error("DELETE ERROR:", err.message);
+    if (err.number === 547) {
+      return res.status(409).json({
+        error: "This account head cannot be deleted — it already has ledger entries or transactions posted against it.",
+      });
+    }
     res.status(500).json({ error: err.message });
   }
 });

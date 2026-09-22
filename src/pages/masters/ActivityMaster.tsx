@@ -23,6 +23,7 @@ import {
   Plus,
   Package,
   Trash2,
+  Pencil,
 } from "lucide-react";
 import {
   getActivities,
@@ -71,11 +72,19 @@ const GroupRow = ({
   activities,
   search,
   onView,
+  onEdit,
+  onDelete,
+  canEdit,
+  canDelete,
 }: {
   group: DbActivity;
   activities: DbActivity[];
   search: string;
   onView: (item: DbActivity) => void;
+  onEdit: (item: DbActivity) => void;
+  onDelete: (item: DbActivity) => void;
+  canEdit: boolean;
+  canDelete: boolean;
 }) => {
   const [open, setOpen] = useState(true);
 
@@ -123,6 +132,30 @@ const GroupRow = ({
         >
           <Eye size={13} />
         </button>
+        {canEdit && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onEdit(group);
+            }}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0"
+            title="Edit"
+          >
+            <Pencil size={13} />
+          </button>
+        )}
+        {canDelete && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(group);
+            }}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
+            title="Delete"
+          >
+            <Trash2 size={13} />
+          </button>
+        )}
       </div>
 
       {/* Activities */}
@@ -161,6 +194,24 @@ const GroupRow = ({
                 >
                   <Eye size={13} />
                 </button>
+                {canEdit && (
+                  <button
+                    onClick={() => onEdit(activity)}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                    title="Edit"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                )}
+                {canDelete && (
+                  <button
+                    onClick={() => onDelete(activity)}
+                    className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                    title="Delete"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                )}
               </div>
             ))
           )}
@@ -227,6 +278,16 @@ const ActivityMaster: React.FC = () => {
   const [viewRecord, setViewRecord] = useState<DbActivity | null>(null);
   const [addItemOpen, setAddItemOpen] = useState(false);
   const [pickedItemId, setPickedItemId] = useState("");
+
+  // Edit, triggered from the grouped tree view below (the table itself is
+  // hidden — hideTable — so MasterPage's own row-level Edit button never
+  // renders; this drives its edit mode from the outside instead).
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editKey, setEditKey] = useState(0);
+  const handleEditRequest = (item: DbActivity) => {
+    setEditId(String(item.id));
+    setEditKey((k) => k + 1);
+  };
 
   const {
     data: dbData,
@@ -368,6 +429,20 @@ const ActivityMaster: React.FC = () => {
       await deleteActivity(event.id);
       toast.success("Activity deleted!");
       await refetch();
+    }
+  };
+
+  // Delete, triggered from the grouped tree view — same reasoning as
+  // handleEditRequest above: the table (and its own inline delete-confirm)
+  // is hidden, so this drives deleteActivity directly instead.
+  const handleDeleteRequest = async (item: DbActivity) => {
+    const kind = item.activity_type === 0 ? "group" : "activity";
+    if (!window.confirm(`Delete this ${kind} — "${item.activity_name}"?`)) return;
+    try {
+      await handleDataEvent({ action: "delete", id: String(item.id), records: [] });
+      if (viewRecord?.id === item.id) setViewRecord(null);
+    } catch (err: any) {
+      toast.error("Failed to delete: " + (err?.message || "Unknown error"));
     }
   };
 
@@ -518,6 +593,8 @@ const ActivityMaster: React.FC = () => {
           ]}
           initialData={mappedData}
           onDataEvent={handleDataEvent}
+          requestEditId={editId}
+          requestEditKey={editId ? `${editId}:${editKey}` : null}
         />
       </div>
 
@@ -582,6 +659,10 @@ const ActivityMaster: React.FC = () => {
               activities={activityItems.filter((a) => a.group_id === group.id)}
               search={treeSearch}
               onView={setViewRecord}
+              onEdit={handleEditRequest}
+              onDelete={handleDeleteRequest}
+              canEdit={rights.canEdit}
+              canDelete={rights.canDelete}
             />
           ))}
 
@@ -617,6 +698,24 @@ const ActivityMaster: React.FC = () => {
                     >
                       <Eye size={13} />
                     </button>
+                    {rights.canEdit && (
+                      <button
+                        onClick={() => handleEditRequest(a)}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                        title="Edit"
+                      >
+                        <Pencil size={13} />
+                      </button>
+                    )}
+                    {rights.canDelete && (
+                      <button
+                        onClick={() => handleDeleteRequest(a)}
+                        className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                        title="Delete"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

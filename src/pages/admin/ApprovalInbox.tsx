@@ -30,7 +30,6 @@ import {
   Building2,
   Home,
   Car,
-  ChevronDown,
   SlidersHorizontal,
   Eye,
   FileText,
@@ -38,9 +37,12 @@ import {
   UserCheck,
   FileWarning,
   Undo2,
+  ArrowDownWideNarrow,
+  ArrowUpWideNarrow,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
+import { MultiSelectDropdown, type MultiSelectOption } from "@/components/ui/MultiSelectDropdown";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -68,6 +70,16 @@ export interface InboxItem {
   SourceTransferDocNo: string | null;
   FromGodownName: string | null;
   ToGodownName: string | null;
+  // Set by the backend's visibility filter (approvalInbox.js) only when the
+  // viewer is named somewhere on this record's workflow but NOT on the
+  // level it's currently sitting at — e.g. a Level-2 approver looking at a
+  // record still waiting on Level 1. It's shown for awareness (so the inbox
+  // doesn't look like it's missing records), but Approve/Reject will
+  // correctly be refused by the backend until it actually reaches their
+  // level. Omitted entirely (undefined) for every normal, actionable row.
+  _canAct?: boolean;
+  _currentLevel?: number;
+  _totalLevels?: number;
 }
 
 // ─── Module config ────────────────────────────────────────────────────────────
@@ -152,6 +164,13 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/material-issues",
     label: "Material Issues",
   },
+  "material-issue-return": {
+    icon: Undo2,
+    color: "text-lime-500 bg-lime-500/10",
+    navPath: "/material/issue-return",
+    apiEndpoint: "/api/material-issue-return",
+    label: "Material Issue Returns",
+  },
   "sale-orders": {
     icon: ShoppingCart,
     color: "text-fuchsia-500 bg-fuchsia-500/10",
@@ -165,6 +184,13 @@ export const MODULE_CONFIG: Record<
     navPath: "/material/vehicle-in-out",
     apiEndpoint: "/api/vehicle-in-out",
     label: "Vehicle In/Out",
+  },
+  "stock-transfers": {
+    icon: Warehouse,
+    color: "text-teal-500 bg-teal-500/10",
+    navPath: "/material/stock-transfer",
+    apiEndpoint: "/api/stock-transfers",
+    label: "Stock Transfer",
   },
   "journal-voucher": {
     icon: Receipt,
@@ -316,11 +342,13 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
   "expense-booking": "ExpenseBooking",
   payments: "NewPayment",
   "material-issues": "MaterialIssues",
+  "material-issue-return": "MaterialIssueReturn",
   "material-requests": "MaterialRequests",
   boq: "BOQ",
   "work-done": "WorkDone",
   "sale-orders": "SaleOrders",
   "vehicle-in-out": "VehicleInOut",
+  "stock-transfers": "StockTransfers",
   contracts: "Contract",
 };
 
@@ -352,6 +380,70 @@ export const RESTRICTED_MODULES = new Set([
 ]);
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
+
+// ─── Category grouping ────────────────────────────────────────────────────────
+// Every module bucketed under the business function it belongs to — MR/PO/GRN/
+// Material Issues etc. all read as "Material", Payments/JV/Fund Transfer as
+// "Finance", and so on — so the inbox groups like-with-like instead of one
+// long flat module list.
+export type CategoryId = "material" | "finance" | "engineering" | "sales" | "admin";
+
+export const CATEGORY_META: Record<CategoryId, { label: string; color: string }> = {
+  material: { label: "Material", color: "text-cyan-600" },
+  finance: { label: "Finance", color: "text-emerald-600" },
+  engineering: { label: "Engineering", color: "text-indigo-600" },
+  sales: { label: "Sales / CRM", color: "text-orange-600" },
+  admin: { label: "Admin", color: "text-purple-600" },
+};
+
+const CATEGORY_ORDER: CategoryId[] = ["material", "finance", "engineering", "sales", "admin"];
+
+export const MODULE_CATEGORY: Record<string, CategoryId> = {
+  "material-requests": "material",
+  "purchase-orders": "material",
+  "work-orders": "material",
+  "goods-receipt": "material",
+  "expense-booking": "material",
+  "material-issues": "material",
+  "material-issue-return": "material",
+  "vehicle-in-out": "material",
+  "stock-transfers": "material",
+  "inter-company-transfer": "material",
+  "debit-note": "material",
+
+  payments: "finance",
+  "received-payment": "finance",
+  "journal-voucher": "finance",
+  "fund-transfer": "finance",
+  contracts: "finance",
+
+  "work-done": "engineering",
+  boq: "engineering",
+
+  "sale-orders": "sales",
+  "crm-bookings": "sales",
+  "crm-agreements": "sales",
+  "crm-agreement-date": "sales",
+  "crm-sales-deed-director": "sales",
+  "crm-brokerage": "sales",
+  "crm-cancellations": "sales",
+  "crm-money-receipts": "sales",
+  "crm-noc": "sales",
+  "crm-booking-amendment": "sales",
+  "crm-refunds": "sales",
+  "crm-refunds-finance": "sales",
+};
+
+export const categoryOf = (mod: string): CategoryId => MODULE_CATEGORY[mod] ?? "admin";
+
+// Within a category, MODULE_CATEGORY's own declaration order above doubles
+// as the module display order — e.g. Material Requests before Purchase
+// Orders before GRNs — so every module's rows stay contiguous instead of
+// interleaving with other modules in the same category by date.
+const MODULE_ORDER: Record<string, number> = Object.fromEntries(
+  Object.keys(MODULE_CATEGORY).map((mod, i) => [mod, i]),
+);
+const moduleOrderOf = (mod: string): number => MODULE_ORDER[mod] ?? Number.MAX_SAFE_INTEGER;
 
 // Modules whose one-click Approve is either guaranteed to fail without a
 // review step first (crm-bookings' Data Review checklist gate) or whose
@@ -488,6 +580,7 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "material-issues":      "border-cyan-500",
   "sale-orders":          "border-fuchsia-500",
   "vehicle-in-out":       "border-sky-500",
+  "stock-transfers":      "border-teal-500",
   "journal-voucher":      "border-amber-600",
   "inter-company-transfer":"border-fuchsia-600",
   "fund-transfer":        "border-violet-600",
@@ -502,64 +595,6 @@ export const MODULE_ACCENT_BORDER: Record<string, string> = {
   "crm-noc":              "border-teal-500",
   "crm-refunds":          "border-orange-600",
   "crm-refunds-finance":  "border-orange-700",
-};
-
-const MODULE_TAB_COLORS: Record<string, { icon: string; active: string }> = {
-  "purchase-orders": { icon: "text-blue-500", active: "bg-blue-500 border-blue-500" },
-  "work-orders": { icon: "text-amber-500", active: "bg-amber-500 border-amber-500" },
-  payments: { icon: "text-emerald-500", active: "bg-emerald-500 border-emerald-500" },
-  "goods-receipt": { icon: "text-violet-500", active: "bg-violet-500 border-violet-500" },
-  "expense-booking": { icon: "text-rose-500", active: "bg-rose-500 border-rose-500" },
-  "received-payment": { icon: "text-teal-500", active: "bg-teal-500 border-teal-500" },
-  "work-done": { icon: "text-emerald-600", active: "bg-emerald-600 border-emerald-600" },
-  boq: { icon: "text-indigo-500", active: "bg-indigo-500 border-indigo-500" },
-  "material-requests": { icon: "text-orange-500", active: "bg-orange-500 border-orange-500" },
-  "material-issues": { icon: "text-cyan-500", active: "bg-cyan-500 border-cyan-500" },
-  "journal-voucher": { icon: "text-amber-600", active: "bg-amber-600 border-amber-600" },
-  "inter-company-transfer": { icon: "text-fuchsia-600", active: "bg-fuchsia-600 border-fuchsia-600" },
-  "fund-transfer": { icon: "text-violet-600", active: "bg-violet-600 border-violet-600" },
-  "sale-orders": { icon: "text-lime-600", active: "bg-lime-600 border-lime-600" },
-  "vehicle-in-out": { icon: "text-sky-600", active: "bg-sky-600 border-sky-600" },
-  "crm-money-receipts": { icon: "text-teal-600", active: "bg-teal-600 border-teal-600" },
-  contracts: { icon: "text-purple-500", active: "bg-purple-500 border-purple-500" },
-};
-
-const ModuleTab: React.FC<{
-  module: string | null;
-  label: string;
-  icon?: React.ElementType;
-  count: number;
-  active: boolean;
-  onClick: () => void;
-}> = ({ module, label, icon: Icon, count, active, onClick }) => {
-  const colors = module ? MODULE_TAB_COLORS[module] : null;
-
-  return (
-    <button
-      onClick={onClick}
-      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-[11px] font-medium transition-all whitespace-nowrap ${
-        active
-          ? `${colors?.active ?? "bg-primary border-primary"} text-white shadow-sm`
-          : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground"
-      }`}
-    >
-      {Icon && (
-        <Icon size={12} className={active ? "text-white" : colors?.icon} />
-      )}
-      <span>{label}</span>
-      {count > 0 && (
-        <span
-          className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-none ${
-            active
-              ? "bg-white/20 text-white"
-              : "bg-muted text-foreground/70"
-          }`}
-        >
-          {count}
-        </span>
-      )}
-    </button>
-  );
 };
 
 // ─── Detail preview modal ───────────────────────────────────────────────────
@@ -644,7 +679,11 @@ export function labelizeKey(key: string): string {
 // other array, so a reviewer approving a PO actually sees what's on it.
 export function extractLineItems(detail: Record<string, unknown> | null): Record<string, unknown>[] {
   if (!detail) return [];
-  for (const key of ["LineItems", "POItems", "Items"]) {
+  // "items" (lowercase) covers Material Requests' own GET /:id response
+  // (materialRequests.js: `{ ...header, items: [...] }`) — missing it meant
+  // the review panel's line-items table silently never rendered for MRs at
+  // all, even though the data was right there in `detail`.
+  for (const key of ["LineItems", "POItems", "Items", "items"]) {
     const v = detail[key];
     if (Array.isArray(v) && v.length > 0) return v as Record<string, unknown>[];
   }
@@ -695,44 +734,58 @@ const InboxRow: React.FC<{
       >
         <Eye size={14} />
       </button>
-      <ApprovalActions
-        status={item.Status}
-        recordId={item.RecordId}
-        endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
-        actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
-        approverRoles={
-          item.Module === "crm-refunds-finance" ? REFUND_FINANCE_APPROVER_ROLES
-          : SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
-          : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
-          : item.Module === "crm-money-receipts" ? MR_APPROVER_ROLES
-          : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
-          : undefined
-        }
-        // crm-applications'/crm-bookings' own PUT /:id/approve routes 400
-        // until every Level-1/Level-2 checklist item is ticked — a one-click
-        // Approve here can never succeed on its own, it can only ever
-        // produce the "Complete the Level-X verification checklist..."
-        // error toast. crm-brokerage's approve CAN succeed one-click (no
-        // checklist gate), but the computed amount is meant to be reviewed
-        // — and is only ever editable — before approval (see crmBrokerage.js
-        // PUT /:id "can only be customized before approval"), so a blind
-        // one-click Approve here skips the one chance to catch/adjust a
-        // wrong figure. All three swap the Approve button for a direct
-        // hand-off to their own review screen instead. Reject is untouched
-        // for all of them — no checklist/review gate applies to rejecting.
-        reviewInstead={
-          REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
-            ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
+      {item.Status === "Pending" && item._canAct === false ? (
+        // Visible for awareness (named on some other level of this
+        // record's workflow) but not their turn yet — Approve/Reject would
+        // just 403 from transition()'s own per-level gate. Say so instead
+        // of offering live-looking buttons that are guaranteed to fail.
+        <span
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium text-muted-foreground bg-muted border border-border whitespace-nowrap"
+          title="Named on this approval workflow, but this record hasn't reached your level yet."
+        >
+          Waiting on Level {item._currentLevel}
+          {item._totalLevels ? ` of ${item._totalLevels}` : ""}
+        </span>
+      ) : (
+        <ApprovalActions
+          status={item.Status}
+          recordId={item.RecordId}
+          endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
+          actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
+          approverRoles={
+            item.Module === "crm-refunds-finance" ? REFUND_FINANCE_APPROVER_ROLES
+            : SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+            : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
+            : item.Module === "crm-money-receipts" ? MR_APPROVER_ROLES
+            : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
             : undefined
-        }
-        restricted={RESTRICTED_MODULES.has(item.Module)}
-        onSuccess={(action) => {
-          if (action === "approve" || action === "reject") {
-            onOptimisticUpdate(item.RecordId, item.Module);
           }
-          onActionDone();
-        }}
-      />
+          // crm-applications'/crm-bookings' own PUT /:id/approve routes 400
+          // until every Level-1/Level-2 checklist item is ticked — a one-click
+          // Approve here can never succeed on its own, it can only ever
+          // produce the "Complete the Level-X verification checklist..."
+          // error toast. crm-brokerage's approve CAN succeed one-click (no
+          // checklist gate), but the computed amount is meant to be reviewed
+          // — and is only ever editable — before approval (see crmBrokerage.js
+          // PUT /:id "can only be customized before approval"), so a blind
+          // one-click Approve here skips the one chance to catch/adjust a
+          // wrong figure. All three swap the Approve button for a direct
+          // hand-off to their own review screen instead. Reject is untouched
+          // for all of them — no checklist/review gate applies to rejecting.
+          reviewInstead={
+            REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
+              ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
+              : undefined
+          }
+          restricted={RESTRICTED_MODULES.has(item.Module)}
+          onSuccess={(action) => {
+            if (action === "approve" || action === "reject") {
+              onOptimisticUpdate(item.RecordId, item.Module);
+            }
+            onActionDone();
+          }}
+        />
+      )}
       {/* The separate "open in preview" arrow is redundant for any module
           with a reviewInstead button while Pending — that button above
           already does the exact same navigation. Once it leaves Pending
@@ -978,8 +1031,11 @@ const InboxRow: React.FC<{
 const ApprovalInbox: React.FC = () => {
   const queryClient = useQueryClient();
   const rights = usePageRights("approval-inbox");
-  const [activeModule, setActiveModule] = useState<string | null>(null);
-  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  // Multi-select, nested-by-category filter — replaces the old single-select
+  // module tabs so an approver can pick e.g. "PO + GRN + Payment" at once
+  // instead of flipping between one module at a time. Empty = every module.
+  const [activeModules, setActiveModules] = useState<string[]>([]);
+  const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
 
   const {
     data: allItems = [],
@@ -996,8 +1052,43 @@ const ApprovalInbox: React.FC = () => {
   const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
 
   const items = (
-    activeModule ? allItems.filter((i) => i.Module === activeModule) : allItems
-  ).filter((i) => !removedKeys.has(`${i.Module}-${i.RecordId}`));
+    activeModules.length > 0
+      ? allItems.filter((i) => activeModules.includes(i.Module))
+      : allItems
+  )
+    .filter((i) => !removedKeys.has(`${i.Module}-${i.RecordId}`))
+    // Grouped by module first (all Material Requests together, then all
+    // Purchase Orders, then all GRNs, etc. — MODULE_ORDER below) so like
+    // documents sit together instead of interleaving by date across
+    // modules within the same category. Sorted by the record's own date
+    // within each module, not the backend's LastModified order — a
+    // document dated last month that was only just resubmitted shouldn't
+    // outrank one genuinely raised yesterday.
+    .sort((a, b) => {
+      const moduleDelta = moduleOrderOf(a.Module) - moduleOrderOf(b.Module);
+      if (moduleDelta !== 0) return moduleDelta;
+      const da = a.RecordDate ? new Date(a.RecordDate).getTime() : 0;
+      const db = b.RecordDate ? new Date(b.RecordDate).getTime() : 0;
+      return dateSort === "desc" ? db - da : da - db;
+    });
+
+  // Group by category (Material, Finance, Engineering, Sales/CRM, Admin) so
+  // like modules — MR/PO/GRN under Material, Payment/JV under Finance, etc. —
+  // sit together in the list, in a fixed category order. Within a category,
+  // the date sort above is preserved.
+  const groupedItems = CATEGORY_ORDER.map((cat) => ({
+    cat,
+    items: items.filter((i) => categoryOf(i.Module) === cat),
+  })).filter((g) => g.items.length > 0);
+
+  // Feeds the nested filter dropdown — every module, grouped by its business
+  // category, with a live pending-count hint per option.
+  const moduleFilterOptions: MultiSelectOption[] = ALL_MODULES.map((mod) => ({
+    id: mod,
+    label: MODULE_CONFIG[mod].label,
+    group: CATEGORY_META[categoryOf(mod)].label,
+    hint: String(allItems.filter((i) => i.Module === mod).length || ""),
+  }));
 
   const handleOptimisticUpdate = (recordId: string, module: string) => {
     setRemovedKeys((prev) => new Set(prev).add(`${module}-${recordId}`));
@@ -1018,8 +1109,6 @@ const ApprovalInbox: React.FC = () => {
     window.dispatchEvent(new CustomEvent("approval-action"));
   };
 
-  const countFor = (mod: string) =>
-    allItems.filter((i) => i.Module === mod).length;
   const totalCount = allItems.length;
 
   return (
@@ -1052,55 +1141,38 @@ const ApprovalInbox: React.FC = () => {
           </div>
         }
       >
-        {/* Module filter — collapsible so the full module list doesn't
-            spill across multiple lines by default; expand to see/pick all. */}
-        <div className="rounded-xl border border-border bg-muted/30 overflow-hidden">
-          <button
-            onClick={() => setFiltersExpanded((v) => !v)}
-            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <span className="flex items-center gap-2">
+        {/* Nested filter — every approval type, grouped by its business
+            category (Material/Finance/Engineering/Sales-CRM), multi-select
+            so several types (e.g. PO + GRN + Payment) can be picked at once
+            instead of one module at a time. Paired with a date-sort toggle
+            since "filter, then sort" is how this list is actually worked. */}
+        <div className="rounded-xl border border-border bg-muted/30 p-2.5 space-y-2">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
               <SlidersHorizontal size={12} />
-              Filter by module
-              {activeModule && (
-                <span className="text-[10px] font-semibold text-primary">
-                  · {MODULE_CONFIG[activeModule]?.label}
-                </span>
-              )}
+              Filter by type
             </span>
-            <ChevronDown
-              size={14}
-              className={`transition-transform ${filtersExpanded ? "rotate-180" : ""}`}
-            />
-          </button>
-          {filtersExpanded && (
-            <div className="flex items-center gap-1.5 flex-wrap p-1.5 pt-0">
-              <ModuleTab
-                module={null}
-                label="All"
-                icon={ClipboardCheck}
-                count={totalCount}
-                active={activeModule === null}
-                onClick={() => setActiveModule(null)}
-              />
-              {ALL_MODULES.map((mod) => {
-                const cfg = MODULE_CONFIG[mod];
-                return (
-                  <ModuleTab
-                    key={mod}
-                    module={mod}
-                    label={cfg.label}
-                    icon={cfg.icon}
-                    count={countFor(mod)}
-                    active={activeModule === mod}
-                    onClick={() =>
-                      setActiveModule(activeModule === mod ? null : mod)
-                    }
-                  />
-                );
-              })}
-            </div>
-          )}
+            <button
+              onClick={() => setDateSort((s) => (s === "desc" ? "asc" : "desc"))}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Toggle date sort order"
+            >
+              {dateSort === "desc" ? (
+                <ArrowDownWideNarrow size={12} />
+              ) : (
+                <ArrowUpWideNarrow size={12} />
+              )}
+              {dateSort === "desc" ? "Newest first" : "Oldest first"}
+            </button>
+          </div>
+          <MultiSelectDropdown
+            options={moduleFilterOptions}
+            value={activeModules}
+            onChange={setActiveModules}
+            placeholder="All approval types"
+            searchPlaceholder="Search PO, GRN, Payment…"
+            itemNoun="type"
+          />
         </div>
 
         {/* Content */}
@@ -1128,13 +1200,13 @@ const ApprovalInbox: React.FC = () => {
                 <Inbox size={24} className="text-muted-foreground/40" />
               </div>
               <p className="text-sm font-semibold text-foreground">
-                {activeModule
-                  ? "No pending items in this module"
+                {activeModules.length > 0
+                  ? "No pending items for the selected type(s)"
                   : "All clear!"}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {activeModule
-                  ? "Switch to All to see the full inbox"
+                {activeModules.length > 0
+                  ? "Clear the filter to see the full inbox"
                   : "No records are awaiting approval right now"}
               </p>
             </div>
@@ -1164,13 +1236,29 @@ const ApprovalInbox: React.FC = () => {
               </div>
 
               <div>
-                {items.map((item) => (
-                  <InboxRow
-                    key={`${item.Module}-${item.RecordId}`}
-                    item={item}
-                    onActionDone={handleActionDone}
-                    onOptimisticUpdate={handleOptimisticUpdate}
-                  />
+                {groupedItems.map(({ cat, items: catItems }) => (
+                  <div key={cat}>
+                    {/* Category section header — only worth showing when the
+                        current result set spans more than one category; a
+                        filter narrow enough to leave just one category on
+                        screen makes the header redundant. */}
+                    {groupedItems.length > 1 && (
+                      <div className="sticky top-0 z-[1] flex items-center gap-1.5 px-4 py-1.5 bg-muted/60 backdrop-blur-sm border-b border-border">
+                        <span className={`text-[10px] font-bold uppercase tracking-wider ${CATEGORY_META[cat].color}`}>
+                          {CATEGORY_META[cat].label}
+                        </span>
+                        <span className="text-[10px] text-muted-foreground">({catItems.length})</span>
+                      </div>
+                    )}
+                    {catItems.map((item) => (
+                      <InboxRow
+                        key={`${item.Module}-${item.RecordId}`}
+                        item={item}
+                        onActionDone={handleActionDone}
+                        onOptimisticUpdate={handleOptimisticUpdate}
+                      />
+                    ))}
+                  </div>
                 ))}
               </div>
 
@@ -1178,8 +1266,8 @@ const ApprovalInbox: React.FC = () => {
                 <p className="text-[11px] text-muted-foreground">
                   {items.length} record{items.length !== 1 ? "s" : ""} pending
                   approval
-                  {activeModule &&
-                    ` in ${MODULE_CONFIG[activeModule]?.label ?? activeModule}`}
+                  {activeModules.length > 0 &&
+                    ` — ${activeModules.map((m) => MODULE_CONFIG[m]?.label ?? m).join(", ")}`}
                 </p>
               </div>
             </>

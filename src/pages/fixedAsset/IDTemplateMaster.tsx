@@ -78,7 +78,7 @@ export default function IDTemplateMaster() {
   const handleDelete = async (r: IDTemplate) => {
     try {
       await deleteIDTemplate(r.id);
-      toast.success("ID template deactivated");
+      toast.success("ID template deleted");
       await invalidate();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed");
@@ -111,7 +111,12 @@ export default function IDTemplateMaster() {
     {
       id: "sample",
       header: "Sample FA Item Code",
-      cell: ({ row }) => <span className="font-mono text-xs text-muted-foreground">{row.original.projectAlias}/ItemName/0001/26-27</span>,
+      cell: ({ row }) => (
+        <div className="font-mono text-xs text-muted-foreground space-y-0.5">
+          <div><span className="font-sans text-[10px] uppercase tracking-wide opacity-70">Inventory </span>{row.original.projectAlias}/ItemName/0001/26-27</div>
+          <div><span className="font-sans text-[10px] uppercase tracking-wide opacity-70">Assigned </span>{row.original.projectAlias}/<span className="text-amber-600 dark:text-amber-400">Department</span>/ItemName/0001/26-27</div>
+        </div>
+      ),
     },
     {
       id: "status",
@@ -143,7 +148,7 @@ export default function IDTemplateMaster() {
             )}
             {rights.canDelete && r.isActive && (
               <button onClick={() => setDeleting(r)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="Deactivate">
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors" title="Delete">
                 <Trash2 size={13} />
               </button>
             )}
@@ -208,7 +213,7 @@ export default function IDTemplateMaster() {
                 value={form.projectAlias}
                 onChange={(e) => setForm((p) => ({ ...p, projectAlias: e.target.value }))} />
               <p className="text-[11px] text-muted-foreground">
-                Used as the first segment of every generated FA Item Code for this project, e.g. <span className="font-mono">RG/Laptop/0001/26-27</span>.
+                Used as the first segment of every generated FA Item Code for this project, e.g. <span className="font-mono">RG/Laptop/0001/26-27</span>. Once an asset is assigned, its holder's department is shown after the alias (<span className="font-mono">RG/Legal/Laptop/0001/26-27</span>) and follows the asset when it is transferred.
               </p>
             </div>
             <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
@@ -239,11 +244,11 @@ export default function IDTemplateMaster() {
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
-              <AlertTriangle size={16} /> Deactivate Template
+              <AlertTriangle size={16} /> Delete Template
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground pt-1">
-            Deactivate the alias <strong>{deleting?.projectAlias}</strong> for <strong>{deleting?.projectName}</strong>? Codes already generated stay exactly as they are — this only blocks new tagging for this project until re-activated.
+            Delete the alias <strong>{deleting?.projectAlias}</strong> for <strong>{deleting?.projectName}</strong>? This permanently removes it and cannot be undone. Codes already generated stay exactly as they are — this only blocks new tagging for this project.
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => setDeleting(null)} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
@@ -251,7 +256,7 @@ export default function IDTemplateMaster() {
             </button>
             <button onClick={() => deleting && handleDelete(deleting)}
               className="px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity">
-              Deactivate
+              Delete
             </button>
           </div>
         </DialogContent>

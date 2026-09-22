@@ -15,11 +15,12 @@ import {
   VideoPlay,
   Shield,
   MoneyRecive,
+  Profile2User,
 } from "iconsax-react";
 import { HardHat, Wrench } from "lucide-react";
 import { TimelineIcon } from "@/components/icons/TimelineIcon";
 import { useModule } from "@/contexts/ModuleContext";
-import { MODULE_DASHBOARD_ROUTES, Module } from "@/contexts/module.utils";
+import { MODULE_DASHBOARD_ROUTES, Module, isAdminTierRole, userHasModuleAccess as sharedUserHasModuleAccess } from "@/contexts/module.utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./layoutContexts";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
@@ -151,6 +152,15 @@ const MODULES = [
     bg: "rgba(101,163,13,0.22)",
     ringRgb: "101,163,13",
   },
+  {
+    id: "hr-payroll" as Module,
+    icon: Profile2User,
+    label: "HR and Payroll",
+    desc: "Employees, attendance & payroll",
+    color: "#eab308",
+    bg: "rgba(234,179,8,0.22)",
+    ringRgb: "234,179,8",
+  },
   // Records is always last — new modules get inserted above this entry
   {
     id: "records" as Module,
@@ -192,7 +202,7 @@ export const ModuleStrip: React.FC = () => {
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
   const role = currentUser?.role ?? "";
-  const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
+  const isAdminTier = isAdminTierRole(role);
 
   const activeModuleItem =
     [...MODULES, ADMIN_MODULE].find((m) => m.id === activeModule) ?? MODULES[0];
@@ -216,29 +226,11 @@ export const ModuleStrip: React.FC = () => {
     setCanScrollDown(hasOverflow && !atBottom);
   }, []);
 
-  // Map each module to a representative page key that signals access.
-  // A user with ANY view right in a module's page definitions will see that module.
-  const MODULE_SAMPLE_PAGES: Record<string, string[]> = {
-    finance:     ["finance-dashboard", "new-payment", "received-payment", "brs", "transactions", "expense-booking"],
-    material:    ["material-dashboard", "purchase-orders", "grn-master", "material-request", "material-issues", "stock-ledger"],
-    "fixed-asset": ["fixed-asset-dashboard", "fixed-asset-record", "fixed-asset-tagging", "asset-transfer", "depreciation-setup", "id-template-master"],
-    followup:    ["followup-dashboard", "followup-applications", "followup-bookings", "followup-agreements", "followup-demands"],
-    engineering: ["engineering-dashboard", "boq", "engineering-work-order", "work-done", "dpr"],
-    ticket:      ["ticket-dashboard", "tickets"],
-    sales:       ["sale-order", "sale-invoice", "sales-payment"],
-    civilworkdpr: ["civilworkdpr-dashboard"],
-    "sales-automation": ["sa-social-media", "sa-campaigns", "sa-ads", "sa-leads", "sa-lead-distribution", "sa-inquiry", "sa-site-visits", "sa-marketing-invoices"],
-    maintenance: ["maintenance-dashboard"],
-    loan:        ["loan-dashboard", "loan-sanction"],
-    records:     ["records"],
-    crm:         ["crm-dashboard", "crm-bookings", "crm-applications", "crm-agreements", "crm-sales-deed"],
-  };
-
-  const userHasModuleAccess = (moduleId: string): boolean => {
-    if (isAdminTier) return true;
-    const pages = MODULE_SAMPLE_PAGES[moduleId] ?? [];
-    return pages.some((pk) => canAccessPage(pk as any));
-  };
+  // MODULE_SAMPLE_PAGES/userHasModuleAccess now live in module.utils.ts —
+  // shared with useGlobalShortcuts.ts's Shift+key module switcher so both
+  // agree on exactly who can reach which module.
+  const userHasModuleAccess = (moduleId: string): boolean =>
+    sharedUserHasModuleAccess(moduleId, isAdminTier, (pk) => canAccessPage(pk as any));
 
   // Filter regular modules; admin for admin-tier OR users with approval-inbox access
   const canAccessApprovalInbox = canAccessPage("approval-inbox" as any);

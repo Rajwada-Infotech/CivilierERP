@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { safeHtml, raw } from "@/utils/escapeHtml";
+import { printStatusLabel } from "@/utils/printStatus";
 import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { type DbItem } from "@/api/itemMasterApi";
@@ -1843,7 +1844,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
                 <Trash2 size={13} className="mr-1.5" /> Delete
               </Button>
             )}
-            {canEdit && (record.Status === "Draft" || record.Status === "Approved") && (
+            {canEdit && (record.Status === "Draft" || record.Status === "Approved" || record.Status === "Rejected") && (
               <Button
                 variant="secondary"
                 size="sm"
@@ -2401,7 +2402,7 @@ export default function BOQ() {
               <h1>Bill of Quantities</h1>
               <div class="muted">${record.BoqNo || record.DocNo || `#${record.BoqID}`}</div>
             </div>
-            <div><span class="badge">${record.Status || "Draft"}</span></div>
+            <div><span class="badge">${printStatusLabel(record.Status) || "Draft"}</span></div>
           </div>
           <div class="grid">
             <div><div class="label">Company</div><div class="value">${record.CompanyName || ""}</div></div>

@@ -7,9 +7,10 @@ const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { postFundTransferApproval, hasPosting } = require("../services/generalLedger");
+const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 
 function requireUser(req, res) {
   const email = req.user?.email || req.user?.name;
@@ -83,6 +84,19 @@ async function assertChequeAvailable(pool, lotId, chequeNo, excludeFTId) {
   const dupFT = await ftReq.query(ftQuery);
   if (dupFT.recordset[0].cnt > 0) {
     const err = new Error("Cheque number already used in another Fund Transfer.");
+    err.status = 409;
+    throw err;
+  }
+
+  const dupJV = await pool.request()
+    .input("ChequeLotId", sql.Int, lotId)
+    .input("ChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
+      SELECT COUNT(*) AS cnt FROM dbo.JournalVoucher
+      WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo
+        AND Status NOT IN ('Rejected', 'Deleted')
+    `);
+  if (dupJV.recordset[0].cnt > 0) {
+    const err = new Error("Cheque number already used in a Journal Voucher.");
     err.status = 409;
     throw err;
   }
@@ -385,7 +399,8 @@ router.post("/", authenticateToken, requirePageRight("fund-transfer", "create"),
   }
 });
 
-// ── PUT /:id — edit (Draft only) ────────────────────────────────────────────
+// ── PUT /:id — edit (Draft or Rejected — guardEdit already allows both;
+// saving a Rejected transfer re-submits it, see the resubmit block below) ──
 router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"), async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
@@ -395,9 +410,11 @@ router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"),
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
+    let wasRejected = false;
     try {
       const allowPostApproval = await resolveAllowPostApproval(req, "fund-transfer");
       await guardEdit("fund-transfer", id, { allowPostApproval });
+      wasRejected = (await getRecordStatus("fund-transfer", id)) === "Rejected";
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
@@ -438,7 +455,7 @@ router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"),
           ChequeNo=@ChequeNo, ChequeDate=@ChequeDate, IsPostDated=@IsPostDated,
           DigitalRefNumber=@DigitalRefNumber,
           UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()
-        WHERE FTId=@id AND Status='Draft'
+        WHERE FTId=@id AND Status IN ('Draft', 'Rejected')
       `);
 
     if (updateResult.rowsAffected[0] === 0) {
@@ -446,7 +463,112 @@ router.put("/:id", authenticateToken, requirePageRight("fund-transfer", "edit"),
     }
 
     await bumpCacheVersion("fund-transfer");
-    res.json({ message: "Fund Transfer updated" });
+
+    // A corrected, previously-Rejected transfer goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("fund-transfer", id, "Pending", user, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[fund-transfer] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Fund Transfer updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: resubmitted ? "Fund Transfer updated and re-submitted for approval" : "Fund Transfer updated",
+      resubmitted,
+    });
+  } catch (err) {
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/remarks — edit only the narration/remarks ──────────────────────
+// Remarks carry no financial weight, so unlike PUT /:id (full edit, Draft or
+// Rejected only) they stay editable while the transfer is Pending too. Once
+// Approved they're still editable, but only with the post-approval right, and
+// the change is written to the Amendment trail (Finance → Amendment). The GL
+// posting is left alone — only the transfer's own Narration changes.
+router.put("/:id/remarks", authenticateToken, requirePageRight("fund-transfer", "edit"), async (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const raw = req.body?.Narration;
+    if (raw !== undefined && raw !== null && typeof raw !== "string") {
+      return res.status(400).json({ error: "Narration must be text." });
+    }
+    const narration = (raw || "").trim();
+    if (narration.length > 500) {
+      return res.status(400).json({ error: "Narration can be at most 500 characters." });
+    }
+
+    const before = await snapshotRow(pool, "dbo.FundTransfer", "FTId", id);
+    if (!before) return res.status(404).json({ error: "Not found" });
+
+    const status = before.Status;
+    const wasApproved = status === "Approved";
+    if (!wasApproved && !["Draft", "Pending", "Rejected"].includes(status)) {
+      return res.status(400).json({ error: `Remarks cannot be edited on a ${status} transfer.` });
+    }
+    if (wasApproved && !(await resolveAllowPostApproval(req, "fund-transfer"))) {
+      return res.status(403).json({ error: "You don't have permission to edit an approved transfer." });
+    }
+
+    const updateResult = await pool.request()
+      .input("id", sql.Int, id)
+      .input("status", sql.NVarChar(20), status)
+      .input("Narration", sql.NVarChar(500), narration || null)
+      .input("UpdatedBy", sql.NVarChar(150), user).query(`
+        UPDATE dbo.FundTransfer
+        SET Narration=@Narration, UpdatedBy=@UpdatedBy, UpdatedAt=SYSDATETIME()
+        WHERE FTId=@id AND Status=@status
+      `);
+    if (updateResult.rowsAffected[0] === 0) {
+      return res.status(409).json({ error: "The transfer's status changed before the remarks could be saved. Reload and try again." });
+    }
+
+    await bumpCacheVersion("fund-transfer");
+
+    let amendmentId = null;
+    if (wasApproved) {
+      try {
+        const after = await snapshotRow(pool, "dbo.FundTransfer", "FTId", id);
+        const company = await pool.request().input("c", sql.Int, before.SourceCompanyId)
+          .query("SELECT name FROM dbo.enterprise WHERE id = @c");
+        amendmentId = await recordAmendment({
+          refDocType: "fund-transfer",
+          refDocId: id,
+          refDocNo: before.DocNo,
+          projectName: null,
+          companyName: company.recordset[0]?.name || null,
+          changedBy: user,
+          before,
+          after,
+          fieldLabels: { Narration: "Narration / Remarks" },
+        });
+      } catch (logErr) {
+        console.error("Amendment log error (fund-transfer):", logErr.message);
+      }
+    }
+
+    res.json({
+      message: amendmentId ? "Remarks updated and logged in Amendment" : "Remarks updated",
+      amendmentId,
+    });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
@@ -473,7 +595,7 @@ router.put("/:id/approve", authenticateToken, requirePageRight("fund-transfer", 
 
     let transitionResult = {};
     if (!alreadyApproved) {
-      transitionResult = await transition("fund-transfer", id, "Approved", user, req.user?.role, req.body?.note);
+      transitionResult = await transition("fund-transfer", id, "Approved", user, req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
     }
 
     if (alreadyApproved) {
@@ -521,7 +643,7 @@ router.put("/:id/reject", authenticateToken, requirePageRight("fund-transfer", "
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const result = await transition("fund-transfer", id, "Rejected", user, req.user?.role, req.body?.note);
+    const result = await transition("fund-transfer", id, "Rejected", user, req.user?.role, req.body?.note, req.user?.userId ?? req.user?.id ?? null);
     await bumpCacheVersion("fund-transfer");
     res.json({ message: "Fund Transfer rejected", ...result });
   } catch (err) {

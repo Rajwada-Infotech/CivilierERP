@@ -16,11 +16,12 @@ import {
   type SourceType,
   type Engineer,
 } from "@/api/dependencyActivityAssignmentApi";
-import { getActivityCheckpoints } from "@/api/activityCheckpointApi";
+import { getCheckpoints, type ActivityCheckpoint } from "@/api/activityCheckpointApi";
 import { getRoomBlueprint } from "@/api/roomMasterApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
+import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -206,6 +207,11 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [checkpoints, setCheckpoints] = useState<AssignmentCheckpoint[]>([]);
   const [loadingCheckpoints, setLoadingCheckpoints] = useState(false);
+  // Picker over the general Work Checkpoint Master list.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pool, setPool] = useState<ActivityCheckpoint[]>([]);
+  const [picked, setPicked] = useState<Set<number>>(new Set());
+  const [pickerSearch, setPickerSearch] = useState("");
 
   const { data: engineers = [] } = useQuery({
     queryKey: ["dependency-activity-assignment-engineers"],
@@ -252,35 +258,55 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail]);
 
-  // Pulls the activity's checkpoint template from Work Checkpoint Master
-  // and appends any not already attached here (matched by checkpointId, or
-  // by name for ones added before a checkpointId existed) — never
-  // duplicates, never clobbers checked state already on the list.
-  const handleAddCheckpoints = async () => {
+  // Work Checkpoint Master is one general list; the user picks the checkpoints
+  // that apply to THIS activity. Already-attached ones (matched by checkpointId,
+  // or by name for ones added before a checkpointId existed) aren't offered again.
+  const openCheckpointPicker = async () => {
+    if (pickerOpen) {
+      setPickerOpen(false);
+      return;
+    }
     setLoadingCheckpoints(true);
     try {
-      const template = await getActivityCheckpoints(rung.activityId);
-      if (!template.length) {
-        toast.error("No checkpoints configured for this activity in Work Checkpoint Master.");
+      const list = await getCheckpoints();
+      if (!list.length) {
+        toast.error("No checkpoints in Work Checkpoint Master yet — add some there first.");
         return;
       }
-      setCheckpoints((prev) => {
-        const existingIds = new Set(prev.map((c) => c.checkpointId).filter((id): id is number => id != null));
-        const existingNames = new Set(prev.map((c) => c.fieldName.toLowerCase()));
-        const additions = template
-          .filter((t) => !existingIds.has(t.id) && !existingNames.has(t.fieldName.toLowerCase()))
-          .map((t): AssignmentCheckpoint => ({ checkpointId: t.id, fieldName: t.fieldName, isChecked: false, minWaitDays: t.minWaitDays }));
-        if (!additions.length) {
-          toast("All of this activity's checkpoints are already on the list.");
-          return prev;
-        }
-        return [...prev, ...additions];
-      });
+      setPool(list);
+      setPicked(new Set());
+      setPickerSearch("");
+      setPickerOpen(true);
     } catch (e: any) {
       toast.error(e.message ?? "Couldn't load checkpoints");
     } finally {
       setLoadingCheckpoints(false);
     }
+  };
+
+  const availableToPick = pool.filter((t) => {
+    const onList = checkpoints.some(
+      (c) => (c.checkpointId != null && c.checkpointId === t.id) || c.fieldName.toLowerCase() === t.fieldName.toLowerCase(),
+    );
+    return !onList && t.fieldName.toLowerCase().includes(pickerSearch.trim().toLowerCase());
+  });
+
+  const togglePicked = (id: number) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const addPickedCheckpoints = () => {
+    const additions = pool
+      .filter((t) => picked.has(t.id))
+      .map((t): AssignmentCheckpoint => ({ checkpointId: t.id, fieldName: t.fieldName, isChecked: false, minWaitDays: t.minWaitDays, isDaily: t.isDaily }));
+    if (!additions.length) return;
+    setCheckpoints((prev) => [...prev, ...additions]);
+    setPicked(new Set());
+    setPickerOpen(false);
   };
 
   // Checking OFF is always allowed; checking ON is blocked until
@@ -307,8 +333,16 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     }
     setCheckpoints((prev) => prev.map((c, i) => (i === index ? { ...c, isChecked: !c.isChecked } : c)));
   };
-  const removeCheckpoint = (index: number) =>
+  const removeCheckpoint = (index: number) => {
+    const cp = checkpoints[index];
+    if (cp?.isDaily && (cp.updateCount ?? 0) > 0) {
+      const ok = window.confirm(
+        `"${cp.fieldName}" has ${cp.updateCount} daily update(s) with photos. Removing it deletes them when you save. Remove anyway?`,
+      );
+      if (!ok) return;
+    }
     setCheckpoints((prev) => prev.filter((_, i) => i !== index));
+  };
 
   // Same rule toggleCheckpoint enforces, exposed here so the row can show
   // *why* a checkpoint can't be checked yet instead of just silently
@@ -592,7 +626,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                 </label>
                 <button
                   type="button"
-                  onClick={handleAddCheckpoints}
+                  onClick={openCheckpointPicker}
                   disabled={loadingCheckpoints}
                   className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 h-auto rounded-lg border border-dashed border-border text-muted-foreground hover:text-cyan-600 dark:hover:text-cyan-400 hover:border-cyan-500/50 hover:bg-cyan-500/5 disabled:opacity-50 transition-all"
                 >
@@ -600,9 +634,56 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   Add Checkpoints
                 </button>
               </div>
+              {pickerOpen && (
+                <div className="mb-3 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3 space-y-2">
+                  <input
+                    value={pickerSearch}
+                    onChange={(e) => setPickerSearch(e.target.value)}
+                    placeholder="Search checkpoints…"
+                    className="w-full px-2.5 py-1.5 rounded-md text-xs bg-background border border-border focus:outline-none focus:ring-1 focus:ring-cyan-500/40"
+                  />
+                  <div className="max-h-44 overflow-y-auto space-y-0.5">
+                    {availableToPick.length === 0 ? (
+                      <p className="text-xs text-muted-foreground italic py-2 text-center">
+                        {pickerSearch.trim() ? "No checkpoint matches." : "Every checkpoint is already on this rung."}
+                      </p>
+                    ) : (
+                      availableToPick.map((t) => (
+                        <label key={t.id} className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-background/60 cursor-pointer text-xs">
+                          <input type="checkbox" checked={picked.has(t.id)} onChange={() => togglePicked(t.id)} className="accent-cyan-500" />
+                          <span className="flex-1 text-foreground">{t.fieldName}</span>
+                          {t.isDaily && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-cyan-700 dark:text-cyan-300">
+                              <CalendarDays size={9} /> Daily
+                            </span>
+                          )}
+                          {t.minWaitDays != null && t.minWaitDays > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
+                              <Timer size={9} /> {t.minWaitDays}d wait
+                            </span>
+                          )}
+                        </label>
+                      ))
+                    )}
+                  </div>
+                  <div className="flex items-center justify-end gap-2">
+                    <button type="button" onClick={() => setPickerOpen(false)} className="text-xs px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted">
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={addPickedCheckpoints}
+                      disabled={picked.size === 0}
+                      className="text-xs font-semibold px-3 py-1 rounded-md bg-cyan-500 text-white hover:bg-cyan-600 disabled:opacity-40"
+                    >
+                      Add {picked.size > 0 ? picked.size : ""} selected
+                    </button>
+                  </div>
+                </div>
+              )}
               {checkpoints.length === 0 ? (
                 <p className="text-xs text-muted-foreground italic py-1.5">
-                  No checkpoints on this rung yet — click "Add Checkpoints" to pull them from Work Checkpoint Master.
+                  No checkpoints on this rung yet — click "Add Checkpoints" to choose from Work Checkpoint Master.
                 </p>
               ) : (
                 <div className="space-y-0">
@@ -630,9 +711,15 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                           <div className={`w-0.5 flex-1 min-h-[18px] ${cp.isChecked ? "bg-emerald-500/40" : "bg-border"}`} />
                         )}
                       </div>
-                      <div className="flex-1 flex items-center justify-between gap-2 pb-3 pt-0.5">
+                      <div className="flex-1 min-w-0 pb-3 pt-0.5">
+                      <div className="flex items-center justify-between gap-2">
                         <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
                           {cp.fieldName}
+                          {cp.isDaily && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                              <CalendarDays size={9} /> Daily
+                            </span>
+                          )}
                           {gate.locked && (
                             <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
                               <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
@@ -647,6 +734,8 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         >
                           <Trash2 size={12} />
                         </button>
+                      </div>
+                      {cp.isDaily && <CheckpointDailyUpdates checkpointId={cp.id} startDate={startDate || undefined} />}
                       </div>
                     </div>
                     );

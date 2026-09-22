@@ -18,11 +18,11 @@ import {
   Check,
   ShieldCheck,
   Loader2,
-  ArrowDown,
   Users,
   GitBranch,
   CheckCircle2,
   AlertCircle,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +35,10 @@ export interface ApprovalLevel {
   id: number;
   label: string;
   userIds: number[];
+  // "any" (default) — the step is done as soon as one assigned person
+  // approves. "all" — every assigned person must approve before the step
+  // moves on (e.g. Director 1 AND Director 2, not just one of them).
+  mode: "any" | "all";
 }
 
 export interface ApprovalWorkflow {
@@ -70,10 +74,16 @@ const MODULE_OPTIONS = [
     desc: "When materials leave store",
   },
   {
+    id: "MaterialIssueReturn",
+    label: "Material Issue Return",
+    icon: "↩️",
+    desc: "Before returned material is credited back to stock",
+  },
+  {
     id: "Expenses",
-    label: "Expense Booking",
+    label: "Invoice",
     icon: "🧾",
-    desc: "Staff expense claims",
+    desc: "Before an invoice is booked",
   },
   {
     id: "WorkOrderHeader",
@@ -88,10 +98,28 @@ const MODULE_OPTIONS = [
     desc: "Before payments are made",
   },
   {
+    id: "MaterialRequests",
+    label: "Material Request",
+    icon: "📋",
+    desc: "Before store issues material against a request",
+  },
+  {
+    id: "VehicleInOut",
+    label: "Vehicle In/Out",
+    icon: "🚛",
+    desc: "Site gate entry/exit log",
+  },
+  {
+    id: "debit-note",
+    label: "Debit Note",
+    icon: "📉",
+    desc: "Supplier debit note before it's finalized",
+  },
+  {
     id: "StockTransfer",
     label: "Stock Transfer",
     icon: "🔄",
-    desc: "Moving stock between sites",
+    desc: "Stock only moves between godowns once this is fully approved",
   },
   {
     id: "SaleOrder",
@@ -124,10 +152,106 @@ const MODULE_OPTIONS = [
     desc: "Auto-submitted for approval as soon as it's created — no Draft step",
   },
   {
+    id: "BOQ",
+    label: "BOQ",
+    icon: "📐",
+    desc: "Bill of Quantities before it's locked",
+  },
+  {
+    id: "WorkDone",
+    label: "Work Done",
+    icon: "🏗️",
+    desc: "Measured work-done entry before certification",
+  },
+  {
     id: "crm-agreements",
     label: "CRM Agreement (Senior Approval)",
     icon: "📝",
     desc: "Before an agreement is sent to the customer portal — approver roles here are always restricted to admin/super_admin/marketing_head regardless of who's assigned",
+  },
+  {
+    id: "crm-agreement-date",
+    label: "CRM Agreement (Date Approval)",
+    icon: "📅",
+    desc: "Once both sides' proposed dates match, before the Agreement Date is locked — restricted to super_admin regardless of who's assigned here",
+  },
+  {
+    id: "crm-applications",
+    label: "CRM Application",
+    icon: "📥",
+    desc: "Customer application before it converts to a booking",
+  },
+  {
+    id: "crm-bookings",
+    label: "CRM Booking",
+    icon: "🏠",
+    desc: "Unit booking confirmation",
+  },
+  {
+    id: "crm-booking-amendment",
+    label: "CRM Booking Amendment",
+    icon: "✏️",
+    desc: "Changes to an existing booking",
+  },
+  {
+    id: "crm-sales-deed-senior",
+    label: "CRM Sale Deed (Senior Approval)",
+    icon: "📜",
+    desc: "Senior sign-off on the Sale Deed",
+  },
+  {
+    id: "crm-sales-deed-director",
+    label: "CRM Sale Deed (Director Approval)",
+    icon: "🖋️",
+    desc: "Before Sale Deed registration proceeds — restricted to super_admin regardless of who's assigned here",
+  },
+  {
+    id: "crm-registry-complete",
+    label: "CRM Registry Complete",
+    icon: "✅",
+    desc: "Confirms the Sale Deed was registered at the Sub-Registrar",
+  },
+  {
+    id: "crm-registry-cancel",
+    label: "CRM Registry Cancel",
+    icon: "❌",
+    desc: "Cancels a registry step",
+  },
+  {
+    id: "crm-mutation-approve",
+    label: "CRM Mutation Approve",
+    icon: "🗺️",
+    desc: "Confirms the municipal authority's Khata transfer",
+  },
+  {
+    id: "crm-query-payment-confirm",
+    label: "CRM Query Payment Confirm",
+    icon: "🧮",
+    desc: "Confirms government stamp-duty/query fee payment",
+  },
+  {
+    id: "crm-noc",
+    label: "CRM NOC",
+    icon: "🔓",
+    desc: "Organisation & bank No-Objection Certificate",
+  },
+  {
+    id: "crm-brokerage",
+    label: "CRM Brokerage",
+    icon: "🤝",
+    desc: "Broker payment/brokerage record",
+  },
+  {
+    id: "crm-cancellations",
+    label: "CRM Cancellation",
+    icon: "🚫",
+    desc: "Booking cancellation",
+  },
+  {
+    id: "crm-refunds",
+    label: "CRM Refund",
+    icon: "💸",
+    desc: "Customer refund before it's paid out",
   },
 ] as const;
 
@@ -142,22 +266,25 @@ const MODULE_GROUPS = [
       "GRN",
       "PurchaseOrders",
       "MaterialIssues",
-      "Expenses",
-      "StockTransfer",
+      "MaterialIssueReturn",
+      "MaterialRequests",
       "InterCompanyTransfer",
+      "VehicleInOut",
+      "debit-note",
+      "StockTransfer",
     ],
-  },
-  {
-    id: "finance",
-    label: "Finance",
-    icon: "💰",
-    modules: ["NewPayment", "JournalVoucher", "FundTransfer", "Contract"],
   },
   {
     id: "engineering",
     label: "Engineering",
     icon: "⚙️",
-    modules: ["WorkOrderHeader"],
+    modules: ["WorkOrderHeader", "BOQ", "WorkDone"],
+  },
+  {
+    id: "finance",
+    label: "Finance",
+    icon: "💰",
+    modules: ["NewPayment", "Expenses", "JournalVoucher", "FundTransfer", "Contract"],
   },
   {
     id: "sales",
@@ -166,34 +293,47 @@ const MODULE_GROUPS = [
     modules: ["SaleOrder"],
   },
   {
-    id: "crm",
-    label: "CRM",
-    icon: "🏠",
-    modules: ["crm-agreements"],
-  },
-] as const;
-
-const APPROVAL_TYPES = [
-  {
-    id: "sequential" as const,
-    label: "One by one",
-    icon: ArrowDown,
-    desc: "Each person must approve before the next is asked. Like a chain — first Manager, then Director.",
-    example: "Manager → Director → CFO",
+    id: "crm-pipeline",
+    label: "CRM — Pipeline",
+    icon: "📥",
+    modules: ["crm-applications", "crm-bookings", "crm-booking-amendment"],
   },
   {
-    id: "any" as const,
-    label: "Anyone can approve",
-    icon: Users,
-    desc: "Any one person from the list can approve. Useful when multiple people share the same role.",
-    example: "Manager A or Manager B",
+    id: "crm-presale",
+    label: "CRM — Pre-Sale",
+    icon: "📝",
+    modules: ["crm-agreements", "crm-agreement-date"],
   },
   {
-    id: "parallel" as const,
-    label: "Everyone at once",
-    icon: GitBranch,
-    desc: "All approvers are asked at the same time. All must approve before it moves forward.",
-    example: "Manager + Director + CFO (simultaneously)",
+    id: "crm-saledeed",
+    label: "CRM — Sale Deed",
+    icon: "🔑",
+    modules: [
+      "crm-sales-deed-director",
+      "crm-sales-deed-senior",
+      "crm-registry-complete",
+      "crm-registry-cancel",
+      "crm-mutation-approve",
+      "crm-query-payment-confirm",
+    ],
+  },
+  {
+    id: "crm-noc",
+    label: "CRM — NOC",
+    icon: "🏢",
+    modules: ["crm-noc"],
+  },
+  {
+    id: "crm-finance",
+    label: "CRM — Finance",
+    icon: "💵",
+    modules: ["crm-brokerage", "crm-refunds"],
+  },
+  {
+    id: "crm-aftersales",
+    label: "CRM — After-Sales",
+    icon: "🔧",
+    modules: ["crm-cancellations"],
   },
 ] as const;
 
@@ -246,9 +386,11 @@ function UserMultiSelect({
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
   const ref = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     function handle(e: MouseEvent) {
@@ -291,7 +433,14 @@ function UserMultiSelect({
   }, []);
 
   useEffect(() => {
-    if (open) updatePosition();
+    if (open) {
+      updatePosition();
+      setSearch("");
+      // Autofocus the search box the moment the dropdown opens — the whole
+      // point of adding search is to let someone start typing immediately
+      // instead of scrolling a long user list by hand.
+      requestAnimationFrame(() => searchRef.current?.focus());
+    }
   }, [open, updatePosition]);
 
   useEffect(() => {
@@ -320,6 +469,14 @@ function UserMultiSelect({
   }
 
   const selectedUsers = users.filter((u) => value.includes(u.id));
+  const q = search.trim().toLowerCase();
+  const filteredUsers = q
+    ? users.filter(
+        (u) =>
+          u.name.toLowerCase().includes(q) ||
+          u.role?.toLowerCase().includes(q),
+      )
+    : users;
 
   return (
     <div ref={ref} className="relative">
@@ -366,20 +523,36 @@ function UserMultiSelect({
           style={dropdownStyle}
           className="rounded-xl border border-border bg-popover shadow-xl overflow-hidden"
         >
-          <div className="px-3 py-2 border-b border-border bg-muted/30">
+          <div className="px-3 py-2 border-b border-border bg-muted/30 space-y-2">
             <p className="text-xs text-muted-foreground font-medium">
               {selectedUsers.length === 0
                 ? "Select who can approve at this level"
                 : `${selectedUsers.length} person${selectedUsers.length > 1 ? "s" : ""} selected — click to add/remove`}
             </p>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-muted-foreground absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                ref={searchRef}
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                placeholder="Search by name or role…"
+                className="w-full h-8 pl-8 pr-2 rounded-md border border-border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              />
+            </div>
           </div>
           <div className="max-h-72 overflow-y-auto">
             {users.length === 0 ? (
               <div className="px-3 py-6 text-center text-sm text-muted-foreground">
                 No users available
               </div>
+            ) : filteredUsers.length === 0 ? (
+              <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                No users match "{search}"
+              </div>
             ) : (
-              users.map((u) => {
+              filteredUsers.map((u) => {
                 const sel = value.includes(u.id);
                 return (
                   <div
@@ -434,14 +607,19 @@ function AddLevelRow({
   levelNumber,
   onConfirm,
   onCancel,
+  initial,
 }: {
   users: User[];
   levelNumber: number;
   onConfirm: (level: Omit<ApprovalLevel, "id">) => void;
   onCancel: () => void;
+  /** Prefills the form and switches it to "edit an existing step" mode/copy. */
+  initial?: Omit<ApprovalLevel, "id">;
 }) {
-  const [label, setLabel] = useState("");
-  const [userIds, setUserIds] = useState<number[]>([]);
+  const isEdit = !!initial;
+  const [label, setLabel] = useState(initial?.label ?? "");
+  const [userIds, setUserIds] = useState<number[]>(initial?.userIds ?? []);
+  const [mode, setMode] = useState<"any" | "all">(initial?.mode ?? "any");
   const labelRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -453,7 +631,7 @@ function AddLevelRow({
       labelRef.current?.focus();
       return;
     }
-    onConfirm({ label: label.trim(), userIds });
+    onConfirm({ label: label.trim(), userIds, mode });
   }
 
   return (
@@ -463,7 +641,7 @@ function AddLevelRow({
           {levelNumber}
         </div>
         <span className="text-sm font-semibold text-foreground">
-          New approval step
+          {isEdit ? "Edit approval step" : "New approval step"}
         </span>
       </div>
 
@@ -495,11 +673,57 @@ function AddLevelRow({
             onChange={setUserIds}
             users={users}
           />
-          <p className="text-[11px] text-muted-foreground mt-1">
-            You can assign multiple people — anyone assigned can approve unless
-            you chose "Everyone at once" above.
-          </p>
         </div>
+
+        {userIds.length > 1 && (
+          <div>
+            <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
+              How many of them need to approve?
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {(
+                [
+                  {
+                    id: "any" as const,
+                    icon: Users,
+                    label: "Any one of them",
+                    desc: "The first person to approve settles this step.",
+                  },
+                  {
+                    id: "all" as const,
+                    icon: GitBranch,
+                    label: "All of them",
+                    desc: "Every person assigned here must approve before it moves on.",
+                  },
+                ]
+              ).map((opt) => {
+                const Icon = opt.icon;
+                const selected = mode === opt.id;
+                return (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => setMode(opt.id)}
+                    className={cn(
+                      "text-left p-3 rounded-lg border-2 transition-all",
+                      selected
+                        ? "border-primary bg-primary/5"
+                        : "border-border bg-background hover:border-primary/30",
+                    )}
+                  >
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <Icon className={cn("w-3.5 h-3.5", selected ? "text-primary" : "text-muted-foreground")} />
+                      <span className={cn("text-xs font-semibold", selected ? "text-primary" : "text-foreground")}>
+                        {opt.label}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground leading-snug">{opt.desc}</p>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-2 pt-1">
@@ -508,7 +732,7 @@ function AddLevelRow({
           className="gap-1.5 bg-primary hover:bg-primary/90 text-white"
           onClick={confirm}
         >
-          <Check className="w-3.5 h-3.5" /> Add this step
+          <Check className="w-3.5 h-3.5" /> {isEdit ? "Save changes" : "Add this step"}
         </Button>
         <Button
           size="sm"
@@ -533,6 +757,7 @@ function LevelCard({
   onMoveUp,
   onMoveDown,
   onRemove,
+  onEdit,
 }: {
   level: ApprovalLevel;
   index: number;
@@ -541,6 +766,7 @@ function LevelCard({
   onMoveUp: () => void;
   onMoveDown: () => void;
   onRemove: () => void;
+  onEdit: () => void;
 }) {
   function initials(name: string) {
     return name
@@ -569,8 +795,15 @@ function LevelCard({
       {/* Card */}
       <div className="flex-1 flex items-center justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 mb-1 hover:border-primary/30 hover:shadow-sm transition-all">
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-foreground">
-            {level.label}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="text-sm font-semibold text-foreground">
+              {level.label}
+            </div>
+            {level.mode === "all" && levelUsers.length > 1 && (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-600 bg-violet-500/10 border border-violet-500/20 rounded-full px-2 py-0.5">
+                <GitBranch className="w-2.5 h-2.5" /> All must approve
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
             {levelUsers.length === 0 ? (
@@ -627,7 +860,16 @@ function LevelCard({
           <Button
             variant="ghost"
             size="sm"
-            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10 ml-1"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 ml-1"
+            onClick={onEdit}
+            title="Edit who's assigned to this step"
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
             onClick={onRemove}
             title="Remove this step"
           >
@@ -691,14 +933,12 @@ function ConfigForm({
   saving: boolean;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
-  const [type, setType] = useState<"sequential" | "any" | "parallel">(
-    initial?.type ?? "sequential",
-  );
   const [selectedModules, setSelectedModules] = useState<string[]>(
     initial?.modules ?? [],
   );
   const [levels, setLevels] = useState<ApprovalLevel[]>(initial?.levels ?? []);
   const [addingLevel, setAddingLevel] = useState(false);
+  const [editingLevelId, setEditingLevelId] = useState<number | null>(null);
   const nextId = useRef(Date.now());
 
   function toggleModule(id: string) {
@@ -710,6 +950,11 @@ function ConfigForm({
   function addLevel(lv: Omit<ApprovalLevel, "id">) {
     setLevels((prev) => [...prev, { ...lv, id: nextId.current++ }]);
     setAddingLevel(false);
+  }
+
+  function updateLevel(id: number, lv: Omit<ApprovalLevel, "id">) {
+    setLevels((prev) => prev.map((p) => (p.id === id ? { ...lv, id } : p)));
+    setEditingLevelId(null);
   }
 
   function moveUp(idx: number) {
@@ -742,8 +987,10 @@ function ConfigForm({
       return;
     }
     onSave({
+      // Each step now carries its own Anyone/Everyone mode — the workflow
+      // itself is always "sequential" (steps happen in the order below).
       name: name.trim(),
-      type,
+      type: "sequential",
       modules: selectedModules,
       levels,
       active: initial?.active ?? true,
@@ -805,68 +1052,11 @@ function ConfigForm({
           )}
         </FormStep>
 
-        {/* Step 3: Approval style */}
-        <FormStep
-          number={3}
-          title="How should approvals work?"
-          subtitle="Choose how approvers respond when a request comes in"
-        >
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {APPROVAL_TYPES.map((t) => {
-              const Icon = t.icon;
-              const selected = type === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setType(t.id)}
-                  className={cn(
-                    "text-left p-4 rounded-xl border-2 transition-all",
-                    selected
-                      ? "border-primary bg-primary/5 shadow-sm"
-                      : "border-border bg-muted/20 hover:border-primary/30 hover:bg-muted/40",
-                  )}
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <div
-                      className={cn(
-                        "w-7 h-7 rounded-lg flex items-center justify-center",
-                        selected
-                          ? "bg-primary/15 text-primary"
-                          : "bg-muted text-muted-foreground",
-                      )}
-                    >
-                      <Icon className="w-4 h-4" />
-                    </div>
-                    <span
-                      className={cn(
-                        "text-sm font-semibold",
-                        selected ? "text-primary" : "text-foreground",
-                      )}
-                    >
-                      {t.label}
-                    </span>
-                    {selected && (
-                      <Check className="w-4 h-4 text-primary ml-auto" />
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    {t.desc}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground/60 mt-2 font-mono">
-                    {t.example}
-                  </p>
-                </button>
-              );
-            })}
-          </div>
-        </FormStep>
-
-        {/* Step 4: Approval steps */}
+        {/* Step 3: Approval steps */}
         <div className="flex gap-4">
           <div className="flex flex-col items-center flex-shrink-0">
             <div className="w-7 h-7 rounded-full bg-primary/10 border-2 border-primary/30 text-primary text-xs font-bold flex items-center justify-center">
-              4
+              3
             </div>
           </div>
           <div className="flex-1 pb-2">
@@ -875,8 +1065,9 @@ function ConfigForm({
                 Who needs to approve, and in what order?
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">
-                Add approval steps — each step is one person or group that must
-                sign off
+                Add approval steps in order. Assign one or more people to
+                each — if you assign more than one, choose whether any one of
+                them can approve, or all of them must.
               </div>
             </div>
 
@@ -892,27 +1083,39 @@ function ConfigForm({
                 <p className="text-xs text-muted-foreground mb-4">
                   Click the button below to add your first approver.
                   <br />
-                  Example: Step 1 → Site Manager, Step 2 → Finance Head
+                  Example: Step 1 → Head Engineer, Step 2 → Director 1 & Director 2 (all must approve)
                 </p>
               </div>
             )}
 
             {/* Level cards */}
             <div className="space-y-0">
-              {levels.map((lv, idx) => (
-                <LevelCard
-                  key={lv.id}
-                  level={lv}
-                  index={idx}
-                  total={levels.length}
-                  users={users}
-                  onMoveUp={() => moveUp(idx)}
-                  onMoveDown={() => moveDown(idx)}
-                  onRemove={() =>
-                    setLevels((prev) => prev.filter((_, i) => i !== idx))
-                  }
-                />
-              ))}
+              {levels.map((lv, idx) =>
+                editingLevelId === lv.id ? (
+                  <AddLevelRow
+                    key={lv.id}
+                    users={users}
+                    levelNumber={idx + 1}
+                    initial={{ label: lv.label, userIds: lv.userIds, mode: lv.mode }}
+                    onConfirm={(patch) => updateLevel(lv.id, patch)}
+                    onCancel={() => setEditingLevelId(null)}
+                  />
+                ) : (
+                  <LevelCard
+                    key={lv.id}
+                    level={lv}
+                    index={idx}
+                    total={levels.length}
+                    users={users}
+                    onMoveUp={() => moveUp(idx)}
+                    onMoveDown={() => moveDown(idx)}
+                    onRemove={() =>
+                      setLevels((prev) => prev.filter((_, i) => i !== idx))
+                    }
+                    onEdit={() => setEditingLevelId(lv.id)}
+                  />
+                ),
+              )}
 
               {/* Arrow between last card and add row */}
               {levels.length > 0 && !addingLevel && (
@@ -928,7 +1131,7 @@ function ConfigForm({
                   onConfirm={addLevel}
                   onCancel={() => setAddingLevel(false)}
                 />
-              ) : (
+              ) : editingLevelId === null ? (
                 <button
                   type="button"
                   onClick={() => setAddingLevel(true)}
@@ -943,7 +1146,7 @@ function ConfigForm({
                     ? "Add first approval step"
                     : "Add another step"}
                 </button>
-              )}
+              ) : null}
             </div>
           </div>
         </div>
@@ -1276,8 +1479,9 @@ export default function ApprovalSetup() {
             ) : (
               <div className="divide-y divide-border/60">
                 {workflows.map((wf) => {
-                  const typeInfo = APPROVAL_TYPES.find((t) => t.id === wf.type);
-                  const TypeIcon = typeInfo?.icon ?? ArrowDown;
+                  const allModeSteps = wf.levels.filter(
+                    (l) => l.mode === "all" && l.userIds.length > 1,
+                  ).length;
                   return (
                     <div
                       key={wf.id}
@@ -1302,10 +1506,12 @@ export default function ApprovalSetup() {
                           <span className="text-sm font-semibold text-foreground">
                             {wf.name}
                           </span>
-                          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full border border-border">
-                            <TypeIcon className="w-3 h-3" />
-                            {typeInfo?.label}
-                          </span>
+                          {allModeSteps > 0 && (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-violet-600 bg-violet-500/10 px-2 py-0.5 rounded-full border border-violet-500/20">
+                              <GitBranch className="w-3 h-3" />
+                              {allModeSteps} step{allModeSteps > 1 ? "s" : ""} need everyone
+                            </span>
+                          )}
                         </div>
                         <div className="flex items-center gap-3 mt-1.5 flex-wrap">
                           {/* Modules */}

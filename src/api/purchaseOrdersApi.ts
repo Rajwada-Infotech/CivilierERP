@@ -328,6 +328,10 @@ export interface SupplierDetails {
    *  to decide CGST+SGST vs IGST on PO line items relative to the company's
    *  own state. */
   LGSTState: string | null;
+  /** "Registered" / "Unregistered" — GST is only ever calculated on line
+   *  items when this is "Registered"; an Unregistered supplier can't charge
+   *  GST at all, regardless of what the item/HSN master's own rate is. */
+  LGSTType: string | null;
   LHeadPhone: string | null;
   LHeadEmail: string | null;
 }
@@ -346,6 +350,7 @@ export const getSupplierDetails = (
         LHeadContactPerson: data.LHeadContactPerson ?? null,
         LGST: data.LGST ?? null,
         LGSTState: data.LGSTState ?? null,
+        LGSTType: data.LGSTType ?? null,
         LHeadPhone: data.LHeadPhone ?? null,
         LHeadEmail: data.LHeadEmail ?? null,
       };

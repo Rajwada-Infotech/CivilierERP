@@ -8,6 +8,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
+const { assertProjectVisibleToCompany } = require("../services/projectVisibility");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { validateBody } = require("../middleware/validateRequest");
@@ -51,6 +52,20 @@ function paymentReferenceForBrokerage(row) {
 // DocYear (which only reflects the calendar year the doc number was issued
 // in). Used so direct/manual payments (no linked ExpenseBooking) are still
 // correctly filterable/displayable by Financial Year in Reports.
+// NewPayment.PCompany holds either the enterprise id ("23") or, for payments
+// saved from the current form, the company's NAME ("ABC TEST COMPANY") — both
+// shapes exist in the data (see also brs.js's dual match). TDS needs the id.
+async function resolvePaymentCompanyId(pool, pCompany) {
+  const text = String(pCompany ?? "").trim();
+  if (!text) return null;
+  if (/^\d+$/.test(text)) return parseInt(text, 10);
+  const r = await pool
+    .request()
+    .input("Name", sql.NVarChar(255), text)
+    .query("SELECT TOP 1 id FROM dbo.enterprise WHERE name = @Name AND business_type = 'C'");
+  return r.recordset[0]?.id ?? null;
+}
+
 async function resolveFinYearId(pool, pDate) {
   if (!pDate) return null;
   const result = await pool
@@ -426,6 +441,11 @@ router.get("/cheque-lots", async (req, res) => {
           - ISNULL((
               SELECT COUNT(*) FROM dbo.CancelledCheque cc
               WHERE cc.ChequeLotId = cm.CId
+            ), 0)
+          - ISNULL((
+              SELECT COUNT(*) FROM dbo.JournalVoucher jv
+              WHERE jv.ChequeLotId = cm.CId AND jv.ChequeNo IS NOT NULL
+                AND jv.Status NOT IN ('Rejected', 'Deleted')
             ), 0) AS RemainingCheques
       FROM dbo.ChequeMaster cm
       LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
@@ -491,6 +511,15 @@ router.get("/cheque-numbers/:lotId", async (req, res) => {
           AND Status NOT IN ('Rejected', 'Deleted')
       `);
     ftUsedRes.recordset.forEach((r) => usedSet.add(String(r.ChequeNo)));
+
+    // ...and by a Journal Voucher that records a cheque settlement.
+    const jvUsedRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
+      .query(`
+        SELECT ChequeNo FROM dbo.JournalVoucher
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo IS NOT NULL
+          AND Status NOT IN ('Rejected', 'Deleted')
+      `);
+    jvUsedRes.recordset.forEach((r) => usedSet.add(String(r.ChequeNo)));
 
     // Same for Loan Sanctions
     const lsUsedRes = await pool.request().input("ChequeLotId", sql.Int, lotId)
@@ -594,6 +623,21 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
         .json({ error: "Cheque number already used in a Fund Transfer" });
     }
 
+    // ...and if a Journal Voucher claimed it.
+    const jvDupRes = await pool
+      .request()
+      .input("ChequeLotId", sql.Int, lotId)
+      .input("ChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
+        SELECT COUNT(*) AS cnt FROM dbo.JournalVoucher
+        WHERE ChequeLotId = @ChequeLotId AND ChequeNo = @ChequeNo
+          AND Status NOT IN ('Rejected', 'Deleted')
+      `);
+    if (jvDupRes.recordset[0].cnt > 0) {
+      return res
+        .status(409)
+        .json({ error: "Cheque number already used in a Journal Voucher" });
+    }
+
     // Also block if a Loan Sanction claimed this number from this lot.
     const lsDupRes = await pool
       .request()
@@ -635,6 +679,9 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
           WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
             AND Status NOT IN ('Rejected', 'Deleted')) +
         (SELECT COUNT(*) FROM dbo.LoanSanction
+          WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
+            AND Status NOT IN ('Rejected', 'Deleted')) +
+        (SELECT COUNT(*) FROM dbo.JournalVoucher
           WHERE ChequeLotId = @PChequeLotId AND ChequeNo IS NOT NULL
             AND Status NOT IN ('Rejected', 'Deleted')) AS usedCount
     `);
@@ -713,6 +760,12 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     if (!userEmail) return;
 
     const pool = getPool();
+
+    try {
+      await assertProjectVisibleToCompany(pool, PProject, PCompany);
+    } catch (err) {
+      return res.status(err.status || 400).json({ error: err.message });
+    }
 
     const expenseHeadAllocations = normalizeAllocations(EExpenseHeadAllocations);
     if (expenseHeadAllocations.length > 0) {
@@ -802,7 +855,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // TDS is due but nothing was selected — caught below like every other
     // validation error in this handler.
     const isInvoiceLinkedForTds = !!PExpenseRef && !ContractId;
-    const companyIdForTds = parseInt(PCompany, 10) || null;
+    const companyIdForTds = await resolvePaymentCompanyId(pool, PCompany);
     const finYearIdForTds = await resolveFinYearId(pool, PDate);
     let tdsSnapshot;
     try {
@@ -1058,6 +1111,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const pool = getPool();
     const beforeSnapshot = await snapshotRow(pool, "dbo.NewPayment", "PPaymentID", id);
     const wasApproved = beforeSnapshot?.Status === "Approved";
+    const wasRejected = beforeSnapshot?.Status === "Rejected";
 
     // A cancelled payment's GL posting was already reversed and the invoice
     // recomputed on that assumption (see routes/chequeCancellation.js) —
@@ -1067,6 +1121,8 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     if (beforeSnapshot?.Status === "Cancelled") {
       return res.status(400).json({ error: "This payment's cheque was cancelled and cannot be edited." });
     }
+
+    await assertProjectVisibleToCompany(pool, PProject, PCompany);
 
     const expenseHeadAllocationsPut = normalizeAllocations(EExpenseHeadAllocations);
     if (expenseHeadAllocationsPut.length > 0) {
@@ -1241,7 +1297,29 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       }
     }
 
-    res.json({ message: "Payment updated successfully" });
+    // A corrected, previously-Rejected payment goes straight back into the
+    // approval queue on save — no separate "Submit" click. transition()'s
+    // Pending branch writes a fresh Level=0 marker, which restarts approval
+    // at level 1 regardless of what was approved before the rejection (see
+    // approvalService.js's currentCycleCutoffSql).
+    let resubmitted = false;
+    if (wasRejected) {
+      try {
+        await transition("payments", id, "Pending", userEmail, req.user?.role);
+        resubmitted = true;
+      } catch (resubmitErr) {
+        console.error("[payments] auto-resubmit after edit failed:", resubmitErr.message);
+        return res.status(207).json({
+          message: "Payment updated, but could not be re-submitted for approval — submit it manually.",
+          resubmitError: resubmitErr.message,
+        });
+      }
+    }
+
+    res.json({
+      message: resubmitted ? "Payment updated and re-submitted for approval" : "Payment updated successfully",
+      resubmitted,
+    });
   } catch (err) {
     if (
       (err.number === 2601 || err.number === 2627) &&
@@ -1252,7 +1330,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       });
     }
     console.error("PAYMENT UPDATE ERROR:", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(err.status || 500).json({ error: err.message });
   }
 });
 
@@ -1443,6 +1521,8 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
       "Approved",
       userEmail,
       req.user?.role,
+      null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
 
     // Sync EMI installment if this payment is for an EMI ref
@@ -1760,6 +1840,7 @@ router.put("/:id/reject", requirePageRight("new-payment", "edit"), async (req, r
       userEmail,
       req.user?.role,
       note || null,
+      req.user?.userId ?? req.user?.id ?? null,
     );
     await Promise.all([
       bumpCacheVersion("new-payment"),
@@ -2534,7 +2615,14 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     const amount = parseFloat(pmt.PAmount) || 0;
     if (amount <= 0) return res.status(400).json({ error: "No amount to post." });
-    const tdsAmount = parseFloat(pmt.TDSAmount) || 0;
+    // Mirrors postPaymentApproval in services/generalLedger.js: for an
+    // invoice-linked payment, pmt.TDSAmount is only an inherited display
+    // snapshot (see resolveInvoiceLinkedTds in services/tds.js) — TDS was
+    // already withheld as its own liability leg when the INVOICE was
+    // posted, so this route's own GL split must not re-deduct it here too.
+    // This route previously skipped that guard, so a manual "Post to GL" on
+    // an invoice-linked payment double-withheld the TDS amount.
+    const tdsAmount = pmt.PExpenseRef ? 0 : parseFloat(pmt.TDSAmount) || 0;
     if (tdsAmount > amount) {
       return res.status(422).json({ error: `TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — re-save the payment before posting.` });
     }

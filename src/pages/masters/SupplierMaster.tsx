@@ -41,6 +41,7 @@ import {
   Upload,
   Loader2,
   Copy,
+  Landmark,
 } from "lucide-react";
 import TreeDropdown from "@/components/common/TreeDropdown";
 import {
@@ -157,6 +158,11 @@ interface Supplier {
   // supplier's login username for the Supplier Portal, distinct from
   // LHeadEmail (their own business contact address).
   SupplierLoginEmail: string | null;
+  // Bank Details — all optional
+  bankAccountNo: string | null;
+  bankIfscCode: string | null;
+  bankName: string | null;
+  bankBranchCode: string | null;
 }
 
 interface AccountGroup {
@@ -185,6 +191,11 @@ interface SupplierForm {
   tdsLimitApplicable: boolean;
   // Mandatory on create; optional on edit (blank = keep existing password).
   SupplierPassword: string;
+  // Bank Details — all optional
+  bankAccountNo: string;
+  bankIfscCode: string;
+  bankName: string;
+  bankBranchCode: string;
 }
 
 const EMPTY_FORM: SupplierForm = {
@@ -203,11 +214,19 @@ const EMPTY_FORM: SupplierForm = {
   isTdsApplicable: false,
   tdsLimitApplicable: true,
   SupplierPassword: "",
+  bankAccountNo: "",
+  bankIfscCode: "",
+  bankName: "",
+  bankBranchCode: "",
 };
 
 // ─── Export Columns ────────────────────────────────────────────────────────────
 const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Vendor Name", accessor: "LHeadName" },
+  {
+    header: "Type",
+    accessor: (r) => vendorTypeFromCategory((r.supplierCategory as string) || "") || "—",
+  },
   { header: "Contact Person", accessor: "LHeadContactPerson" },
   { header: "Phone", accessor: "LHeadPhone" },
   { header: "Email", accessor: "LHeadEmail" },
@@ -218,10 +237,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Category", accessor: "supplierCategory" },
   {
     header: "Group",
-    accessor: (r) => {
-      // resolved in display — raw value is AGId
-      return r.LBelongsTo != null ? String(r.LBelongsTo) : "—";
-    },
+    accessor: (r) => (r.GroupName as string) || "—",
   },
   { header: "Address", accessor: "LHeadAddress" },
   {
@@ -236,6 +252,10 @@ const EXPORT_COLUMNS: ExportColumn[] = [
     header: "TDS Limit",
     accessor: (r) => (r.TdsLimitApplicable ? "Applied" : "Deduct on every bill"),
   },
+  { header: "Bank Account No", accessor: "bankAccountNo" },
+  { header: "Bank Name", accessor: "bankName" },
+  { header: "Bank Branch Location", accessor: "bankBranchCode" },
+  { header: "IFSC Code", accessor: "bankIfscCode" },
 ];
 
 // ─── CSV template / import column mapping ─────────────────────────────────────
@@ -500,6 +520,10 @@ const SupplierMaster: React.FC = () => {
               : "Supplier")
           : next, // "Vendor" / "Landlord" — the Type IS the stored value
       isTdsApplicable: next === "Supplier" ? p.isTdsApplicable : false,
+      // Switching away from Supplier hides the login-password field — clear
+      // any half-typed value so it can't linger in state and get submitted
+      // if the user switches back and forth before saving.
+      SupplierPassword: next === "Supplier" ? p.SupplierPassword : "",
     }));
   };
 
@@ -560,6 +584,10 @@ const SupplierMaster: React.FC = () => {
       TdsLimitApplicable: item.TdsLimitApplicable == null ? true : Boolean(item.TdsLimitApplicable),
       GroupName: item.GroupName ?? null,
       SupplierLoginEmail: item.SupplierLoginEmail ?? null,
+      bankAccountNo: item.LAccountNo || null,
+      bankIfscCode: item.LIFSCCode || null,
+      bankName: item.LBankName || null,
+      bankBranchCode: item.LBranchCode || null,
     }));
   }, [rawData]);
 
@@ -590,6 +618,10 @@ const SupplierMaster: React.FC = () => {
     // backend defaults the login password to "123456"; on edit, blank
     // leaves the existing password untouched (see accountHeadMaster.js).
     ...(f.SupplierPassword ? { SupplierPassword: f.SupplierPassword } : {}),
+    LAccountNo: f.bankAccountNo || null,
+    LIFSCCode: f.bankIfscCode || null,
+    LBankName: f.bankName || null,
+    LBranchCode: f.bankBranchCode || null,
   });
 
   const createMut = useMutation({
@@ -793,6 +825,11 @@ const SupplierMaster: React.FC = () => {
             isTdsApplicable: category === "Services",
             tdsLimitApplicable: true,
             SupplierPassword: password,
+            // CSV template has no bank-details columns — always blank on import.
+            bankAccountNo: "",
+            bankIfscCode: "",
+            bankName: "",
+            bankBranchCode: "",
           };
 
           await addRecord(
@@ -889,6 +926,10 @@ const SupplierMaster: React.FC = () => {
       // Never pre-filled from the existing (hashed) password — blank means
       // "keep current password" on save.
       SupplierPassword: "",
+      bankAccountNo: s.bankAccountNo ?? "",
+      bankIfscCode: s.bankIfscCode ?? "",
+      bankName: s.bankName ?? "",
+      bankBranchCode: s.bankBranchCode ?? "",
     });
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -948,6 +989,10 @@ const SupplierMaster: React.FC = () => {
         <tr><td>Group</td><td>${s.LBelongsTo != null ? (accountGroups.find((g) => g._id === String(s.LBelongsTo))?.name ?? "—") : "—"}</td></tr>
         <tr><td>Address</td><td>${s.LHeadAddress || "—"}</td></tr>
         <tr><td>Status</td><td>${s.LHeadStatus ? "Active" : "Inactive"}</td></tr>
+        <tr><td>Bank Account Number</td><td>${s.bankAccountNo || "—"}</td></tr>
+        <tr><td>Bank Name</td><td>${s.bankName || "—"}</td></tr>
+        <tr><td>Bank Branch Location</td><td>${s.bankBranchCode || "—"}</td></tr>
+        <tr><td>IFSC Code</td><td>${s.bankIfscCode || "—"}</td></tr>
       </table>
       </body></html>
     `);
@@ -1460,7 +1505,81 @@ const SupplierMaster: React.FC = () => {
               </div>
             </div>
 
-            {/* ── Section: Supplier Portal Login ── */}
+            {/* ── Section: Bank Details — all fields optional ── */}
+            <div className="space-y-3">
+              <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+                <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+                  <Landmark size={12} className="text-primary" />
+                </div>
+                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                  Bank Details
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-x-6 gap-y-5">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Bank Account Number
+                  </label>
+                  <input
+                    value={form.bankAccountNo}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, bankAccountNo: e.target.value }))
+                    }
+                    placeholder="e.g. 123456789012"
+                    className={`${inputCls} font-mono`}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Bank Name
+                  </label>
+                  <input
+                    value={form.bankName}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, bankName: e.target.value }))
+                    }
+                    placeholder="e.g. State Bank of India"
+                    className={inputCls}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    Bank Branch Location
+                  </label>
+                  <input
+                    value={form.bankBranchCode}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, bankBranchCode: e.target.value }))
+                    }
+                    placeholder="e.g. Mumbai Main Branch"
+                    className={`${inputCls} font-mono`}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider block">
+                    IFSC Code
+                  </label>
+                  <input
+                    value={form.bankIfscCode}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        bankIfscCode: e.target.value.toUpperCase(),
+                      }))
+                    }
+                    placeholder="e.g. SBIN0001234"
+                    maxLength={11}
+                    className={`${inputCls} font-mono`}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* ── Section: Supplier Portal Login — Supplier only. A Vendor or
+                Landlord never gets portal credentials, so the whole section
+                (and everything it would submit) simply doesn't exist for
+                them, rather than being shown disabled/empty. ── */}
+            {vendorType === "Supplier" && (
             <div className="space-y-3">
               <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
@@ -1540,6 +1659,7 @@ const SupplierMaster: React.FC = () => {
             })()}
 
             </div>
+            )}
 
             {/* ── Toggles ── */}
             <div className="flex flex-wrap items-center gap-6 pt-1">
@@ -1881,6 +2001,10 @@ const SupplierMaster: React.FC = () => {
                       : "—",
                 },
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
+                { label: "Bank Account Number", value: viewRecord.bankAccountNo || "—", mono: true },
+                { label: "Bank Name", value: viewRecord.bankName || "—" },
+                { label: "Bank Branch Location", value: viewRecord.bankBranchCode || "—", mono: true },
+                { label: "IFSC Code", value: viewRecord.bankIfscCode || "—", mono: true },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
                   <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">

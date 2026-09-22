@@ -367,7 +367,7 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
     `);
     if (!compRes.recordset.length) {
       return res.status(400).json({
-        error: `No room composition template set up for "${unit.UnitType}" yet — set one in Room Composition Builder first.`,
+        error: `No unit composition template set up for "${unit.UnitType}" yet — set one in Unit Composition first.`,
       });
     }
 

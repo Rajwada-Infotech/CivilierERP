@@ -89,7 +89,6 @@ function FilterSelect({
   onChange,
   options,
   placeholder,
-  color,
 }: {
   icon: React.ElementType;
   label: string;
@@ -97,38 +96,20 @@ function FilterSelect({
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
   placeholder: string;
-  color: "emerald" | "violet";
 }) {
-  const c =
-    color === "emerald"
-      ? {
-          border: "border-emerald-400/40 focus:border-emerald-500/60",
-          bg: "bg-emerald-500/[0.05]",
-          icon: "text-emerald-500",
-          label: "text-emerald-600 dark:text-emerald-400",
-        }
-      : {
-          border: "border-violet-400/40 focus:border-violet-500/60",
-          bg: "bg-violet-500/5",
-          icon: "text-violet-500",
-          label: "text-violet-600 dark:text-violet-400",
-        };
-
   return (
     <div className="flex-1 space-y-1.5">
-      <p
-        className={`text-xs font-semibold uppercase tracking-wider ${c.label}`}
-      >
+      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </p>
       <div className="relative">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10">
-          <Icon size={14} className={c.icon} />
+          <Icon size={14} className="text-muted-foreground" />
         </span>
         <select
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors ${c.border} ${c.bg}`}
+          className="w-full pl-9 pr-8 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none appearance-none transition-colors focus:border-primary/60"
           style={{ colorScheme: "dark" }}
         >
           <option value="" className="bg-popover text-foreground">
@@ -187,21 +168,14 @@ function GodownSelect({
       </p>
       <div className="relative">
         <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none z-10">
-          <Warehouse
-            size={14}
-            className={isFrom ? "text-orange-500" : "text-emerald-600"}
-          />
+          <Warehouse size={14} className="text-muted-foreground" />
         </span>
         <select
           value={value != null ? String(value) : ""}
           onChange={(e) =>
             onChange(e.target.value === "" ? null : Number(e.target.value))
           }
-          className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors ${
-            isFrom
-              ? "border-orange-400/40 bg-orange-500/5 focus:border-orange-500/60"
-              : "border-emerald-400/40 bg-emerald-500/5 focus:border-emerald-500/60"
-          }`}
+          className="w-full pl-9 pr-8 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground outline-none appearance-none transition-colors focus:border-primary/60"
           style={{ colorScheme: "dark" }}
         >
           <option value="" className="bg-popover text-foreground">
@@ -225,19 +199,8 @@ function GodownSelect({
         />
       </div>
       {selected && (
-        <div
-          className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
-            isFrom
-              ? "border-orange-400/30 bg-orange-500/5"
-              : "border-emerald-400/30 bg-emerald-500/5"
-          }`}
-        >
-          <Warehouse
-            size={12}
-            className={
-              isFrom ? "text-orange-500 shrink-0" : "text-emerald-600 shrink-0"
-            }
-          />
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-muted/30">
+          <Warehouse size={12} className="text-muted-foreground shrink-0" />
           <p
             className={`text-xs font-semibold truncate ${
               isFrom
@@ -636,8 +599,8 @@ function TransferPreviewModal({
       <div className="w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/40">
           <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg bg-emerald-500/10">
-              <Eye size={16} className="text-emerald-600" />
+            <div className="p-1.5 rounded-lg bg-muted">
+              <Eye size={16} className="text-muted-foreground" />
             </div>
             <div>
               <p className="text-sm font-semibold text-foreground">
@@ -712,7 +675,7 @@ function TransferPreviewModal({
               {linkedGRNs.map((g) => (
                 <span
                   key={g.GRNID}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20 font-mono"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border font-mono"
                 >
                   <FileText size={9} /> {g.GRNNo || g.DocNo}
                 </span>
@@ -764,8 +727,8 @@ function ICTPreviewModal({
       <div className="w-full max-w-lg bg-card border border-border rounded-2xl shadow-2xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/40">
           <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-lg bg-teal-500/10">
-              <Building2 size={16} className="text-teal-600" />
+            <div className="p-1.5 rounded-lg bg-muted">
+              <Building2 size={16} className="text-muted-foreground" />
             </div>
             <div>
               <p className="text-sm font-semibold text-foreground">
@@ -802,7 +765,17 @@ function ICTPreviewModal({
             </div>
 
             <div className="px-5 pt-3">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-400/30">
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
+                  detail.Status === "Completed"
+                    ? "bg-green-500/10 text-green-700 dark:text-green-400 border-green-400/30"
+                    : detail.Status === "Pending"
+                      ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-400/30"
+                      : detail.Status === "Rejected"
+                        ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-400/30"
+                        : "bg-muted text-muted-foreground border-border"
+                }`}
+              >
                 <CheckCircle2 size={11} />
                 {detail.Status === "Completed"
                   ? `${detail.Status} — every step (Sale Invoice, GRN, Expense Booking, Payment) auto-generated via the Dummy Bank, no manual action required.`
@@ -851,7 +824,7 @@ function ICTPreviewModal({
                   {DOC_LINKS.filter((d) => d.id).map((d) => (
                     <span
                       key={d.label}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border"
                     >
                       <FileText size={9} /> {d.label} #{d.id}
                     </span>
@@ -1060,9 +1033,9 @@ function TransferHistory() {
                     return (
                       <tr
                         key={`ict-${t.ICTId}`}
-                        className="border-b border-border hover:bg-muted/20 transition-colors bg-teal-500/[0.03]"
+                        className="border-b border-border hover:bg-muted/20 transition-colors"
                       >
-                        <td className="px-3 py-2.5 font-mono text-teal-600 dark:text-teal-400 font-semibold whitespace-nowrap">
+                        <td className="px-3 py-2.5 font-mono text-foreground font-semibold whitespace-nowrap">
                           <div>{t.DocNo}</div>
                           <div className="text-[10px] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
                         </td>
@@ -1078,7 +1051,7 @@ function TransferHistory() {
                             <span className="text-emerald-600 dark:text-emerald-400">
                               {t.ReceiverProjectName}
                             </span>
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] bg-teal-500/10 text-teal-600 border border-teal-400/20 ml-1">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] bg-muted text-muted-foreground border border-border ml-1">
                               Inter-Company
                             </span>
                           </div>
@@ -1088,7 +1061,7 @@ function TransferHistory() {
                         </td>
                         <td className="px-3 py-2.5">
                           {t.Status === "Completed" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-teal-500/10 text-teal-700 dark:text-teal-400 border border-teal-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
                               <CheckCircle2 size={10} /> Completed (auto)
                             </span>
                           ) : t.Status === "Approved" ? (
@@ -1132,7 +1105,7 @@ function TransferHistory() {
                       key={t.TransferID}
                       className="border-b border-border hover:bg-muted/20 transition-colors"
                     >
-                      <td className="px-3 py-2.5 font-mono text-emerald-600 dark:text-emerald-400 font-semibold whitespace-nowrap">
+                      <td className="px-3 py-2.5 font-mono text-foreground font-semibold whitespace-nowrap">
                         <div>{t.DocNo}</div>
                         <div className="text-[10px] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
                       </td>
@@ -1172,7 +1145,7 @@ function TransferHistory() {
                           {hasGRN ? (
                             <span
                               title={linkedGRNs.map((g) => g.GRNNo || g.DocNo).join(", ")}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20 font-mono whitespace-nowrap"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] bg-muted text-muted-foreground border border-border font-mono whitespace-nowrap"
                             >
                               <FileText size={9} /> {linkedGRNs.length > 1 ? `${linkedGRNs.length} GRNs` : linkedGRNs[0].GRNNo || linkedGRNs[0].DocNo}
                             </span>
@@ -1450,26 +1423,26 @@ export default function StockTransfer() {
         icon={ArrowLeftRight}
       >
         {/* Tab toggle */}
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border w-fit">
+        <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-muted border border-border w-fit">
           <button
             onClick={() => setActiveTab("transfer")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
               activeTab === "transfer"
-                ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white shadow-sm"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <Send size={14} /> New Transfer
+            <Send size={13} /> New Transfer
           </button>
           <button
             onClick={() => setActiveTab("history")}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
               activeTab === "history"
-                ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white shadow-sm"
-                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <ClipboardList size={14} /> History
+            <ClipboardList size={13} /> History
           </button>
         </div>
 
@@ -1587,7 +1560,6 @@ export default function StockTransfer() {
                   }}
                   options={companyOptions}
                   placeholder="All companies"
-                  color="emerald"
                 />
 
                 {/* Project */}
@@ -1603,7 +1575,6 @@ export default function StockTransfer() {
                   }}
                   options={projectSelectOptions}
                   placeholder={filterCompanyId ? "All projects in company" : "All projects"}
-                  color="violet"
                 />
 
                 {/* To Company (inter-company only) */}
@@ -1615,7 +1586,6 @@ export default function StockTransfer() {
                     onChange={(v) => { setToCompanyId(v); setToGodownId(null); }}
                     options={companyOptions.filter((o) => o.value !== filterCompanyId)}
                     placeholder="Select destination company"
-                    color="emerald"
                   />
                 )}
 
@@ -1648,7 +1618,7 @@ export default function StockTransfer() {
               {(filterCompanyId || filterProjectId) && (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {filterCompanyId && (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-emerald-500/10 text-emerald-600 border border-emerald-400/20 font-medium">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-muted text-foreground border border-border font-medium">
                       <Building2 size={10} />
                       {
                         companyOptions.find((o) => o.value === filterCompanyId)
@@ -1669,7 +1639,7 @@ export default function StockTransfer() {
                     </span>
                   )}
                   {filterProjectId && (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-violet-500/10 text-violet-600 border border-violet-400/20 font-medium">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-muted text-foreground border border-border font-medium">
                       <FolderKanban size={10} />
                       {
                         projectSelectOptions.find(

@@ -30,6 +30,7 @@ export interface DbItem {
   GLHeadName: string | null;
   M_CostCenterId: number | null;
   CostCenterName: string | null;
+  M_DaysOfSupply: number | null;
 }
 
 export const getItems = async (): Promise<DbItem[]> => {

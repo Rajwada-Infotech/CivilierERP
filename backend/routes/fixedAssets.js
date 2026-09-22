@@ -480,7 +480,18 @@ router.delete("/:id", requirePageRight("fixed-asset-record", "delete"), async (r
       // Reverse GRN" reversal flow (or Inventory Import's own reverse) for
       // batches instead.
       if (!asset.AssetCode) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
-      if (asset.Status === "Deleted") { await tx.rollback(); return res.json({ ok: true }); }
+
+      // Chain order (Tagging -> Record -> Assignment -> Transfer) deletes in
+      // reverse -- an asset that's already been assigned (or transferred,
+      // which always leaves its own linked Assignment row) can't be deleted
+      // until every Assignment/Transfer built on it is gone first.
+      const assignRes = await tx.request().input("AssetId", sql.Int, id).query(`
+        SELECT COUNT(*) AS Cnt FROM dbo.FixedAssetAssignment WHERE AssetId = @AssetId
+      `);
+      if (assignRes.recordset[0].Cnt > 0) {
+        await tx.rollback();
+        return res.status(400).json({ error: "This asset has Assignment/Transfer history — delete those first (User-Wise Asset Transfer, then Assignment), then this record." });
+      }
 
       // A batch record (auto-allocated from a GRN, or manually entered) that
       // still has live tagged units against it can't be deleted outright —
@@ -495,13 +506,8 @@ router.delete("/:id", requirePageRight("fixed-asset-record", "delete"), async (r
       }
 
       await tx.request()
-        .input("AssetId",   sql.Int,           id)
-        .input("UpdatedBy", sql.NVarChar(200),  email)
-        .query(`
-          UPDATE dbo.FixedAssetRecord
-          SET Status = 'Deleted', UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
-          WHERE AssetId = @AssetId
-        `);
+        .input("AssetId", sql.Int, id)
+        .query(`DELETE FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId`);
 
       await tx.commit();
       await bumpCacheVersion("fixed-assets");

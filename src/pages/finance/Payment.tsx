@@ -26,6 +26,7 @@ import type { CompanyDetail } from "@/api/enterpriseApi";
 import { ExportMenu } from "@/components/ExportMenu";
 import { toast } from "sonner";
 import { formatINR } from "@/utils/formatCurrency";
+import { printStatusLabel } from "@/utils/printStatus";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import {
@@ -291,9 +292,15 @@ const Payment: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Fetch payment posting data when posting tab opens
+  // Fetch payment posting data when posting tab opens — also needed on the
+  // Payment Chain tab for a direct payment (no expenseRef, no JVLineId
+  // settlement): its own GL posting still gets a real voucher number
+  // (VoucherNo on the journal header, /:id/posting's jvNo), which is what
+  // actually showed as "JV-2026-00115" for a standalone TDS payment like
+  // PAY-2026-00286 — a different thing from JVLineId/jvNo (a payment
+  // settling someone ELSE's Journal Voucher line).
   useEffect(() => {
-    if (detailTab !== "posting" || !viewingRec?.id) return;
+    if ((detailTab !== "posting" && detailTab !== "chain") || !viewingRec?.id) return;
     setPmtPostingLoading(true);
     setPmtPostingData(null);
     const url = viewingRec.expenseRef
@@ -620,7 +627,7 @@ const Payment: React.FC = () => {
       <div style="font-size:14px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${rec.docNo || "—"}</div>
       <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
         <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sColor}18;color:${sColor};border:1px solid ${sColor}40;">
-          ${rec.status}
+          ${printStatusLabel(rec.status)}
         </span>
         <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${mColor}18;color:${mColor};border:1px solid ${mColor}40;">
           ${rec.mode}
@@ -790,13 +797,18 @@ const Payment: React.FC = () => {
   // Companies fetched with business_type=C from enterprise table
   const companyOptions = enterprises;
 
+  // ── Contract source ─────────────────────────────────────────────────────────
+  const [selectedContract, setSelectedContract] = useState<any | null>(null);
+
   // TDS eligibility — live-checked against the chosen Payee/Party for a
   // direct (no invoice linked) payment. Reuses the same generic endpoint
   // the Invoice form uses (AccountHeadMaster eligibility isn't module-
   // specific — Payee/Party here is the exact same Supplier/Contractor
   // master row an Invoice's supplier resolves to).
   useEffect(() => {
-    if (form.expenseRef || !form.partyId || !form.company) {
+    // An invoice-linked payment inherits the invoice's TDS; everything else — a
+    // direct payment, a standalone advance, or a Contract advance — picks its own.
+    if ((form.expenseRef && !selectedContract) || !form.partyId || !form.company) {
       setTdsEligibility(null);
       return;
     }
@@ -824,7 +836,68 @@ const Payment: React.FC = () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form.expenseRef, form.partyId, form.company, form.amount, form.date, companyOptions]);
+  }, [form.expenseRef, selectedContract, form.partyId, form.company, form.amount, form.date, companyOptions]);
+
+  // TDS field for payments that aren't linked to an invoice (direct payment,
+  // standalone advance, Contract advance). Shown once the party is TDS-applicable;
+  // when it can't be shown, say why instead of leaving the option silently absent.
+  // The ₹30k/₹1L threshold itself is enforced server-side on save.
+  const renderTdsField = () => {
+    if (!form.partyId) return null;
+    if (!form.company) {
+      return (
+        <Field label="TDS">
+          <p className="text-[11px] text-muted-foreground pt-2">Select the company to check TDS for this party.</p>
+        </Field>
+      );
+    }
+    if (!tdsEligibility) return null;
+    if (!tdsEligibility.tdsApplicable) {
+      return (
+        <Field label="TDS">
+          <p className="text-[11px] text-muted-foreground pt-2">
+            TDS isn't enabled for this party — turn on "TDS Applicable" in their master to deduct it.
+          </p>
+        </Field>
+      );
+    }
+    const pct = Number(form.tdsPercentage) || 0;
+    const tdsAmt = form.tdsId ? Math.round(((Number(form.amount) || 0) * pct) / 100 * 100) / 100 : 0;
+    return (
+      <Field
+        label="TDS"
+        hint={
+          tdsEligibility.thresholdMet
+            ? "This party has crossed the TDS threshold — select the applicable TDS"
+            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} paid this year so far) — optional`
+        }
+      >
+        <select
+          value={form.tdsId ?? ""}
+          onChange={(e) => {
+            const id = e.target.value ? Number(e.target.value) : null;
+            const rec = tdsRecords.find((t) => Number(t.id) === id);
+            set("tdsId", id);
+            set("tdsPercentage", rec?.percentage ?? null);
+            set("tdsAmount", rec ? Math.round(((Number(form.amount) || 0) * rec.percentage) / 100 * 100) / 100 : 0);
+          }}
+          className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          <option value="">-- No TDS --</option>
+          {tdsRecords.filter((t) => t.status).map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name || t.nature} — {t.percentage}%
+            </option>
+          ))}
+        </select>
+        {!!form.tdsId && (
+          <p className="text-[11px] text-muted-foreground mt-1">
+            TDS ₹{tdsAmt.toLocaleString("en-IN")} · Net ₹{Math.max(0, (Number(form.amount) || 0) - tdsAmt).toLocaleString("en-IN")}
+          </p>
+        )}
+      </Field>
+    );
+  };
 
   const { data: projectOptions = [] } = useQuery<
     {
@@ -832,11 +905,22 @@ const Payment: React.FC = () => {
       label: string;
       belongs_to?: number | null;
       company_id?: number | null;
+      tagged_company_ids?: string | null;
     }[]
   >({
     queryKey: ["project-options-payment-filter"],
     queryFn: fetchProjectOptions,
   });
+
+  // A project is available to a company if it's the project's primary
+  // (owning) company, or the company is tagged onto the project via
+  // Project Master's multi-company tagging (dbo.ProjectCompanies).
+  const isProjectVisibleToCompany = useMemo(
+    () => (p: { company_id?: number | null; tagged_company_ids?: string | null }, companyId: string | number) =>
+      String(p.company_id) === String(companyId) ||
+      (p.tagged_company_ids?.split(",") ?? []).includes(String(companyId)),
+    [],
+  );
 
   const { data: supplierOptions = [] } = useQuery<
     { id: number; label: string; type?: string }[]
@@ -928,9 +1012,6 @@ const Payment: React.FC = () => {
     // payments made) change the true remainingAmount server-side.
     refetchOnMount: "always",
   });
-
-  // ── Contract source ─────────────────────────────────────────────────────────
-  const [selectedContract, setSelectedContract] = useState<any | null>(null);
 
   // ── Journal Voucher source ───────────────────────────────────────────────────
   // Settle a JV's unpaid liability leg (DR that same head, CR bank — the
@@ -1988,7 +2069,7 @@ const Payment: React.FC = () => {
       }
     }
 
-    if (!form.expenseRef && tdsEligibility?.thresholdMet && !form.tdsId) {
+    if ((!form.expenseRef || selectedContract) && tdsEligibility?.thresholdMet && !form.tdsId) {
       toast.error("TDS is due on this payment — please select a TDS.");
       return false;
     }
@@ -2419,7 +2500,7 @@ const Payment: React.FC = () => {
                                         (p) =>
                                           p.label === prev.project &&
                                           (p.belongs_to === newCompanyId ||
-                                            p.company_id === newCompanyId),
+                                            isProjectVisibleToCompany(p, newCompanyId)),
                                       )
                                     : true;
                                   if (!projStillValid) next.project = "";
@@ -2620,8 +2701,8 @@ const Payment: React.FC = () => {
                                   )?.id ?? null);
                             return (
                               companyId
-                                ? projectOptions.filter(
-                                    (p) => p.company_id === companyId,
+                                ? projectOptions.filter((p) =>
+                                    isProjectVisibleToCompany(p, companyId),
                                   )
                                 : projectOptions
                             ).map((p) => (
@@ -2688,47 +2769,7 @@ const Payment: React.FC = () => {
                         />
                       </div>
                     </Field>
-                    {/* TDS — only shown once the chosen party is actually
-                        TDS-eligible. Never mandatory to fill here in the
-                        sense of blocking typing — the ₹30k/₹1L threshold is
-                        enforced server-side on save. */}
-                    {tdsEligibility?.tdsApplicable && (
-                      <Field
-                        label="TDS"
-                        hint={
-                          tdsEligibility.thresholdMet
-                            ? "This party has crossed the TDS threshold — select the applicable TDS"
-                            : `Not yet required (₹${tdsEligibility.cumulativeAmount.toLocaleString("en-IN")} paid this year so far) — optional`
-                        }
-                      >
-                        <select
-                          value={form.tdsId ?? ""}
-                          onChange={(e) => {
-                            const id = e.target.value ? Number(e.target.value) : null;
-                            const rec = tdsRecords.find((t) => Number(t.id) === id);
-                            set("tdsId", id);
-                            set("tdsPercentage", rec?.percentage ?? null);
-                            set(
-                              "tdsAmount",
-                              rec ? Math.round(((Number(form.amount) || 0) * rec.percentage) / 100 * 100) / 100 : 0,
-                            );
-                          }}
-                          className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                          <option value="">-- No TDS --</option>
-                          {tdsRecords.filter((t) => t.status).map((t) => (
-                            <option key={t.id} value={t.id}>
-                              {t.name || t.nature} — {t.percentage}%
-                            </option>
-                          ))}
-                        </select>
-                        {!!form.tdsId && (
-                          <p className="text-[11px] text-muted-foreground mt-1">
-                            TDS ₹{(form.tdsAmount || 0).toLocaleString("en-IN")} · Net ₹{Math.max(0, (form.amount || 0) - (form.tdsAmount || 0)).toLocaleString("en-IN")}
-                          </p>
-                        )}
-                      </Field>
-                    )}
+                    {renderTdsField()}
                   </div>
                 )}
 
@@ -2866,6 +2907,7 @@ const Payment: React.FC = () => {
                         />
                       </div>
                     </Field>
+                    {renderTdsField()}
                   </div>
                 )}
 
@@ -4284,7 +4326,7 @@ const Payment: React.FC = () => {
                                     (p) =>
                                       p.label === projectFilter &&
                                       (p.belongs_to === Number(val) ||
-                                        p.company_id === Number(val)),
+                                        isProjectVisibleToCompany(p, Number(val))),
                                   );
                                   if (!stillValid) setProjectFilter("");
                                 }
@@ -4325,7 +4367,7 @@ const Payment: React.FC = () => {
                                 ? projectOptions.filter(
                                     (p) =>
                                       p.belongs_to === Number(companyFilter) ||
-                                      p.company_id === Number(companyFilter),
+                                      isProjectVisibleToCompany(p, Number(companyFilter)),
                                   )
                                 : projectOptions
                               ).map((p) => (
@@ -5029,9 +5071,60 @@ const Payment: React.FC = () => {
             <div className="p-5 space-y-4 flex-1 overflow-y-auto">
 
               {/* ── Payment Chain Tab ── */}
-              {detailTab === "chain" && !viewingRec.expenseRef && (
+              {/* A "direct" payment (no PExpenseRef/invoice) can still carry a
+                  real reference worth showing instead of the blanket "no
+                  payment chain" message — two different things, both handled
+                  here:
+                  1. viewingRec.jvNo (JVLineId, migration 417) — this payment
+                     SETTLES someone else's Journal Voucher line (the JV
+                     Payment Mode strip feature).
+                  2. pmtPostingData.jvNo — this payment's OWN GL posting, once
+                     posted, gets a real voucher number on the journal header
+                     (GeneralLedgerEntry.VoucherNo) in the same JV-XXXX
+                     numbering — this is what shows on the Posting tab as
+                     "✓ {jvNo}" and is what a standalone/TDS payment like
+                     PAY-2026-00286 actually has, not a JVLineId settlement. */}
+              {detailTab === "chain" && !viewingRec.expenseRef && viewingRec.jvNo && (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
+                    Linked Reference
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Link2 size={13} className="text-primary shrink-0" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Journal Voucher</p>
+                      <p className="font-mono text-sm font-semibold text-foreground">{viewingRec.jvNo}</p>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-2">
+                    This payment settles a Journal Voucher line directly — no invoice/GRN
+                    chain applies. See the JV itself for its own GL posting.
+                  </p>
+                </div>
+              )}
+              {detailTab === "chain" && !viewingRec.expenseRef && !viewingRec.jvNo && pmtPostingData?.jvNo && (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
+                    Linked Reference
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Link2 size={13} className="text-primary shrink-0" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">GL Posting Voucher</p>
+                      <p className="font-mono text-sm font-semibold text-foreground">{pmtPostingData.jvNo}</p>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-2">
+                    This is a direct payment (no linked invoice) — its own GL posting was
+                    recorded under this voucher number. See the Posting tab for the full entry.
+                  </p>
+                </div>
+              )}
+              {detailTab === "chain" && !viewingRec.expenseRef && !viewingRec.jvNo && !pmtPostingData?.jvNo && (
                 <p className="text-center text-xs text-muted-foreground py-8">
-                  This is a direct payment with no linked invoice — there's no payment chain to show.
+                  {pmtPostingLoading
+                    ? "Loading…"
+                    : "This is a direct payment with no linked invoice or Journal Voucher — there's no payment chain to show."}
                 </p>
               )}
               {detailTab === "chain" && viewingRec.expenseRef && (
@@ -5630,6 +5723,7 @@ const Payment: React.FC = () => {
                       date: string; docNo: string; pmtId: number; type: "payment" | "bounce_charge" | "debit_note";
                       amount: number; mode: string; bounceReason?: string;
                       isBounced?: boolean;
+                      tdsAmount?: number;
                       accounts: any; isPosted: boolean; jvNo: string | null;
                     };
                     const entries: ChainEntry[] = pmtPostingData.entries;
@@ -5640,20 +5734,32 @@ const Payment: React.FC = () => {
                           const isBounce = entry.type === "bounce_charge";
                           const isDebitNote = entry.type === "debit_note";
                           const isBouncedPayment = isPayment && !!entry.isBounced;
+                          // TDS Payable — only present when this payment actually deducted
+                          // TDS on its own GL split (never for an invoice-linked payment,
+                          // whose TDS was already withheld when the invoice was posted).
+                          // Dr Supplier stays at the full amount; Cr splits into Bank
+                          // (net of TDS) + TDS Payable (the withheld amount) so the
+                          // posting shows where that money actually went.
+                          const tdsAmt = isPayment ? (entry.tdsAmount ?? 0) : 0;
                           const rows = isPayment
                             ? [
-                                { label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const },
-                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const },
+                                { label: entry.accounts?.supplier?.label ?? "Supplier / Creditor A/c", code: entry.accounts?.supplier?.code, side: "debit" as const, amount: entry.amount },
+                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const, amount: entry.amount - tdsAmt },
+                                ...(tdsAmt > 0
+                                  ? [{ label: entry.accounts?.tdsPayable?.label ?? "TDS Payable A/c", code: entry.accounts?.tdsPayable?.code, side: "credit" as const, amount: tdsAmt }]
+                                  : []),
                               ]
                             : isDebitNote
                             ? [
-                                { label: entry.accounts?.debitLeg?.label ?? "—", code: entry.accounts?.debitLeg?.code, side: "debit" as const },
-                                { label: entry.accounts?.creditLeg?.label ?? "—", code: entry.accounts?.creditLeg?.code, side: "credit" as const },
+                                { label: entry.accounts?.debitLeg?.label ?? "—", code: entry.accounts?.debitLeg?.code, side: "debit" as const, amount: entry.amount },
+                                { label: entry.accounts?.creditLeg?.label ?? "—", code: entry.accounts?.creditLeg?.code, side: "credit" as const, amount: entry.amount },
                               ]
                             : [
-                                { label: entry.accounts?.bankCharges?.label ?? "Bank Charges (Other Expenses)", code: entry.accounts?.bankCharges?.code, side: "debit" as const },
-                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const },
+                                { label: entry.accounts?.bankCharges?.label ?? "Bank Charges (Other Expenses)", code: entry.accounts?.bankCharges?.code, side: "debit" as const, amount: entry.amount },
+                                { label: entry.accounts?.bank?.label ?? "Bank A/c", code: entry.accounts?.bank?.code, side: "credit" as const, amount: entry.amount },
                               ];
+                          const totalDebit = rows.filter((r) => r.side === "debit").reduce((s, r) => s + r.amount, 0);
+                          const totalCredit = rows.filter((r) => r.side === "credit").reduce((s, r) => s + r.amount, 0);
 
                           const entryKey = `${entry.pmtId}-${entry.type}`;
 
@@ -5707,17 +5813,17 @@ const Payment: React.FC = () => {
                                       </span>
                                     </div>
                                     <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">
-                                      {row.side === "debit" ? fmtAmt(entry.amount) : ""}
+                                      {row.side === "debit" ? fmtAmt(row.amount) : ""}
                                     </span>
                                     <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">
-                                      {row.side === "credit" ? fmtAmt(entry.amount) : ""}
+                                      {row.side === "credit" ? fmtAmt(row.amount) : ""}
                                     </span>
                                   </div>
                                 ))}
                                 <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
                                   <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
-                                  <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtAmt(entry.amount)}</span>
-                                  <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtAmt(entry.amount)}</span>
+                                  <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtAmt(totalDebit)}</span>
+                                  <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtAmt(totalCredit)}</span>
                                 </div>
                               </div>
                             </div>

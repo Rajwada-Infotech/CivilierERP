@@ -223,7 +223,18 @@ router.post("/", authMiddleware, requirePageRight("dependency-master", "create")
   }
 });
 
-// ── PUT /:id — update (activities always delete+reinsert) ──────────────────
+// ── PUT /:id — update ───────────────────────────────────────────────────────
+// The chain is reconciled against the saved rungs instead of deleted and
+// re-inserted wholesale. Every rung's row id (rungId) is what Work Allocation
+// assignments, blueprint annotations, photos, worker rosters and attendance hang
+// off — rebuilding all of them on each save wiped that data for the WHOLE chain
+// (or, where attendance existed, failed on its foreign key), which is why removing
+// one activity meant recreating the entire record. Now:
+//   - a rung that stays keeps its id (and everything attached to it);
+//   - a rung that's removed is deleted alone (its assignments/photos/annotations
+//     cascade, its worker roster is cleared) — unless attendance was already
+//     recorded against it, which is history worth protecting, so that's refused;
+//   - a new activity gets a new rung.
 router.put("/:id", authMiddleware, requirePageRight("dependency-master", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
@@ -232,12 +243,16 @@ router.put("/:id", authMiddleware, requirePageRight("dependency-master", "edit")
   const { scope, alias, workType, activities } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
+  let tx;
   try {
     const pool = getPool();
     const existing = await pool.request().input("Id", sql.Int, id).query(`SELECT Id FROM dbo.DependencyMaster WHERE Id = @Id`);
     if (!existing.recordset.length) return res.status(404).json({ error: "Dependency record not found" });
 
-    await pool
+    tx = pool.transaction();
+    await tx.begin();
+
+    await tx
       .request()
       .input("Id", sql.Int, id)
       .input("ProjectId", sql.Int, scope.projectId)
@@ -255,22 +270,81 @@ router.put("/:id", authMiddleware, requirePageRight("dependency-master", "edit")
         WHERE Id = @Id
       `);
 
-    await pool.request().input("Id", sql.Int, id).query(`DELETE FROM dbo.DependencyMasterActivity WHERE DependencyMasterId = @Id`);
-    for (let i = 0; i < activities.length; i++) {
-      await pool
-        .request()
-        .input("DependencyMasterId", sql.Int, id)
-        .input("ActivityId", sql.Int, activities[i].activityId)
-        .input("SequenceNo", sql.Int, i + 1)
-        .input("WorkType", sql.NVarChar(20), activities[i].workType || workType)
-        .query(`
-          INSERT INTO dbo.DependencyMasterActivity (DependencyMasterId, ActivityId, SequenceNo, WorkType)
-          VALUES (@DependencyMasterId, @ActivityId, @SequenceNo, @WorkType)
-        `);
+    const saved = (
+      await tx.request().input("Id", sql.Int, id).query(
+        `SELECT dma.Id, dma.ActivityId, am.activity_name AS ActivityName
+         FROM dbo.DependencyMasterActivity dma
+         LEFT JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+         WHERE dma.DependencyMasterId = @Id`,
+      )
+    ).recordset;
+    const savedById = new Map(saved.map((r) => [Number(r.Id), r]));
+
+    // A submitted rung is "kept" only if it points at a saved rung of this chain
+    // and still names the same activity; anything else is a new rung.
+    const keptIds = new Set();
+    const plan = activities.map((a, i) => {
+      const rungId = Number(a.rungId);
+      const match = savedById.get(rungId);
+      const keep = match && Number(match.ActivityId) === Number(a.activityId) && !keptIds.has(rungId);
+      if (keep) keptIds.add(rungId);
+      return { rungId: keep ? rungId : null, activityId: a.activityId, workType: a.workType || workType, seq: i + 1 };
+    });
+    const removed = saved.filter((r) => !keptIds.has(Number(r.Id)));
+
+    for (const r of removed) {
+      const att = await tx.request().input("Rung", sql.Int, r.Id)
+        .query(`SELECT COUNT(*) AS n FROM dbo.WorkerAttendance WHERE DependencyMasterActivityId = @Rung`);
+      if (att.recordset[0].n > 0) {
+        await tx.rollback();
+        return res.status(409).json({
+          error: `Can't remove "${r.ActivityName || "this activity"}" — worker attendance has already been recorded against it (${att.recordset[0].n} entr${att.recordset[0].n === 1 ? "y" : "ies"}).`,
+        });
+      }
+      await tx.request().input("Rung", sql.Int, r.Id)
+        .query(`DELETE FROM dbo.WorkerActivityRoster WHERE DependencyMasterActivityId = @Rung`);
+      await tx.request().input("Rung", sql.Int, r.Id)
+        .query(`DELETE FROM dbo.DependencyMasterActivity WHERE Id = @Rung`);
     }
 
+    // (DependencyMasterId, SequenceNo) is unique, so park the kept rungs on
+    // temporary negative numbers before assigning their final positions.
+    for (const step of plan.filter((p) => p.rungId)) {
+      await tx.request().input("Rung", sql.Int, step.rungId)
+        .query(`UPDATE dbo.DependencyMasterActivity SET SequenceNo = -Id WHERE Id = @Rung`);
+    }
+    for (const step of plan) {
+      if (step.rungId) {
+        await tx
+          .request()
+          .input("Rung", sql.Int, step.rungId)
+          .input("SequenceNo", sql.Int, step.seq)
+          .input("WorkType", sql.NVarChar(20), step.workType)
+          .query(`UPDATE dbo.DependencyMasterActivity SET SequenceNo = @SequenceNo, WorkType = @WorkType WHERE Id = @Rung`);
+      } else {
+        await tx
+          .request()
+          .input("DependencyMasterId", sql.Int, id)
+          .input("ActivityId", sql.Int, step.activityId)
+          .input("SequenceNo", sql.Int, step.seq)
+          .input("WorkType", sql.NVarChar(20), step.workType)
+          .query(`
+            INSERT INTO dbo.DependencyMasterActivity (DependencyMasterId, ActivityId, SequenceNo, WorkType)
+            VALUES (@DependencyMasterId, @ActivityId, @SequenceNo, @WorkType)
+          `);
+      }
+    }
+
+    await tx.commit();
     res.json({ success: true, message: "Dependency record updated" });
   } catch (err2) {
+    if (tx) {
+      try {
+        await tx.rollback();
+      } catch {
+        /* already rolled back / never begun */
+      }
+    }
     console.error("[PUT /dependency-master/:id]", err2);
     res.status(500).json({ error: err2.message });
   }
@@ -287,10 +361,21 @@ router.delete("/:id", authMiddleware, requirePageRight("dependency-master", "del
 
     // Hard delete — DependencyMasterActivity rows cascade automatically
     // (FK_DependencyMasterActivity_Master ON DELETE CASCADE, migration 320).
+    // Worker rosters (no cascade) are just per-activity setup — clear them so they don't block the delete.
+    await pool.request().input("Id", sql.Int, id).query(`
+      DELETE FROM dbo.WorkerActivityRoster
+      WHERE DependencyMasterActivityId IN (SELECT Id FROM dbo.DependencyMasterActivity WHERE DependencyMasterId = @Id)
+    `);
     await pool.request().input("Id", sql.Int, id).query(`DELETE FROM dbo.DependencyMaster WHERE Id = @Id`);
 
     res.json({ success: true, message: `"${existing.recordset[0].Alias}" deleted` });
   } catch (err) {
+    // 547 = FK violation: worker attendance (no cascade) references its rungs.
+    if (err.number === 547) {
+      return res.status(409).json({
+        error: "This dependency can't be deleted — worker attendance has already been recorded against its activities.",
+      });
+    }
     console.error("[DELETE /dependency-master/:id]", err);
     res.status(500).json({ error: err.message });
   }

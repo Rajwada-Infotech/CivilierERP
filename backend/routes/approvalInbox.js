@@ -5,6 +5,173 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const logger = require("../logger");
 const { getPool } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const {
+  MODULE_MAP,
+  MODULE_APPROVER_ROLE_OVERRIDES,
+  APPROVER_ROLES,
+  getWorkflow,
+  resolveCurrentLevel,
+  hasApprovalInboxEditRight,
+} = require("../services/approvalService");
+
+// ── Per-record visibility filter ────────────────────────────────────────────
+// Before this, GET / returned every Pending row in the system to anyone
+// holding "approval-inbox: view" — a Material Request waiting on its named
+// Level-2 approvers (say, two specific people picked in Approval Setup) was
+// just as visible to everyone else with that page right, with nothing
+// showing which level it was actually on or who was meant to act next.
+//
+// This mirrors transition()'s own per-level gate (approvalService.js) so a
+// record shows up for:
+//  - admin / super_admin (oversight — they can always see everything),
+//  - whoever is actually allowed to act on the level it's CURRENTLY on: the
+//    role(s)/specific user(s) named on that level in Approval Setup, or —
+//    for a level left uncustomised, or a module with no workflow configured
+//    at all — the module's existing default approver set (today's fallback
+//    behaviour, unchanged), or
+//  - anyone named on ANY OTHER level of the same workflow — see the
+//    isNamedOnWorkflow fallback below for why.
+//
+// currentLevel is computed live, on every request, by replaying this
+// record's ApprovalAuditLog against the workflow's CURRENT LevelDefs — there
+// is no stored snapshot of "what the workflow looked like when this record
+// was submitted". So when Approval Setup is edited (a level's named people
+// change, a level is added/removed, etc.) after older Pending records were
+// already partway through approval, those records' *existing* audit rows —
+// recorded under the OLD level layout — get replayed against the NEW one.
+// That can land currentLevel on a level nobody currently reads as "them"
+// (their audit entry now satisfies a level they were never really acting as
+// under today's config), or even past the last level entirely, even though
+// the record's DB Status is still genuinely Pending. Only non-admin viewers
+// ever hit this path (admins bypass it above), so the mismatch is invisible
+// until someone who isn't admin/super_admin — a director, say — reports
+// their inbox is missing older items while new ones (submitted after the
+// reconfiguration, with clean audit history) show up fine. That's exactly
+// this bug: found 2026-09-22 after report of directors (Prashant, Parvin,
+// Bikash) not seeing older Pending MR/PO/JV/etc entries.
+//
+// Fix: don't gate visibility on ONLY the (possibly stale) resolved level —
+// anyone named anywhere in the module's workflow is one of its legitimate
+// approvers and should still be able to see a record that's stuck or
+// mis-resolved, even if they can't act on it from the wrong level. The
+// actual approve/reject gate in transition() is untouched and still checks
+// the real current level — this only widens what shows up in the list.
+function isNamedOnLevel(levelDef, role, viewerUserId) {
+  const hasRoles = Array.isArray(levelDef?.roles) && levelDef.roles.length > 0;
+  const hasUsers = Array.isArray(levelDef?.userIds) && levelDef.userIds.length > 0;
+  if (!hasRoles && !hasUsers) return null; // uncustomised — caller falls back
+  const roleMatch = hasRoles && levelDef.roles.map((r) => String(r).toLowerCase()).includes(role);
+  const userMatch = hasUsers && viewerUserId != null && levelDef.userIds.includes(viewerUserId);
+  return roleMatch || userMatch;
+}
+
+// Returns { visible, canAct, currentLevel?, totalLevels? } rather than a
+// plain boolean — canAct=false means "shown for awareness (named somewhere
+// on this workflow) but this isn't their level yet, so a click on Approve
+// will correctly 403 from transition()'s own per-level gate". The inbox UI
+// uses this to label those rows instead of presenting a live-looking
+// Approve button that's guaranteed to fail. Real production example this
+// was built against: a 2-level Material Request rule (Level 1: Super
+// Admin/Amit, Level 2: Super Admin/Bikash/Parvin) where only 1 of 9 Pending
+// MRs had been approved past Level 1 — before this, Level-2-only approvers
+// correctly couldn't act on the other 8 yet, but also couldn't see them
+// coming, which read as "the inbox is missing records" (2026-09-22).
+async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) {
+  const role = (viewerRole || "").toLowerCase();
+  if (role === "admin" || role === "super_admin") return { visible: true, canAct: true };
+
+  const map = MODULE_MAP[item.Module];
+  const fallbackRoles = MODULE_APPROVER_ROLE_OVERRIDES[item.Module] || APPROVER_ROLES;
+  const fallbackVisible = async () =>
+    fallbackRoles.includes(role) || (await hasApprovalInboxEditRight(viewerUserId));
+
+  // Modules the aggregator lists but that aren't in the shared MODULE_MAP
+  // (e.g. received-payment, crm-money-receipts — they never went through
+  // approvalService.js's level engine) keep today's page-right-only
+  // visibility; there's no per-level data to filter on.
+  if (!map) return { visible: true, canAct: true };
+
+  const workflow = workflowCache.get(item.Module);
+  if (!workflow || !workflow.LevelDefs?.length) {
+    const visible = await fallbackVisible();
+    return { visible, canAct: visible };
+  }
+
+  const isNamedOnWorkflow = workflow.LevelDefs.some(
+    (l) => isNamedOnLevel(l, role, viewerUserId) === true,
+  );
+
+  const tableName = map.table.replace("dbo.", "");
+  const recordId = parseInt(item.RecordId, 10);
+  const totalLevels = workflow.Levels || workflow.LevelDefs.length;
+  const currentLevel = await resolveCurrentLevel(tableName, recordId, totalLevels, workflow.LevelDefs);
+  if (currentLevel > totalLevels) {
+    // Audit history reads as "fully approved" but the aggregator only ever
+    // selects Pending rows — a genuine Status/computed-level mismatch (see
+    // comment above), not "nothing to show". Surface it to this module's
+    // named approvers rather than silently dropping it for everyone.
+    if (isNamedOnWorkflow) {
+      logger.warn(
+        { module: item.Module, recordId, currentLevel, totalLevels, viewerUserId },
+        "approval-inbox: Pending record resolved past its final level — stale audit history vs current workflow config",
+      );
+    }
+    return { visible: isNamedOnWorkflow, canAct: false, currentLevel, totalLevels };
+  }
+
+  const levelDef = workflow.LevelDefs[currentLevel - 1];
+  if (!levelDef) {
+    const visible = await fallbackVisible();
+    return { visible, canAct: visible };
+  }
+
+  const matched = isNamedOnLevel(levelDef, role, viewerUserId);
+  // Level left uncustomised — no named roles or people — falls back to the
+  // module's default approver set, exactly like transition()'s own gate does.
+  if (matched === null) {
+    const visible = await fallbackVisible();
+    return { visible, canAct: visible };
+  }
+  if (matched) return { visible: true, canAct: true, currentLevel, totalLevels };
+
+  // Not a match on the level it currently resolved to, but this viewer IS
+  // named somewhere else on the same workflow (normal staged-approval
+  // waiting, OR the stale-audit mismatch described above). Show it — read-
+  // only from their vantage point; transition() still enforces the real
+  // current level for the actual approve/reject action — rather than let it
+  // vanish for one of this module's own approvers.
+  return { visible: isNamedOnWorkflow, canAct: false, currentLevel, totalLevels };
+}
+
+async function filterVisibleToViewer(items, req) {
+  const viewerRole = req.user?.role;
+  const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+
+  // Resolve each distinct module's workflow once, sequentially, before
+  // filtering — items.map + Promise.all below runs every row concurrently,
+  // so lazily populating the cache inside isVisibleToViewer would just race
+  // (every row for the same module would see an empty cache at once and all
+  // issue their own identical getWorkflow() query).
+  const workflowCache = new Map();
+  const distinctModules = [...new Set(items.map((i) => i.Module))];
+  for (const mod of distinctModules) {
+    workflowCache.set(mod, await getWorkflow(mod));
+  }
+
+  const results = await Promise.all(
+    items.map((item) => isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache)),
+  );
+  const out = [];
+  items.forEach((item, i) => {
+    const r = results[i];
+    if (!r.visible) return;
+    // _canAct is only attached when it's actually informative (false) —
+    // omitted entirely for the common case so existing consumers/tests that
+    // don't know about it are unaffected.
+    out.push(r.canAct === false ? { ...item, _canAct: false, _currentLevel: r.currentLevel, _totalLevels: r.totalLevels } : item);
+  });
+  return out;
+}
 
 // This router previously had no page-level check at all — every other route
 // file in this codebase gates with requirePageRight, but this one relied
@@ -29,14 +196,15 @@ const NULL_EXTRA = `
   CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
   CAST(NULL AS NVARCHAR(255)) AS ToGodownName,`;
 
-router.get("/", async (req, res) => {
-  try {
-    const pool = getPool();
-    const { module } = req.query;
+// Builds the per-module SELECT list (optionally scoped to one module) shared
+// by both GET / (the full inbox) and GET /count (the badge) — a single
+// source of truth for "what counts as pending" so the two can never drift,
+// and so the badge count can be run through the exact same per-viewer
+// visibility filter as the list itself instead of a separate raw aggregate.
+function buildInboxQueries(module) {
+  const queries = [];
 
-    const queries = [];
-
-    if (!module || module === "purchase-orders") {
+  if (!module || module === "purchase-orders") {
       queries.push(`
         SELECT
           'purchase-orders'                    AS Module,
@@ -340,6 +508,34 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "stock-transfers") {
+      queries.push(`
+        SELECT
+          'stock-transfers'                    AS Module,
+          'Stock Transfer'                     AS ModuleLabel,
+          CAST(st.TransferID AS NVARCHAR)      AS RecordId,
+          st.DocNo                             AS Reference,
+          st.TransferDate                      AS RecordDate,
+          st.Status,
+          CAST(fg.GodownName AS NVARCHAR(255)) AS ContractorName,
+          CAST(CONCAT(
+            COALESCE(fg.GodownName, ''), N' → ', COALESCE(tg.GodownName, '')
+          ) AS NVARCHAR(512))                  AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))          AS Amount,
+          ${NULL_EXTRA}
+          CAST(st.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
+          ''                                   AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ISNULL(CAST(st.Remarks AS NVARCHAR(MAX)), '') AS RejectionNote,
+          ISNULL(st.UpdatedAt, st.CreatedAt)   AS LastModified
+        FROM dbo.StockTransfers st
+        LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
+        LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
+        WHERE st.Status = 'Pending'
+      `);
+    }
+
     if (!module || module === "vehicle-in-out") {
       queries.push(`
         SELECT
@@ -386,6 +582,32 @@ router.get("/", async (req, res) => {
         FROM dbo.MaterialIssues mi
         LEFT JOIN dbo.enterprise p ON p.id = mi.ProjectId
         WHERE ISNULL(mi.Status, 'Pending') = 'Pending'
+      `);
+    }
+
+    if (!module || module === "material-issue-return") {
+      queries.push(`
+        SELECT
+          'material-issue-return'                                        AS Module,
+          'Material Issue Return'                                        AS ModuleLabel,
+          CAST(ir.ReturnId AS NVARCHAR)                                   AS RecordId,
+          ISNULL(ir.DocNo, CONCAT('IRN#', CAST(ir.ReturnId AS NVARCHAR))) AS Reference,
+          ir.ReturnDate                                                   AS RecordDate,
+          ISNULL(ir.Status, 'Pending')                                    AS Status,
+          CAST(NULL AS NVARCHAR)                                         AS ContractorName,
+          ISNULL(mi.DocNo, ISNULL(p.name, ir.Reason))                    AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))                                     AS Amount,
+          ${NULL_EXTRA}
+          CAST(ir.CreatedBy AS NVARCHAR(255))                             AS CreatedBy,
+          ''                                                              AS ApprovedBy,
+          ''                                                              AS ApprovedAt,
+          ''                                                              AS RejectedBy,
+          ''                                                              AS RejectionNote,
+          ISNULL(ir.UpdatedAt, ir.CreatedAt)                             AS LastModified
+        FROM dbo.MaterialIssueReturn ir
+        LEFT JOIN dbo.MaterialIssues mi ON mi.IssueId = ir.IssueId
+        LEFT JOIN dbo.enterprise p ON p.id = ir.ProjectId
+        WHERE ISNULL(ir.Status, 'Pending') = 'Pending'
       `);
     }
 
@@ -467,7 +689,12 @@ router.get("/", async (req, res) => {
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,
           ''                                    AS RejectedBy,
-          ISNULL(CAST(jv.Narration AS NVARCHAR(MAX)), '') AS RejectionNote,
+          -- JournalVoucher has no RejectionNote column of its own (rejection
+          -- reasons live in ApprovalAuditLog, not surfaced here) — this used
+          -- to read jv.Narration instead, which meant every pending JV's own
+          -- narration/description showed up mislabeled as a "Rejection Note"
+          -- in the inbox, even though it was never rejected.
+          ''                                    AS RejectionNote,
           ISNULL(jv.UpdatedAt, jv.CreatedAt)    AS LastModified
         FROM dbo.JournalVoucher jv
         WHERE jv.Status = 'Pending'
@@ -890,13 +1117,20 @@ router.get("/", async (req, res) => {
       `);
     }
 
+  return queries;
+}
+
+router.get("/", async (req, res) => {
+  try {
+    const pool = getPool();
+    const queries = buildInboxQueries(req.query.module);
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
       queries.join(" UNION ALL ") + " ORDER BY LastModified DESC";
     const result = await pool.request().query(fullQuery);
 
-    res.json(result.recordset);
+    res.json(await filterVisibleToViewer(result.recordset, req));
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox error");
     res.status(500).json({
@@ -908,42 +1142,22 @@ router.get("/", async (req, res) => {
   }
 });
 
-// GET /api/approval-inbox/count — lightweight badge count
+// GET /api/approval-inbox/count — lightweight badge count.
+// Runs the exact same query + visibility filter as GET / and returns just
+// the length — previously a separate raw SQL aggregate that counted every
+// Pending row system-wide, which meant the badge (unlike the list once
+// filterVisibleToViewer landed there) still showed a count that included
+// records the viewer had no part in and couldn't act on.
 router.get("/count", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT
-        (SELECT COUNT(*) FROM dbo.PurchaseOrders      WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.WorkOrderHeader    WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.NewPayment         WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.ReceivedPayment    WHERE RPStatus = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes  WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE EStatus = 'Pending'
-          AND NOT (ISNULL(ESourceType,'') = 'GRN' AND ISNULL(ERemarks,'') LIKE 'Auto-created for remaining items from GRN%')) +
-        (SELECT COUNT(*) FROM dbo.WorkDone           WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.BOQ                WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.MaterialRequests   WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.MaterialIssues     WHERE ISNULL(Status,'Pending') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.SaleOrders         WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.VehicleInOut       WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.JournalVoucher     WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.InterCompanyTransfer WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.FundTransfer       WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmMoneyReceipt     WHERE Status = 'Pending' AND ReceivedPaymentId IS NULL) +
-        (SELECT COUNT(*) FROM dbo.CrmBooking         WHERE Status = 'Pending' AND IsActive = 1 AND ReadyForApprovalAt IS NOT NULL) +
-        (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE SeniorApprovalStatus = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmAgreement       WHERE DateApprovalStatus = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmBrokerageMaster WHERE Status = 'Pending' AND IsLocked = 0) +
-        (SELECT COUNT(*) FROM dbo.CrmCancellation    WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmNoc             WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.Contract           WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.DebitNote          WHERE ISNULL(Status,'Draft') = 'Pending' AND is_active = 1) +
-        (SELECT COUNT(*) FROM dbo.CrmRefund          WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.CrmRefund          WHERE Status = 'FinancePending')
-      AS TotalPending
-    `);
-    res.json({ count: result.recordset[0].TotalPending ?? 0 });
+    const queries = buildInboxQueries(undefined);
+    if (queries.length === 0) return res.json({ count: 0 });
+
+    const fullQuery = queries.join(" UNION ALL ");
+    const result = await pool.request().query(fullQuery);
+    const visible = await filterVisibleToViewer(result.recordset, req);
+    res.json({ count: visible.length });
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox count error");
     res.json({ count: 0 });
@@ -951,4 +1165,8 @@ router.get("/count", async (req, res) => {
 });
 
 module.exports = router;
+// Exported for testing only — see backend/test/approvalInboxVisibility.test.js.
+module.exports.isVisibleToViewer = isVisibleToViewer;
+module.exports.isNamedOnLevel = isNamedOnLevel;
+module.exports.filterVisibleToViewer = filterVisibleToViewer;
 
