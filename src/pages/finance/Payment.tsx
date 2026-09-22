@@ -5065,9 +5065,33 @@ const Payment: React.FC = () => {
             <div className="p-5 space-y-4 flex-1 overflow-y-auto">
 
               {/* ── Payment Chain Tab ── */}
-              {detailTab === "chain" && !viewingRec.expenseRef && (
+              {/* A "direct" payment (no PExpenseRef/invoice) can still settle a
+                  real linked document — most commonly a Journal Voucher
+                  (JVLineId, migration 417; resolved server-side as jvNo on
+                  this same record, same source the list's own JV chip reads).
+                  Previously this always fell through to the generic "no
+                  payment chain" message even when a genuine link existed. */}
+              {detailTab === "chain" && !viewingRec.expenseRef && viewingRec.jvNo && (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
+                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
+                    Linked Reference
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Link2 size={13} className="text-primary shrink-0" />
+                    <div>
+                      <p className="text-xs text-muted-foreground">Journal Voucher</p>
+                      <p className="font-mono text-sm font-semibold text-foreground">{viewingRec.jvNo}</p>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-2">
+                    This payment settles a Journal Voucher line directly — no invoice/GRN
+                    chain applies. See the JV itself for its own GL posting.
+                  </p>
+                </div>
+              )}
+              {detailTab === "chain" && !viewingRec.expenseRef && !viewingRec.jvNo && (
                 <p className="text-center text-xs text-muted-foreground py-8">
-                  This is a direct payment with no linked invoice — there's no payment chain to show.
+                  This is a direct payment with no linked invoice or Journal Voucher — there's no payment chain to show.
                 </p>
               )}
               {detailTab === "chain" && viewingRec.expenseRef && (
