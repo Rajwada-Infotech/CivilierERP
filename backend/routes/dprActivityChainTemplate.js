@@ -31,7 +31,7 @@ router.get("/", requirePageRight("dpr-activity-chain-template", "view"), async (
         cat.Alias AS roomCategoryAlias,
         cat.SortOrder AS sortOrder,
         (SELECT COUNT(*) FROM dbo.DprActivityChainTemplateItem i WHERE i.TemplateId = t.Id) AS itemCount,
-        t.UpdatedAt, t.CreatedAt
+        t.UpdatedAt AS updatedAt, t.CreatedAt AS createdAt
       FROM dbo.RoomCategoryMaster cat
       LEFT JOIN dbo.DprActivityChainTemplate t ON t.RoomCategoryId = cat.Id AND t.IsActive = 1
       WHERE cat.IsActive = 1
