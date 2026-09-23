@@ -329,6 +329,7 @@ const CrmRefunds: React.FC = () => {
   const [showNew, setShowNew] = useState(false);
   const [financeDialog, setFinanceDialog] = useState<any | null>(null);
   const [financeBank, setFinanceBank] = useState("");
+  const [financeMode, setFinanceMode] = useState("");
 
   const filters = useMemo<Filters>(() => ({ search, status, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }), [search, status, cpb]);
   const { data: result, isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
@@ -450,7 +451,7 @@ const CrmRefunds: React.FC = () => {
 
         {showNew && <NewRefundDialog onClose={() => setShowNew(false)} onDone={invalidate} />}
 
-        <Dialog open={!!financeDialog} onOpenChange={(o) => { if (!o) { setFinanceDialog(null); setFinanceBank(""); } }}>
+        <Dialog open={!!financeDialog} onOpenChange={(o) => { if (!o) { setFinanceDialog(null); setFinanceBank(""); setFinanceMode(""); } }}>
           <DialogContent className="max-w-md">
             <DialogHeader><DialogTitle className="font-heading">Finance-approve refund {financeDialog?.RefundNo}</DialogTitle></DialogHeader>
             <div className="space-y-3 text-sm">
@@ -471,10 +472,21 @@ const CrmRefunds: React.FC = () => {
                 </select>
                 <SelectedBankCard bank={findBank(financeBanks as any[], financeBank)} />
               </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Payment mode (optional — can be set later)</label>
+                <select value={financeMode} onChange={(e) => setFinanceMode(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                  <option value="">Not set yet</option>
+                  <option value="NEFT">NEFT</option>
+                  <option value="RTGS">RTGS</option>
+                  <option value="IMPS">IMPS</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Cheque">Cheque</option>
+                </select>
+              </div>
               <p className="text-[11px] text-muted-foreground">Approving raises a Finance payment voucher. The refund is marked Paid when that voucher is approved.</p>
               <div className="flex justify-end gap-2">
-                <button onClick={() => { setFinanceDialog(null); setFinanceBank(""); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                <button onClick={() => financeAction(financeDialog.Id, "finance-approve", { RefundBankLHeadId: financeBank || undefined })}
+                <button onClick={() => { setFinanceDialog(null); setFinanceBank(""); setFinanceMode(""); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={() => financeAction(financeDialog.Id, "finance-approve", { RefundBankLHeadId: financeBank || undefined, PaymentMode: financeMode || undefined })}
                   disabled={!financeBank}
                   className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">Raise Payout</button>
               </div>

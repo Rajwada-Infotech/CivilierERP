@@ -561,6 +561,27 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
     const net = Number(rf.NetAmount) || 0;
     if (net <= 0) return res.status(400).json({ error: "Net refund amount must be greater than 0" });
 
+    // Payment Mode is optional here, not mandatory — Finance can set it now
+    // to skip the follow-up edit on the spawned voucher, or leave it for
+    // later via Payment.tsx's own Update form, same as before. Cash/Card
+    // excluded — a refund is always a bank transfer to the customer's own
+    // account (see the excludeCash fix on /for-project's disbursing-bank
+    // list, same reasoning). Post-Dated Cheque excluded too — a payout
+    // being raised now shouldn't be dated into the future.
+    const ALLOWED_REFUND_MODES = new Set(["Cheque", "NEFT", "RTGS", "IMPS", "UPI"]);
+    const rawMode = req.body?.PaymentMode;
+    if (rawMode != null && rawMode !== "" && !ALLOWED_REFUND_MODES.has(rawMode)) {
+      return res.status(400).json({ error: `PaymentMode must be one of: ${[...ALLOWED_REFUND_MODES].join(", ")}` });
+    }
+    const paymentMode = rawMode || "";
+
+    // Bank name is known the moment bankId is — resolving and storing it
+    // now (instead of leaving PBankName blank for Finance to fill in later)
+    // is what the whole Payment.tsx NOT-NULL crash chain traced back to.
+    const bankRow = await pool.request().input("bid", sql.Int, bankId)
+      .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @bid");
+    const bankName = bankRow.recordset[0]?.LHeadName || "";
+
     const actorEmail = req.user?.email || req.user?.name || String(actorId(req));
     const customerHeadId = await ensureCrmCustomerLedgerHead(pool, rf.CustomerId, actorEmail);
     const docTypeId = await resolveDocTypeId(pool, sql, "PAY");
@@ -575,7 +596,9 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
 
     const npIns = await pool.request()
       .input("name", sql.VarChar, "CRM Refund")
-      .input("remarks", sql.NVarChar(1000), `${rf.RefundNo} — customer refund ₹${net.toLocaleString("en-IN")} to ${rf.CustomerBankName || "customer bank"} ${rf.CustomerAccountNo || ""} — finance to complete payment details`)
+      .input("remarks", sql.NVarChar(1000), `${rf.RefundNo} — customer refund ₹${net.toLocaleString("en-IN")} to ${rf.CustomerBankName || "customer bank"} ${rf.CustomerAccountNo || ""}${paymentMode ? "" : " — finance to complete payment details"}`)
+      .input("mode", sql.VarChar(50), paymentMode)
+      .input("bankName", sql.VarChar(200), bankName)
       .input("amt", sql.Decimal(18, 2), net)
       .input("dt", sql.Date, today)
       .input("project", sql.VarChar, rf.ProjectId != null ? String(rf.ProjectId) : "")
@@ -599,7 +622,7 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
         )
         OUTPUT INSERTED.PPaymentID
         VALUES (
-          @name, @remarks, '', '', @bankId, @amt, 'CRM Refund', @dt,
+          @name, @remarks, @mode, @bankName, @bankId, @amt, 'CRM Refund', @dt,
           @project, @company, @partyId,
           @docNo, @docTypeId, @docYear, @docSerial, @finYearId,
           @srcRefund,
