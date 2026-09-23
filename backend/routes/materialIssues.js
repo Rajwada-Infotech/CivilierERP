@@ -360,6 +360,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const itemsResult = await itemsReq.query(`
       SELECT
         mii.IssueItemId, mii.ItemId, mii.UOMCode, mii.Quantity, mii.Remarks,
+        mii.CostCenterId, cc.Name AS CostCenterName,
         img.M_Name AS ItemName, img.M_Group AS ItemGroup,
         uom.UOMName, uom.Symbol AS UOMSymbol,
         ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END),0)
@@ -369,12 +370,13 @@ router.get("/:id", authenticateToken, async (req, res) => {
       LEFT JOIN dbo.Item_Master_Group img
         ON CONVERT(NVARCHAR(100), img.M_Id) = mii.ItemId
       LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = mii.UOMCode
+      LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = mii.CostCenterId
       LEFT JOIN dbo.StockLedger sl
         ON CONVERT(NVARCHAR(100), sl.ItemID) = mii.ItemId
         ${godownJoin}
       WHERE mii.IssueId = @id
       GROUP BY mii.IssueItemId, mii.ItemId, mii.UOMCode, mii.Quantity, mii.Remarks,
-               img.M_Name, img.M_Group, uom.UOMName, uom.Symbol
+               mii.CostCenterId, cc.Name, img.M_Name, img.M_Group, uom.UOMName, uom.Symbol
     `);
 
     res.json({ ...headerResult.recordset[0], items: itemsResult.recordset });
@@ -561,9 +563,10 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
           .input("ItemId", sql.NVarChar(100), itemId)
           .input("UOMCode", sql.NVarChar(20), uomCode)
           .input("Quantity", sql.Decimal(18, 2), qty)
-          .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null).query(`
-          INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks)
-          VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks)
+          .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null)
+          .input("CostCenterId", sql.Int, Number.isFinite(parseInt(it.CostCenterId, 10)) ? parseInt(it.CostCenterId, 10) : null).query(`
+          INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks, CostCenterId)
+          VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks, @CostCenterId)
         `);
 
         await tx
@@ -735,9 +738,10 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
           .input("ItemId", sql.NVarChar(100), itemId)
           .input("UOMCode", sql.NVarChar(20), uomCode)
           .input("Quantity", sql.Decimal(18, 2), qty)
-          .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null).query(`
-            INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks)
-            VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks)
+          .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null)
+          .input("CostCenterId", sql.Int, Number.isFinite(parseInt(it.CostCenterId, 10)) ? parseInt(it.CostCenterId, 10) : null).query(`
+            INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks, CostCenterId)
+            VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks, @CostCenterId)
           `);
 
         await tx
