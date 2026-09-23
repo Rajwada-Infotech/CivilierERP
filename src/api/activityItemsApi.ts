@@ -46,6 +46,18 @@ export const addActivityItem = async (
   return handleResponse(res);
 };
 
+export const addActivityItems = async (
+  activityId: number,
+  itemIds: string[],
+): Promise<{ success: boolean; ids: number[] }> => {
+  const res = await fetchWithAuth(BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ activityId, itemIds }),
+  });
+  return handleResponse(res);
+};
+
 export const deleteActivityItem = async (
   id: number,
 ): Promise<{ success: boolean }> => {

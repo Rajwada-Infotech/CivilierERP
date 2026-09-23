@@ -19,7 +19,13 @@ const {
 } = require("../utils/docNumberLock");
 const { requireValidId, checkRowsAffected } = require("../utils/routeHelpers");
 
-router.use(checkPermissionForMethod("Engineering", "WorkOrders"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Engineering", "WorkOrders")(req, res, next);
+});
 
 const requireUserName = (req, res) => {
   const userName = req.user?.name;

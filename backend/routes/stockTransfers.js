@@ -9,7 +9,13 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
 
-router.use(checkPermissionForMethod("Material", "StockTransfer"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Material", "StockTransfer")(req, res, next);
+});
 
 function parseItems(raw) {
   if (Array.isArray(raw)) return raw;

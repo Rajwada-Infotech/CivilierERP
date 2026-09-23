@@ -314,7 +314,13 @@ function resolveGrnIds(eb) {
   return primary ? [primary] : [];
 }
 
-router.use(checkPermissionForMethod("Finance", "ExpenseBooking"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Finance", "ExpenseBooking")(req, res, next);
+});
 
 // Helper: Require authenticated user email
 const requireUserEmail = (req, res) => {
