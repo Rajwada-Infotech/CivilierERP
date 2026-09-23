@@ -101,9 +101,17 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
       // pick does — TileInfoDialog on the frontend already branches on
       // BookingId to show "Booked — Payment Pending" instead of a plain
       // hold, so no frontend change was needed for this.
-      const confirmed = r.BookingId && r.BookingStatus === "Approved" && r.Milestone1Paid;
+      // Ids of 0 are real rows here — CrmBooking had historical
+      // identity-seed corruption (BKG-2026-00001 is Id 0; see migrations
+      // 441-450) — so these must check `!= null`, never plain truthiness.
+      // `r.BookingId &&`/`r.BookingId || null` silently treats a real
+      // Booking at Id 0 as if none existed, showing a booked unit as
+      // Available.
+      const hasBookingId = r.BookingId != null;
+      const hasHoldId = r.HoldId != null;
+      const confirmed = hasBookingId && r.BookingStatus === "Approved" && r.Milestone1Paid;
       const isBooked = !!confirmed;
-      const isOnHold = !isBooked && (r.BookingId || r.HoldId);
+      const isOnHold = !isBooked && (hasBookingId || hasHoldId);
       return {
         Id: r.Id,
         UnitName: r.UnitName,
@@ -112,26 +120,26 @@ router.get("/", requirePageRight("crm-unit-matrix", "view"), async (req, res) =>
         BlockName: r.BlockName,
         Status: !r.UnitIsActive ? "Blocked" : isBooked ? "Booked" : isOnHold ? "OnHold" : "Available",
         AreaSqFt: r.AreaSqFt || null,
-        BookingId: r.BookingId || null,
+        BookingId: hasBookingId ? r.BookingId : null,
         BookingNo: r.BookingNo || null,
         BookingStatus: r.BookingStatus || null,
         BookingDate: r.BookingDate || null,
         TotalValue: r.TotalValue ?? null,
         GrandTotal: r.GrandTotal ?? null,
         BookingAmount: r.BookingAmount ?? null,
-        ApplicationId: r.ApplicationId || null,
+        ApplicationId: r.ApplicationId != null ? r.ApplicationId : null,
         ApplicationNo: r.ApplicationNo || null,
         ApplicantName: r.ApplicantName || null,
         Mobile: r.Mobile || null,
         AssignedToName: r.AssignedToName || null,
         AssignedToEmail: r.AssignedToEmail || null,
-        HoldId: r.HoldId || null,
+        HoldId: hasHoldId ? r.HoldId : null,
         // A still-unconfirmed Booking's countdown comes from its own
         // ConfirmDeadline snapshot (the raw Hold row gets marked
         // 'Converted' the instant the Booking was created, so it can't be
         // relied on afterwards) — a bare pre-Booking hold uses the live
         // hold's HoldUntil as before.
-        HoldUntil: r.BookingId ? (r.ConfirmDeadline || null) : (r.HoldUntil || null),
+        HoldUntil: hasBookingId ? (r.ConfirmDeadline || null) : (r.HoldUntil || null),
         HoldApplicationId: r.HoldApplicationId || null,
         HoldApplicationNo: r.HoldApplicationNo || null,
         HoldApplicantName: r.HoldApplicantName || null,
