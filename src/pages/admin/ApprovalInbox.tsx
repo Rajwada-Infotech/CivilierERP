@@ -39,6 +39,8 @@ import {
   Undo2,
   ArrowDownWideNarrow,
   ArrowUpWideNarrow,
+  Search,
+  X,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
@@ -1081,6 +1083,12 @@ const ApprovalInbox: React.FC = () => {
   // instead of flipping between one module at a time. Empty = every module.
   const [activeModules, setActiveModules] = useState<string[]>([]);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
+  // Free-text search over each item's own document number — separate from
+  // the module-type filter above, which only ever matched module *names*
+  // (e.g. "Journal Voucher"), not a document's Reference like
+  // "JV-2026-00067". Typing a doc number into that filter's search box
+  // matched nothing, which is what "document search isn't working" meant.
+  const [docSearch, setDocSearch] = useState("");
 
   const {
     data: allItems = [],
@@ -1102,6 +1110,11 @@ const ApprovalInbox: React.FC = () => {
       : allItems
   )
     .filter((i) => !removedKeys.has(`${i.Module}-${i.RecordId}`))
+    .filter((i) => {
+      const q = docSearch.trim().toLowerCase();
+      if (!q) return true;
+      return (i.Reference ?? "").toLowerCase().includes(q) || String(i.RecordId).includes(q);
+    })
     // Grouped by module first (all Material Requests together, then all
     // Purchase Orders, then all GRNs, etc. — MODULE_ORDER below) so like
     // documents sit together instead of interleaving by date across
@@ -1191,6 +1204,27 @@ const ApprovalInbox: React.FC = () => {
             so several types (e.g. PO + GRN + Payment) can be picked at once
             instead of one module at a time. Paired with a date-sort toggle
             since "filter, then sort" is how this list is actually worked. */}
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={docSearch}
+            onChange={(e) => setDocSearch(e.target.value)}
+            placeholder="Search by document number (e.g. JV-2026-00067)…"
+            className="w-full pl-9 pr-9 py-2.5 text-sm rounded-xl bg-card border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+          {docSearch && (
+            <button
+              type="button"
+              onClick={() => setDocSearch("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
         <div className="rounded-xl border border-border bg-muted/30 p-2.5 space-y-2">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
@@ -1245,14 +1279,18 @@ const ApprovalInbox: React.FC = () => {
                 <Inbox size={24} className="text-muted-foreground/40" />
               </div>
               <p className="text-sm font-semibold text-foreground">
-                {activeModules.length > 0
-                  ? "No pending items for the selected type(s)"
-                  : "All clear!"}
+                {docSearch.trim()
+                  ? `No document matches "${docSearch.trim()}"`
+                  : activeModules.length > 0
+                    ? "No pending items for the selected type(s)"
+                    : "All clear!"}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {activeModules.length > 0
-                  ? "Clear the filter to see the full inbox"
-                  : "No records are awaiting approval right now"}
+                {docSearch.trim()
+                  ? "Clear the search to see the full inbox"
+                  : activeModules.length > 0
+                    ? "Clear the filter to see the full inbox"
+                    : "No records are awaiting approval right now"}
               </p>
             </div>
           ) : (
