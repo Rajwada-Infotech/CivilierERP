@@ -1,6 +1,9 @@
 function requireValidId(req, res) {
   const id = Number(req.params.id);
-  if (!Number.isInteger(id) || id <= 0) {
+  // A real database row can legitimately be Id = 0 after a historical manual
+  // identity reseed. Requiring `id > 0` makes those rows vanish from every route
+  // that uses this helper, even though the row exists and is valid.
+  if (!Number.isInteger(id) || id < 0) {
     res.status(400).json({ error: "Invalid id" });
     return null;
   }
