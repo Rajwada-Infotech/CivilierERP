@@ -219,7 +219,7 @@ router.get("/:id/posting", async (req, res) => {
     // row's own id (see crmLedger.js). Checking only 'ReceivedPayment' left
     // every CRM-linked receipt showing "Not yet posted" even once approved
     // and actually posted — same join trialBalance.js already uses.
-    const postedRes = (rp.CrmMilestoneId || rp.CrmBookingId)
+    const postedRes = (rp.CrmMilestoneId != null || rp.CrmBookingId != null)
       ? await pool.request().input("SrcId", sql.Int, rpId).query(`
           SELECT TOP 1 gle.VoucherNo
           FROM dbo.GeneralLedgerEntry gle
@@ -493,9 +493,9 @@ async function createReceivedPaymentInternal(pool, payload, createdBy) {
         SourceSaleInvoiceDocNo || null,
       )
       .input("ContractId", sql.Int, ContractId ? parseInt(ContractId, 10) : null)
-      .input("CrmMilestoneId", sql.Int, CrmMilestoneId ? parseInt(CrmMilestoneId, 10) : null)
-      .input("CrmBookingId", sql.Int, CrmBookingId ? parseInt(CrmBookingId, 10) : null)
-      .input("CrmApplicationId", sql.Int, CrmApplicationId ? parseInt(CrmApplicationId, 10) : null);
+      .input("CrmMilestoneId", sql.Int, CrmMilestoneId != null && CrmMilestoneId !== "" ? parseInt(CrmMilestoneId, 10) : null)
+      .input("CrmBookingId", sql.Int, CrmBookingId != null && CrmBookingId !== "" ? parseInt(CrmBookingId, 10) : null)
+      .input("CrmApplicationId", sql.Int, CrmApplicationId != null && CrmApplicationId !== "" ? parseInt(CrmApplicationId, 10) : null);
 
     const extraCols = `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId, RPCustomerName, RPDepositBankId, RPDepositBankName, SourceSaleInvoiceId, SourceSaleInvoiceDocNo, ContractId, RPChequeDate, RPIsPostDated, CrmMilestoneId, CrmBookingId, CrmApplicationId`;
     const extraVals = `, @RPDocNo, @RPFinYear, @RPDocTypeId, @RPCompanyId, @RPProjectId, @RPCustomerName, @RPDepositBankId, @RPDepositBankName, @SourceSaleInvoiceId, @SourceSaleInvoiceDocNo, @ContractId, @RPChequeDate, @RPIsPostDated, @CrmMilestoneId, @CrmBookingId, @CrmApplicationId`;
@@ -867,7 +867,7 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
         .json({ error: `Cannot approve from status "${status}"` });
     }
 
-    if (cur.recordset[0].CrmMilestoneId) {
+    if (cur.recordset[0].CrmMilestoneId != null) {
       const target = await tx.request().input("mid", sql.Int, cur.recordset[0].CrmMilestoneId)
         .query("SELECT BookingId, MilestoneNo FROM dbo.CrmPaymentMilestone WHERE Id = @mid");
       const targetRow = target.recordset[0];
@@ -918,7 +918,7 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
   // createReceiptForMilestone posted directly before this approval detour
   // existed. Never allowed to fail the approval itself; outcome logged the
   // same way GL posting failures already are everywhere else.
-  if (crmRow?.CrmMilestoneId) {
+  if (crmRow?.CrmMilestoneId != null) {
     let brokerWarning = null, crmWarning = null;
     try {
       const { applyCrmMilestonePaymentApproval } = require("./crmPayments");
@@ -941,7 +941,7 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
   // a specific milestone. Same detour as the branch above: the real
   // CrmOnAccountPayment insert/GL/auto-sweep only happens here, once
   // approved, instead of when it was originally submitted.
-  if (crmRow?.CrmBookingId) {
+  if (crmRow?.CrmBookingId != null) {
     let crmWarning = null;
     try {
       const { applyCrmOnAccountPaymentApproval } = require("./crmPayments");

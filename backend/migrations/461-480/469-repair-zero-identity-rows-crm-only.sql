@@ -34,16 +34,32 @@
 
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
+-- sqlcmd's default session runs with QUOTED_IDENTIFIER OFF, which SQL
+-- Server refuses for any UPDATE/DELETE against a table with a filtered
+-- index or computed column (several CRM tables have one) — found by an
+-- actual production run where 3 simple tables fixed cleanly and the other
+-- 10 (including CrmBooking) failed with exactly this error and rolled
+-- back safely, untouched, thanks to the per-table TRY/CATCH already here.
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
 
 DECLARE @fixed TABLE (TableName NVARCHAR(300), IdentityColumn SYSNAME, OldId INT, NewId INT);
 DECLARE @blocked TABLE (TableName NVARCHAR(300), Reason NVARCHAR(1000));
 
 -- Known unconstrained "soft FK" columns — see header comment above.
+-- CrmMoneyReceipt.BookingId added after a live production diagnostic
+-- (2026-09) found a real Approved MoneyReceipt row pointing at
+-- CrmBooking.Id=0 that this list had missed — the DB-level
+-- trg_CrmBooking_PreventUnsafeDelete trigger would otherwise block this
+-- whole repair for CrmBooking, since it checks CrmMoneyReceipt for any
+-- non-Rejected row before allowing the delete this script's repair
+-- step performs.
 DECLARE @softRefs TABLE (SchemaName SYSNAME, TableName SYSNAME, ColumnName SYSNAME, RefSchemaName SYSNAME, RefTableName SYSNAME, RefColumnName SYSNAME);
 INSERT INTO @softRefs VALUES
   ('dbo', 'CrmBookingStageLog',    'BookingId',         'dbo', 'CrmBooking', 'Id'),
   ('dbo', 'CrmOnAccountPayment',   'HeldFromBookingId', 'dbo', 'CrmBooking', 'Id'),
-  ('dbo', 'CrmRefund',             'BookingId',         'dbo', 'CrmBooking', 'Id');
+  ('dbo', 'CrmRefund',             'BookingId',         'dbo', 'CrmBooking', 'Id'),
+  ('dbo', 'CrmMoneyReceipt',       'BookingId',         'dbo', 'CrmBooking', 'Id');
 
 DECLARE
   @SchemaName SYSNAME,
@@ -131,6 +147,11 @@ IF EXISTS (
 
         IF @nextId <= 0 SET @nextId = 1;
 
+        -- is_computed = 0 excludes computed columns (e.g. CrmPaymentPlanTemplate
+        -- .ScopeKey) — a computed column can never appear in an explicit INSERT
+        -- column list, SQL Server always derives it itself. Found by an actual
+        -- production run where this table failed with "column cannot be
+        -- modified because it is a computed column" until this filter was added.
         SELECT
           @colList = STRING_AGG(QUOTENAME(name), N', ') WITHIN GROUP (ORDER BY column_id),
           @selectList = STRING_AGG(
@@ -140,7 +161,7 @@ IF EXISTS (
             N', '
           ) WITHIN GROUP (ORDER BY column_id)
         FROM sys.columns
-        WHERE object_id = @ObjectId;
+        WHERE object_id = @ObjectId AND is_computed = 0;
 
         SET @disableFkSql = N'';
         SET @enableFkSql = N'';
