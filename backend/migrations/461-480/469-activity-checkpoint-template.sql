@@ -26,8 +26,16 @@ BEGIN
     CreatedAt    DATETIME2(3) NOT NULL DEFAULT SYSDATETIME(),
     CONSTRAINT FK_ActivityCheckpointTemplate_Activity
       FOREIGN KEY (ActivityId) REFERENCES dbo.ActivityMaster(id) ON DELETE CASCADE,
+    -- NO ACTION (not CASCADE) — dbo.ActivityCheckpoint already has its own
+    -- (unused, nullable) ON DELETE CASCADE path back to ActivityMaster
+    -- (migration 337), so a second cascade path from ActivityMaster through
+    -- this table to ActivityCheckpoint would give SQL Server two ways to
+    -- reach the same row ("may cause cycles or multiple cascade paths") and
+    -- the CREATE TABLE is rejected outright. Deleting a still-tagged
+    -- catalog checkpoint fails loudly with an FK error instead — detach it
+    -- from every activity in Activity Master first.
     CONSTRAINT FK_ActivityCheckpointTemplate_Checkpoint
-      FOREIGN KEY (CheckpointId) REFERENCES dbo.ActivityCheckpoint(Id) ON DELETE CASCADE
+      FOREIGN KEY (CheckpointId) REFERENCES dbo.ActivityCheckpoint(Id)
   );
   CREATE UNIQUE INDEX UX_ActivityCheckpointTemplate_Activity_Checkpoint
     ON dbo.ActivityCheckpointTemplate(ActivityId, CheckpointId);
