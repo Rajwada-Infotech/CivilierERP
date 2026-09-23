@@ -179,7 +179,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
       : null;
 
     // Detect optional columns (same pattern as inventoryMaster.js)
-    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate, hasDaysOfSupply] =
+    const [hasUOM, hasGodownCol, hasCreatedDate, hasEntryDate, hasDaysOfSupply, hasCC] =
       await Promise.all([
         pool
           .request()
@@ -214,6 +214,13 @@ router.get("/item-options", authenticateToken, async (req, res) => {
           .query(
             `SELECT COUNT(1) AS cnt FROM sys.columns
              WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_DaysOfSupply'`,
+          )
+          .then((r) => r.recordset[0].cnt > 0),
+        pool
+          .request()
+          .query(
+            `SELECT COUNT(1) AS cnt FROM sys.columns
+             WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_CostCenterId'`,
           )
           .then((r) => r.recordset[0].cnt > 0),
       ]);
@@ -265,6 +272,8 @@ router.get("/item-options", authenticateToken, async (req, res) => {
               uom.UOMName  AS DefaultUOMName,
               uom.Symbol   AS DefaultUOMSymbol,
               ${hasDaysOfSupply ? "img.M_DaysOfSupply" : "NULL"} AS DaysOfSupply,
+              ${hasCC ? "img.M_CostCenterId" : "NULL"} AS M_CostCenterId,
+              ${hasCC ? "cc.Name" : "NULL"} AS CostCenterName,
               ISNULL(SUM(CASE WHEN sl.Type = 'IN'  THEN sl.Qty ELSE 0 END), 0)
             - ISNULL(SUM(CASE WHEN sl.Type = 'OUT' THEN sl.Qty ELSE 0 END), 0)
               AS AvailableStock
@@ -275,10 +284,12 @@ router.get("/item-options", authenticateToken, async (req, res) => {
         ${dateFilter}
         ${godownFilter}
       ${hasUOM ? "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = img.M_UOM" : "LEFT JOIN dbo.UOMMaster uom ON 1=0"}
+      ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = img.M_CostCenterId" : ""}
       WHERE (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
       GROUP BY img.M_Id, img.M_Name, img.M_Type, grp.M_Name
                ${hasUOM ? ", img.M_UOM" : ""},
                ${hasDaysOfSupply ? "img.M_DaysOfSupply," : ""}
+               ${hasCC ? "img.M_CostCenterId, cc.Name," : ""}
                uom.UOMName, uom.Symbol
       ORDER BY img.M_Name
     `);
@@ -716,9 +727,10 @@ router.get("/:id", authenticateToken, async (req, res) => {
       return res.status(404).json({ error: "Not found" });
 
     const items = await pool.request().input("id", sql.Int, id).query(`
-        SELECT mri.*, u.UOMName, u.Symbol AS UOMSymbol
+        SELECT mri.*, u.UOMName, u.Symbol AS UOMSymbol, cc.Name AS CostCenterName
         FROM   dbo.MaterialRequestItems mri
         LEFT JOIN dbo.UOMMaster u ON u.UOMCode = mri.UOMCode
+        LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = mri.CostCenterId
         WHERE  mri.MRId = @id
         ORDER  BY mri.MRItemId
       `);
@@ -833,9 +845,10 @@ router.post("/", authenticateToken, requirePageRight("material-request", "create
           .input("ItemName", sql.NVarChar(200), item.ItemName || null)
           .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
           .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
-          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
-            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks)
-            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
+          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null)
+          .input("CostCenterId", sql.Int, Number.isFinite(parseInt(item.CostCenterId, 10)) ? parseInt(item.CostCenterId, 10) : null).query(`
+            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks, CostCenterId)
+            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks, @CostCenterId)
           `);
       }
 
@@ -1023,9 +1036,10 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
           .input("ItemName", sql.NVarChar(200), item.ItemName || null)
           .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
           .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
-          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
-            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks)
-            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
+          .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null)
+          .input("CostCenterId", sql.Int, Number.isFinite(parseInt(item.CostCenterId, 10)) ? parseInt(item.CostCenterId, 10) : null).query(`
+            INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks, CostCenterId)
+            VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks, @CostCenterId)
           `);
       }
 
