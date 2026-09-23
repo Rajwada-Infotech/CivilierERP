@@ -34,6 +34,12 @@
 
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
+-- sqlcmd's default session runs with QUOTED_IDENTIFIER OFF, which SQL
+-- Server refuses for any UPDATE/DELETE against a table with a filtered
+-- index or computed column — found by an actual production run of the
+-- CRM-scoped sibling of this script.
+SET QUOTED_IDENTIFIER ON;
+SET ANSI_NULLS ON;
 
 DECLARE @fixed TABLE (TableName NVARCHAR(300), IdentityColumn SYSNAME, OldId INT, NewId INT);
 DECLARE @blocked TABLE (TableName NVARCHAR(300), Reason NVARCHAR(1000));
