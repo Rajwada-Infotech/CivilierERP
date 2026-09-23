@@ -192,34 +192,65 @@ router.get("/template/:activityId", authMiddleware, async (req, res) => {
   }
 });
 
-// POST /template/:activityId — attach a catalog checkpoint to this activity.
+// POST /template/:activityId — attach one or more catalog checkpoints to
+// this activity in one request. Accepts either the original single
+// `checkpointId`, or `checkpointIds: number[]` for attaching several at
+// once (Activity Master's picker now lets a user multi-select — mirrors
+// dependencyMaster.js's POST /, which already took an array of activities).
+// Each id is deduped/sorted the same way whichever path is used, so a
+// single-id caller gets byte-identical behaviour to before.
 router.post("/template/:activityId", authMiddleware, requirePageRight("dpr-activity-master", "edit"), async (req, res) => {
   const activityId = parseInt(req.params.activityId, 10);
   if (!Number.isFinite(activityId)) return res.status(400).json({ error: "Invalid activityId" });
-  const checkpointId = parseInt(req.body?.checkpointId, 10);
-  if (!Number.isFinite(checkpointId)) return res.status(400).json({ error: "checkpointId is required" });
+
+  const rawIds = Array.isArray(req.body?.checkpointIds)
+    ? req.body.checkpointIds
+    : req.body?.checkpointId !== undefined
+      ? [req.body.checkpointId]
+      : [];
+  // De-dupe the request itself so the same id checked twice in one payload
+  // can't slip past the DB duplicate check below (which only sees rows
+  // already committed, not siblings still in this same array).
+  const checkpointIds = [...new Set(rawIds.map((v) => parseInt(v, 10)))].filter(Number.isFinite);
+  if (checkpointIds.length === 0) return res.status(400).json({ error: "checkpointId or checkpointIds is required" });
+
   try {
     const pool = await getPool();
-    const dup = await pool.request().input("activityId", sql.Int, activityId).input("checkpointId", sql.Int, checkpointId)
-      .query(`SELECT TOP 1 Id FROM dbo.ActivityCheckpointTemplate WHERE ActivityId = @activityId AND CheckpointId = @checkpointId`);
-    if (dup.recordset.length) return res.status(409).json({ error: "This checkpoint is already attached to the activity." });
+    const dup = await pool.request().input("activityId", sql.Int, activityId)
+      .query(`SELECT CheckpointId FROM dbo.ActivityCheckpointTemplate WHERE ActivityId = @activityId`);
+    const already = new Set(dup.recordset.map((r) => r.CheckpointId));
+    const dupRequested = checkpointIds.filter((id) => already.has(id));
+    if (dupRequested.length) {
+      return res.status(409).json({ error: "This checkpoint is already attached to the activity." });
+    }
 
     const maxSort = await pool.request().input("activityId", sql.Int, activityId)
       .query(`SELECT ISNULL(MAX(SortOrder), 0) AS m FROM dbo.ActivityCheckpointTemplate WHERE ActivityId = @activityId`);
-    const nextSort = (maxSort.recordset[0].m || 0) + 10;
+    let nextSort = maxSort.recordset[0].m || 0;
     const actor = req.user?.email || req.user?.name || "system";
 
-    const inserted = await pool.request()
-      .input("activityId", sql.Int, activityId)
-      .input("checkpointId", sql.Int, checkpointId)
-      .input("sortOrder", sql.Int, nextSort)
-      .input("createdBy", sql.NVarChar(200), actor)
-      .query(`
-        INSERT INTO dbo.ActivityCheckpointTemplate (ActivityId, CheckpointId, SortOrder, CreatedBy)
-        OUTPUT INSERTED.Id AS linkId
-        VALUES (@activityId, @checkpointId, @sortOrder, @createdBy)
-      `);
-    res.status(201).json({ linkId: inserted.recordset[0].linkId });
+    const linkIds = [];
+    for (const checkpointId of checkpointIds) {
+      nextSort += 10;
+      const inserted = await pool.request()
+        .input("activityId", sql.Int, activityId)
+        .input("checkpointId", sql.Int, checkpointId)
+        .input("sortOrder", sql.Int, nextSort)
+        .input("createdBy", sql.NVarChar(200), actor)
+        .query(`
+          INSERT INTO dbo.ActivityCheckpointTemplate (ActivityId, CheckpointId, SortOrder, CreatedBy)
+          OUTPUT INSERTED.Id AS linkId
+          VALUES (@activityId, @checkpointId, @sortOrder, @createdBy)
+        `);
+      linkIds.push(inserted.recordset[0].linkId);
+    }
+
+    // Single-id requests keep the original `{ linkId }` shape so any other
+    // caller of this route (if one exists) isn't broken by this change.
+    if (rawIds.length === 1 && req.body?.checkpointId !== undefined) {
+      return res.status(201).json({ linkId: linkIds[0] });
+    }
+    res.status(201).json({ linkIds });
   } catch (err) {
     console.error("[activity-checkpoint] POST /template/:activityId error:", err.message);
     res.status(500).json({ error: err.message });

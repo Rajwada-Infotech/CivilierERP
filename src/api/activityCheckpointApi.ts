@@ -111,6 +111,18 @@ export const attachCheckpointToActivity = async (
   return handleResponse<{ linkId: number }>(res);
 };
 
+export const attachCheckpointsToActivity = async (
+  activityId: number,
+  checkpointIds: number[],
+): Promise<{ linkIds: number[] }> => {
+  const res = await fetchWithAuth(`${BASE}/template/${activityId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ checkpointIds }),
+  });
+  return handleResponse<{ linkIds: number[] }>(res);
+};
+
 export const detachCheckpointFromActivity = async (
   activityId: number,
   linkId: number,
