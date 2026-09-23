@@ -50,7 +50,8 @@ DECLARE @softRefs TABLE (SchemaName SYSNAME, TableName SYSNAME, ColumnName SYSNA
 INSERT INTO @softRefs VALUES
   ('dbo', 'CrmBookingStageLog',    'BookingId',         'dbo', 'CrmBooking', 'Id'),
   ('dbo', 'CrmOnAccountPayment',   'HeldFromBookingId', 'dbo', 'CrmBooking', 'Id'),
-  ('dbo', 'CrmRefund',             'BookingId',         'dbo', 'CrmBooking', 'Id');
+  ('dbo', 'CrmRefund',             'BookingId',         'dbo', 'CrmBooking', 'Id'),
+  ('dbo', 'CrmMoneyReceipt',       'BookingId',         'dbo', 'CrmBooking', 'Id');
 
 DECLARE
   @SchemaName SYSNAME,

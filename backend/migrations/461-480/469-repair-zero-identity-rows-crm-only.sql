@@ -39,11 +39,19 @@ DECLARE @fixed TABLE (TableName NVARCHAR(300), IdentityColumn SYSNAME, OldId INT
 DECLARE @blocked TABLE (TableName NVARCHAR(300), Reason NVARCHAR(1000));
 
 -- Known unconstrained "soft FK" columns — see header comment above.
+-- CrmMoneyReceipt.BookingId added after a live production diagnostic
+-- (2026-09) found a real Approved MoneyReceipt row pointing at
+-- CrmBooking.Id=0 that this list had missed — the DB-level
+-- trg_CrmBooking_PreventUnsafeDelete trigger would otherwise block this
+-- whole repair for CrmBooking, since it checks CrmMoneyReceipt for any
+-- non-Rejected row before allowing the delete this script's repair
+-- step performs.
 DECLARE @softRefs TABLE (SchemaName SYSNAME, TableName SYSNAME, ColumnName SYSNAME, RefSchemaName SYSNAME, RefTableName SYSNAME, RefColumnName SYSNAME);
 INSERT INTO @softRefs VALUES
   ('dbo', 'CrmBookingStageLog',    'BookingId',         'dbo', 'CrmBooking', 'Id'),
   ('dbo', 'CrmOnAccountPayment',   'HeldFromBookingId', 'dbo', 'CrmBooking', 'Id'),
-  ('dbo', 'CrmRefund',             'BookingId',         'dbo', 'CrmBooking', 'Id');
+  ('dbo', 'CrmRefund',             'BookingId',         'dbo', 'CrmBooking', 'Id'),
+  ('dbo', 'CrmMoneyReceipt',       'BookingId',         'dbo', 'CrmBooking', 'Id');
 
 DECLARE
   @SchemaName SYSNAME,
