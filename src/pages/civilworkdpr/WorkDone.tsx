@@ -4,7 +4,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
-import { getRoomInstancesForUnit } from "@/api/unitBhkConfigApi";
+import { getRoomsForUnit } from "@/api/roomMasterApi";
 import { getDependencyMasters, getDependencyMaster, type DependencyMasterListRow, type LadderActivity } from "@/api/dependencyMasterApi";
 import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/components/ActivityChainPreview";
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
@@ -106,10 +106,8 @@ interface WorkDoneLocationForm {
   BlockId: string;
   FloorNo: string;
   UnitId: string;
-  // Value is the synthetic "<categoryId>-<index>" key from
-  // getRoomInstancesForUnit — there's no per-room table yet, just a
-  // category+quantity count, so this key only ever exists for the
-  // lifetime of this form (nothing persists it).
+  // A real dbo.RoomMaster row id (Flat Master), scoped to the selected
+  // Unit — no synthetic/generated room list anymore.
   RoomId: string;
 }
 const EMPTY_FORM: WorkDoneLocationForm = { ProjectId: "", BlockId: "", FloorNo: "", UnitId: "", RoomId: "" };
@@ -231,15 +229,9 @@ export default function WorkDone() {
     return unitsForTower.filter((u: any) => String(u.FloorNo) === form.FloorNo);
   }, [unitsForTower, form.FloorNo]);
 
-  // Dependency link — appears once a Room is selected. Work Allocation's
-  // "Room" is a synthetic per-category instance (RoomCompositionBuilder's
-  // category+quantity model, no real dbo.RoomMaster row behind it — see
-  // RoomInstance's {key,label} shape), while a Dependency Master's own scope
-  // is tied to a real RoomMaster row. The two "Room" concepts can't be
-  // cross-referenced, so matching is scoped to Project/Tower/Floor/Unit —
-  // the levels both sides genuinely share — and the user picks the specific
-  // chain themselves rather than the page guessing a Room match that isn't
-  // really there.
+  // Dependency link — appears once a Room is selected. Both sides are now
+  // real dbo.RoomMaster rows (Flat Master), so matching narrows all the way
+  // down to the exact Room, not just Project/Tower/Floor/Unit.
   const [linkedDependencyId, setLinkedDependencyId] = useState<string>("");
   const { data: allDependencies = [], isLoading: loadingDependencies } = useQuery({
     queryKey: ["civilworkdpr-work-done-dependencies"],
@@ -254,7 +246,8 @@ export default function WorkDone() {
         String(d.projectId) === form.ProjectId &&
         String(d.towerId) === form.BlockId &&
         String(d.floor) === form.FloorNo &&
-        String(d.flatId) === form.UnitId,
+        String(d.flatId) === form.UnitId &&
+        String(d.roomId) === form.RoomId,
     );
   }, [allDependencies, form.ProjectId, form.BlockId, form.FloorNo, form.UnitId, form.RoomId]);
   const linkedDependency = useMemo(
@@ -272,14 +265,13 @@ export default function WorkDone() {
     [units, form.UnitId],
   );
 
-  // Room instances (Bathroom 1, Bathroom 2, ...) generated live from the
-  // selected Unit's saved room composition — current Alias at render time,
-  // so a renamed category shows up immediately without touching any stored
-  // data (see RoomCompositionBuilder.tsx / RoomCategoryMaster.tsx).
+  // Real rooms tagged to the selected Unit in Flat Master (dbo.RoomMaster)
+  // — no more synthetic/generated room list; if a unit has no rooms tagged
+  // yet, that's fixed in Flat Master, not by regenerating one here.
   const selectedUnitId = form.UnitId ? parseInt(form.UnitId, 10) : null;
   const { data: roomInstances = [], isLoading: loadingRooms } = useQuery({
-    queryKey: ["work-done-room-instances", selectedUnitId],
-    queryFn: () => getRoomInstancesForUnit(selectedUnitId as number),
+    queryKey: ["work-done-rooms-for-unit", selectedUnitId],
+    queryFn: () => getRoomsForUnit(selectedUnitId as number),
     enabled: !!selectedUnitId,
   });
   const selectedProject = useMemo(
@@ -441,15 +433,14 @@ export default function WorkDone() {
                     </div>
                   ))}
 
-                {/* 5. Room — generated from the selected Unit's saved room
-                    composition (Room Category Master x quantity, via
-                    RoomCompositionBuilder.tsx). */}
+                {/* 5. Room — real dbo.RoomMaster rows tagged to the selected
+                    Unit in Flat Master. */}
                 {form.UnitId &&
                   (form.RoomId ? (
                     <LocationChip
                       icon={DoorOpen}
                       label="Room"
-                      value={roomInstances.find((r) => r.key === form.RoomId)?.label || form.RoomId}
+                      value={roomInstances.find((r) => String(r.Id) === form.RoomId)?.RoomName || form.RoomId}
                       onClear={() => handleRoomChange("")}
                     />
                   ) : (
@@ -467,12 +458,12 @@ export default function WorkDone() {
                           {loadingRooms
                             ? "Loading rooms…"
                             : roomInstances.length === 0
-                              ? "No rooms configured for this unit"
+                              ? "No rooms created for this unit — add them in Flat Master"
                               : "Select room…"}
                         </option>
                         {roomInstances.map((r) => (
-                          <option key={r.key} value={r.key}>
-                            {r.label}
+                          <option key={r.Id} value={String(r.Id)}>
+                            {r.RoomName}
                           </option>
                         ))}
                       </select>
