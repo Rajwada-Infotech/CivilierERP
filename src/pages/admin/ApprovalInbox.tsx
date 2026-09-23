@@ -39,6 +39,8 @@ import {
   Undo2,
   ArrowDownWideNarrow,
   ArrowUpWideNarrow,
+  Search,
+  X,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
@@ -70,6 +72,9 @@ export interface InboxItem {
   SourceTransferDocNo: string | null;
   FromGodownName: string | null;
   ToGodownName: string | null;
+  // journal-voucher only — "AccountHead Dr/Cr Amount | AccountHead Dr/Cr Amount"
+  // for every line on the voucher, null for all other modules.
+  JournalVoucherSummary: string | null;
   // Set by the backend's visibility filter (approvalInbox.js) only when the
   // viewer is named somewhere on this record's workflow but NOT on the
   // level it's currently sitting at — e.g. a Level-2 approver looking at a
@@ -683,7 +688,10 @@ export function extractLineItems(detail: Record<string, unknown> | null): Record
   // (materialRequests.js: `{ ...header, items: [...] }`) — missing it meant
   // the review panel's line-items table silently never rendered for MRs at
   // all, even though the data was right there in `detail`.
-  for (const key of ["LineItems", "POItems", "Items", "items"]) {
+  // "lines" (lowercase) covers Journal Vouchers' own GET /:id response
+  // (journalVoucher.js: `{ ...header, lines: [...] }`) — same class of gap
+  // as "items" above, just for JV's debit/credit lines.
+  for (const key of ["LineItems", "POItems", "Items", "items", "lines"]) {
     const v = detail[key];
     if (Array.isArray(v) && v.length > 0) return v as Record<string, unknown>[];
   }
@@ -880,6 +888,16 @@ const InboxRow: React.FC<{
                 </span>
               )}
             </div>
+          ) : item.Module === "journal-voucher" && item.JournalVoucherSummary ? (
+            <span className="truncate" title={item.JournalVoucherSummary}>
+              {item.JournalVoucherSummary}
+            </span>
+          ) : item.Module === "fund-transfer" && item.ContractorName && item.SupplierName ? (
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+              <span className="truncate">{item.ContractorName}</span>
+              <ArrowLeftRight size={8} className="shrink-0" />
+              <span className="truncate">{item.SupplierName}</span>
+            </span>
           ) : (
             <span className="truncate">{party}</span>
           )}
@@ -990,6 +1008,28 @@ const InboxRow: React.FC<{
               </span>
             )}
           </div>
+        ) : item.Module === "journal-voucher" && item.JournalVoucherSummary ? (
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+              Account heads
+            </span>
+            <p className="text-xs text-foreground truncate" title={item.JournalVoucherSummary}>
+              {item.JournalVoucherSummary}
+            </p>
+          </div>
+        ) : item.Module === "fund-transfer" && item.ContractorName && item.SupplierName ? (
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+              From → To
+            </span>
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+              <Building2 size={9} className="shrink-0 text-blue-500" />
+              <span className="truncate">{item.ContractorName}</span>
+              <ArrowLeftRight size={8} className="shrink-0 text-muted-foreground" />
+              <Building2 size={9} className="shrink-0 text-violet-500" />
+              <span className="truncate">{item.SupplierName}</span>
+            </span>
+          </div>
         ) : (
           <p className="text-xs text-foreground truncate">{party}</p>
         )}
@@ -1043,6 +1083,12 @@ const ApprovalInbox: React.FC = () => {
   // instead of flipping between one module at a time. Empty = every module.
   const [activeModules, setActiveModules] = useState<string[]>([]);
   const [dateSort, setDateSort] = useState<"desc" | "asc">("desc");
+  // Free-text search over each item's own document number — separate from
+  // the module-type filter above, which only ever matched module *names*
+  // (e.g. "Journal Voucher"), not a document's Reference like
+  // "JV-2026-00067". Typing a doc number into that filter's search box
+  // matched nothing, which is what "document search isn't working" meant.
+  const [docSearch, setDocSearch] = useState("");
 
   const {
     data: allItems = [],
@@ -1064,6 +1110,11 @@ const ApprovalInbox: React.FC = () => {
       : allItems
   )
     .filter((i) => !removedKeys.has(`${i.Module}-${i.RecordId}`))
+    .filter((i) => {
+      const q = docSearch.trim().toLowerCase();
+      if (!q) return true;
+      return (i.Reference ?? "").toLowerCase().includes(q) || String(i.RecordId).includes(q);
+    })
     // Grouped by module first (all Material Requests together, then all
     // Purchase Orders, then all GRNs, etc. — MODULE_ORDER below) so like
     // documents sit together instead of interleaving by date across
@@ -1153,6 +1204,27 @@ const ApprovalInbox: React.FC = () => {
             so several types (e.g. PO + GRN + Payment) can be picked at once
             instead of one module at a time. Paired with a date-sort toggle
             since "filter, then sort" is how this list is actually worked. */}
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            type="text"
+            value={docSearch}
+            onChange={(e) => setDocSearch(e.target.value)}
+            placeholder="Search by document number (e.g. JV-2026-00067)…"
+            className="w-full pl-9 pr-9 py-2.5 text-sm rounded-xl bg-card border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+          {docSearch && (
+            <button
+              type="button"
+              onClick={() => setDocSearch("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              title="Clear search"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
         <div className="rounded-xl border border-border bg-muted/30 p-2.5 space-y-2">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
@@ -1207,14 +1279,18 @@ const ApprovalInbox: React.FC = () => {
                 <Inbox size={24} className="text-muted-foreground/40" />
               </div>
               <p className="text-sm font-semibold text-foreground">
-                {activeModules.length > 0
-                  ? "No pending items for the selected type(s)"
-                  : "All clear!"}
+                {docSearch.trim()
+                  ? `No document matches "${docSearch.trim()}"`
+                  : activeModules.length > 0
+                    ? "No pending items for the selected type(s)"
+                    : "All clear!"}
               </p>
               <p className="text-xs text-muted-foreground mt-1">
-                {activeModules.length > 0
-                  ? "Clear the filter to see the full inbox"
-                  : "No records are awaiting approval right now"}
+                {docSearch.trim()
+                  ? "Clear the search to see the full inbox"
+                  : activeModules.length > 0
+                    ? "Clear the filter to see the full inbox"
+                    : "No records are awaiting approval right now"}
               </p>
             </div>
           ) : (

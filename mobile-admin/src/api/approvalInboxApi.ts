@@ -27,6 +27,15 @@ export interface InboxItem {
   SourceTransferDocNo: string | null;
   FromGodownName: string | null;
   ToGodownName: string | null;
+  // Set by the backend's visibility filter (approvalInbox.js) only when the
+  // viewer is named somewhere on this record's workflow but NOT on the
+  // level it's currently sitting at — e.g. a Level-1 approver looking at a
+  // record that's already past their level and waiting on Level 2. Mirrors
+  // the web app's InboxItem (src/pages/admin/ApprovalInbox.tsx) — omitted
+  // (undefined) for every normal, actionable row.
+  _canAct?: boolean;
+  _currentLevel?: number;
+  _totalLevels?: number;
 }
 
 export const fetchInbox = async (): Promise<InboxItem[]> => {

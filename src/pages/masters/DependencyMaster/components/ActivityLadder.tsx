@@ -35,6 +35,15 @@ export function ActivityLadder({ active, rungs, onAdd, onRemove, onMove, readOnl
     setOverIndex(null);
   };
 
+  // onDragEnd always fires on release, even when the drop lands outside any
+  // rung (or the drag is cancelled) and onDrop never gets called — without
+  // this, dragIndex stayed set forever and that rung stayed dimmed at 40%
+  // opacity with no way to clear it short of reloading the page.
+  const handleDragEnd = () => {
+    setDragIndex(null);
+    setOverIndex(null);
+  };
+
   const rail = (
     <>
       {rungs.length === 0 ? (
@@ -54,6 +63,7 @@ export function ActivityLadder({ active, rungs, onAdd, onRemove, onMove, readOnl
               onDragStart={setDragIndex}
               onDragOver={setOverIndex}
               onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
               isDragging={dragIndex === i}
               isDropTarget={overIndex === i && dragIndex !== i}
             />

@@ -273,6 +273,11 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   // every row. Name + Qty (+ UOM, if the detail response carries it) is all
   // that's meaningful here.
   const isMaterialRequest = item.Module === "material-requests";
+  // Journal Voucher lines are ledger postings (LHeadName/DebitAmount/
+  // CreditAmount), not PO-style Item/Qty/Rate rows — the generic table
+  // below was showing "—"/0/₹0 for every JV line since it read fields
+  // (ItemName/Quantity/Rate) that don't exist on a JV line at all.
+  const isJournalVoucher = item.Module === "journal-voucher";
 
   // TDS — Payments/ExpenseBooking both snapshot TDSId/TDSNature/TDSName/
   // TDSPercentage/TDSAmount onto the record at booking/payment time (same
@@ -465,9 +470,55 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             {lineItems.length > 0 && (
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
-                  <Package size={10} className="text-emerald-500" /> Items ({lineItems.length})
+                  <Package size={10} className="text-emerald-500" />
+                  {isJournalVoucher ? "Journal Entry" : `Items (${lineItems.length})`}
                 </p>
-                {isMaterialRequest ? (
+                {isJournalVoucher ? (
+                  <div className="rounded-xl border border-border overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead className="bg-muted/40 border-b border-border">
+                        <tr>
+                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-left">Ledger</th>
+                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Debit (₹)</th>
+                          <th className="px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground text-right">Credit (₹)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/50">
+                        {lineItems.map((li, i) => {
+                          const debit = Number(li.DebitAmount) || 0;
+                          const credit = Number(li.CreditAmount) || 0;
+                          return (
+                            <tr key={i} className="hover:bg-muted/20 transition-colors">
+                              <td className="px-3 py-2 font-medium">
+                                <span className="flex items-center gap-2">
+                                  <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${debit > 0 ? "bg-emerald-500" : "bg-red-500"}`} />
+                                  {(li.LHeadName as string) || "—"}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">
+                                {debit > 0 ? formatINR(debit) : ""}
+                              </td>
+                              <td className="px-3 py-2 text-right text-red-600 dark:text-red-400">
+                                {credit > 0 ? formatINR(credit) : ""}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-muted/20 border-t border-border font-semibold">
+                        <tr>
+                          <td className="px-3 py-2 text-[10px] uppercase tracking-widest text-muted-foreground">Total</td>
+                          <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">
+                            {formatINR(lineItems.reduce((s, li) => s + (Number(li.DebitAmount) || 0), 0))}
+                          </td>
+                          <td className="px-3 py-2 text-right text-red-600 dark:text-red-400">
+                            {formatINR(lineItems.reduce((s, li) => s + (Number(li.CreditAmount) || 0), 0))}
+                          </td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                ) : isMaterialRequest ? (
                   <div className="rounded-xl border border-border divide-y divide-border/50">
                     {lineItems.map((li, i) => {
                       const name = (li.ItemName ?? li.itemName ?? "—") as string;

@@ -176,8 +176,8 @@ export default function DependencyMasterFormPage() {
       <ActivityPickerModal
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onPick={(activityId, activityName) => {
-          form.ladder.add(activityId, activityName, form.workType);
+        onPick={(picks) => {
+          form.ladder.addMany(picks, form.workType);
           setPickerOpen(false);
         }}
         excludeIds={form.ladder.rungs.map((r) => r.activityId)}

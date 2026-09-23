@@ -45,9 +45,10 @@ import {
 import {
   getCheckpoints as getCheckpointCatalog,
   getActivityCheckpointTemplate,
-  attachCheckpointToActivity,
+  attachCheckpointsToActivity,
   detachCheckpointFromActivity,
 } from "@/api/activityCheckpointApi";
+import { Checkbox } from "@/components/ui/checkbox";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   Dialog,
@@ -289,7 +290,7 @@ const ActivityMaster: React.FC = () => {
   const [pickedItemId, setPickedItemId] = useState("");
   const [itemSearch, setItemSearch] = useState("");
   const [addCheckpointOpen, setAddCheckpointOpen] = useState(false);
-  const [pickedCheckpointId, setPickedCheckpointId] = useState<number | null>(null);
+  const [pickedCheckpointIds, setPickedCheckpointIds] = useState<number[]>([]);
   const [checkpointSearch, setCheckpointSearch] = useState("");
 
   // Edit, triggered from the grouped tree view below (the table itself is
@@ -352,16 +353,20 @@ const ActivityMaster: React.FC = () => {
   );
 
   const handleAttachCheckpoint = async () => {
-    if (!viewRecord || pickedCheckpointId == null) return;
+    if (!viewRecord || pickedCheckpointIds.length === 0) return;
     try {
-      await attachCheckpointToActivity(viewRecord.id, pickedCheckpointId);
-      toast.success("Checkpoint tagged to activity ✓");
+      await attachCheckpointsToActivity(viewRecord.id, pickedCheckpointIds);
+      toast.success(
+        pickedCheckpointIds.length === 1
+          ? "Checkpoint tagged to activity ✓"
+          : `${pickedCheckpointIds.length} checkpoints tagged to activity ✓`,
+      );
       await queryClient.invalidateQueries({ queryKey: ["activityCheckpointTemplate", viewRecord.id] });
       setAddCheckpointOpen(false);
-      setPickedCheckpointId(null);
+      setPickedCheckpointIds([]);
       setCheckpointSearch("");
     } catch (err: any) {
-      toast.error("Failed to tag checkpoint: " + err.message);
+      toast.error("Failed to tag checkpoint(s): " + err.message);
     }
   };
 
@@ -1118,7 +1123,7 @@ const ActivityMaster: React.FC = () => {
         onOpenChange={(open) => {
           setAddCheckpointOpen(open);
           if (!open) {
-            setPickedCheckpointId(null);
+            setPickedCheckpointIds([]);
             setCheckpointSearch("");
           }
         }}
@@ -1126,7 +1131,7 @@ const ActivityMaster: React.FC = () => {
         <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
           <DialogHeader className="px-5 pt-5 pb-3">
             <DialogTitle className="font-heading text-base">
-              Tag Checkpoint to {viewRecord?.activity_name}
+              Tag Checkpoints to {viewRecord?.activity_name}
             </DialogTitle>
           </DialogHeader>
 
@@ -1165,18 +1170,23 @@ const ActivityMaster: React.FC = () => {
                   </p>
                 ) : (
                   filteredCheckpoints.map((c) => {
-                    const selected = pickedCheckpointId === c.id;
+                    const selected = pickedCheckpointIds.includes(c.id);
+                    const toggle = () =>
+                      setPickedCheckpointIds((prev) =>
+                        prev.includes(c.id) ? prev.filter((id) => id !== c.id) : [...prev, c.id],
+                      );
                     return (
                       <button
                         key={c.id}
                         type="button"
-                        onClick={() => setPickedCheckpointId(c.id)}
+                        onClick={toggle}
                         className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm transition-colors ${
                           selected
                             ? "bg-primary/10 border border-primary/40 text-foreground"
                             : "border border-transparent hover:bg-muted text-foreground"
                         }`}
                       >
+                        <Checkbox checked={selected} onCheckedChange={toggle} className="shrink-0" />
                         <Flag size={13} className="text-amber-400 shrink-0" />
                         <span className="flex-1 truncate">{c.fieldName}</span>
                         {c.minWaitDays != null && (
@@ -1196,7 +1206,7 @@ const ActivityMaster: React.FC = () => {
             <button
               onClick={() => {
                 setAddCheckpointOpen(false);
-                setPickedCheckpointId(null);
+                setPickedCheckpointIds([]);
                 setCheckpointSearch("");
               }}
               className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted"
@@ -1205,10 +1215,10 @@ const ActivityMaster: React.FC = () => {
             </button>
             <button
               onClick={handleAttachCheckpoint}
-              disabled={pickedCheckpointId == null}
+              disabled={pickedCheckpointIds.length === 0}
               className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-engineering text-white disabled:opacity-40 transition-all"
             >
-              Add
+              {pickedCheckpointIds.length > 0 ? `Add ${pickedCheckpointIds.length}` : "Add"}
             </button>
           </DialogFooter>
         </DialogContent>

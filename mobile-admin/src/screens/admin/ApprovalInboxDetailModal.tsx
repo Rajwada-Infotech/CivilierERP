@@ -251,7 +251,26 @@ export function ApprovalInboxDetailModal({
           )}
         </ScrollView>
 
-        {item.Status === "Pending" && (
+        {item.Status === "Pending" && item._canAct === false ? (
+          // Named on this record's workflow, but not this level — approving/
+          // rejecting here would just 403 from transition()'s own per-level
+          // gate (see approvalService.js). Say so instead of showing live-
+          // looking buttons guaranteed to fail, same as the web inbox does.
+          <View
+            style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: insets.bottom + 12 }}
+            className="px-4 pt-3"
+          >
+            <View
+              className="flex-row items-center justify-center gap-1.5 py-3 rounded-xl"
+              style={{ backgroundColor: colors.muted, borderWidth: 1, borderColor: colors.border }}
+            >
+              <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.heading.semibold }}>
+                Waiting on Level {item._currentLevel}
+                {item._totalLevels ? ` of ${item._totalLevels}` : ""}
+              </Text>
+            </View>
+          </View>
+        ) : item.Status === "Pending" && (
           <View style={{ borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: insets.bottom + 12 }}>
             {rejecting ? (
               <View className="px-4 pt-3">
