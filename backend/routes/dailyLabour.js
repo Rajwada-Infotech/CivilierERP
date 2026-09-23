@@ -82,7 +82,7 @@ router.get("/", authMiddleware, async (req, res) => {
 });
 
 // ─── POST / ────────────────────────────────────────────────────────────────────
-router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-register", "create"), async (req, res) => {
+router.post("/", authMiddleware, requirePageRight("civilworkdpr-daily-labour", "create"), async (req, res) => {
   const {
     allocationId, entryDate, skilledLabourCount, unskilledLabourCount,
     skilledLabourNames, unskilledLabourNames,
@@ -129,7 +129,7 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-regis
 });
 
 // ─── PUT /:id ──────────────────────────────────────────────────────────────────
-router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-register", "edit"), async (req, res) => {
+router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-daily-labour", "edit"), async (req, res) => {
   const entryId = parseInt(req.params.id, 10);
   if (isNaN(entryId)) return res.status(400).json({ error: "Invalid ID" });
 
@@ -183,7 +183,7 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
 });
 
 // ─── DELETE /:id ───────────────────────────────────────────────────────────────
-router.delete("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-register", "delete"), async (req, res) => {
+router.delete("/:id", authMiddleware, requirePageRight("civilworkdpr-daily-labour", "delete"), async (req, res) => {
   const entryId = parseInt(req.params.id, 10);
   if (isNaN(entryId)) return res.status(400).json({ error: "Invalid ID" });
 

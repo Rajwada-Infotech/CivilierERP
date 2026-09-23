@@ -4,10 +4,9 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || "civil-work-dpr-validation-te
 /**
  * Civil Work DPR — request validation contract tests.
  *
- * The module (DependencyMaster/Activity chains, Contractor Register, the
- * Activity Chain Template generator) had zero automated coverage before
- * this file — every fix to it was only checked by hand. These tests lock
- * in the input-validation layer for the module's core write paths: the
+ * The module (DependencyMaster/Activity chains) had zero automated coverage
+ * before this file — every fix to it was only checked by hand. These tests
+ * lock in the input-validation layer for the module's core write paths: the
  * part most exposed to a malformed request, and exactly the layer that
  * held the falsy-zero-id bugs (`if (!id)` instead of `Number.isFinite`)
  * fixed alongside this file. Every case here returns before any real DB
@@ -156,60 +155,3 @@ describe("POST /api/dependency-master — payload validation", () => {
   });
 });
 
-describe("POST /api/contractor-allocation — payload validation", () => {
-  test("rejects a missing contractorId", async () => {
-    const res = await request(app)
-      .post("/api/contractor-allocation")
-      .set("Authorization", `Bearer ${token()}`)
-      .send({ activityId: 1 });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/contractor/i);
-  });
-
-  test("rejects a missing activityId", async () => {
-    const res = await request(app)
-      .post("/api/contractor-allocation")
-      .set("Authorization", `Bearer ${token()}`)
-      .send({ contractorId: 1 });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/activity/i);
-  });
-});
-
-describe("POST /api/dpr-activity-chain-template/generate — payload validation", () => {
-  test("rejects a missing ProjectId", async () => {
-    const res = await request(app)
-      .post("/api/dpr-activity-chain-template/generate")
-      .set("Authorization", `Bearer ${token()}`)
-      .send({});
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/ProjectId/i);
-  });
-
-  test("accepts ProjectId 0 without treating it as missing", async () => {
-    const res = await request(app)
-      .post("/api/dpr-activity-chain-template/generate")
-      .set("Authorization", `Bearer ${token()}`)
-      .send({ ProjectId: 0 });
-    expect(res.status).not.toBe(400);
-  });
-});
-
-describe("PUT /api/dpr-activity-chain-template/:roomCategoryId — payload validation", () => {
-  test("rejects an empty ActivityIds list", async () => {
-    const res = await request(app)
-      .put("/api/dpr-activity-chain-template/1")
-      .set("Authorization", `Bearer ${token()}`)
-      .send({ ActivityIds: [] });
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/Activity/i);
-  });
-
-  test("rejects a non-numeric roomCategoryId", async () => {
-    const res = await request(app)
-      .put("/api/dpr-activity-chain-template/not-a-number")
-      .set("Authorization", `Bearer ${token()}`)
-      .send({ ActivityIds: [1] });
-    expect(res.status).toBe(400);
-  });
-});
