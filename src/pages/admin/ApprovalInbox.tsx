@@ -115,6 +115,18 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/new-payment",
     label: "Payments",
   },
+  // A CRM Refund's payout voucher — same table/route as "payments" above,
+  // just its own Module tag so it resolves its own single-level workflow
+  // (see approvalInbox.js's query split and approvalService.js's
+  // "crm-refund-payment" module) instead of the multi-module Payments
+  // bundle every other payment goes through.
+  "crm-refund-payment": {
+    icon: Banknote,
+    color: "text-orange-600 bg-orange-600/10",
+    navPath: "/payments",
+    apiEndpoint: "/api/new-payment",
+    label: "CRM Refund Payments",
+  },
   "goods-receipt": {
     icon: Truck,
     color: "text-violet-500 bg-violet-500/10",
@@ -341,6 +353,7 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
   "work-orders": "WorkOrderHeader",
   "expense-booking": "ExpenseBooking",
   payments: "NewPayment",
+  "crm-refund-payment": "NewPayment",
   "material-issues": "MaterialIssues",
   "material-issue-return": "MaterialIssueReturn",
   "material-requests": "MaterialRequests",
@@ -356,7 +369,7 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
 export const CRM_MODULES = new Set(["crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 export const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
-const MR_APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
+export const MR_APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
 const CRM_BOOKING_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "director"];
 // Agreement Date and Sales Deed Director approval are narrower, separate
 // gates — super_admin only, "for now" per instruction, unlike the rest of
@@ -376,6 +389,7 @@ export const RESTRICTED_MODULES = new Set([
   "inter-company-transfer",
   "fund-transfer",
   "crm-money-receipts",
+  "crm-refund-payment",
   ...SUB_GATE_MODULES,
 ]);
 
@@ -468,6 +482,7 @@ const VIEW_PARAM_MODULES = new Set([
   "goods-receipt",
   "expense-booking",
   "payments",
+  "crm-refund-payment",
   "vehicle-in-out",
   "material-requests",
   "crm-brokerage",
@@ -756,7 +771,10 @@ const InboxRow: React.FC<{
             item.Module === "crm-refunds-finance" ? REFUND_FINANCE_APPROVER_ROLES
             : SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
             : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
-            : item.Module === "crm-money-receipts" ? MR_APPROVER_ROLES
+            // Same role set as Received Payments (admin/super_admin/dba/
+            // accounts_head) — matches approvalService.js's
+            // MODULE_APPROVER_ROLE_OVERRIDES["crm-refund-payment"] exactly.
+            : item.Module === "crm-money-receipts" || item.Module === "crm-refund-payment" ? MR_APPROVER_ROLES
             : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
             : undefined
           }

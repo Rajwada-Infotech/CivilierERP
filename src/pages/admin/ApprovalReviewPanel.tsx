@@ -27,6 +27,7 @@ import {
   CRM_MODULES,
   CRM_APPROVER_ROLES,
   DATE_APPROVER_ROLES,
+  MR_APPROVER_ROLES,
   RESTRICTED_MODULES,
   openInModulePath,
   fmtDate,
@@ -596,6 +597,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
             approverRoles={
               SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+              : item.Module === "crm-money-receipts" || item.Module === "crm-refund-payment" ? MR_APPROVER_ROLES
               : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
               : undefined
             }
