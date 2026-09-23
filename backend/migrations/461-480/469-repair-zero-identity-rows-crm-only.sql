@@ -147,6 +147,11 @@ IF EXISTS (
 
         IF @nextId <= 0 SET @nextId = 1;
 
+        -- is_computed = 0 excludes computed columns (e.g. CrmPaymentPlanTemplate
+        -- .ScopeKey) — a computed column can never appear in an explicit INSERT
+        -- column list, SQL Server always derives it itself. Found by an actual
+        -- production run where this table failed with "column cannot be
+        -- modified because it is a computed column" until this filter was added.
         SELECT
           @colList = STRING_AGG(QUOTENAME(name), N', ') WITHIN GROUP (ORDER BY column_id),
           @selectList = STRING_AGG(
@@ -156,7 +161,7 @@ IF EXISTS (
             N', '
           ) WITHIN GROUP (ORDER BY column_id)
         FROM sys.columns
-        WHERE object_id = @ObjectId;
+        WHERE object_id = @ObjectId AND is_computed = 0;
 
         SET @disableFkSql = N'';
         SET @enableFkSql = N'';

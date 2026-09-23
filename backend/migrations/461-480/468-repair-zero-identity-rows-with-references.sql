@@ -143,6 +143,9 @@ IF EXISTS (
 
         IF @nextId <= 0 SET @nextId = 1;
 
+        -- is_computed = 0 excludes computed columns — a computed column can
+        -- never appear in an explicit INSERT column list. Found by an actual
+        -- production run of the CRM-scoped sibling of this script.
         SELECT
           @colList = STRING_AGG(QUOTENAME(name), N', ') WITHIN GROUP (ORDER BY column_id),
           @selectList = STRING_AGG(
@@ -152,7 +155,7 @@ IF EXISTS (
             N', '
           ) WITHIN GROUP (ORDER BY column_id)
         FROM sys.columns
-        WHERE object_id = @ObjectId;
+        WHERE object_id = @ObjectId AND is_computed = 0;
 
         SET @disableFkSql = N'';
         SET @enableFkSql = N'';
