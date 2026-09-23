@@ -778,6 +778,13 @@ const InboxRow: React.FC<{
               : undefined
           }
           restricted={RESTRICTED_MODULES.has(item.Module)}
+          // Reaching this branch at all already means _canAct !== false (the
+          // "waiting on level" badge above handles that case) — so for a
+          // restricted module, this row being here means the inbox's own
+          // isVisibleToViewer (approvalInbox.js) matched this viewer by
+          // userId on the record's current Approval Setup level. See
+          // ApprovalActions' workflowVisible prop doc.
+          workflowVisible={item._canAct !== false}
           onSuccess={(action) => {
             if (action === "approve" || action === "reject") {
               onOptimisticUpdate(item.RecordId, item.Module);

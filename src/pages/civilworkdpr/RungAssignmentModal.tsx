@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Flag, Trash2, Check, Timer } from "lucide-react";
+import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer } from "lucide-react";
 import type { LadderActivity, DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import {
   getEngineers,
@@ -16,12 +16,10 @@ import {
   type SourceType,
   type Engineer,
 } from "@/api/dependencyActivityAssignmentApi";
-import { getCheckpoints, type ActivityCheckpoint } from "@/api/activityCheckpointApi";
 import { getRoomBlueprint } from "@/api/roomMasterApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
-import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -108,7 +106,7 @@ function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number
         </div>
       ) : !blueprint ? (
         <p className="text-xs text-muted-foreground italic py-1.5">
-          No blueprint uploaded for this room yet — upload one from Setup &gt; Room Master.
+          No blueprint uploaded for this room yet — upload one from Setup &gt; Flat Master.
         </p>
       ) : (
         <button
@@ -205,13 +203,9 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   const [descriptionTouched, setDescriptionTouched] = useState(false);
   const [remarks, setRemarks] = useState<string>("");
   const [quantities, setQuantities] = useState<Record<string, string>>({});
+  // Read-only here — see the render block below. Tagged in Activity Master,
+  // toggled in Reporting.
   const [checkpoints, setCheckpoints] = useState<AssignmentCheckpoint[]>([]);
-  const [loadingCheckpoints, setLoadingCheckpoints] = useState(false);
-  // Picker over the general Work Checkpoint Master list.
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pool, setPool] = useState<ActivityCheckpoint[]>([]);
-  const [picked, setPicked] = useState<Set<number>>(new Set());
-  const [pickerSearch, setPickerSearch] = useState("");
 
   const { data: engineers = [] } = useQuery({
     queryKey: ["dependency-activity-assignment-engineers"],
@@ -257,104 +251,6 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
     setCheckpoints(a.checkpoints || []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [detail]);
-
-  // Work Checkpoint Master is one general list; the user picks the checkpoints
-  // that apply to THIS activity. Already-attached ones (matched by checkpointId,
-  // or by name for ones added before a checkpointId existed) aren't offered again.
-  const openCheckpointPicker = async () => {
-    if (pickerOpen) {
-      setPickerOpen(false);
-      return;
-    }
-    setLoadingCheckpoints(true);
-    try {
-      const list = await getCheckpoints();
-      if (!list.length) {
-        toast.error("No checkpoints in Work Checkpoint Master yet — add some there first.");
-        return;
-      }
-      setPool(list);
-      setPicked(new Set());
-      setPickerSearch("");
-      setPickerOpen(true);
-    } catch (e: any) {
-      toast.error(e.message ?? "Couldn't load checkpoints");
-    } finally {
-      setLoadingCheckpoints(false);
-    }
-  };
-
-  const availableToPick = pool.filter((t) => {
-    const onList = checkpoints.some(
-      (c) => (c.checkpointId != null && c.checkpointId === t.id) || c.fieldName.toLowerCase() === t.fieldName.toLowerCase(),
-    );
-    return !onList && t.fieldName.toLowerCase().includes(pickerSearch.trim().toLowerCase());
-  });
-
-  const togglePicked = (id: number) =>
-    setPicked((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-
-  const addPickedCheckpoints = () => {
-    const additions = pool
-      .filter((t) => picked.has(t.id))
-      .map((t): AssignmentCheckpoint => ({ checkpointId: t.id, fieldName: t.fieldName, isChecked: false, minWaitDays: t.minWaitDays, isDaily: t.isDaily }));
-    if (!additions.length) return;
-    setCheckpoints((prev) => [...prev, ...additions]);
-    setPicked(new Set());
-    setPickerOpen(false);
-  };
-
-  // Checking OFF is always allowed; checking ON is blocked until
-  // minWaitDays have passed since Start Date — the same rule the server
-  // enforces on save (see dependencyActivityAssignment.js POST /:rungId),
-  // caught here first so the user gets an immediate, specific reason
-  // instead of a save-time rejection.
-  const toggleCheckpoint = (index: number) => {
-    const cp = checkpoints[index];
-    if (!cp.isChecked && cp.minWaitDays != null && cp.minWaitDays > 0) {
-      if (!startDate) {
-        toast.error(`"${cp.fieldName}" needs a Start Date set before it can be checked off.`);
-        return;
-      }
-      const eligibleDate = addDays(startDate, cp.minWaitDays);
-      const todayStr = new Date().toISOString().slice(0, 10);
-      if (todayStr < eligibleDate) {
-        const daysLeft = diffDays(todayStr, eligibleDate);
-        toast.error(
-          `"${cp.fieldName}" needs ${cp.minWaitDays} day(s) after the start date — ${daysLeft ?? cp.minWaitDays} day(s) left.`,
-        );
-        return;
-      }
-    }
-    setCheckpoints((prev) => prev.map((c, i) => (i === index ? { ...c, isChecked: !c.isChecked } : c)));
-  };
-  const removeCheckpoint = (index: number) => {
-    const cp = checkpoints[index];
-    if (cp?.isDaily && (cp.updateCount ?? 0) > 0) {
-      const ok = window.confirm(
-        `"${cp.fieldName}" has ${cp.updateCount} daily update(s) with photos. Removing it deletes them when you save. Remove anyway?`,
-      );
-      if (!ok) return;
-    }
-    setCheckpoints((prev) => prev.filter((_, i) => i !== index));
-  };
-
-  // Same rule toggleCheckpoint enforces, exposed here so the row can show
-  // *why* a checkpoint can't be checked yet instead of just silently
-  // refusing the click.
-  const checkpointGate = (cp: AssignmentCheckpoint): { locked: boolean; daysLeft: number | null } => {
-    if (cp.isChecked || cp.minWaitDays == null || cp.minWaitDays <= 0) return { locked: false, daysLeft: null };
-    if (!startDate) return { locked: true, daysLeft: null };
-    const eligibleDate = addDays(startDate, cp.minWaitDays);
-    const todayStr = new Date().toISOString().slice(0, 10);
-    if (todayStr >= eligibleDate) return { locked: false, daysLeft: null };
-    return { locked: true, daysLeft: diffDays(todayStr, eligibleDate) };
-  };
 
   // Days drives End Date whenever Start Date is known; editing End Date
   // directly recomputes Days the other way — whichever field the user last
@@ -617,129 +513,45 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
               )}
             </div>
 
-            {/* Checkpoints — pulled from Work Checkpoint Master, tracked
-                milestone-style per rung. */}
+            {/* Checkpoints — read-only preview here. These are tagged onto the
+                Activity itself in Activity Master (not picked per-rung
+                anymore) and auto-seed onto this rung the first time it's
+                viewed; checking them off happens in Reporting, not here. */}
             <div>
-              <div className="flex items-center justify-between mb-1.5">
-                <label className={`${labelCls} mb-0`}>
-                  <ListChecks size={11} /> Checkpoints
-                </label>
-                <button
-                  type="button"
-                  onClick={openCheckpointPicker}
-                  disabled={loadingCheckpoints}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 py-1.5 h-auto rounded-lg border border-dashed border-border text-muted-foreground hover:text-cyan-600 dark:hover:text-cyan-400 hover:border-cyan-500/50 hover:bg-cyan-500/5 disabled:opacity-50 transition-all"
-                >
-                  {loadingCheckpoints ? <Loader2 size={12} className="animate-spin" /> : <Flag size={12} />}
-                  Add Checkpoints
-                </button>
-              </div>
-              {pickerOpen && (
-                <div className="mb-3 rounded-lg border border-cyan-500/30 bg-cyan-500/5 p-3 space-y-2">
-                  <input
-                    value={pickerSearch}
-                    onChange={(e) => setPickerSearch(e.target.value)}
-                    placeholder="Search checkpoints…"
-                    className="w-full px-2.5 py-1.5 rounded-md text-xs bg-background border border-border focus:outline-none focus:ring-1 focus:ring-cyan-500/40"
-                  />
-                  <div className="max-h-44 overflow-y-auto space-y-0.5">
-                    {availableToPick.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic py-2 text-center">
-                        {pickerSearch.trim() ? "No checkpoint matches." : "Every checkpoint is already on this rung."}
-                      </p>
-                    ) : (
-                      availableToPick.map((t) => (
-                        <label key={t.id} className="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-background/60 cursor-pointer text-xs">
-                          <input type="checkbox" checked={picked.has(t.id)} onChange={() => togglePicked(t.id)} className="accent-cyan-500" />
-                          <span className="flex-1 text-foreground">{t.fieldName}</span>
-                          {t.isDaily && (
-                            <span className="inline-flex items-center gap-1 text-[10px] text-cyan-700 dark:text-cyan-300">
-                              <CalendarDays size={9} /> Daily
-                            </span>
-                          )}
-                          {t.minWaitDays != null && t.minWaitDays > 0 && (
-                            <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400">
-                              <Timer size={9} /> {t.minWaitDays}d wait
-                            </span>
-                          )}
-                        </label>
-                      ))
-                    )}
-                  </div>
-                  <div className="flex items-center justify-end gap-2">
-                    <button type="button" onClick={() => setPickerOpen(false)} className="text-xs px-2.5 py-1 rounded-md text-muted-foreground hover:bg-muted">
-                      Cancel
-                    </button>
-                    <button
-                      type="button"
-                      onClick={addPickedCheckpoints}
-                      disabled={picked.size === 0}
-                      className="text-xs font-semibold px-3 py-1 rounded-md bg-cyan-500 text-white hover:bg-cyan-600 disabled:opacity-40"
-                    >
-                      Add {picked.size > 0 ? picked.size : ""} selected
-                    </button>
-                  </div>
-                </div>
-              )}
+              <label className={`${labelCls} mb-1.5`}>
+                <ListChecks size={11} /> Checkpoints
+              </label>
               {checkpoints.length === 0 ? (
                 <p className="text-xs text-muted-foreground italic py-1.5">
-                  No checkpoints on this rung yet — click "Add Checkpoints" to choose from Work Checkpoint Master.
+                  No checkpoints tagged to this activity — add them in Activity Master.
                 </p>
               ) : (
-                <div className="space-y-0">
-                  {checkpoints.map((cp, i) => {
-                    const gate = checkpointGate(cp);
-                    return (
-                    <div key={`${cp.checkpointId ?? "custom"}-${i}`} className="flex items-start gap-3">
-                      {/* Milestone rail — filled circle + connecting line */}
-                      <div className="flex flex-col items-center shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => toggleCheckpoint(i)}
-                          className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${
-                            cp.isChecked
-                              ? "bg-emerald-500 border-emerald-500 text-white"
-                              : gate.locked
-                                ? "bg-background border-amber-500/40 text-transparent"
-                                : "bg-background border-border text-transparent hover:border-cyan-500/50"
-                          }`}
-                          title={cp.isChecked ? "Mark incomplete" : gate.locked ? "Not eligible yet" : "Mark complete"}
-                        >
-                          <Check size={11} strokeWidth={3} />
-                        </button>
-                        {i < checkpoints.length - 1 && (
-                          <div className={`w-0.5 flex-1 min-h-[18px] ${cp.isChecked ? "bg-emerald-500/40" : "bg-border"}`} />
-                        )}
+                <div className="space-y-1.5">
+                  {checkpoints.map((cp, i) => (
+                    <div
+                      key={`${cp.checkpointId ?? "custom"}-${i}`}
+                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50"
+                    >
+                      <div
+                        className={`w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                          cp.isChecked ? "bg-emerald-500 border-emerald-500 text-white" : "bg-background border-border text-transparent"
+                        }`}
+                      >
+                        <Check size={9} strokeWidth={3} />
                       </div>
-                      <div className="flex-1 min-w-0 pb-3 pt-0.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
-                          {cp.fieldName}
-                          {cp.isDaily && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
-                              <CalendarDays size={9} /> Daily
-                            </span>
-                          )}
-                          {gate.locked && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
-                              <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
-                            </span>
-                          )}
+                      <span className="text-sm text-foreground flex-1 truncate">{cp.fieldName}</span>
+                      {cp.isDaily && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full shrink-0">
+                          <CalendarDays size={9} /> Daily
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => removeCheckpoint(i)}
-                          className="p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0"
-                          title="Remove"
-                        >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                      {cp.isDaily && <CheckpointDailyUpdates checkpointId={cp.id} startDate={startDate || undefined} />}
-                      </div>
+                      )}
+                      {cp.minWaitDays != null && cp.minWaitDays > 0 && (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full shrink-0">
+                          <Timer size={9} /> {cp.minWaitDays}d wait
+                        </span>
+                      )}
                     </div>
-                    );
-                  })}
+                  ))}
                 </div>
               )}
             </div>

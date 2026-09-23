@@ -92,7 +92,7 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-dependency", "cr
   } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
-  if (!allocationId) return res.status(400).json({ error: "Allocation is required" });
+  if (!Number.isFinite(parseInt(allocationId, 10))) return res.status(400).json({ error: "Allocation is required" });
 
   try {
     const pool = getPool();

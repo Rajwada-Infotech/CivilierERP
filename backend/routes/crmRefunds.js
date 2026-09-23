@@ -8,7 +8,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { actorId, requireUserEmail } = require("../services/saAccess");
 const { getNextDocNumber } = require("../services/docNumber");
 const { applyPagination } = require("../services/crmListPagination");
-const { transition: approvalTransition, recordGLPosting } = require("../services/approvalService");
+const { transition: approvalTransition, recordGLPosting, getWorkflow } = require("../services/approvalService");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { bumpCacheVersion } = require("../redis");
 const {
@@ -20,6 +20,21 @@ router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 const FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
+
+// Same gap found and fixed in approvalService.js's transition() for Journal
+// Voucher: finance-approve/finance-reject only ever checked the hardcoded
+// FINANCE_APPROVER_ROLES list, never Approval Setup's own "crm-refunds-
+// finance" workflow (SUB_GATE_SUFFIX in ApprovalInbox.tsx) — so naming a
+// specific person there as an approver had no actual effect, same as JV.
+// Mirrors canApproveBookingAmendment's single-level userId check.
+async function isFinanceApprover(role, userId) {
+  if (FINANCE_APPROVER_ROLES.includes(role)) return true;
+  if (userId == null) return false;
+  const workflow = await getWorkflow("crm-refunds-finance");
+  const levelDef = workflow?.LevelDefs?.[0];
+  const hasUsers = Array.isArray(levelDef?.userIds) && levelDef.userIds.length > 0;
+  return hasUsers && levelDef.userIds.includes(userId);
+}
 
 // ── helpers ────────────────────────────────────────────────────────────────
 async function resolveFinYearId(pool, pDate) {
@@ -507,7 +522,8 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
   try {
     const pool = getPool();
     const role = (req.user?.role || "").toLowerCase();
-    if (!FINANCE_APPROVER_ROLES.includes(role)) {
+    const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+    if (!(await isFinanceApprover(role, viewerUserId))) {
       return res.status(403).json({ error: "Only accounts/finance heads or admins can finance-approve a refund" });
     }
     const cur = await pool.request().input("id", sql.Int, id).query(`
@@ -619,7 +635,8 @@ router.put(["/:id/finance-reject", "/:id/finance/reject"], requirePageRight("crm
   try {
     const pool = getPool();
     const role = (req.user?.role || "").toLowerCase();
-    if (!FINANCE_APPROVER_ROLES.includes(role)) {
+    const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+    if (!(await isFinanceApprover(role, viewerUserId))) {
       return res.status(403).json({ error: "Only accounts/finance heads or admins can finance-reject a refund" });
     }
     const cur = await pool.request().input("id", sql.Int, id).query("SELECT Status FROM dbo.CrmRefund WHERE Id = @id");

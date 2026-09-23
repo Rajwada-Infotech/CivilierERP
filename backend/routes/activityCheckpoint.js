@@ -6,10 +6,19 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 
-// Work Checkpoint Master is ONE general list of checkpoints (migration 461) —
-// not a list per activity. Work Allocation picks from it for whichever rung it
-// is assigning. dbo.ActivityCheckpoint.ActivityId is kept (nullable) for history
-// but no longer used.
+// Work Checkpoint Master is ONE general, reusable catalog of checkpoints
+// (migration 461) — not a list per activity. dbo.ActivityCheckpoint.ActivityId
+// is kept (nullable) for history but no longer used on this table itself.
+//
+// Which of the catalog's checkpoints apply to a given Activity is configured
+// separately, in Activity Master, via dbo.ActivityCheckpointTemplate
+// (migration 469, see the /template/:activityId routes below) — this is
+// what restores migration 337's original per-activity intent without going
+// back to one non-reusable checkpoint row per activity. A rung's assignment
+// auto-seeds its own checklist from that template the first time it's
+// viewed (dependencyActivityAssignment.js's GET /:rungId); Work Allocation
+// then only shows it read-only, and Work Reporting is where the actual
+// check-off happens.
 
 function parseMinWaitDays(raw) {
   if (raw === null || raw === undefined || raw === "") return { value: null };
@@ -152,6 +161,83 @@ router.delete("/:id", authMiddleware, requirePageRight("work-checkpoint-master",
     res.json({ success: true });
   } catch (err) {
     console.error("[activity-checkpoint] DELETE /:id error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Per-Activity checkpoint template ────────────────────────────────────────
+// Which of the general catalog's checkpoints apply to a given Activity
+// (dbo.ActivityMaster) — configured once, in Activity Master. A rung's
+// assignment auto-seeds its own checklist from this the first time it's
+// viewed (see dependencyActivityAssignment.js's GET /:rungId).
+
+// GET /template/:activityId — the activity's configured checkpoints.
+router.get("/template/:activityId", authMiddleware, async (req, res) => {
+  const activityId = parseInt(req.params.activityId, 10);
+  if (!Number.isFinite(activityId)) return res.status(400).json({ error: "Invalid activityId" });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input("activityId", sql.Int, activityId).query(`
+      SELECT t.Id AS linkId, c.Id AS id, c.FieldName AS fieldName, t.SortOrder AS sortOrder,
+             c.MinWaitDays AS minWaitDays, CAST(c.IsDaily AS BIT) AS isDaily
+      FROM dbo.ActivityCheckpointTemplate t
+      JOIN dbo.ActivityCheckpoint c ON c.Id = t.CheckpointId
+      WHERE t.ActivityId = @activityId
+      ORDER BY t.SortOrder ASC, t.Id ASC
+    `);
+    res.json(r.recordset.map((row) => ({ ...row, isDaily: !!row.isDaily })));
+  } catch (err) {
+    console.error("[activity-checkpoint] GET /template/:activityId error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /template/:activityId — attach a catalog checkpoint to this activity.
+router.post("/template/:activityId", authMiddleware, requirePageRight("dpr-activity-master", "edit"), async (req, res) => {
+  const activityId = parseInt(req.params.activityId, 10);
+  if (!Number.isFinite(activityId)) return res.status(400).json({ error: "Invalid activityId" });
+  const checkpointId = parseInt(req.body?.checkpointId, 10);
+  if (!Number.isFinite(checkpointId)) return res.status(400).json({ error: "checkpointId is required" });
+  try {
+    const pool = await getPool();
+    const dup = await pool.request().input("activityId", sql.Int, activityId).input("checkpointId", sql.Int, checkpointId)
+      .query(`SELECT TOP 1 Id FROM dbo.ActivityCheckpointTemplate WHERE ActivityId = @activityId AND CheckpointId = @checkpointId`);
+    if (dup.recordset.length) return res.status(409).json({ error: "This checkpoint is already attached to the activity." });
+
+    const maxSort = await pool.request().input("activityId", sql.Int, activityId)
+      .query(`SELECT ISNULL(MAX(SortOrder), 0) AS m FROM dbo.ActivityCheckpointTemplate WHERE ActivityId = @activityId`);
+    const nextSort = (maxSort.recordset[0].m || 0) + 10;
+    const actor = req.user?.email || req.user?.name || "system";
+
+    const inserted = await pool.request()
+      .input("activityId", sql.Int, activityId)
+      .input("checkpointId", sql.Int, checkpointId)
+      .input("sortOrder", sql.Int, nextSort)
+      .input("createdBy", sql.NVarChar(200), actor)
+      .query(`
+        INSERT INTO dbo.ActivityCheckpointTemplate (ActivityId, CheckpointId, SortOrder, CreatedBy)
+        OUTPUT INSERTED.Id AS linkId
+        VALUES (@activityId, @checkpointId, @sortOrder, @createdBy)
+      `);
+    res.status(201).json({ linkId: inserted.recordset[0].linkId });
+  } catch (err) {
+    console.error("[activity-checkpoint] POST /template/:activityId error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /template/:activityId/:linkId — detach one.
+router.delete("/template/:activityId/:linkId", authMiddleware, requirePageRight("dpr-activity-master", "edit"), async (req, res) => {
+  const linkId = parseInt(req.params.linkId, 10);
+  if (!Number.isFinite(linkId)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = await getPool();
+    const result = await pool.request().input("id", sql.Int, linkId)
+      .query(`DELETE FROM dbo.ActivityCheckpointTemplate WHERE Id = @id`);
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Not found" });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[activity-checkpoint] DELETE /template/:activityId/:linkId error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

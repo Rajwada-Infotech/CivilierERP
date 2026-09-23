@@ -105,6 +105,19 @@ interface ApprovalActionsProps {
    *  showSubmit logic didn't know about, leaving that row with no action at
    *  all. Additive and opt-in so every other caller is unaffected. */
   extraSubmitStatuses?: string[];
+  /** For a `restricted` module only: true when this specific record's
+   *  caller already determined (via the Approval Inbox list's own
+   *  isVisibleToViewer/_canAct computation, approvalInbox.js) that the
+   *  current viewer is named by userId on the record's current Approval
+   *  Setup level — e.g. Journal Voucher is hardcoded to super_admin by
+   *  approverRoles, but an admin can still name someone else (Prashant) as
+   *  an approver for it in Approval Setup. Without this, a restricted
+   *  module's buttons stayed locked to the hardcoded role list even for a
+   *  person Approval Setup explicitly named, even though the inbox row
+   *  already showed them the record as theirs to act on and
+   *  approvalService.js's transition() now honours the same match. Ignored
+   *  when `restricted` is false. */
+  workflowVisible?: boolean;
 }
 
 export function ApprovalActions({
@@ -119,6 +132,7 @@ export function ApprovalActions({
   reviewInstead,
   restricted = false,
   extraSubmitStatuses = [],
+  workflowVisible = false,
 }: ApprovalActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -127,10 +141,13 @@ export function ApprovalActions({
   // Fallback: holding "edit" on the "approval-inbox" page via Menu Rights
   // also unlocks the buttons — mirrors the backend's transition() gate in
   // approvalService.js. Not consulted for `restricted` modules, which stay
-  // locked to approverRoles on both sides.
+  // locked to approverRoles unless workflowVisible names this person
+  // specifically (see that prop's doc comment).
   const { canEdit: hasApprovalInboxEdit } = usePageRights("approval-inbox");
   const approver =
-    isApprover(approverRoles) || (!restricted && hasApprovalInboxEdit);
+    isApprover(approverRoles) ||
+    (!restricted && hasApprovalInboxEdit) ||
+    (restricted && workflowVisible);
 
   // ── Action handler ──────────────────────────────────────────────────────────
   async function handleAction(action: "submit" | "approve" | "reject") {

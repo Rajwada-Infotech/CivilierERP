@@ -1,7 +1,12 @@
+// Engineering's own Activity Master — split from src/pages/masters/ActivityMaster.tsx
+// (migration 463) so Engineering (BOQ, Work Order) and Civil Work DPR can
+// each manage their own activity list independently. Civil Work DPR keeps
+// using the original ActivityMaster.tsx/table unchanged; this page and its
+// API (engineeringActivityMasterApi.ts, engineeringActivityItemsApi.ts) are
+// a fully separate clone from here on.
 import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
-import { useModule } from "@/contexts/ModuleContext";
+import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -24,7 +29,6 @@ import {
   Package,
   Trash2,
   Pencil,
-  Flag,
 } from "lucide-react";
 import {
   getActivities,
@@ -33,7 +37,7 @@ import {
   deleteActivity,
   toPayload,
   type DbActivity,
-} from "@/api/activityMasterApi";
+} from "@/api/engineeringActivityMasterApi";
 import { getHsn } from "@/api/hsnApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getLedgerOptions } from "@/api/generalLedgerApi";
@@ -41,13 +45,7 @@ import {
   getActivityItems,
   addActivityItem,
   deleteActivityItem,
-} from "@/api/activityItemsApi";
-import {
-  getCheckpoints as getCheckpointCatalog,
-  getActivityCheckpointTemplate,
-  attachCheckpointToActivity,
-  detachCheckpointFromActivity,
-} from "@/api/activityCheckpointApi";
+} from "@/api/engineeringActivityItemsApi";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   Dialog,
@@ -260,37 +258,20 @@ const exportToCSV = (items: DbActivity[], groups: DbActivity[]) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "activity-master.csv";
+  link.download = "engineering-activity-master.csv";
   link.click();
   URL.revokeObjectURL(url);
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-const MODULE_BREADCRUMB_LABEL: Record<string, string> = {
-  engineering: "Engineering",
-  civilworkdpr: "Civil Work DPR",
-  material: "Material",
-};
-
-const ActivityMaster: React.FC = () => {
+const EngineeringActivityMaster: React.FC = () => {
   const queryClient = useQueryClient();
-  const rights = usePageRights("activity-master");
-  const { activeModule } = useModule();
-  // Civil Work DPR's own Activity Master — Engineering split off onto its
-  // own copy (see src/pages/masters/EngineeringActivityMaster.tsx,
-  // migration 463). Keeping the module-aware breadcrumb rather than
-  // hardcoding "Civil Work DPR" since this page is also still reachable
-  // from the generic Masters area.
-  const moduleBreadcrumb =
-    (activeModule && MODULE_BREADCRUMB_LABEL[activeModule]) || "Masters";
+  const rights = usePageRights("engineering-activity-master");
   const [treeSearch, setTreeSearch] = useState("");
   const [viewRecord, setViewRecord] = useState<DbActivity | null>(null);
   const [addItemOpen, setAddItemOpen] = useState(false);
   const [pickedItemId, setPickedItemId] = useState("");
   const [itemSearch, setItemSearch] = useState("");
-  const [addCheckpointOpen, setAddCheckpointOpen] = useState(false);
-  const [pickedCheckpointId, setPickedCheckpointId] = useState<number | null>(null);
-  const [checkpointSearch, setCheckpointSearch] = useState("");
 
   // Edit, triggered from the grouped tree view below (the table itself is
   // hidden — hideTable — so MasterPage's own row-level Edit button never
@@ -307,7 +288,7 @@ const ActivityMaster: React.FC = () => {
     isLoading,
     error,
   } = useQuery<DbActivity[]>({
-    queryKey: ["activities"],
+    queryKey: ["engineering-activities"],
     queryFn: getActivities,
     staleTime: 0,
     refetchOnMount: true,
@@ -315,7 +296,7 @@ const ActivityMaster: React.FC = () => {
 
   // Items linked to the activity currently open in the detail drawer.
   const { data: linkedItems = [] } = useQuery({
-    queryKey: ["activityItems", viewRecord?.id],
+    queryKey: ["engineeringActivityItems", viewRecord?.id],
     queryFn: () => getActivityItems(viewRecord!.id),
     enabled: !!viewRecord && viewRecord.activity_type === 1,
   });
@@ -330,58 +311,13 @@ const ActivityMaster: React.FC = () => {
     (i) => !linkedItems.some((li) => li.itemId === i.M_Id),
   );
 
-  // Checkpoints tagged onto the activity currently open in the detail
-  // drawer — this is now the ONLY place they're configured (see
-  // RungAssignmentModal, which used to let Work Allocation pick these by
-  // hand; a rung's own checklist auto-seeds from this the first time it's
-  // viewed instead).
-  const { data: checkpointTemplate = [] } = useQuery({
-    queryKey: ["activityCheckpointTemplate", viewRecord?.id],
-    queryFn: () => getActivityCheckpointTemplate(viewRecord!.id),
-    enabled: !!viewRecord && viewRecord.activity_type === 1,
-  });
-
-  // Work Checkpoint Master's full catalog, for the "Add Checkpoint" picker.
-  const { data: checkpointCatalog = [] } = useQuery({
-    queryKey: ["checkpoint-catalog-for-activity-link"],
-    queryFn: getCheckpointCatalog,
-    enabled: addCheckpointOpen,
-  });
-  const unattachedCheckpoints = checkpointCatalog.filter(
-    (c) => !checkpointTemplate.some((t) => t.id === c.id),
-  );
-
-  const handleAttachCheckpoint = async () => {
-    if (!viewRecord || pickedCheckpointId == null) return;
-    try {
-      await attachCheckpointToActivity(viewRecord.id, pickedCheckpointId);
-      toast.success("Checkpoint tagged to activity ✓");
-      await queryClient.invalidateQueries({ queryKey: ["activityCheckpointTemplate", viewRecord.id] });
-      setAddCheckpointOpen(false);
-      setPickedCheckpointId(null);
-      setCheckpointSearch("");
-    } catch (err: any) {
-      toast.error("Failed to tag checkpoint: " + err.message);
-    }
-  };
-
-  const handleDetachCheckpoint = async (linkId: number) => {
-    if (!viewRecord) return;
-    try {
-      await detachCheckpointFromActivity(viewRecord.id, linkId);
-      await queryClient.invalidateQueries({ queryKey: ["activityCheckpointTemplate", viewRecord.id] });
-    } catch (err: any) {
-      toast.error("Failed to remove checkpoint: " + err.message);
-    }
-  };
-
   const handleAddItem = async () => {
     if (!viewRecord || !pickedItemId) return;
     try {
       await addActivityItem(viewRecord.id, pickedItemId);
       toast.success("Item linked to activity ✓");
       await queryClient.invalidateQueries({
-        queryKey: ["activityItems", viewRecord.id],
+        queryKey: ["engineeringActivityItems", viewRecord.id],
       });
       setAddItemOpen(false);
       setPickedItemId("");
@@ -396,7 +332,7 @@ const ActivityMaster: React.FC = () => {
     try {
       await deleteActivityItem(id);
       await queryClient.invalidateQueries({
-        queryKey: ["activityItems", viewRecord.id],
+        queryKey: ["engineeringActivityItems", viewRecord.id],
       });
     } catch (err: any) {
       toast.error("Failed to unlink item: " + err.message);
@@ -411,11 +347,11 @@ const ActivityMaster: React.FC = () => {
 
   // GL Head options, for the Activity-only field below.
   const { data: glHeadOptions = [] } = useQuery({
-    queryKey: ["gl-heads-for-activity"],
+    queryKey: ["gl-heads-for-engineering-activity"],
     queryFn: getLedgerOptions,
   });
 
-  // Activity Master is engineering-side (services), so only SAC-flagged
+  // Engineering Activity Master is services-side, so only SAC-flagged
   // HSN Master rows are offered here — plain HSN (goods) codes are hidden.
   const hsnOptions: { code: string; desc: string }[] = Array.isArray(hsnRaw)
     ? (hsnRaw as any[])
@@ -457,9 +393,9 @@ const ActivityMaster: React.FC = () => {
   });
 
   const refetch = async () => {
-    queryClient.removeQueries({ queryKey: ["activities"] });
+    queryClient.removeQueries({ queryKey: ["engineering-activities"] });
     await queryClient.fetchQuery({
-      queryKey: ["activities"],
+      queryKey: ["engineering-activities"],
       queryFn: getActivities,
     });
   };
@@ -512,10 +448,10 @@ const ActivityMaster: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", moduleBreadcrumb, "Activity Master"]} />
-      <CivilWorkDprShell
-        title="Activity Master"
-        subtitle="Manage Civil Work DPR's activity groups and their individual activities"
+      <Breadcrumbs items={["Dashboard", "Engineering", "Engineering Activity Master"]} />
+      <EngineeringShell
+        title="Engineering Activity Master"
+        subtitle="Manage activity groups and their individual activities for the Engineering module"
         icon={Activity}
       >
 
@@ -789,7 +725,7 @@ const ActivityMaster: React.FC = () => {
           )}
         </div>
       </div>
-      </CivilWorkDprShell>
+      </EngineeringShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
@@ -943,62 +879,6 @@ const ActivityMaster: React.FC = () => {
                   )}
                 </div>
               )}
-              {viewRecord.activity_type === 1 && (
-                <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
-                      Checkpoints
-                    </p>
-                    {rights.canEdit && (
-                      <button
-                        onClick={() => setAddCheckpointOpen(true)}
-                        className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium border border-primary/30 text-primary hover:bg-primary/10 transition-colors"
-                      >
-                        <Plus size={11} /> Add Checkpoint
-                      </button>
-                    )}
-                  </div>
-                  {checkpointTemplate.length === 0 ? (
-                    <p className="text-muted-foreground italic text-sm">
-                      No checkpoints tagged yet — every rung assigned this activity in Work
-                      Allocation will start with an empty checklist.
-                    </p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {checkpointTemplate.map((cp) => (
-                        <div
-                          key={cp.linkId}
-                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-muted/40 border border-border/50"
-                        >
-                          <Flag size={11} className="text-amber-400 shrink-0" />
-                          <span className="text-sm text-foreground flex-1 truncate">
-                            {cp.fieldName}
-                          </span>
-                          {cp.minWaitDays != null && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
-                              {cp.minWaitDays}d wait
-                            </span>
-                          )}
-                          {cp.isDaily && (
-                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
-                              Daily
-                            </span>
-                          )}
-                          {rights.canEdit && (
-                            <button
-                              onClick={() => handleDetachCheckpoint(cp.linkId)}
-                              className="p-0.5 rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 shrink-0"
-                              title="Remove checkpoint"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
               <div>
                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
@@ -1111,110 +991,8 @@ const ActivityMaster: React.FC = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* ── Add Checkpoint dialog ── */}
-      <Dialog
-        open={addCheckpointOpen}
-        onOpenChange={(open) => {
-          setAddCheckpointOpen(open);
-          if (!open) {
-            setPickedCheckpointId(null);
-            setCheckpointSearch("");
-          }
-        }}
-      >
-        <DialogContent className="max-w-md p-0 gap-0 overflow-hidden">
-          <DialogHeader className="px-5 pt-5 pb-3">
-            <DialogTitle className="font-heading text-base">
-              Tag Checkpoint to {viewRecord?.activity_name}
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="px-5 pb-3">
-            <div className="relative">
-              <Search
-                size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <input
-                type="text"
-                autoFocus
-                value={checkpointSearch}
-                onChange={(e) => setCheckpointSearch(e.target.value)}
-                placeholder="Search checkpoints…"
-                className="w-full pl-8 pr-3 py-2 text-sm rounded-lg bg-muted border border-border text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40"
-              />
-            </div>
-          </div>
-
-          {(() => {
-            const filteredCheckpoints = unattachedCheckpoints.filter((c) =>
-              checkpointSearch
-                ? c.fieldName.toLowerCase().includes(checkpointSearch.toLowerCase())
-                : true,
-            );
-            return (
-              <div className="max-h-72 overflow-y-auto px-5 pb-5 space-y-1">
-                {unattachedCheckpoints.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic text-center py-6">
-                    Every checkpoint in Work Checkpoint Master is already tagged to this activity.
-                  </p>
-                ) : filteredCheckpoints.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic text-center py-6">
-                    No checkpoint matches "{checkpointSearch}".
-                  </p>
-                ) : (
-                  filteredCheckpoints.map((c) => {
-                    const selected = pickedCheckpointId === c.id;
-                    return (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => setPickedCheckpointId(c.id)}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-sm transition-colors ${
-                          selected
-                            ? "bg-primary/10 border border-primary/40 text-foreground"
-                            : "border border-transparent hover:bg-muted text-foreground"
-                        }`}
-                      >
-                        <Flag size={13} className="text-amber-400 shrink-0" />
-                        <span className="flex-1 truncate">{c.fieldName}</span>
-                        {c.minWaitDays != null && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono shrink-0">
-                            {c.minWaitDays}d wait
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            );
-          })()}
-
-          <DialogFooter className="px-5 py-4 border-t border-border">
-            <button
-              onClick={() => {
-                setAddCheckpointOpen(false);
-                setPickedCheckpointId(null);
-                setCheckpointSearch("");
-              }}
-              className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={handleAttachCheckpoint}
-              disabled={pickedCheckpointId == null}
-              className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-engineering text-white disabled:opacity-40 transition-all"
-            >
-              Add
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 };
 
-export default ActivityMaster;
+export default EngineeringActivityMaster;

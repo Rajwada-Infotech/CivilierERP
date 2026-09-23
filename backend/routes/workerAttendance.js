@@ -40,7 +40,7 @@ function actorOf(req) {
 //     label ("Electrical — Room 101") matches what Activity Reporting shows.
 router.get("/activities", async (req, res) => {
   const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
-  if (!projectId) return res.status(400).json({ error: "projectId is required" });
+  if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
   try {
     const pool = getPool();
     const r = await pool.request().input("projectId", sql.Int, projectId).query(`
@@ -145,7 +145,7 @@ router.post("/workers", requirePageRight(PAGE_KEY, "create"), async (req, res) =
 // ─── GET /roster/:rungId — workers currently assigned to this activity ─────
 router.get("/roster/:rungId", requirePageRight(PAGE_KEY, "view"), async (req, res) => {
   const rungId = parseInt(req.params.rungId, 10);
-  if (!rungId) return res.status(400).json({ error: "Invalid rungId" });
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
   try {
     const pool = getPool();
     const r = await pool.request().input("rungId", sql.Int, rungId).query(`
@@ -167,8 +167,8 @@ router.get("/roster/:rungId", requirePageRight(PAGE_KEY, "view"), async (req, re
 // ─── POST /roster/:rungId — add worker(s) to an activity's roster ──────────
 router.post("/roster/:rungId", requirePageRight(PAGE_KEY, "create"), async (req, res) => {
   const rungId = parseInt(req.params.rungId, 10);
-  if (!rungId) return res.status(400).json({ error: "Invalid rungId" });
-  const workerIds = Array.isArray(req.body?.workerIds) ? req.body.workerIds.map((n) => parseInt(n, 10)).filter(Boolean) : [];
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+  const workerIds = Array.isArray(req.body?.workerIds) ? req.body.workerIds.map((n) => parseInt(n, 10)).filter(Number.isFinite) : [];
   if (!workerIds.length) return res.status(400).json({ error: "workerIds is required" });
 
   try {
@@ -205,7 +205,7 @@ router.post("/roster/:rungId", requirePageRight(PAGE_KEY, "create"), async (req,
 router.delete("/roster/:rungId/:workerId", requirePageRight(PAGE_KEY, "delete"), async (req, res) => {
   const rungId = parseInt(req.params.rungId, 10);
   const workerId = parseInt(req.params.workerId, 10);
-  if (!rungId || !workerId) return res.status(400).json({ error: "Invalid rungId/workerId" });
+  if (!Number.isFinite(rungId) || !Number.isFinite(workerId)) return res.status(400).json({ error: "Invalid rungId/workerId" });
   try {
     const pool = getPool();
     await pool.request().input("rungId", sql.Int, rungId).input("workerId", sql.Int, workerId).query(`
@@ -225,7 +225,7 @@ router.delete("/roster/:rungId/:workerId", requirePageRight(PAGE_KEY, "delete"),
 router.get("/attendance", requirePageRight(PAGE_KEY, "view"), async (req, res) => {
   const rungId = parseInt(req.query.rungId, 10);
   const date = req.query.date;
-  if (!rungId) return res.status(400).json({ error: "rungId is required" });
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "rungId is required" });
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
 
   try {
@@ -257,7 +257,7 @@ router.get("/attendance", requirePageRight(PAGE_KEY, "view"), async (req, res) =
 router.post("/attendance", requirePageRight(PAGE_KEY, "create"), async (req, res) => {
   const { rungId, date, entries } = req.body;
   const rungIdVal = parseInt(rungId, 10);
-  if (!rungIdVal) return res.status(400).json({ error: "rungId is required" });
+  if (!Number.isFinite(rungIdVal)) return res.status(400).json({ error: "rungId is required" });
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "date must be YYYY-MM-DD" });
   if (!Array.isArray(entries) || !entries.length) return res.status(400).json({ error: "entries is required" });
   for (const e of entries) {
@@ -270,7 +270,7 @@ router.post("/attendance", requirePageRight(PAGE_KEY, "create"), async (req, res
     let saved = 0;
     for (const entry of entries) {
       const workerId = parseInt(entry.workerId, 10);
-      if (!workerId) continue;
+      if (!Number.isFinite(workerId)) continue;
       const remarks = cleanStr(entry.remarks);
 
       const existing = await pool.request()

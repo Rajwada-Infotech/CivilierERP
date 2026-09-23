@@ -374,7 +374,7 @@ export default function BlueprintAnnotationEditor({
           <div className="flex-1 flex flex-col items-center justify-center gap-2 py-20 text-center px-6">
             <FileText size={28} className="text-muted-foreground" />
             <p className="text-sm text-muted-foreground">
-              No blueprint uploaded for this room yet — upload one from Setup &gt; Room Master, then come back here to mark it up.
+              No blueprint uploaded for this room yet — upload one from Setup &gt; Flat Master, then come back here to mark it up.
             </p>
           </div>
         ) : isPdf ? (
