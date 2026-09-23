@@ -81,3 +81,40 @@ export const setCheckpointDaily = async (id: number, isDaily: boolean): Promise<
   });
   return handleResponse<{ success: boolean }>(res);
 };
+
+// ── Per-Activity checkpoint template ────────────────────────────────────────
+// Which of the general catalog above applies to one Activity (dbo.ActivityMaster)
+// — configured in Activity Master. A rung's own assignment auto-seeds its
+// checklist from this the first time it's viewed (Work Allocation/Work
+// Reporting no longer pick checkpoints by hand).
+export interface ActivityCheckpointTemplateItem extends ActivityCheckpoint {
+  /** dbo.ActivityCheckpointTemplate row id — pass to detachCheckpointFromActivity, not `id` (the catalog checkpoint's own id). */
+  linkId: number;
+}
+
+export const getActivityCheckpointTemplate = async (
+  activityId: number,
+): Promise<ActivityCheckpointTemplateItem[]> => {
+  const res = await fetchWithAuth(`${BASE}/template/${activityId}`);
+  return handleResponse<ActivityCheckpointTemplateItem[]>(res);
+};
+
+export const attachCheckpointToActivity = async (
+  activityId: number,
+  checkpointId: number,
+): Promise<{ linkId: number }> => {
+  const res = await fetchWithAuth(`${BASE}/template/${activityId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ checkpointId }),
+  });
+  return handleResponse<{ linkId: number }>(res);
+};
+
+export const detachCheckpointFromActivity = async (
+  activityId: number,
+  linkId: number,
+): Promise<{ success: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/template/${activityId}/${linkId}`, { method: "DELETE" });
+  return handleResponse<{ success: boolean }>(res);
+};
