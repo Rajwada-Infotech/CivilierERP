@@ -371,12 +371,19 @@ function UnitRoomConfigCard({ unitId }: { unitId: string }) {
   );
 }
 
+// Sentinel for a unit with no FloorNo set — real floor numbers are >= 0
+// (0 = Ground), so this can never collide with an actual value.
+const NO_FLOOR = "__none__";
+
 // ── Fields ────────────────────────────────────────────────────────────────────
-// Unit is filtered by the selected project. Block and Floor are never chosen
-// directly — both are whichever the selected unit's own Auto Project Setup
-// data says, shown read-only (and enforced server-side too — see
-// roomMaster.js POST/PUT, which derive them from the unit rather than
-// trusting whatever the client sends).
+// A real cascade — Project -> Block -> Floor -> Unit — instead of a flat
+// Unit dropdown with Block/Floor shown read-only afterwards. All four levels
+// come from the same __units list (Unit Master, populated by CRM Auto
+// Project Setup), filtered client-side at each step rather than round-
+// tripping to /structure or /floor-units per selection. Block/Floor are
+// still re-derived from the chosen Unit server-side on save (roomMaster.js
+// POST/PUT) — these selects are purely a faster way to land on the right
+// unit, not something the server trusts blindly.
 const fields: FieldDef[] = [
   {
     name: "projectId",
@@ -386,57 +393,66 @@ const fields: FieldDef[] = [
     asyncOptions: fetchProjectOptions,
   },
   {
+    name: "blockId",
+    label: "Block",
+    type: "select",
+    required: true,
+    disabledWhen: (form) => !form?.projectId,
+    disabledPlaceholder: "Select a project first",
+    optionsProvider: (_data, _currentId, form) => {
+      const units: UnitOption[] = (form?.__units as any) ?? [];
+      const selectedProject = form?.projectId as string | undefined;
+      const seen = new Map<string, string>();
+      units
+        .filter((u) => (selectedProject ? String(u.ProjectId) === selectedProject : true))
+        .forEach((u) => {
+          if (u.BlockId != null) seen.set(String(u.BlockId), u.BlockName || `Block ${u.BlockId}`);
+        });
+      return Array.from(seen, ([value, label]) => ({ value, label }))
+        .sort((a, b) => a.label.localeCompare(b.label));
+    },
+  },
+  {
+    name: "floorId",
+    label: "Floor",
+    type: "select",
+    required: true,
+    disabledWhen: (form) => !form?.blockId,
+    disabledPlaceholder: "Select a block first",
+    optionsProvider: (_data, _currentId, form) => {
+      const units: UnitOption[] = (form?.__units as any) ?? [];
+      const selectedBlock = form?.blockId as string | undefined;
+      if (!selectedBlock) return [];
+      const floorNos = new Set<number | null>();
+      units
+        .filter((u) => String(u.BlockId) === selectedBlock)
+        .forEach((u) => floorNos.add(u.FloorNo));
+      return Array.from(floorNos)
+        .sort((a, b) => (a ?? -Infinity) - (b ?? -Infinity))
+        .map((f) => ({
+          value: f == null ? NO_FLOOR : String(f),
+          label: f == null ? "No Floor" : `Floor ${floorLabel(f)}`,
+        }));
+    },
+  },
+  {
     name: "unitId",
     label: "Unit",
     type: "select",
     required: true,
+    disabledWhen: (form) => !form?.floorId,
+    disabledPlaceholder: "Select a floor first",
     optionsProvider: (_data, _currentId, form) => {
       const units: UnitOption[] = (form?.__units as any) ?? [];
-      const selectedProject = form?.projectId as string | undefined;
+      const selectedBlock = form?.blockId as string | undefined;
+      const selectedFloor = form?.floorId as string | undefined;
+      if (!selectedBlock || !selectedFloor) return [];
       return units
-        .filter((u) =>
-          selectedProject ? String(u.ProjectId) === selectedProject : true,
-        )
+        .filter((u) => {
+          if (String(u.BlockId) !== selectedBlock) return false;
+          return selectedFloor === NO_FLOOR ? u.FloorNo == null : String(u.FloorNo) === selectedFloor;
+        })
         .map((u) => ({ value: String(u.Id), label: u.Name }));
-    },
-  },
-  {
-    name: "blockNameDisplay",
-    label: "Block",
-    type: "custom",
-    render: ({ formData }) => {
-      const units: UnitOption[] = (formData?.__units as any) ?? [];
-      const selectedUnit = formData?.unitId as string | undefined;
-      const unit = units.find((u) => String(u.Id) === selectedUnit);
-      return (
-        <div className="text-sm text-foreground bg-muted/40 border border-border rounded-lg px-3 py-2">
-          {unit?.BlockName || (
-            <span className="text-muted-foreground italic">
-              Select a unit to see its block
-            </span>
-          )}
-        </div>
-      );
-    },
-  },
-  {
-    name: "floorDisplay",
-    label: "Floor",
-    type: "custom",
-    render: ({ formData }) => {
-      const units: UnitOption[] = (formData?.__units as any) ?? [];
-      const selectedUnit = formData?.unitId as string | undefined;
-      const unit = units.find((u) => String(u.Id) === selectedUnit);
-      const label = unit ? floorLabel(unit.FloorNo) : null;
-      return (
-        <div className="text-sm text-foreground bg-muted/40 border border-border rounded-lg px-3 py-2">
-          {label ?? (
-            <span className="text-muted-foreground italic">
-              {unit ? "No floor set on this unit" : "Select a unit to see its floor"}
-            </span>
-          )}
-        </div>
-      );
     },
   },
   {
@@ -538,6 +554,11 @@ const RoomMaster: React.FC = () => {
       projectName: item.ProjectName ?? "",
       blockId: String(item.BlockId),
       blockName: item.BlockName ?? "",
+      // Floor cascade field expects the raw FloorNo ("0" for Ground, NO_FLOOR
+      // sentinel for none) — item.Floor is the display label ("G", "3", …)
+      // computed server-side at save time, so undo floorLabel's "G" mapping
+      // to get back to a value the Floor select's options actually contain.
+      floorId: item.Floor === "G" ? "0" : item.Floor ? String(item.Floor) : NO_FLOOR,
       unitId: String(item.UnitId),
       unitName: item.UnitName ?? "",
       roomName: item.RoomName ?? "",
@@ -648,11 +669,17 @@ const RoomMaster: React.FC = () => {
         columns={columns}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
-        // Inject __units + reset unitId when project changes
+        // Inject __units + cascade-reset the fields below whichever level changed
         externalFormPatch={unitsPatch}
         externalFormPatchKey={allUnits.length}
         onFieldChange={(form, fieldName) => {
           if (fieldName === "projectId") {
+            return { ...form, blockId: "", floorId: "", unitId: "" };
+          }
+          if (fieldName === "blockId") {
+            return { ...form, floorId: "", unitId: "" };
+          }
+          if (fieldName === "floorId") {
             return { ...form, unitId: "" };
           }
           return form;
