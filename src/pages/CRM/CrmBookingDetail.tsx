@@ -19,6 +19,7 @@ import { useGstRates, computeExtraWorkGst, fmtInr } from "@/lib/crmGst";
 import { FinancialStatusBar } from "@/components/crm/FinancialStatusBar";
 import { BookingLifecycleBar } from "@/components/crm/BookingLifecycleBar";
 import { CrmInvoiceList } from "@/components/crm/CrmInvoiceList";
+import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { usePageRights } from "@/hooks/usePageRights";
 
 const API = "/api/crm/bookings";
@@ -2069,6 +2070,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                       )}
                     </div>
+                    <SelectedBankCard bank={findBank(bankOptions as any[], payForm.DepositBankId)} />
                     <button onClick={handleRecordPayment} disabled={paySaving || (bankOptions.length > 0 && !payForm.DepositBankId)}
                       className="w-full py-2 text-sm font-medium text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
                       {paySaving ? "Submitting..." : `Submit for Approval`}

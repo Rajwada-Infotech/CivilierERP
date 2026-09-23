@@ -14,6 +14,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
@@ -1066,6 +1067,7 @@ const CrmPaymentMilestones: React.FC = () => {
                       </option>
                     ))}
                   </select>
+                  <SelectedBankCard bank={findBank(bankOptions as any[], payForm.DepositBankId)} />
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs text-muted-foreground block mb-1">Remarks</label>
@@ -1199,6 +1201,7 @@ const CrmPaymentMilestones: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                <SelectedBankCard bank={findBank(bankOptions as any[], onAccountForm.DepositBankId)} />
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Notes</label>

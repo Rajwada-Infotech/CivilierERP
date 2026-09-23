@@ -13,6 +13,7 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/refunds";
@@ -273,6 +274,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                     </option>
                   ))}
                 </select>
+                <SelectedBankCard bank={findBank(banks as any[], bankLHeadId)} />
               </div>
               <div>
                 <div className="flex items-center justify-between mb-1">
@@ -463,6 +465,7 @@ const CrmRefunds: React.FC = () => {
                     </option>
                   ))}
                 </select>
+                <SelectedBankCard bank={findBank(financeBanks as any[], financeBank)} />
               </div>
               <p className="text-[11px] text-muted-foreground">Approving raises a Finance payment voucher. The refund is marked Paid when that voucher is approved.</p>
               <div className="flex justify-end gap-2">

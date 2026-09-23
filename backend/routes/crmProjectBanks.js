@@ -70,7 +70,7 @@ router.get("/for-project/:projectId", async (req, res) => {
     // system into a project meant to be exclusive to specific banks.
     const rows = await pool.request().input("pid", sql.Int, projectId).query(`
       SELECT ah.LHeadId AS BId, ah.LHeadName AS BName, ah.LHeadStatus AS BStatus,
-             ah.LBranchName AS BBranch,
+             ah.LBranchName AS BBranch, ah.LIFSCCode AS BIfscCode,
              CASE WHEN LEN(ISNULL(ah.LAccountNo, '')) >= 4
                   THEN RIGHT(ah.LAccountNo, 4) ELSE NULL END AS BAccountLast4
       FROM dbo.CrmProjectBank pb
@@ -92,13 +92,13 @@ router.get("/for-project/:projectId", async (req, res) => {
       // to a project, its dropdown still shows nothing). Use a truthy check
       // instead so it works regardless of whether the driver hands back a
       // boolean or a 1/0.
-      return res.json(rows.recordset.filter((r) => !!r.BStatus).map(({ BId, BName, BBranch, BAccountLast4 }) => ({ BId, BName, BBranch, BAccountLast4 })));
+      return res.json(rows.recordset.filter((r) => !!r.BStatus).map(({ BId, BName, BBranch, BIfscCode, BAccountLast4 }) => ({ BId, BName, BBranch, BIfscCode, BAccountLast4 })));
     }
 
     // No banks are tagged to this project — show ALL active company banks
     const allBanks = await pool.request().query(`
       SELECT ah.LHeadId AS BId, ah.LHeadName AS BName,
-             ah.LBranchName AS BBranch,
+             ah.LBranchName AS BBranch, ah.LIFSCCode AS BIfscCode,
              CASE WHEN LEN(ISNULL(ah.LAccountNo, '')) >= 4
                   THEN RIGHT(ah.LAccountNo, 4) ELSE NULL END AS BAccountLast4
       FROM dbo.AccountHeadMaster ah
