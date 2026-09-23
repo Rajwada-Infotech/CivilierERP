@@ -9,6 +9,7 @@ interface Props {
   onDragStart?: (index: number) => void;
   onDragOver?: (index: number) => void;
   onDrop?: () => void;
+  onDragEnd?: () => void;
   isDragging?: boolean;
   isDropTarget?: boolean;
   /** Inline list-row preview — no drag handle, no delete button. */
@@ -27,6 +28,7 @@ export function ActivityRung({
   onDragStart,
   onDragOver,
   onDrop,
+  onDragEnd,
   isDragging,
   isDropTarget,
   readOnly,
@@ -54,6 +56,16 @@ export function ActivityRung({
           if (readOnly) return;
           e.preventDefault();
           onDrop?.();
+        }}
+        // Fires on release regardless of whether a drop landed on a valid
+        // target — dropping outside the list (or pressing Escape mid-drag)
+        // never fires onDrop, which used to leave this row stuck at 40%
+        // opacity forever (dragIndex never got reset). onDragEnd is the one
+        // event the HTML5 DnD spec guarantees always fires when the drag
+        // ends, so it's the right place to unconditionally clear the state.
+        onDragEnd={() => {
+          if (readOnly) return;
+          onDragEnd?.();
         }}
         className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 bg-card transition-all ${
           isDragging ? "opacity-40" : ""
