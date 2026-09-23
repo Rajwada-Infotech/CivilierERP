@@ -1,3 +1,6 @@
+// Reads dbo.EngineeringActivityMaster, not dbo.ActivityMaster — Engineering
+// was moved onto its own split-out activity master (migration 463); Civil
+// Work DPR keeps the original table.
 const { requirePageRight } = require("../middleware/requirePageRight");
 const express = require("express");
 const { cache } = require("../middleware/cache");
@@ -108,7 +111,7 @@ router.get(
       const pool = getPool();
       const result = await pool.request().query(`
       SELECT id, activity_name AS name
-      FROM dbo.ActivityMaster
+      FROM dbo.EngineeringActivityMaster
       WHERE activity_type = 0 AND ISNULL(is_active, 1) = 1
       ORDER BY activity_name
     `);
@@ -136,14 +139,14 @@ router.get(
       if (groupId && Number.isFinite(groupId)) {
         result = await pool.request().input("GroupId", sql.Int, groupId).query(`
           SELECT id, activity_name AS name, group_id AS groupId
-          FROM dbo.ActivityMaster
+          FROM dbo.EngineeringActivityMaster
           WHERE activity_type = 1 AND group_id = @GroupId AND ISNULL(is_active, 1) = 1
           ORDER BY activity_name
         `);
       } else {
         result = await pool.request().query(`
         SELECT id, activity_name AS name, group_id AS groupId
-        FROM dbo.ActivityMaster
+        FROM dbo.EngineeringActivityMaster
         WHERE activity_type = 1 AND ISNULL(is_active, 1) = 1
         ORDER BY activity_name
       `);
@@ -334,8 +337,8 @@ router.get(
         SELECT a.*, ag.activity_name AS ActivityGroupName,
           act.activity_name AS ActivityName, uom.UOMName
         FROM dbo.WorkOrderActivities a
-        LEFT JOIN dbo.ActivityMaster ag  ON ag.id  = a.ActivityGroupId
-        LEFT JOIN dbo.ActivityMaster act ON act.id = a.ActivityId
+        LEFT JOIN dbo.EngineeringActivityMaster ag  ON ag.id  = a.ActivityGroupId
+        LEFT JOIN dbo.EngineeringActivityMaster act ON act.id = a.ActivityId
         LEFT JOIN dbo.UOMMaster      uom ON uom.Id = a.UOMId
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId ORDER BY a.Id
       `);
@@ -793,8 +796,8 @@ router.get("/:id/activities", async (req, res) => {
           COUNT(m.Id) AS MaterialCount,
           ISNULL(SUM(m.Quantity * m.Rate), 0) AS MaterialTotal
         FROM dbo.WorkOrderActivities a
-        LEFT JOIN dbo.ActivityMaster             ag  ON ag.id  = a.ActivityGroupId
-        LEFT JOIN dbo.ActivityMaster             act ON act.id = a.ActivityId
+        LEFT JOIN dbo.EngineeringActivityMaster             ag  ON ag.id  = a.ActivityGroupId
+        LEFT JOIN dbo.EngineeringActivityMaster             act ON act.id = a.ActivityId
         LEFT JOIN dbo.UOMMaster                  uom ON uom.Id = a.UOMId
         LEFT JOIN dbo.WorkOrderActivityMaterials m   ON m.WorkOrderActivityId = a.Id
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId

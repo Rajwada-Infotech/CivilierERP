@@ -88,8 +88,16 @@ export default function ActivityReporting() {
     return Array.from(groups.values());
   }, [filteredRows]);
 
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<number, boolean>>({});
-  const toggleGroup = (key: number) => setCollapsedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  // Tracked as "expanded" (not "collapsed") specifically so the empty-object
+  // default means every group starts collapsed — every activity chain open
+  // by default turned into a very long, clumsy page the moment there were
+  // more than a couple.
+  const [expandedGroups, setExpandedGroups] = useState<Record<number, boolean>>({});
+  const toggleGroup = (key: number) => setExpandedGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  const allGroupsExpanded =
+    groupedRows.length > 0 && groupedRows.every((g) => expandedGroups[g.key]);
+  const toggleAllGroups = () =>
+    setExpandedGroups(Object.fromEntries(groupedRows.map((g) => [g.key, !allGroupsExpanded])));
 
   return (
     <>
@@ -112,7 +120,24 @@ export default function ActivityReporting() {
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-border bg-muted/30">
               <span className="text-sm font-heading font-semibold text-foreground">Assigned Activities</span>
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {groupedRows.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={toggleAllGroups}
+                    className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors mr-1"
+                  >
+                    {allGroupsExpanded ? (
+                      <>
+                        <ChevronRight size={12} /> Collapse all
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown size={12} /> Expand all
+                      </>
+                    )}
+                  </button>
+                )}
                 {FILTER_OPTIONS.map((opt) => (
                   <button
                     key={opt.value}
@@ -142,7 +167,7 @@ export default function ActivityReporting() {
               </div>
             ) : (
               groupedRows.map((group) => {
-                const collapsed = !!collapsedGroups[group.key];
+                const collapsed = !expandedGroups[group.key];
                 return (
                   <div key={group.key} className="border-b border-border last:border-0">
                     {/* Group header — one dependency chain's activities grouped together */}

@@ -26,6 +26,9 @@ import {
   Plus,
   Save,
   UserX,
+  ListChecks,
+  Check,
+  Timer,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -36,10 +39,14 @@ import {
   getBlueprintAnnotation,
   getBlueprintAnnotationHistory,
   updateAssignmentDetail,
+  getRungAssignment,
+  saveRungAssignment,
   type PhotoPhase,
   type ActivityPhotoMeta,
   type ReportedAssignment,
+  type AssignmentCheckpoint,
 } from "@/api/dependencyActivityAssignmentApi";
+import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 import {
   getAttendance,
   saveAttendance,
@@ -52,7 +59,19 @@ import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStat
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 import { useCameraCapture } from "@/hooks/useCameraCapture";
 
-type DetailTab = "overview" | "blueprint" | "photos" | "attendance";
+type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints";
+
+function addDays(dateStr: string, days: number): string {
+  const d = new Date(`${dateStr}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function diffDays(startStr: string, endStr: string): number | null {
+  const s = new Date(`${startStr}T00:00:00`);
+  const e = new Date(`${endStr}T00:00:00`);
+  const diff = Math.round((e.getTime() - s.getTime()) / 86400000);
+  return diff >= 0 ? diff : null;
+}
 
 const TAG_META: Record<PhotoPhase, { label: string; icon: LucideIcon; color: string }> = {
   before: { label: "Before", icon: Clock, color: "#f59e0b" },
@@ -651,6 +670,148 @@ function AttendanceTab({ rungId }: { rungId: number }) {
   );
 }
 
+// ── Checkpoints tab ──────────────────────────────────────────────────────
+// The interactive checklist — checking off happens HERE, in Reporting, not
+// in Work Allocation (RungAssignmentModal, which now only shows these
+// read-only). What's on the list is configured in Activity Master and
+// auto-seeded onto this rung's assignment the first time it's fetched (see
+// dependencyActivityAssignment.js's GET /:rungId); nothing is added or
+// removed from this tab.
+function CheckpointsTab({ rungId }: { rungId: number }) {
+  const queryClient = useQueryClient();
+  const [checkpoints, setCheckpoints] = useState<AssignmentCheckpoint[]>([]);
+  const [saving, setSaving] = useState<number | null>(null);
+
+  const { data: detail, isLoading } = useQuery({
+    queryKey: ["dependency-activity-assignment", rungId],
+    queryFn: () => getRungAssignment(rungId),
+  });
+
+  useEffect(() => {
+    setCheckpoints(detail?.assignment?.checkpoints || []);
+  }, [detail]);
+
+  const startDate = detail?.assignment?.startDate ? detail.assignment.startDate.slice(0, 10) : "";
+
+  // Same rule the server enforces on save (dependencyActivityAssignment.js
+  // POST /:rungId) — caught here first for an immediate, specific reason
+  // instead of a save-time rejection.
+  const checkpointGate = (cp: AssignmentCheckpoint): { locked: boolean; daysLeft: number | null } => {
+    if (cp.isChecked || cp.minWaitDays == null || cp.minWaitDays <= 0) return { locked: false, daysLeft: null };
+    if (!startDate) return { locked: true, daysLeft: null };
+    const eligibleDate = addDays(startDate, cp.minWaitDays);
+    const todayStr = new Date().toISOString().slice(0, 10);
+    if (todayStr >= eligibleDate) return { locked: false, daysLeft: null };
+    return { locked: true, daysLeft: diffDays(todayStr, eligibleDate) };
+  };
+
+  const toggleCheckpoint = async (index: number) => {
+    if (!detail?.assignment) return;
+    const cp = checkpoints[index];
+    if (!cp.isChecked) {
+      const gate = checkpointGate(cp);
+      if (gate.locked) {
+        toast.error(
+          startDate
+            ? `"${cp.fieldName}" needs ${cp.minWaitDays} day(s) after the start date — ${gate.daysLeft ?? cp.minWaitDays} day(s) left.`
+            : `"${cp.fieldName}" needs a Start Date set (in Work Allocation) before it can be checked off.`,
+        );
+        return;
+      }
+    }
+    const next = checkpoints.map((c, i) => (i === index ? { ...c, isChecked: !c.isChecked } : c));
+    setCheckpoints(next);
+    setSaving(index);
+    try {
+      const a = detail.assignment;
+      await saveRungAssignment(rungId, {
+        engineerIds: a.engineerIds,
+        startDate: a.startDate,
+        days: a.days,
+        endDate: a.endDate,
+        labourSource: a.labourSource,
+        materialSource: a.materialSource,
+        labourContractorId: a.labourContractorId,
+        materialContractorId: a.materialContractorId,
+        description: a.description,
+        remarks: a.remarks,
+        materials: a.materials,
+        checkpoints: next,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["dependency-activity-assignment", rungId] });
+    } catch (err: any) {
+      setCheckpoints(checkpoints); // revert the optimistic toggle
+      toast.error(err.message || "Failed to save checkpoint");
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10 text-muted-foreground gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading checkpoints…
+      </div>
+    );
+  }
+
+  if (checkpoints.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground italic text-center py-10">
+        No checkpoints tagged to this activity — add them in Activity Master.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-0">
+      {checkpoints.map((cp, i) => {
+        const gate = checkpointGate(cp);
+        return (
+          <div key={`${cp.checkpointId ?? "custom"}-${i}`} className="flex items-start gap-3">
+            <div className="flex flex-col items-center shrink-0">
+              <button
+                type="button"
+                onClick={() => toggleCheckpoint(i)}
+                disabled={saving === i}
+                className={`w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors disabled:opacity-50 ${
+                  cp.isChecked
+                    ? "bg-emerald-500 border-emerald-500 text-white"
+                    : gate.locked
+                      ? "bg-background border-amber-500/40 text-transparent"
+                      : "bg-background border-border text-transparent hover:border-cyan-500/50"
+                }`}
+                title={cp.isChecked ? "Mark incomplete" : gate.locked ? "Not eligible yet" : "Mark complete"}
+              >
+                {saving === i ? <Loader2 size={10} className="animate-spin text-muted-foreground" /> : <Check size={11} strokeWidth={3} />}
+              </button>
+              {i < checkpoints.length - 1 && (
+                <div className={`w-0.5 flex-1 min-h-[18px] ${cp.isChecked ? "bg-emerald-500/40" : "bg-border"}`} />
+              )}
+            </div>
+            <div className="flex-1 min-w-0 pb-3 pt-0.5">
+              <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
+                {cp.fieldName}
+                {cp.isDaily && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                    <CalendarDays size={9} /> Daily
+                  </span>
+                )}
+                {gate.locked && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                    <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
+                  </span>
+                )}
+              </span>
+              {cp.isDaily && <CheckpointDailyUpdates checkpointId={cp.id} startDate={startDate || undefined} />}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Overview tab ─────────────────────────────────────────────────────────
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -744,6 +905,7 @@ const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
   { id: "blueprint", label: "Blueprint", icon: ScanLine },
   { id: "photos", label: "Photos", icon: CameraIcon },
   { id: "attendance", label: "Attendance", icon: Users2 },
+  { id: "checkpoints", label: "Checkpoints", icon: ListChecks },
 ];
 
 export default function ActivityDetailModal({
@@ -821,6 +983,7 @@ export default function ActivityDetailModal({
               {tab === "blueprint" && row.roomId != null && <BlueprintTab rungId={row.rungId} roomId={row.roomId} />}
               {tab === "photos" && <PhotosTab rungId={row.rungId} />}
               {tab === "attendance" && <AttendanceTab rungId={row.rungId} />}
+              {tab === "checkpoints" && <CheckpointsTab rungId={row.rungId} />}
             </div>
           </div>
         </CivilWorkDprShell>

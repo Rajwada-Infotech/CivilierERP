@@ -470,10 +470,10 @@ const followupSetupItems: SetupItem[] = [
 const engineeringSetupItems: SetupItem[] = [
   {
     icon: Activity,
-    label: "Activity Master",
-    path: "/masters/activity",
+    label: "Engineering Activity Master",
+    path: "/masters/engineering-activity",
     color: "text-orange-400",
-    pageKey: "activity-master",
+    pageKey: "engineering-activity-master",
   },
   {
     icon: GitBranch,
@@ -624,18 +624,16 @@ const adminSetupItems: SetupItem[] = [
   },
 ];
 
-// Activity Master is the shared Engineering master (no separate Civil Work
-// DPR-specific one) — this just gives quick access to it from this module.
 const civilWorkDprSetupItems: SetupItem[] = [
   {
     icon: ClipboardList,
-    label: "Activity",
+    label: "Activity Master",
     path: "/masters/activity",
     color: "text-cyan-500",
   },
   {
     icon: DoorOpen,
-    label: "Room Master",
+    label: "Flat Master",
     path: "/civilworkdpr/room-master",
     color: "text-cyan-500",
   },

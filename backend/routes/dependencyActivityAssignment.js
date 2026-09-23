@@ -252,6 +252,40 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
       `);
       engineerIds = engRes.recordset.map((r) => r.engineerId);
 
+      // Auto-seed this assignment's checklist from the activity's configured
+      // template (Activity Master, dbo.ActivityCheckpointTemplate, migration
+      // 469) the first time it's viewed with none yet — replaces the old
+      // "Add Checkpoints" manual picker that used to live in this same
+      // modal. Only fires when truly empty so a legacy assignment that
+      // already had checkpoints picked by hand (or a template added to
+      // later) is never silently rewritten.
+      const existingCp = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId)
+        .query(`SELECT TOP 1 1 AS found FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @assignmentId`);
+      if (existingCp.recordset.length === 0) {
+        const templateRes = await pool.request().input("activityId", sql.Int, activityId).query(`
+          SELECT t.SortOrder AS sortOrder, c.Id AS checkpointId, c.FieldName AS fieldName,
+                 c.MinWaitDays AS minWaitDays, CAST(c.IsDaily AS BIT) AS isDaily
+          FROM dbo.ActivityCheckpointTemplate t
+          JOIN dbo.ActivityCheckpoint c ON c.Id = t.CheckpointId
+          WHERE t.ActivityId = @activityId
+          ORDER BY t.SortOrder ASC, t.Id ASC
+        `);
+        for (const row of templateRes.recordset) {
+          await pool.request()
+            .input("assignmentId", sql.Int, assignment.assignmentId)
+            .input("checkpointId", sql.Int, row.checkpointId)
+            .input("fieldName", sql.NVarChar(200), row.fieldName)
+            .input("sortOrder", sql.Int, row.sortOrder)
+            .input("minWaitDays", sql.Int, row.minWaitDays)
+            .input("isDaily", sql.Bit, row.isDaily ? 1 : 0)
+            .query(`
+              INSERT INTO dbo.DependencyActivityCheckpoint
+                (AssignmentId, CheckpointId, FieldName, SortOrder, MinWaitDays, IsDaily, IsChecked)
+              VALUES (@assignmentId, @checkpointId, @fieldName, @sortOrder, @minWaitDays, @isDaily, 0)
+            `);
+        }
+      }
+
       const cpRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
         SELECT c.Id AS id, c.CheckpointId AS checkpointId, c.FieldName AS fieldName, c.SortOrder AS sortOrder,
                c.IsChecked AS isChecked, c.MinWaitDays AS minWaitDays, CAST(c.IsDaily AS BIT) AS isDaily,

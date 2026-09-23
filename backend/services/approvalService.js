@@ -620,11 +620,13 @@ async function transition(
   const tableName = map.table.replace("dbo.", "");
 
   // ── Authorisation gate (cheap check before opening a transaction) ─────────
-  // Two independent ways in: the hardcoded per-module role whitelist (the
-  // original design), OR holding "edit" on the "approval-inbox" page via
-  // Menu Rights — added because granting someone that page's rights (the
-  // obvious, discoverable way to give approve/reject access) silently did
-  // nothing; only the fixed role list was ever actually checked.
+  // Three independent ways in: the hardcoded per-module role whitelist (the
+  // original design), holding "edit" on the "approval-inbox" page via Menu
+  // Rights (added because granting someone that page's rights — the
+  // obvious, discoverable way to give approve/reject access — silently did
+  // nothing; only the fixed role list was ever actually checked), or being
+  // named by userId on this record's CURRENT workflow level in Approval
+  // Setup.
   //
   // The page-right fallback only applies to modules on the *default*
   // APPROVER_ROLES list. Modules with an explicit, deliberately narrow
@@ -633,6 +635,18 @@ async function transition(
   // hardcoded to super_admin "per explicit instruction") stay locked to
   // that role list regardless of page rights, since those overrides exist
   // specifically to be stricter than a page permission can express.
+  //
+  // The Approval Setup userId path DOES apply to those restricted modules
+  // though — Approval Setup's own UI lets an admin name a specific person
+  // (e.g. Prashant) as a Journal Voucher approver alongside the hardcoded
+  // super_admin baseline, and approvalInbox.js's isVisibleToViewer already
+  // shows that person the record as theirs to act on (_canAct: true). Before
+  // this, transition() never consulted the workflow for restricted modules
+  // at all, so that same click 403'd — the inbox row looked actionable but
+  // wasn't. Mirrors isVisibleToViewer's per-level userId match (found via
+  // production report: Approval Setup named Prashant alongside Super Admin
+  // for Journal Voucher, but only Super Admin ever saw a working
+  // Approve/Reject).
   const isApproveOrReject =
     targetStatus === "Approved" || targetStatus === "Rejected";
   if (isApproveOrReject) {
@@ -644,7 +658,18 @@ async function transition(
     // narrower ones — the common case (an actual admin/dba) never pays
     // for it.
     const pageRightAllowed = !roleAllowed && !hasOverride && (await hasApprovalInboxEditRight(userId));
-    if (!roleAllowed && !pageRightAllowed) {
+    let workflowUserAllowed = false;
+    if (!roleAllowed && !pageRightAllowed && userId != null) {
+      const workflow = await getWorkflow(module);
+      if (workflow?.LevelDefs?.length) {
+        const totalLevels = workflow.Levels || workflow.LevelDefs.length;
+        const currentLevel = await resolveCurrentLevel(tableName, id, totalLevels, workflow.LevelDefs);
+        const levelDef = workflow.LevelDefs[currentLevel - 1];
+        const hasUsers = Array.isArray(levelDef?.userIds) && levelDef.userIds.length > 0;
+        workflowUserAllowed = hasUsers && levelDef.userIds.includes(userId);
+      }
+    }
+    if (!roleAllowed && !pageRightAllowed && !workflowUserAllowed) {
       const authErr = new Error("You are not authorized to approve or reject records.");
       authErr.status = 403;
       throw authErr;
