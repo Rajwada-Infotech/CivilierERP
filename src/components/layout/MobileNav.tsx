@@ -639,6 +639,12 @@ const civilWorkDprSetupItems: SetupItem[] = [
     path: "/civilworkdpr/room-master",
     color: "text-cyan-500",
   },
+  {
+    icon: HardHat,
+    label: "Contractor Register",
+    path: "/civilworkdpr/contractor-register",
+    color: "text-cyan-500",
+  },
 ];
 
 export const MobileNav: React.FC = () => {

@@ -32,6 +32,10 @@ export interface ContractorAllocation {
   contractorPhone: string | null;
   projectId: number | null;
   projectName: string | null;
+  blockId: number | null;
+  blockName: string | null;
+  unitId: number | null;
+  unitName: string | null;
   activityId: number;
   activityName: string | null;
   workDescription: string | null;
@@ -57,6 +61,8 @@ export interface ContractorAllocation {
 export interface ContractorAllocationPayload {
   contractorId: number;
   projectId?: number | null;
+  blockId?: number | null;
+  unitId?: number | null;
   activityId: number;
   workDescription?: string | null;
   allocationDate?: string | null;

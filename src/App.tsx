@@ -168,6 +168,9 @@ const RoomMaster = lazy(() => import("./pages/civilworkdpr/RoomMaster"));
 const WorkCheckpointMaster = lazy(
   () => import("./pages/civilworkdpr/WorkCheckpointMaster"),
 );
+const ContractorRegister = lazy(
+  () => import("./pages/civilworkdpr/ContractorRegister"),
+);
 const DependencyTracker = lazy(
   () => import("./pages/civilworkdpr/DependencyTracker"),
 );
@@ -1208,6 +1211,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="work-checkpoint-master">
             <WorkCheckpointMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/contractor-register"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-contractor-register">
+            <ContractorRegister />
           </ProtectedRoute>
         }
       />

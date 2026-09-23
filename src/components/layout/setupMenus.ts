@@ -411,6 +411,13 @@ export const civilWorkDprSetupItems: SetupItem[] = [
     color: "text-cyan-500",
     pageKey: "work-checkpoint-master",
   },
+  {
+    icon: HardHat,
+    label: "Contractor Register",
+    path: "/civilworkdpr/contractor-register",
+    color: "text-cyan-500",
+    pageKey: "civilworkdpr-contractor-register",
+  },
 ];
 
 export const salesAutomationSetupItems: SetupItem[] = [
