@@ -397,7 +397,7 @@ const CrmRefunds: React.FC = () => {
             </>
           )}
           {r.FinanceNewPaymentId != null && (
-            <button onClick={() => navigate(`/finance/payments?view=${r.FinanceNewPaymentId}`)}
+            <button onClick={() => navigate(`/payments?view=${r.FinanceNewPaymentId}`)}
               className="text-xs text-primary hover:underline flex items-center gap-1">Payment <ExternalLink size={11} /></button>
           )}
           {r.Status === "Paid" && <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Paid</span>}
