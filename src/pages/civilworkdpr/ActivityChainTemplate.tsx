@@ -41,8 +41,8 @@ async function fetchBlockOptions(projectId: string): Promise<{ value: string; la
   if (!projectId) return [];
   const res = await fetchWithAuth(`/api/unit-master/blocks?projectId=${projectId}`);
   if (!res.ok) throw new Error("Failed to fetch blocks");
-  const data: { Id: number; BlockName: string }[] = await res.json().catch(() => []);
-  return data.map((b) => ({ value: String(b.Id), label: b.BlockName }));
+  const data: { Id: number; Name: string }[] = await res.json().catch(() => []);
+  return data.map((b) => ({ value: String(b.Id), label: b.Name }));
 }
 
 // ── Chain editor — picks an ordered Activity list for one Room Category ────
