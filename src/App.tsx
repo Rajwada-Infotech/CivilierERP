@@ -286,6 +286,7 @@ const NamedEntryTypeMaster = lazy(
 );
 const TypeOfDocMaster = lazy(() => import("./pages/masters/TypeOfDocMaster"));
 const ActivityMaster = lazy(() => import("./pages/masters/ActivityMaster"));
+const EngineeringActivityMaster = lazy(() => import("./pages/masters/EngineeringActivityMaster"));
 const DebitNoteMaster = lazy(() => import("./pages/masters/DebitNoteMaster"));
 const BillingTermsMaster = lazy(
   () => import("./pages/masters/BillingTermsMaster"),
@@ -1822,6 +1823,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="activity-master">
             <ActivityMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/engineering-activity"
+        element={
+          <ProtectedRoute pageKey="engineering-activity-master">
+            <EngineeringActivityMaster />
           </ProtectedRoute>
         }
       />

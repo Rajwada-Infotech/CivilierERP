@@ -839,6 +839,38 @@ const PurchaseOrderMaster: React.FC = () => {
     }
   }, [minExpectedDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Same "only show what can actually arrive in time" filter as Material
+  // Request's item picker — a PO can be raised directly, without an MR
+  // behind it, so this needs its own copy of the logic rather than relying
+  // on whatever floor the MR it came from already enforced.
+  const availableSupplyDays = useMemo(() => {
+    if (!form.poDate || !form.expectedDate) return null;
+    const start = new Date(`${form.poDate}T00:00:00`);
+    const end = new Date(`${form.expectedDate}T00:00:00`);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+    return Math.round((end.getTime() - start.getTime()) / 86_400_000);
+  }, [form.poDate, form.expectedDate]);
+
+  // An item already on some line stays pickable everywhere — filtering it
+  // out of the list the moment the date window shrinks would make that
+  // line's own ItemPicker unable to display its current value.
+  const selectedItemIds = useMemo(
+    () => new Set(lineItems.map((li) => li.itemId).filter(Boolean)),
+    [lineItems],
+  );
+
+  const pickableItems = useMemo(() => {
+    if (availableSupplyDays === null) return items;
+    return items.filter((i) => {
+      if (selectedItemIds.has(i.id)) return true;
+      // Days of Supply is a new field — most items don't have one set yet.
+      // No data means no constraint: show it anyway, exactly like an item
+      // whose lead time already fits.
+      if (i.daysOfSupply === null || i.daysOfSupply === undefined) return true;
+      return i.daysOfSupply <= availableSupplyDays;
+    });
+  }, [items, availableSupplyDays, selectedItemIds]);
+
   const tcRecords = useMemo(
     () =>
       ensureArray<any>(tcRaw)
@@ -4424,6 +4456,12 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
               </div>
             )}
 
+            {availableSupplyDays !== null && (
+              <p className="mx-5 mb-3 text-[11px] text-amber-600 dark:text-amber-400">
+                Only items deliverable within {availableSupplyDays} day{availableSupplyDays === 1 ? "" : "s"} are listed in the item picker.
+              </p>
+            )}
+
             {/* Table header */}
             <div
               className={`overflow-x-auto ${errors.lineItems ? "border-t border-red-400" : ""}`}
@@ -4477,7 +4515,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           </span>
                         ) : (
                           <ItemPicker
-                            items={items}
+                            items={pickableItems}
                             value={li.itemId}
                             onChange={(id) => handleItemSelect(idx, id)}
                           />

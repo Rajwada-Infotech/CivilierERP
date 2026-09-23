@@ -162,10 +162,12 @@ export const fetchSuppliers = async (): Promise<
   }
 };
 
-// Uses /api/activity-master directly (same source as ActivityMaster page)
+// Uses /api/engineering-activity-master directly (same source as the
+// Engineering Activity Master page — split from the shared Activity Master
+// in migration 463, Civil Work DPR keeps the original).
 // Filters client-side to avoid stale/duplicate meta routes.
 const _fetchAllActivities = async () => {
-  const res = await fetchWithAuth("/api/activity-master");
+  const res = await fetchWithAuth("/api/engineering-activity-master");
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return safeArray<{
     id: number;
