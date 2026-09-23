@@ -246,6 +246,7 @@ const ALL_ROUTES = [
   { path: "/api/dependency", file: "./routes/dependency" },
   { path: "/api/dependency-master", file: "./routes/dependencyMaster" },
   { path: "/api/dependency-activity-assignment", file: "./routes/dependencyActivityAssignment" },
+  { path: "/api/dpr-activity-chain-template", file: "./routes/dprActivityChainTemplate" },
   { path: "/api/depreciation-setup", file: "./routes/depreciationSetup" },
   { path: "/api/fixed-assets",       file: "./routes/fixedAssets" },
   { path: "/api/fixed-asset-tagging", file: "./routes/fixedAssetTagging" },

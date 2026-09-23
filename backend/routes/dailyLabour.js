@@ -91,7 +91,7 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-regis
   } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
-  if (!allocationId) return res.status(400).json({ error: "Allocation is required" });
+  if (!Number.isFinite(parseInt(allocationId, 10))) return res.status(400).json({ error: "Allocation is required" });
   if (!entryDate) return res.status(400).json({ error: "Date is required" });
 
   try {
@@ -103,9 +103,9 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-regis
       .input("unskilled", sql.Int, unskilledLabourCount || 0)
       .input("skilledNames", sql.NVarChar(sql.MAX), cleanStr(skilledLabourNames, 4000))
       .input("unskilledNames", sql.NVarChar(sql.MAX), cleanStr(unskilledLabourNames, 4000))
-      .input("blockId", sql.Int, blockId || null)
-      .input("unitId", sql.Int, unitId || null)
-      .input("roomId", sql.Int, roomId || null)
+      .input("blockId", sql.Int, blockId != null && blockId !== "" ? blockId : null)
+      .input("unitId", sql.Int, unitId != null && unitId !== "" ? unitId : null)
+      .input("roomId", sql.Int, roomId != null && roomId !== "" ? roomId : null)
       .input("shift", sql.NVarChar, cleanStr(shift, 20))
       .input("attendanceStatus", sql.NVarChar, cleanStr(attendanceStatus, 20))
       .input("remarks", sql.NVarChar, cleanStr(remarks))
@@ -157,9 +157,9 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
       .input("unskilled", sql.Int, unskilledLabourCount || 0)
       .input("skilledNames", sql.NVarChar(sql.MAX), cleanStr(skilledLabourNames, 4000))
       .input("unskilledNames", sql.NVarChar(sql.MAX), cleanStr(unskilledLabourNames, 4000))
-      .input("blockId", sql.Int, blockId || null)
-      .input("unitId", sql.Int, unitId || null)
-      .input("roomId", sql.Int, roomId || null)
+      .input("blockId", sql.Int, blockId != null && blockId !== "" ? blockId : null)
+      .input("unitId", sql.Int, unitId != null && unitId !== "" ? unitId : null)
+      .input("roomId", sql.Int, roomId != null && roomId !== "" ? roomId : null)
       .input("shift", sql.NVarChar, cleanStr(shift, 20))
       .input("attendanceStatus", sql.NVarChar, cleanStr(attendanceStatus, 20))
       .input("remarks", sql.NVarChar, cleanStr(remarks))

@@ -11,6 +11,29 @@ const cleanStr = (v, len = 500) => {
   return String(v).trim().slice(0, len);
 };
 
+// Both Block and Unit are optional (an allocation can be project-wide), but
+// if given they must actually nest correctly — a Unit belongs to exactly
+// one Block, so a mismatched pair would silently mis-tag the work.
+async function resolveBlockUnit(pool, blockId, unitId) {
+  const bId = blockId != null && blockId !== "" ? parseInt(blockId, 10) : null;
+  const uId = unitId != null && unitId !== "" ? parseInt(unitId, 10) : null;
+  if (uId != null) {
+    const unit = await pool.request().input("uid", sql.Int, uId)
+      .query("SELECT BlockId FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
+    if (!unit.recordset.length) throw Object.assign(new Error("Selected unit not found"), { status: 400 });
+    if (bId != null && unit.recordset[0].BlockId !== bId) {
+      throw Object.assign(new Error("Selected unit does not belong to the selected block"), { status: 400 });
+    }
+    return { blockId: unit.recordset[0].BlockId, unitId: uId };
+  }
+  if (bId != null) {
+    const block = await pool.request().input("bid", sql.Int, bId)
+      .query("SELECT Id FROM dbo.BlockMaster WHERE Id = @bid AND IsActive = 1");
+    if (!block.recordset.length) throw Object.assign(new Error("Selected block not found"), { status: 400 });
+  }
+  return { blockId: bId, unitId: null };
+}
+
 // ─── GET /contractors — auto-populated from Contractor Master, no manual entry ─
 // Mirrors workOrder.js's /meta/contractors pattern.
 router.get("/contractors", authMiddleware, async (req, res) => {
@@ -42,6 +65,10 @@ const SELECT_COLUMNS = `
   ahm.LHeadPhone             AS contractorPhone,
   ca.ProjectId               AS projectId,
   pr.name                    AS projectName,
+  ca.BlockId                 AS blockId,
+  blk.BlockName               AS blockName,
+  ca.UnitId                  AS unitId,
+  um.UnitName                 AS unitName,
   ca.ActivityId              AS activityId,
   act.activity_name           AS activityName,
   ca.WorkDescription         AS workDescription,
@@ -69,6 +96,8 @@ const JOINS = `
   FROM dbo.ContractorAllocation ca
   LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = ca.ContractorLHeadId
   LEFT JOIN dbo.enterprise pr ON pr.id = ca.ProjectId
+  LEFT JOIN dbo.BlockMaster blk ON blk.Id = ca.BlockId
+  LEFT JOIN dbo.UnitMaster um ON um.Id = ca.UnitId
   LEFT JOIN dbo.ActivityMaster act ON act.id = ca.ActivityId
 `;
 
@@ -98,19 +127,22 @@ router.get("/", authMiddleware, async (req, res) => {
 // ─── POST / ────────────────────────────────────────────────────────────────────
 router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-register", "create"), async (req, res) => {
   const {
-    contractorId, projectId, activityId, workDescription, allocationDate,
+    contractorId, projectId, blockId, unitId, activityId, workDescription, allocationDate,
     startDate, expectedCompletionDate, currentStatus, siteLocation, remarks,
   } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
-  if (!contractorId) return res.status(400).json({ error: "Contractor is required" });
-  if (!activityId) return res.status(400).json({ error: "Activity is required" });
+  if (!Number.isFinite(parseInt(contractorId, 10))) return res.status(400).json({ error: "Contractor is required" });
+  if (!Number.isFinite(parseInt(activityId, 10))) return res.status(400).json({ error: "Activity is required" });
 
   try {
     const pool = getPool();
+    const resolved = await resolveBlockUnit(pool, blockId, unitId);
     const result = await pool.request()
       .input("contractorId", sql.Int, contractorId)
       .input("projectId", sql.Int, projectId ?? null)
+      .input("blockId", sql.Int, resolved.blockId)
+      .input("unitId", sql.Int, resolved.unitId)
       .input("activityId", sql.Int, activityId)
       .input("workDescription", sql.NVarChar, cleanStr(workDescription))
       .input("allocationDate", sql.Date, allocationDate || null)
@@ -122,17 +154,18 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-regis
       .input("remarks", sql.NVarChar, cleanStr(remarks))
       .query(`
         INSERT INTO dbo.ContractorAllocation
-          (ContractorLHeadId, ProjectId, ActivityId, WorkDescription, AllocationDate,
+          (ContractorLHeadId, ProjectId, BlockId, UnitId, ActivityId, WorkDescription, AllocationDate,
            StartDate, ExpectedCompletionDate, CurrentStatus, AllocatedBy, SiteLocation,
            Remarks, IsAcknowledged, ApprovalStatus, CreatedBy, CreatedAt)
         OUTPUT INSERTED.AllocationId AS id
         VALUES
-          (@contractorId, @projectId, @activityId, @workDescription, @allocationDate,
+          (@contractorId, @projectId, @blockId, @unitId, @activityId, @workDescription, @allocationDate,
            @startDate, @expectedCompletionDate, @currentStatus, @allocatedBy, @siteLocation,
            @remarks, 0, 'Pending', @allocatedBy, GETDATE())
       `);
     res.status(201).json({ success: true, id: result.recordset[0].id });
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     console.error("ContractorAllocation POST error:", err);
     res.status(500).json({ error: "Failed to create allocation" });
   }
@@ -144,7 +177,7 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
   if (isNaN(allocId)) return res.status(400).json({ error: "Invalid ID" });
 
   const {
-    contractorId, projectId, activityId, workDescription, allocationDate,
+    contractorId, projectId, blockId, unitId, activityId, workDescription, allocationDate,
     startDate, expectedCompletionDate, currentStatus, siteLocation, remarks,
   } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
@@ -157,11 +190,14 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
     if (existing.recordset.length === 0) {
       return res.status(404).json({ error: "Allocation not found" });
     }
+    const resolved = await resolveBlockUnit(pool, blockId, unitId);
 
     await pool.request()
       .input("id", sql.Int, allocId)
       .input("contractorId", sql.Int, contractorId)
       .input("projectId", sql.Int, projectId ?? null)
+      .input("blockId", sql.Int, resolved.blockId)
+      .input("unitId", sql.Int, resolved.unitId)
       .input("activityId", sql.Int, activityId)
       .input("workDescription", sql.NVarChar, cleanStr(workDescription))
       .input("allocationDate", sql.Date, allocationDate || null)
@@ -173,7 +209,8 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
       .input("updatedBy", sql.NVarChar, actor)
       .query(`
         UPDATE dbo.ContractorAllocation SET
-          ContractorLHeadId = @contractorId, ProjectId = @projectId, ActivityId = @activityId,
+          ContractorLHeadId = @contractorId, ProjectId = @projectId, BlockId = @blockId, UnitId = @unitId,
+          ActivityId = @activityId,
           WorkDescription = @workDescription, AllocationDate = @allocationDate,
           StartDate = @startDate, ExpectedCompletionDate = @expectedCompletionDate,
           CurrentStatus = @currentStatus, SiteLocation = @siteLocation, Remarks = @remarks,
@@ -184,6 +221,7 @@ router.put("/:id", authMiddleware, requirePageRight("civilworkdpr-contractor-reg
       `);
     res.json({ success: true });
   } catch (err) {
+    if (err.status === 400) return res.status(400).json({ error: err.message });
     console.error("ContractorAllocation PUT error:", err);
     res.status(500).json({ error: "Failed to update allocation" });
   }

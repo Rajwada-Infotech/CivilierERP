@@ -101,10 +101,19 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
       //   - Truly standalone (no BookingId, sold directly via
       //     CrmParkingBooking.tsx): its own PaymentStatus is the only signal
       //     there is — there's no Booking to gate on.
-      const unitLinkedConfirmed = r.BookingId && r.BookingStatus === "Approved" && r.Milestone1Paid;
-      const standaloneConfirmed = r.AllotmentId && !r.BookingId && r.AllotmentPaymentStatus === "Paid";
+      // Ids of 0 are real rows here (CrmParkingAllotment/CrmBooking both had
+      // historical identity-seed corruption — see migrations 441-450), so
+      // every one of these has to check `!= null`, never plain truthiness —
+      // `r.AllotmentId &&`/`r.AllotmentId || null` silently treats a real
+      // allotment/booking at Id 0 as if none existed, showing a taken slot
+      // as Available.
+      const hasBookingId = r.BookingId != null;
+      const hasAllotmentId = r.AllotmentId != null;
+      const hasHoldId = r.HoldId != null;
+      const unitLinkedConfirmed = hasBookingId && r.BookingStatus === "Approved" && r.Milestone1Paid;
+      const standaloneConfirmed = hasAllotmentId && !hasBookingId && r.AllotmentPaymentStatus === "Paid";
       const isBooked = !!(unitLinkedConfirmed || standaloneConfirmed);
-      const isOnHold = !isBooked && (r.AllotmentId || r.HoldId);
+      const isOnHold = !isBooked && (hasAllotmentId || hasHoldId);
       return {
         Id: r.Id,
         SlotNo: r.SlotNo,
@@ -112,28 +121,28 @@ router.get("/", requirePageRight("crm-parking-matrix", "view"), async (req, res)
         BlockId: r.BlockId,
         BlockName: r.BlockName,
         Status: !r.SlotIsActive ? "Blocked" : isBooked ? "Booked" : isOnHold ? "OnHold" : "Available",
-        AllotmentId: r.AllotmentId || null,
-        BookingId: r.BookingId || null,
+        AllotmentId: hasAllotmentId ? r.AllotmentId : null,
+        BookingId: hasBookingId ? r.BookingId : null,
         BookingNo: r.BookingNo || null,
         BookingStatus: r.BookingStatus || null,
         AllotmentDate: r.AllotmentDate || null,
         TotalAmount: r.TotalAmount ?? null,
         AllotmentPaymentStatus: r.AllotmentPaymentStatus || null,
         Quantity: r.Quantity ?? null,
-        ApplicationId: r.ApplicationId || null,
+        ApplicationId: r.ApplicationId != null ? r.ApplicationId : null,
         ApplicationNo: r.ApplicationNo || null,
         ApplicantName: r.ApplicantName || null,
         Mobile: r.Mobile || null,
         AssignedToName: r.AssignedToName || null,
         AssignedToEmail: r.AssignedToEmail || null,
-        HoldId: r.HoldId || null,
+        HoldId: hasHoldId ? r.HoldId : null,
         // Unit-linked pending allotment: countdown comes from the parent
         // Booking's own ConfirmDeadline snapshot (its hold already got
         // Converted the moment the allotment was created — see
         // crmEntityCreation.js). A bare pre-Booking hold, or a standalone
         // sale with no deadline concept at all, falls back to the live
         // hold's HoldUntil (or null — "—" on the frontend).
-        HoldUntil: r.BookingId ? (r.ConfirmDeadline || null) : (r.HoldUntil || null),
+        HoldUntil: hasBookingId ? (r.ConfirmDeadline || null) : (r.HoldUntil || null),
         HoldApplicationId: r.HoldApplicationId || null,
         HoldApplicationNo: r.HoldApplicationNo || null,
         HoldApplicantName: r.HoldApplicantName || null,

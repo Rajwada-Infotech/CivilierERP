@@ -40,6 +40,8 @@ router.get("/", cache("room-master", 300), async (req, res) => {
         r.UnitId,
         u.UnitName,
         r.RoomName,
+        r.RoomCategoryId,
+        cat.Alias AS RoomCategoryAlias,
         r.Floor,
         r.IsActive,
         r.BlueprintFileName,
@@ -50,6 +52,7 @@ router.get("/", cache("room-master", 300), async (req, res) => {
       LEFT JOIN dbo.enterprise  ep ON ep.id = r.ProjectId AND ep.business_type = 'P'
       LEFT JOIN dbo.BlockMaster  b ON b.Id  = r.BlockId
       LEFT JOIN dbo.UnitMaster   u ON u.Id  = r.UnitId
+      LEFT JOIN dbo.RoomCategoryMaster cat ON cat.Id = r.RoomCategoryId
       ${where}
       ORDER BY ep.name, b.BlockName, u.UnitName, r.RoomName
     `);
@@ -231,7 +234,7 @@ router.get("/unit-rooms/:unitId", async (req, res) => {
 
 // POST — add room
 router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
-  const { ProjectId, UnitId, RoomName, IsActive } = req.body;
+  const { ProjectId, UnitId, RoomName, RoomCategoryId, IsActive } = req.body;
   const createdBy = req.user?.userId || null;
 
   // ProjectId, UnitId and RoomName are NOT NULL columns with no fallback
@@ -243,10 +246,10 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
   // purchaseOrders.js, expenseBooking.js, workOrder.js, materialIssues.js,
   // chequeMasterSchemas.js, debitNote.js, and cardMasterSchemas.js during a
   // live-DB workflow test.
-  if (!ProjectId) {
+  if (!Number.isFinite(parseInt(ProjectId, 10))) {
     return res.status(400).json({ error: "ProjectId is required." });
   }
-  if (!UnitId) {
+  if (!Number.isFinite(parseInt(UnitId, 10))) {
     return res.status(400).json({ error: "UnitId is required." });
   }
   if (!RoomName || !String(RoomName).trim()) {
@@ -278,13 +281,14 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       .input("BlockId",   sql.Int, BlockId)
       .input("UnitId",    sql.Int, parseInt(UnitId))
       .input("RoomName",  sql.NVarChar(100), RoomName)
-      .input("Floor",     sql.NVarChar(50), Floor)
+      .input("RoomCategoryId", sql.Int, RoomCategoryId ? parseInt(RoomCategoryId) : null)
+      .input("Floor",     sql.NVarChar(50), Floor || null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
-        INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, Floor, IsActive, CreatedBy, CreatedAt)
+        INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, RoomCategoryId, Floor, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@ProjectId, @BlockId, @UnitId, @RoomName, @Floor, @IsActive, @CreatedBy, @CreatedAt)
+        VALUES (@ProjectId, @BlockId, @UnitId, @RoomName, @RoomCategoryId, @Floor, @IsActive, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("room-master");
     res.json({ id: insertRes.recordset[0].Id, message: "Room added successfully" });
@@ -297,17 +301,17 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
 // PUT — update room
 router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const { id } = req.params;
-  const { ProjectId, UnitId, RoomName, IsActive } = req.body;
+  const { ProjectId, UnitId, RoomName, RoomCategoryId, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
 
   // Same NOT NULL columns as POST / — this UPDATE overwrites them
   // unconditionally, so omitting any of them here would null out the
   // existing value and crash the same way the create path did before the
   // fix above.
-  if (!ProjectId) {
+  if (!Number.isFinite(parseInt(ProjectId, 10))) {
     return res.status(400).json({ error: "ProjectId is required." });
   }
-  if (!UnitId) {
+  if (!Number.isFinite(parseInt(UnitId, 10))) {
     return res.status(400).json({ error: "UnitId is required." });
   }
   if (!RoomName || !String(RoomName).trim()) {
@@ -333,7 +337,8 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
       .input("BlockId",   sql.Int, BlockId)
       .input("UnitId",    sql.Int, parseInt(UnitId))
       .input("RoomName",  sql.NVarChar(100), RoomName)
-      .input("Floor",     sql.NVarChar(50), Floor)
+      .input("RoomCategoryId", sql.Int, RoomCategoryId ? parseInt(RoomCategoryId) : null)
+      .input("Floor",     sql.NVarChar(50), Floor || null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("UpdatedBy", sql.Int, updatedBy)
       .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
@@ -342,6 +347,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
           BlockId   = @BlockId,
           UnitId    = @UnitId,
           RoomName  = @RoomName,
+          RoomCategoryId = @RoomCategoryId,
           Floor     = @Floor,
           IsActive  = @IsActive,
           UpdatedBy = @UpdatedBy,
@@ -488,7 +494,7 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
     }
 
     const compRes = await pool.request().input("typeKey", sql.NVarChar(20), typeKey).query(`
-      SELECT rc.Quantity AS quantity, cat.Alias AS alias
+      SELECT rc.Quantity AS quantity, cat.Alias AS alias, cat.Id AS categoryId
       FROM dbo.UnitRoomConfig cfg
       JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id
       JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId
@@ -503,7 +509,9 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
 
     const names = [];
     for (const row of compRes.recordset) {
-      for (let i = 1; i <= row.quantity; i++) names.push(row.quantity > 1 ? `${row.alias} ${i}` : row.alias);
+      for (let i = 1; i <= row.quantity; i++) {
+        names.push({ name: row.quantity > 1 ? `${row.alias} ${i}` : row.alias, categoryId: row.categoryId });
+      }
     }
 
     // Check ALL rooms for this unit — active AND inactive — so we can
@@ -522,15 +530,17 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
     );
 
     let created = 0;
-    for (const name of names) {
+    for (const { name, categoryId } of names) {
       const lower = name.toLowerCase();
       if (activeSet.has(lower)) continue; // already exists and is active
       if (inactiveMap.has(lower)) {
         // Reactivate the soft-deleted row — preserves its Id, blueprints, etc.
+        // Also backfills RoomCategoryId in case this row predates migration 466.
         await pool.request()
           .input("Id", sql.Int, inactiveMap.get(lower))
           .input("Floor", sql.NVarChar(50), floorLabel)
-          .query(`UPDATE dbo.RoomMaster SET IsActive = 1, Floor = @Floor WHERE Id = @Id`);
+          .input("CategoryId", sql.Int, categoryId)
+          .query(`UPDATE dbo.RoomMaster SET IsActive = 1, Floor = @Floor, RoomCategoryId = ISNULL(RoomCategoryId, @CategoryId) WHERE Id = @Id`);
         created++;
         continue;
       }
@@ -541,11 +551,12 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
         .input("UnitId", sql.Int, unitId)
         .input("RoomName", sql.NVarChar(100), name)
         .input("Floor", sql.NVarChar(50), floorLabel)
+        .input("CategoryId", sql.Int, categoryId)
         .input("CreatedBy", sql.Int, createdBy)
         .input("CreatedAt", sql.DateTime2(3), new Date())
         .query(`
-          INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, Floor, IsActive, CreatedBy, CreatedAt)
-          VALUES (@ProjectId, @BlockId, @UnitId, @RoomName, @Floor, 1, @CreatedBy, @CreatedAt)
+          INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, RoomCategoryId, Floor, IsActive, CreatedBy, CreatedAt)
+          VALUES (@ProjectId, @BlockId, @UnitId, @RoomName, @CategoryId, @Floor, 1, @CreatedBy, @CreatedAt)
         `);
       created++;
     }
