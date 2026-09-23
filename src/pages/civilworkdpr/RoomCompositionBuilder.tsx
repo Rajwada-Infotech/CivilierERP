@@ -246,7 +246,7 @@ export default function RoomCompositionBuilder() {
                         <p className={labelCls}>Room Categories</p>
                         {(categories as RoomCategory[]).length === 0 ? (
                           <p className="text-sm text-muted-foreground">
-                            No active room categories yet — add some in Room Category Master first.
+                            No active room categories yet — add some in Room Master first.
                           </p>
                         ) : (
                           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">

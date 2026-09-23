@@ -633,7 +633,7 @@ const civilWorkDprSetupItems: SetupItem[] = [
   },
   {
     icon: DoorOpen,
-    label: "Room Master",
+    label: "Flat Master",
     path: "/civilworkdpr/room-master",
     color: "text-cyan-500",
   },

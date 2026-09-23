@@ -1,7 +1,7 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { FileText, Upload, DoorOpen } from "lucide-react";
+import { FileText, Upload, DoorOpen, Sparkles, Loader2, CheckCircle2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
@@ -25,7 +25,7 @@ const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jp
 // header, so a plain <a href> straight to the API 401s with "No token
 // provided". This decodes the base64 into a Blob and opens that instead,
 // going through fetchWithAuth so the request is actually authenticated.
-async function openBlueprint(roomId: string) {
+async function openBlueprint(roomId: string | number) {
   try {
     const res = await fetchWithAuth(`${API}/${roomId}/blueprint`);
     if (!res.ok) {
@@ -116,20 +116,14 @@ function BlueprintUploadField({
   );
 }
 
-// The "Generate from Unit Layout" panel (POST /api/room-master/generate/:id)
-// was removed from this page's UI on request (twice — it was re-added by
-// something else in between; if it reappears again, that's worth tracing
-// down rather than just deleting it a third time). The backend route itself
-// is untouched, still valid infra, just no longer surfaced here.
-
-// Suggests Room Category Master's active aliases (the same list Room
+// Suggests Room Master's active room-type aliases (the same list Room
 // Composition Builder and Work Done's Room dropdown read) instead of typing
 // a name from scratch — but stays a real text input, not a strict dropdown,
 // because a unit can have more than one room of the same category
-// ("Bedroom 1", "Bedroom 2", same convention the bulk-generator above also
-// respects — each generated room keeps a plain category name so it still
-// matches these suggestions) and an existing room's saved name still needs
-// to display correctly even once it no longer matches a category alias
+// ("Bedroom 1", "Bedroom 2", same convention the template-based generator
+// below also respects — each generated room keeps a plain category name so
+// it still matches these suggestions) and an existing room's saved name
+// still needs to display correctly even once it no longer matches an alias
 // exactly.
 let roomCategoryOptionsCache: { value: string; label: string }[] | null = null;
 function RoomNameField({
@@ -225,7 +219,7 @@ async function fetchProjectOptions(): Promise<
 // Same active-categories list Room Composition Builder and Work Done's Room
 // dropdown both read (GET /options, ordered by SortOrder) — Room Name now
 // picks from here instead of free text, so a room is always named after one
-// of the categories actually set up in Room Category Master.
+// of the categories actually set up in Room Master.
 async function fetchRoomCategoryOptions(): Promise<
   { value: string; label: string }[]
 > {
@@ -237,9 +231,152 @@ async function fetchRoomCategoryOptions(): Promise<
   return data.map((c) => ({ value: c.alias, label: c.alias }));
 }
 
+type UnitOption = {
+  Id: number;
+  Name: string;
+  ProjectId: number;
+  BlockId: number;
+  BlockName: string | null;
+  UnitType: string | null;
+  FloorNo: number | null;
+};
+
+// 0 = Ground -> "G", otherwise the numbered floor, same convention
+// CrmProjectAutoSetupFloor.FloorLabel and the backend's own Floor-derivation
+// (roomMaster.js POST/PUT/generate) already use — kept in sync here purely
+// for display, the actual stored value always comes from the server.
+function floorLabel(floorNo: number | null | undefined): string | null {
+  if (floorNo == null) return null;
+  return floorNo === 0 ? "G" : String(floorNo);
+}
+
+type UnitRoomsResponse = {
+  unit: { Id: number; UnitName: string; UnitType: string | null };
+  template: { quantity: number; alias: string }[];
+  existing: { Id: number; RoomName: string; IsActive: boolean; BlueprintFileName: string | null }[];
+};
+
+async function fetchUnitRooms(unitId: string): Promise<UnitRoomsResponse> {
+  const res = await fetchWithAuth(`${API}/unit-rooms/${unitId}`);
+  if (!res.ok) throw new Error("Failed to fetch this unit's rooms");
+  return res.json();
+}
+
+// Preview of a unit's room template (from Unit Composition, keyed off its
+// Unit Type) next to what's already been created for it, with a one-click
+// bulk-create — this is what replaces the old one-room-at-a-time flow for
+// the common case of "generate every room this unit's layout calls for".
+// The Add Room form below still exists for anything the template doesn't
+// cover.
+function UnitRoomConfigCard({ unitId }: { unitId: string }) {
+  const qc = useQueryClient();
+  const [generating, setGenerating] = React.useState(false);
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["room-master-unit-rooms", unitId],
+    queryFn: () => fetchUnitRooms(unitId),
+  });
+
+  const templateTotal = (data?.template ?? []).reduce((s, r) => s + r.quantity, 0);
+  const activeExisting = (data?.existing ?? []).filter((r) => r.IsActive);
+  const allCreated = templateTotal > 0 && activeExisting.length >= templateTotal;
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const res = await fetchWithAuth(`${API}/generate/${unitId}`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Failed to create rooms");
+      toast.success(body.message || "Rooms created");
+      await qc.invalidateQueries({ queryKey: ["room-master-unit-rooms", unitId] });
+      await qc.invalidateQueries({ queryKey: ["room-master"] });
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to create rooms");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground py-3">
+        <Loader2 size={12} className="animate-spin" /> Loading room configuration…
+      </div>
+    );
+  }
+  if (!data) return null;
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+          Room Configuration{data.unit.UnitType ? ` — ${data.unit.UnitType}` : ""}
+        </p>
+        <button
+          type="button"
+          onClick={handleGenerate}
+          disabled={generating || templateTotal === 0 || allCreated}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gradient-to-r from-cyan-500 to-teal-400 text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+        >
+          {generating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+          {allCreated ? "All rooms created" : "Create Rooms"}
+        </button>
+      </div>
+
+      {data.template.length === 0 ? (
+        <p className="text-xs text-muted-foreground italic">
+          {data.unit.UnitType
+            ? `No room template set up for "${data.unit.UnitType}" — configure one in Unit Composition first.`
+            : "This unit has no Unit Type set — set one in Unit Master first."}
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {data.template.map((t) => (
+            <span key={t.alias} className="text-xs font-medium bg-background border border-border px-2 py-1 rounded-lg">
+              {t.alias} <span className="text-muted-foreground">×{t.quantity}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {activeExisting.length > 0 && (
+        <div className="space-y-1">
+          <p className="text-[11px] font-medium text-muted-foreground">
+            {activeExisting.length} room{activeExisting.length === 1 ? "" : "s"} already tagged to this unit:
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {activeExisting.map((r) => (
+              <span
+                key={r.Id}
+                className="inline-flex items-center gap-1 text-[11px] bg-background border border-border px-2 py-0.5 rounded-full"
+              >
+                <CheckCircle2 size={10} className="text-emerald-500 shrink-0" />
+                {r.RoomName}
+                {r.BlueprintFileName && (
+                  <button
+                    type="button"
+                    onClick={() => openBlueprint(r.Id)}
+                    className="text-primary hover:underline"
+                    title="View blueprint"
+                  >
+                    <FileText size={10} />
+                  </button>
+                )}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Fields ────────────────────────────────────────────────────────────────────
-// Unit is filtered by the selected project. Block is never chosen directly —
-// it's whichever block the selected unit belongs to, shown read-only.
+// Unit is filtered by the selected project. Block and Floor are never chosen
+// directly — both are whichever the selected unit's own Auto Project Setup
+// data says, shown read-only (and enforced server-side too — see
+// roomMaster.js POST/PUT, which derive them from the unit rather than
+// trusting whatever the client sends).
 const fields: FieldDef[] = [
   {
     name: "projectId",
@@ -254,8 +391,7 @@ const fields: FieldDef[] = [
     type: "select",
     required: true,
     optionsProvider: (_data, _currentId, form) => {
-      const units: { Id: number; Name: string; ProjectId: number }[] =
-        (form?.__units as any) ?? [];
+      const units: UnitOption[] = (form?.__units as any) ?? [];
       const selectedProject = form?.projectId as string | undefined;
       return units
         .filter((u) =>
@@ -269,8 +405,7 @@ const fields: FieldDef[] = [
     label: "Block",
     type: "custom",
     render: ({ formData }) => {
-      const units: { Id: number; BlockName: string | null }[] =
-        (formData?.__units as any) ?? [];
+      const units: UnitOption[] = (formData?.__units as any) ?? [];
       const selectedUnit = formData?.unitId as string | undefined;
       const unit = units.find((u) => String(u.Id) === selectedUnit);
       return (
@@ -278,6 +413,26 @@ const fields: FieldDef[] = [
           {unit?.BlockName || (
             <span className="text-muted-foreground italic">
               Select a unit to see its block
+            </span>
+          )}
+        </div>
+      );
+    },
+  },
+  {
+    name: "floorDisplay",
+    label: "Floor",
+    type: "custom",
+    render: ({ formData }) => {
+      const units: UnitOption[] = (formData?.__units as any) ?? [];
+      const selectedUnit = formData?.unitId as string | undefined;
+      const unit = units.find((u) => String(u.Id) === selectedUnit);
+      const label = unit ? floorLabel(unit.FloorNo) : null;
+      return (
+        <div className="text-sm text-foreground bg-muted/40 border border-border rounded-lg px-3 py-2">
+          {label ?? (
+            <span className="text-muted-foreground italic">
+              {unit ? "No floor set on this unit" : "Select a unit to see its floor"}
             </span>
           )}
         </div>
@@ -293,10 +448,23 @@ const fields: FieldDef[] = [
       <RoomNameField value={value as string | undefined} onChange={onChange} />
     ),
   },
+  // Once a Unit is picked above, shows that unit's room template (from Unit
+  // Composition) and a one-click bulk-create — the fast path for "give me
+  // every room this unit's layout calls for" instead of filling Room Name
+  // one room at a time. Lives inside this same form (reading the Unit
+  // already selected above) rather than as a separate section with its own
+  // Project/Unit pickers — a standalone panel like that was tried before and
+  // pulled for being clumsy/duplicative; this reuses the form's own Unit.
   {
-    name: "floor",
-    label: "Floor",
-    type: "text",
+    name: "roomConfigPreview",
+    label: "Room Configuration",
+    type: "custom",
+    fullWidth: true,
+    render: ({ formData }) => {
+      const unitId = formData?.unitId as string | undefined;
+      if (!unitId) return null;
+      return <UnitRoomConfigCard unitId={unitId} />;
+    },
   },
   {
     name: "blueprintUpload",
@@ -349,10 +517,9 @@ const RoomMaster: React.FC = () => {
   });
 
   // Fetch all units once — passed into form as __units so optionsProvider /
-  // the read-only block display can filter & look up by id.
-  const { data: allUnits = [] } = useQuery<
-    { Id: number; Name: string; ProjectId: number; BlockId: number; BlockName: string | null; UnitType: string | null }[]
-  >({
+  // the read-only block+floor displays can filter & look up by id, and
+  // reused below for the Generate Rooms panel's own Project/Unit pickers.
+  const { data: allUnits = [] } = useQuery<UnitOption[]>({
     queryKey: ["room-master-units"],
     queryFn: async () => {
       const res = await fetchWithAuth(`${API}/units`);
@@ -388,7 +555,6 @@ const RoomMaster: React.FC = () => {
     ProjectId: parseInt(r.projectId),
     UnitId: parseInt(r.unitId),
     RoomName: r.roomName?.trim() || null,
-    Floor: r.floor?.trim() || null,
     IsActive: r.isActive !== false,
   });
 
@@ -468,8 +634,11 @@ const RoomMaster: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Setup", "Room Master"]} />
-      <CivilWorkDprShell title="Room Master" icon={DoorOpen}>
+      <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Setup", "Flat Master"]} />
+      <CivilWorkDprShell
+        title="Flat Master"
+        icon={DoorOpen}
+      >
       <MasterPage
         title="Room"
         canCreate={rights.canCreate}
@@ -489,7 +658,7 @@ const RoomMaster: React.FC = () => {
           return form;
         }}
         exportConfig={{
-          title: "Room Master",
+          title: "Flat Master",
           filename: "room-master",
           columns: exportColumns,
         }}

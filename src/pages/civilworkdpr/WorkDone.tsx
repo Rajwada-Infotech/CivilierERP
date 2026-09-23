@@ -166,9 +166,23 @@ export default function WorkDone() {
     });
     return Array.from(groups.values());
   }, [allChains]);
-  const [collapsedChainGroups, setCollapsedChainGroups] = useState<Record<string, boolean>>({});
+  // Tracked as "expanded" (not "collapsed") specifically so the empty-object
+  // default means every group starts collapsed — the previous "collapsed"
+  // naming defaulted every group to expanded instead, which read fine for
+  // one or two rooms but turned into a very long, clumsy page the moment
+  // there were several. A group only opens once its key is explicitly set.
+  const [expandedChainGroups, setExpandedChainGroups] = useState<Record<string, boolean>>({});
   const toggleChainGroup = (key: string) =>
-    setCollapsedChainGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+    setExpandedChainGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+  // Single toggle to open (or close) every group at once instead of hunting
+  // down each chevron individually.
+  const allChainGroupsExpanded =
+    chainGroupsByRoom.length > 0 &&
+    chainGroupsByRoom.every((g) => expandedChainGroups[g.key]);
+  const toggleAllChainGroups = () =>
+    setExpandedChainGroups(
+      Object.fromEntries(chainGroupsByRoom.map((g) => [g.key, !allChainGroupsExpanded])),
+    );
 
   const { data: projects = [], isLoading: loadingProjects } = useQuery({
     queryKey: ["civilworkdpr-work-done-projects"],
@@ -480,10 +494,25 @@ export default function WorkDone() {
               <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
                 <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
                 <span className="text-sm font-heading font-semibold text-foreground">Dependency Chains</span>
+                <button
+                  type="button"
+                  onClick={toggleAllChainGroups}
+                  className="ml-auto flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors"
+                >
+                  {allChainGroupsExpanded ? (
+                    <>
+                      <ChevronRight size={12} /> Collapse all
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={12} /> Expand all
+                    </>
+                  )}
+                </button>
               </div>
               <div className="divide-y divide-border">
                 {chainGroupsByRoom.map((group) => {
-                  const collapsed = !!collapsedChainGroups[group.key];
+                  const collapsed = !expandedChainGroups[group.key];
                   return (
                     <div key={group.key}>
                       {/* Group header — every chain allocated to this room */}

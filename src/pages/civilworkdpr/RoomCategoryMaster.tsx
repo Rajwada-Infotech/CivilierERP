@@ -170,7 +170,7 @@ export default function RoomCategoryMaster() {
 
   return (
     <CivilWorkDprShell
-      title="Room Category Master"
+      title="Room Master"
       subtitle="Manage the room types used across every Unit's room composition"
       icon={Tags}
       action={
@@ -179,12 +179,12 @@ export default function RoomCategoryMaster() {
             onClick={openCreate}
             className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-cyan-500 to-teal-400 text-white hover:opacity-90 transition-opacity"
           >
-            <Plus size={14} /> New Category
+            <Plus size={14} /> New Room Type
           </button>
         ) : undefined
       }
     >
-      <Breadcrumbs items={[{ label: "Civil Work DPR", path: "/civilworkdpr" }, { label: "Room Category Master" }]} />
+      <Breadcrumbs items={[{ label: "Civil Work DPR", path: "/civilworkdpr" }, { label: "Room Master" }]} />
 
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <DataTable columns={columns} data={categories} loading={isLoading} emptyMessage="No room categories found. Add one to get started." />
@@ -194,7 +194,7 @@ export default function RoomCategoryMaster() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{editing ? "Edit Room Category" : "New Room Category"}</DialogTitle>
+            <DialogTitle>{editing ? "Edit Room Type" : "New Room Type"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 pt-1" onKeyDown={preventEnterSubmit}>
             <div className="space-y-1.5">

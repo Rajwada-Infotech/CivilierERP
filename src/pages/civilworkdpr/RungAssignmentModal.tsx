@@ -108,7 +108,7 @@ function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number
         </div>
       ) : !blueprint ? (
         <p className="text-xs text-muted-foreground italic py-1.5">
-          No blueprint uploaded for this room yet — upload one from Setup &gt; Room Master.
+          No blueprint uploaded for this room yet — upload one from Setup &gt; Flat Master.
         </p>
       ) : (
         <button
