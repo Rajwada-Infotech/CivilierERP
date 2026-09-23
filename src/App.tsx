@@ -171,6 +171,9 @@ const WorkCheckpointMaster = lazy(
 const ContractorRegister = lazy(
   () => import("./pages/civilworkdpr/ContractorRegister"),
 );
+const ActivityChainTemplate = lazy(
+  () => import("./pages/civilworkdpr/ActivityChainTemplate"),
+);
 const DependencyTracker = lazy(
   () => import("./pages/civilworkdpr/DependencyTracker"),
 );
@@ -1219,6 +1222,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-contractor-register">
             <ContractorRegister />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/activity-chain-template"
+        element={
+          <ProtectedRoute pageKey="dpr-activity-chain-template">
+            <ActivityChainTemplate />
           </ProtectedRoute>
         }
       />
