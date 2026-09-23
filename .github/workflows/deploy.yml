@@ -35,7 +35,12 @@ jobs:
           command_timeout: 20m
           script: |
             set -euo pipefail
-            cd ~/CivilierERP
+            # Absolute path, not ~ — $HOME in this box's WSL environment
+            # resolves to a broken value ("C:UsersAdministrator", no
+            # slashes) inherited from Windows, so ~ expansion fails under a
+            # fresh non-interactive SSH login even though it works fine in
+            # an already-open interactive shell.
+            cd /home/administrator/CivilierERP
 
             BRANCH="${{ github.event.inputs.branch }}"
             echo "Deploying branch: $BRANCH"
