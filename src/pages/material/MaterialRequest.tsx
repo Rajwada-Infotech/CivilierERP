@@ -354,14 +354,47 @@ export default function MaterialRequest() {
     return m;
   }, [itemOptions]);
 
+  // Whole days between Request Date and Required By Date — null when either
+  // isn't set yet, meaning "no constraint" (nothing to filter against). Can
+  // legitimately be 0 (same-day) or negative (a not-yet-corrected date pair
+  // mid-edit); the filter below just excludes anything whose lead time
+  // doesn't fit, so 0/negative naturally excludes every item with a real
+  // Days of Supply set.
+  const availableSupplyDays = useMemo(() => {
+    if (!header.requestDate || !header.requiredByDate) return null;
+    const start = new Date(`${header.requestDate}T00:00:00`);
+    const end = new Date(`${header.requiredByDate}T00:00:00`);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+    return Math.round((end.getTime() - start.getTime()) / 86_400_000);
+  }, [header.requestDate, header.requiredByDate]);
+
+  // An item already picked on some cart row stays selectable everywhere —
+  // filtering it out of the list the moment the date window shrinks would
+  // make that row's own ItemPicker unable to display its current value.
+  const selectedItemIds = useMemo(
+    () => new Set(cart.map((ci) => ci.ItemId).filter(Boolean)),
+    [cart],
+  );
+
   const pickableItems = useMemo(
     () =>
-      (itemOptions as any[]).map((item) => ({
-        id: String(item.M_Id),
-        name: `${item.M_Name} — Stock: ${Number(item.AvailableStock).toFixed(2)}${item.M_Group ? ` · ${item.M_Group}` : ""}`,
-        itemType: item.M_Type ?? "",
-      })),
-    [itemOptions],
+      (itemOptions as any[])
+        .filter((item) => {
+          if (availableSupplyDays === null) return true; // no Required By Date chosen yet
+          if (selectedItemIds.has(String(item.M_Id))) return true;
+          const dos = item.DaysOfSupply;
+          // Days of Supply is a new field — most items don't have one set
+          // yet. No data means no constraint: show it anyway, exactly like
+          // an item whose lead time already fits.
+          if (dos === null || dos === undefined || dos === "") return true;
+          return Number(dos) <= availableSupplyDays;
+        })
+        .map((item) => ({
+          id: String(item.M_Id),
+          name: `${item.M_Name} — Stock: ${Number(item.AvailableStock).toFixed(2)}${item.M_Group ? ` · ${item.M_Group}` : ""}`,
+          itemType: item.M_Type ?? "",
+        })),
+    [itemOptions, availableSupplyDays, selectedItemIds],
   );
 
   const uomMap = useMemo(() => {
@@ -1205,6 +1238,11 @@ export default function MaterialRequest() {
                 {header.projectId && (
                   <span className="ml-2 text-emerald-600 dark:text-emerald-400 font-medium">
                     · Stock from project godown
+                  </span>
+                )}
+                {availableSupplyDays !== null && (
+                  <span className="ml-2 text-amber-600 dark:text-amber-400 font-medium">
+                    · Only items deliverable within {availableSupplyDays} day{availableSupplyDays === 1 ? "" : "s"} are listed
                   </span>
                 )}
               </p>
