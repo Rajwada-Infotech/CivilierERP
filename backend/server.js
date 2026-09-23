@@ -254,7 +254,7 @@ const ALL_ROUTES = [
   { path: "/api/asset-transfer", file: "./routes/assetTransfer" },
   { path: "/api/fixed-asset-quality-check", file: "./routes/fixedAssetQualityCheck" },
   { path: "/api/fixed-asset-maintenance", file: "./routes/fixedAssetMaintenance" },
-  { path: "/api/home/activity-feed", file: "./routes/homeActivity" },
+  { path: "/api/home", file: "./routes/homeActivity" },
   { path: "/api/id-template-master", file: "./routes/idTemplateMaster" },
   { path: "/api/work-progress", file: "./routes/workProgress" },
   { path: "/api/contractor-allocation", file: "./routes/contractorAllocation" },
