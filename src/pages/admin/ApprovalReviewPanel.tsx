@@ -299,6 +299,22 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
       )
     : [];
 
+  // NewPayment's PSupplierName/PSupplierContact columns are reused verbatim
+  // for a CRM Refund payout's customer ledger head (see ensureCrmCustomerLedgerHead
+  // in crmLedger.js) — labelizeKey's generic column-name split would show
+  // "Supplier Name"/"Supplier Contact" for what is actually the customer
+  // being refunded, which reads as a wrong-ledger red flag to a reviewer.
+  // Relabel just those two keys when this record is a CRM Refund voucher.
+  const isCrmRefundPayment = !!(detail as Record<string, unknown> | null)?.SourceCrmRefundId;
+  const labelFor = (k: string): string => {
+    if (isCrmRefundPayment) {
+      const stripped = stripDbPrefix(k).toLowerCase();
+      if (stripped === "suppliername") return "Customer Name";
+      if (stripped === "suppliercontact") return "Customer Contact";
+    }
+    return labelizeKey(k);
+  };
+
   const chainSection = (
     <>
       <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
@@ -539,7 +555,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   {extraFields.map(([k, v]) => (
-                    <FormField key={k} label={labelizeKey(k)} value={formatPreviewValue(v)} />
+                    <FormField key={k} label={labelFor(k)} value={formatPreviewValue(v)} />
                   ))}
                 </div>
               )}
