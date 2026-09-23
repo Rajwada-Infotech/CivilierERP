@@ -70,6 +70,9 @@ export interface InboxItem {
   SourceTransferDocNo: string | null;
   FromGodownName: string | null;
   ToGodownName: string | null;
+  // journal-voucher only — "AccountHead Dr/Cr Amount | AccountHead Dr/Cr Amount"
+  // for every line on the voucher, null for all other modules.
+  JournalVoucherSummary: string | null;
   // Set by the backend's visibility filter (approvalInbox.js) only when the
   // viewer is named somewhere on this record's workflow but NOT on the
   // level it's currently sitting at — e.g. a Level-2 approver looking at a
@@ -683,7 +686,10 @@ export function extractLineItems(detail: Record<string, unknown> | null): Record
   // (materialRequests.js: `{ ...header, items: [...] }`) — missing it meant
   // the review panel's line-items table silently never rendered for MRs at
   // all, even though the data was right there in `detail`.
-  for (const key of ["LineItems", "POItems", "Items", "items"]) {
+  // "lines" (lowercase) covers Journal Vouchers' own GET /:id response
+  // (journalVoucher.js: `{ ...header, lines: [...] }`) — same class of gap
+  // as "items" above, just for JV's debit/credit lines.
+  for (const key of ["LineItems", "POItems", "Items", "items", "lines"]) {
     const v = detail[key];
     if (Array.isArray(v) && v.length > 0) return v as Record<string, unknown>[];
   }
@@ -880,6 +886,16 @@ const InboxRow: React.FC<{
                 </span>
               )}
             </div>
+          ) : item.Module === "journal-voucher" && item.JournalVoucherSummary ? (
+            <span className="truncate" title={item.JournalVoucherSummary}>
+              {item.JournalVoucherSummary}
+            </span>
+          ) : item.Module === "fund-transfer" && item.ContractorName && item.SupplierName ? (
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+              <span className="truncate">{item.ContractorName}</span>
+              <ArrowLeftRight size={8} className="shrink-0" />
+              <span className="truncate">{item.SupplierName}</span>
+            </span>
           ) : (
             <span className="truncate">{party}</span>
           )}
@@ -989,6 +1005,28 @@ const InboxRow: React.FC<{
                 <span className="truncate">{item.ToGodownName}</span>
               </span>
             )}
+          </div>
+        ) : item.Module === "journal-voucher" && item.JournalVoucherSummary ? (
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+              Account heads
+            </span>
+            <p className="text-xs text-foreground truncate" title={item.JournalVoucherSummary}>
+              {item.JournalVoucherSummary}
+            </p>
+          </div>
+        ) : item.Module === "fund-transfer" && item.ContractorName && item.SupplierName ? (
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+              From → To
+            </span>
+            <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+              <Building2 size={9} className="shrink-0 text-blue-500" />
+              <span className="truncate">{item.ContractorName}</span>
+              <ArrowLeftRight size={8} className="shrink-0 text-muted-foreground" />
+              <Building2 size={9} className="shrink-0 text-violet-500" />
+              <span className="truncate">{item.SupplierName}</span>
+            </span>
           </div>
         ) : (
           <p className="text-xs text-foreground truncate">{party}</p>

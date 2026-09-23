@@ -187,14 +187,15 @@ router.use(requirePageRight("approval-inbox", "view"));
 
 // NULL placeholders so every UNION ALL branch has the same column count.
 // Only the expense-booking branch populates GrnTotalAmount, GrnBasicAmount,
-// and BillingTermsData.
+// and BillingTermsData; only journal-voucher populates JournalVoucherSummary.
 const NULL_EXTRA = `
   CAST(NULL AS DECIMAL(18,2)) AS GrnTotalAmount,
   CAST(NULL AS DECIMAL(18,2)) AS GrnBasicAmount,
   CAST(NULL AS NVARCHAR(MAX)) AS BillingTermsData,
   CAST(NULL AS NVARCHAR(100)) AS SourceTransferDocNo,
   CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
-  CAST(NULL AS NVARCHAR(255)) AS ToGodownName,`;
+  CAST(NULL AS NVARCHAR(255)) AS ToGodownName,
+  CAST(NULL AS NVARCHAR(MAX)) AS JournalVoucherSummary,`;
 
 // Builds the per-module SELECT list (optionally scoped to one module) shared
 // by both GET / (the full inbox) and GET /count (the badge) — a single
@@ -321,6 +322,7 @@ function buildInboxQueries(module) {
           grn.SourceTransferDocNo                   AS SourceTransferDocNo,
           fg.GodownName                             AS FromGodownName,
           tg.GodownName                             AS ToGodownName,
+          CAST(NULL AS NVARCHAR(MAX))               AS JournalVoucherSummary,
           CAST(ISNULL(po.PurchaseOrderNo, '') AS NVARCHAR(255)) AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -403,6 +405,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR(100)) AS SourceTransferDocNo,
           CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
           CAST(NULL AS NVARCHAR(255)) AS ToGodownName,
+          CAST(NULL AS NVARCHAR(MAX)) AS JournalVoucherSummary,
           CAST(ISNULL(u_created.name, CAST(eb.ECreatedBy AS NVARCHAR(255))) AS NVARCHAR(255))  AS CreatedBy,
           CAST(ISNULL(u_approved.name, '') AS NVARCHAR(255))                                    AS ApprovedBy,
           ''                       AS ApprovedAt,
@@ -629,6 +632,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR(100))                  AS SourceTransferDocNo,
           fg.GodownName                                 AS FromGodownName,
           tg.GodownName                                 AS ToGodownName,
+          CAST(NULL AS NVARCHAR(MAX))                  AS JournalVoucherSummary,
           CAST(so.CreatedBy AS NVARCHAR(255))          AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -684,7 +688,29 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR)                AS ContractorName,
           CAST(NULL AS NVARCHAR)                AS SupplierName,
           (SELECT SUM(DebitAmount) FROM dbo.JournalVoucherLines WHERE JVID = jv.JVID) AS Amount,
-          ${NULL_EXTRA}
+          CAST(NULL AS DECIMAL(18,2))           AS GrnTotalAmount,
+          CAST(NULL AS DECIMAL(18,2))           AS GrnBasicAmount,
+          CAST(NULL AS NVARCHAR(MAX))           AS BillingTermsData,
+          CAST(NULL AS NVARCHAR(100))           AS SourceTransferDocNo,
+          CAST(NULL AS NVARCHAR(255))           AS FromGodownName,
+          CAST(NULL AS NVARCHAR(255))           AS ToGodownName,
+          -- One "AccountHead Dr/Cr ₹Amount" segment per line, so the inbox
+          -- row can show exactly which heads this JV moves money between
+          -- without a second round trip — same account-head join every other
+          -- JV screen already uses (journalVoucher.js), just aggregated here.
+          (
+            SELECT STRING_AGG(
+              CONCAT(
+                ISNULL(ahm.DisplayName, ahm.LHeadName),
+                CASE WHEN l.DebitAmount IS NOT NULL THEN ' Dr ' ELSE ' Cr ' END,
+                FORMAT(ISNULL(l.DebitAmount, l.CreditAmount), 'N2')
+              ),
+              ' | '
+            ) WITHIN GROUP (ORDER BY l.SortOrder)
+            FROM dbo.JournalVoucherLines l
+            JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = l.LHeadId
+            WHERE l.JVID = jv.JVID
+          )                                    AS JournalVoucherSummary,
           CAST(jv.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,
@@ -744,7 +770,20 @@ function buildInboxQueries(module) {
           ''                                      AS ApprovedBy,
           ''                                      AS ApprovedAt,
           ''                                      AS RejectedBy,
-          ISNULL(CAST(ft.Narration AS NVARCHAR(MAX)), '') AS RejectionNote,
+          -- Was ft.Narration — the transfer's own free-text description, not
+          -- a rejection reason, so every pending (never-rejected) transfer's
+          -- narration showed up mislabeled as a "Rejection Note" in the
+          -- inbox. Same bug class already fixed for journal-voucher below;
+          -- actual rejection reasons live in ApprovalAuditLog like every
+          -- other module here.
+          ISNULL((
+            SELECT TOP 1 Note
+            FROM dbo.ApprovalAuditLog
+            WHERE TableName = 'FundTransfer'
+              AND RecordId = ft.FTId
+              AND ActionStatus = 'Rejected'
+            ORDER BY ActionAt DESC
+          ), '')                                  AS RejectionNote,
           ft.CreatedAt                            AS LastModified
         FROM dbo.FundTransfer ft
         LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
