@@ -59,7 +59,11 @@ async function fetchEligibleSources(customerId?: number): Promise<any[]> {
 }
 async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
   if (projectId == null) return [];
-  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
+  // excludeCash=1 — a refund is always disbursed as a bank transfer to the
+  // customer's own account; Cash in Hand (selectable elsewhere, e.g. a cash
+  // payment mode on NewPayment) has no business appearing as a refund's
+  // disbursing bank. See crmProjectBanks.js's /for-project comment.
+  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}?excludeCash=1`); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
