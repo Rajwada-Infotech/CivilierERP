@@ -41,6 +41,11 @@ export interface DirectLineItem {
   rate: number;
   /** Computed: qty x rate. */
   amount: number;
+  // From the selected Item Master row's own tag (M_CostCenterId) — same
+  // auto-fill convention Purchase Order's line items already use. Not yet
+  // consumed by GL posting for direct/TOD bookings (see the comment on
+  // DirectItemsTable below) — persisted so it's available once that's wired.
+  costCenterId?: string | null;
 }
 
 interface UomOption {
@@ -56,7 +61,7 @@ function makeKey() {
 }
 
 function blankItem(defaultUom: string): DirectLineItem {
-  return { _key: makeKey(), description: "", qty: 1, uom: defaultUom, rate: 0, amount: 0 };
+  return { _key: makeKey(), description: "", qty: 1, uom: defaultUom, rate: 0, amount: 0, costCenterId: null };
 }
 
 export function computeItemAmount(qty: number, rate: number): number {
@@ -78,6 +83,7 @@ export function makeDirectLineItem(data: Partial<DirectLineItem>): DirectLineIte
     uom: data.uom || "",
     rate,
     amount: computeItemAmount(qty, rate),
+    costCenterId: data.costCenterId ?? null,
   };
 }
 
@@ -204,8 +210,11 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
 
   // Item picker — DINV/Other Expenses is a service-driven booking (no
   // goods, since goods always flow through a GRN first), so only Item
-  // Master rows tagged M_Type='Service' are offered here. Posting these
-  // against GL/cost-center per item is a follow-up, not wired yet.
+  // Master rows tagged M_Type='Service' are offered here. Each line now
+  // carries costCenterId (auto-filled from the item's own Item Master tag,
+  // see onSelect below) so it's captured and persisted — actually posting
+  // it against GL per item (rather than the booking's single header-level
+  // ECostCenter) is still a follow-up.
   const [serviceItems, setServiceItems] = useState<DbItem[]>([]);
   const [itemsLoading, setItemsLoading] = useState(false);
 
@@ -332,6 +341,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
                     patch(i, {
                       description: it.M_Name,
                       ...(it.M_UOM ? { uom: it.M_UOM } : {}),
+                      costCenterId: it.M_CostCenterId != null ? String(it.M_CostCenterId) : null,
                     });
                     if (it.M_UOM) lastUom.current = it.M_UOM;
                   }}

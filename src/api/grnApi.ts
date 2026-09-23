@@ -93,6 +93,10 @@ export interface GRNItemLine {
   quantity: number;
   /** Computed: rate Ã— quantity. Stored for audit trail. */
   totalAmount: number;
+  // Inherited from the linked PO line's own Cost Centre (which was itself
+  // auto-filled from Item Master) — not re-resolved here, since every GRN
+  // is raised against a PO.
+  costCenterId?: string | null;
 }
 
 export interface GRNFormDataPayload {

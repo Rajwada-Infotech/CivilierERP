@@ -5171,6 +5171,14 @@ const Payment: React.FC = () => {
                           </p>
                         </div>
                       </div>
+                      {paymentChainData.invoice?.ECostCenter && (
+                        <div className="mt-2 pt-2 border-t border-primary/10 flex items-center justify-between">
+                          <span className="text-[9px] text-muted-foreground uppercase">Cost Centre</span>
+                          <span className="text-xs font-medium text-foreground">
+                            {paymentChainData.invoice.ECostCenter}
+                          </span>
+                        </div>
+                      )}
                     </div>
                     );
                   })()}

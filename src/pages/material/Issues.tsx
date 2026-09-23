@@ -100,6 +100,9 @@ interface CartItem {
   ItemName?: string;
   AvailableStock?: number;
   DefaultUOM?: string;
+  // From the selected item's own Item Master tag (M_CostCenterId) — same
+  // auto-fill convention Purchase Order's line items already use.
+  CostCenterId?: string;
 }
 
 interface IssueHeader {
@@ -461,6 +464,7 @@ export default function Issues() {
                 AvailableStock: Number(found?.AvailableStock ?? 0),
                 DefaultUOM: resolvedUom,
                 UOMCode: resolvedUom,
+                CostCenterId: found?.M_CostCenterId ? String(found.M_CostCenterId) : "",
               }
             : ci,
         ),
@@ -631,6 +635,7 @@ export default function Issues() {
       Remarks: it.Remarks ?? "",
       ItemName: it.ItemName,
       AvailableStock: Number(itemMap[it.ItemId]?.AvailableStock ?? 0),
+      CostCenterId: it.CostCenterId != null ? String(it.CostCenterId) : "",
     }));
     setCart(items.length > 0 ? items : [blankCartItem()]);
     setEditingId(record.IssueId);
@@ -686,6 +691,7 @@ export default function Issues() {
           UOMCode: ci.UOMCode,
           Quantity: Number(ci.Quantity),
           Remarks: ci.Remarks || null,
+          CostCenterId: ci.CostCenterId || null,
         })),
     };
     if (editingId != null) {

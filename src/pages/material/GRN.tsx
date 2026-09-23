@@ -1420,6 +1420,7 @@ export default function GRN() {
           totalAmount,
           gstPct,
           gstAmount: totalAmount * (gstPct / 100),
+          costCenterId: it.CostCenterId != null ? String(it.CostCenterId) : null,
         };
       });
 
