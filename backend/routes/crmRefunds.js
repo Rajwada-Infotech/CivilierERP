@@ -545,18 +545,30 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
     if (!(await isFinanceApprover(role, viewerUserId))) {
       return res.status(403).json({ error: "Only accounts/finance heads or admins can finance-approve a refund" });
     }
-    const cur = await pool.request().input("id", sql.Int, id).query(`
+    // Locked for the life of this request — two concurrent finance-approve
+    // calls (double-click, or two Finance users racing) must not both pass
+    // this check and each mint their own NewPayment voucher for the same
+    // refund. Everything through the closing UPDATE below runs inside this
+    // one transaction so the row stays locked until either a voucher is
+    // committed or the whole attempt rolls back.
+    const tx = pool.transaction();
+    await tx.begin();
+    let committed = false;
+    try {
+    const cur = await tx.request().input("id", sql.Int, id).query(`
       SELECT Id, RefundNo, Status, CustomerId, CompanyId, ProjectId, NetAmount, GrossAmount,
              SourceOnAccountId, RefundBankLHeadId, CustomerBankName, CustomerAccountNo, FinanceNewPaymentId,
              PreferredPaymentMode
-      FROM dbo.CrmRefund WHERE Id = @id
+      FROM dbo.CrmRefund WITH (UPDLOCK, HOLDLOCK) WHERE Id = @id
     `);
-    if (!cur.recordset.length) return res.status(404).json({ error: "Refund not found" });
+    if (!cur.recordset.length) { await tx.rollback(); return res.status(404).json({ error: "Refund not found" }); }
     const rf = cur.recordset[0];
     if (rf.Status !== "FinancePending") {
+      await tx.rollback();
       return res.status(400).json({ error: `Cannot finance-approve — status must be FinancePending (currently '${rf.Status}')` });
     }
     if (rf.FinanceNewPaymentId) {
+      await tx.rollback();
       return res.status(409).json({ error: "A payout voucher already exists for this refund" });
     }
     // Last checkpoint before real money leaves — re-validate against the
@@ -565,21 +577,23 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
     // consumed the same held credit in the days since. See
     // getUnclaimedRemaining for why AppliedAmount alone isn't enough.
     if (rf.SourceOnAccountId) {
-      const { found, unclaimed } = await getUnclaimedRemaining(pool, rf.SourceOnAccountId, { excludeRefundId: rf.Id });
-      if (!found) return res.status(409).json({ error: "The source credit for this refund no longer exists" });
+      const { found, unclaimed } = await getUnclaimedRemaining(tx, rf.SourceOnAccountId, { excludeRefundId: rf.Id });
+      if (!found) { await tx.rollback(); return res.status(409).json({ error: "The source credit for this refund no longer exists" }); }
       if (Number(rf.GrossAmount) > unclaimed + 0.01) {
+        await tx.rollback();
         return res.status(409).json({
           error: `Cannot disburse — the source credit's available balance (₹${unclaimed.toLocaleString("en-IN")}) is now less than this refund's amount (₹${Number(rf.GrossAmount).toLocaleString("en-IN")}). It was likely consumed by a re-booking transfer or another refund in the meantime.`,
         });
       }
     }
     const bankId = req.body?.RefundBankLHeadId !== undefined && req.body?.RefundBankLHeadId !== null && req.body?.RefundBankLHeadId !== "" ? parseInt(req.body.RefundBankLHeadId, 10) : rf.RefundBankLHeadId;
-    if (bankId == null) return res.status(400).json({ error: "A company bank account (RefundBankLHeadId) is required to disburse this refund" });
+    if (bankId == null) { await tx.rollback(); return res.status(400).json({ error: "A company bank account (RefundBankLHeadId) is required to disburse this refund" }); }
     if (!rf.CustomerBankName && !rf.CustomerAccountNo) {
+      await tx.rollback();
       return res.status(400).json({ error: "Customer bank details are missing — add them to the refund before disbursing" });
     }
     const net = Number(rf.NetAmount) || 0;
-    if (net <= 0) return res.status(400).json({ error: "Net refund amount must be greater than 0" });
+    if (net <= 0) { await tx.rollback(); return res.status(400).json({ error: "Net refund amount must be greater than 0" }); }
 
     // Payment Mode is optional here, not mandatory — Finance can set it now
     // to skip the follow-up edit on the spawned voucher, or leave it for
@@ -587,28 +601,28 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
     // noted as a preference when the refund was raised, if anything.
     let paymentMode;
     try { paymentMode = validatePaymentMode(req.body?.PaymentMode ?? rf.PreferredPaymentMode); }
-    catch (e) { return res.status(400).json({ error: e.message }); }
+    catch (e) { await tx.rollback(); return res.status(400).json({ error: e.message }); }
 
     // Bank name is known the moment bankId is — resolving and storing it
     // now (instead of leaving PBankName blank for Finance to fill in later)
     // is what the whole Payment.tsx NOT-NULL crash chain traced back to.
-    const bankRow = await pool.request().input("bid", sql.Int, bankId)
+    const bankRow = await tx.request().input("bid", sql.Int, bankId)
       .query("SELECT LHeadName FROM dbo.AccountHeadMaster WHERE LHeadId = @bid");
     const bankName = bankRow.recordset[0]?.LHeadName || "";
 
     const actorEmail = req.user?.email || req.user?.name || String(actorId(req));
-    const customerHeadId = await ensureCrmCustomerLedgerHead(pool, rf.CustomerId, actorEmail);
-    const docTypeId = await resolveDocTypeId(pool, sql, "PAY");
-    const finalDocNo = await lockNextDocNumber(pool, sql, {
+    const customerHeadId = await ensureCrmCustomerLedgerHead(tx, rf.CustomerId, actorEmail);
+    const docTypeId = await resolveDocTypeId(tx, sql, "PAY");
+    const finalDocNo = await lockNextDocNumber(tx, sql, {
       docTypeId, tableName: "NewPayment", docNoColumn: "DocNo", issuedBy: actorEmail,
     });
     const parts = (finalDocNo || "").split("-");
     const docYear = parseInt(parts[parts.length - 2], 10) || null;
     const docSerial = parseInt(parts[parts.length - 1], 10) || null;
     const today = new Date().toISOString().slice(0, 10);
-    const finYearId = await resolveFinYearId(pool, today);
+    const finYearId = await resolveFinYearId(tx, today);
 
-    const npIns = await pool.request()
+    const npIns = await tx.request()
       .input("name", sql.VarChar, "CRM Refund")
       .input("remarks", sql.NVarChar(1000), `${rf.RefundNo} — customer refund ₹${net.toLocaleString("en-IN")} to ${rf.CustomerBankName || "customer bank"} ${rf.CustomerAccountNo || ""}${paymentMode ? "" : " — finance to complete payment details"}`)
       .input("mode", sql.VarChar(50), paymentMode)
@@ -644,19 +658,32 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
         )
       `);
     const newPaymentId = npIns.recordset[0].PPaymentID;
-    await backPatchRecordId(pool, sql, finalDocNo, "NewPayment", newPaymentId);
+    await backPatchRecordId(tx, sql, finalDocNo, "NewPayment", newPaymentId);
 
-    await pool.request()
+    // Guard the write itself, not just the read above — under the row lock
+    // this can't actually fail, but keeping the WHERE clause honest (rather
+    // than an unconditional UPDATE) means a future refactor that loosens the
+    // locking can't silently reintroduce the double-voucher race.
+    const upd = await tx.request()
       .input("id", sql.Int, id).input("np", sql.Int, newPaymentId)
       .input("bank", sql.Int, bankId).input("fc", sql.Int, actorId(req))
       .query(`
         UPDATE dbo.CrmRefund SET
           Status = 'FinanceApproved', FinanceNewPaymentId = @np, RefundBankLHeadId = @bank,
           FinanceClearedBy = @fc, FinanceClearedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
+        WHERE Id = @id AND Status = 'FinancePending' AND FinanceNewPaymentId IS NULL
       `);
+    if (upd.rowsAffected[0] !== 1) {
+      throw new Error("Refund status changed under us — another approval was already in progress");
+    }
+    await tx.commit();
+    committed = true;
     await Promise.all([bumpCacheVersion("crm-refunds"), bumpCacheVersion("new-payment")]);
     res.json({ success: true, status: "FinanceApproved", newPaymentId, docNo: finalDocNo });
+    } catch (e) {
+      try { if (!committed) await tx.rollback(); } catch {}
+      throw e;
+    }
   } catch (e) {
     console.error("[crm-refunds] finance-approve error:", e.message);
     res.status(500).json({ error: "An internal error occurred. Please try again later." });
