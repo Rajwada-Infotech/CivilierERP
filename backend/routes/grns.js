@@ -1826,9 +1826,12 @@ router.put(
 );
 
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
 router.put(
   "/:id/approve",
-  requirePageRight("grn-master", "edit"),
   async (req, res) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid id" });
@@ -1863,7 +1866,6 @@ router.put(
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
 router.put(
   "/:id/reject",
-  requirePageRight("grn-master", "edit"),
   async (req, res) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid id" });

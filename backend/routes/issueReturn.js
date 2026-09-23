@@ -356,7 +356,11 @@ router.put("/:id/submit", requirePageRight("material-issue-return", "edit"), asy
 // transition() itself is the authority on this (it accounts for multi-level
 // and "everyone must approve" workflows configured in Approval Setup), same
 // pattern stockTransfers.js and saleOrders.js use for their own stock posts.
-router.put("/:id/approve", requirePageRight("material-issue-return", "edit"), async (req, res) => {
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -420,7 +424,7 @@ router.put("/:id/approve", requirePageRight("material-issue-return", "edit"), as
 // ── PUT /:id/reject ───────────────────────────────────────────────────────────
 // Nothing was ever posted to StockLedger before approval, so there is
 // nothing to reverse here.
-router.put("/:id/reject", requirePageRight("material-issue-return", "edit"), async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
   try {
