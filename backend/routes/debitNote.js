@@ -538,7 +538,12 @@ router.put("/:id/submit", requirePageRight("debit-note", "edit"), async (req, re
 });
 
 // ─── PUT /:id/approve — Pending → Approved (posts GL) ────────────────────────
-router.put("/:id/approve", requirePageRight("debit-note", "edit"), async (req, res) => {
+// No requirePageRight gate here (or on /:id/reject below) — transition()
+// is the real authority on who can approve/reject (role whitelist,
+// approval-inbox edit right, or named workflow approver from Approval
+// Setup). requirePageRight used to 403 a named approver before transition()
+// ever got a chance to say yes, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -551,7 +556,7 @@ router.put("/:id/approve", requirePageRight("debit-note", "edit"), async (req, r
 });
 
 // ─── PUT /:id/reject — Pending → Rejected ────────────────────────────────────
-router.put("/:id/reject", requirePageRight("debit-note", "edit"), async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   const id = toInt(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {

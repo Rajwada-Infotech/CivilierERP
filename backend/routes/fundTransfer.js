@@ -574,8 +574,13 @@ router.put("/:id/remarks", authenticateToken, requirePageRight("fund-transfer", 
   }
 });
 
-// ── PUT /:id/approve — Pending → Approved (super_admin only) ────────────────
-router.put("/:id/approve", authenticateToken, requirePageRight("fund-transfer", "edit"), async (req, res) => {
+// ── PUT /:id/approve — Pending → Approved (super_admin, OR anyone named as
+// an approver on this record's current level in Approval Setup) ───────────
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", authenticateToken, async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 
@@ -635,7 +640,7 @@ router.put("/:id/approve", authenticateToken, requirePageRight("fund-transfer", 
 });
 
 // ── PUT /:id/reject — Pending → Rejected (super_admin only) ─────────────────
-router.put("/:id/reject", authenticateToken, requirePageRight("fund-transfer", "edit"), async (req, res) => {
+router.put("/:id/reject", authenticateToken, async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 
