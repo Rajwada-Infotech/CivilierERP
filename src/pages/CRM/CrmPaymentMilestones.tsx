@@ -1061,7 +1061,9 @@ const CrmPaymentMilestones: React.FC = () => {
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                     <option value="">Select company bank</option>
                     {(bankOptions as any[]).map((b: any) => (
-                      <option key={b.BId} value={String(b.BId)}>{b.BName}{b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}</option>
+                      <option key={b.BId} value={String(b.BId)}>
+                        {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -1192,7 +1194,9 @@ const CrmPaymentMilestones: React.FC = () => {
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                   <option value="">Select company bank</option>
                   {(bankOptions as any[]).map((b: any) => (
-                    <option key={b.BId} value={String(b.BId)}>{b.BName}{b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}</option>
+                    <option key={b.BId} value={String(b.BId)}>
+                      {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                    </option>
                   ))}
                 </select>
               </div>

@@ -267,7 +267,11 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                 <label className="text-xs text-muted-foreground block mb-1">Company bank (disburses from)</label>
                 <select value={bankLHeadId} onChange={(e) => setBankLHeadId(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
                   <option value="">Finance will pick at approval</option>
-                  {(banks as any[]).map((b) => <option key={b.BId} value={String(b.BId)}>{b.BName}</option>)}
+                  {(banks as any[]).map((b) => (
+                    <option key={b.BId} value={String(b.BId)}>
+                      {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -453,7 +457,11 @@ const CrmRefunds: React.FC = () => {
                 <label className="text-xs text-muted-foreground block mb-1">Company bank to disburse from *</label>
                 <select value={financeBank} onChange={(e) => setFinanceBank(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
                   <option value="">Select…</option>
-                  {(financeBanks as any[]).map((b) => <option key={b.BId} value={String(b.BId)}>{b.BName}</option>)}
+                  {(financeBanks as any[]).map((b) => (
+                    <option key={b.BId} value={String(b.BId)}>
+                      {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                    </option>
+                  ))}
                 </select>
               </div>
               <p className="text-[11px] text-muted-foreground">Approving raises a Finance payment voucher. The refund is marked Paid when that voucher is approved.</p>

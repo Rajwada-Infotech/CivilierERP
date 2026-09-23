@@ -1016,7 +1016,9 @@ const CrmBooking: React.FC = () => {
                       </SelectTrigger>
                       <SelectContent>
                         {(bankOptions as any[]).map((b: any) => (
-                          <SelectItem key={b.BId} value={String(b.BId)}>{b.BName}</SelectItem>
+                          <SelectItem key={b.BId} value={String(b.BId)}>
+                            {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

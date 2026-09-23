@@ -2059,7 +2059,9 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
                         <option value="">— Select deposit bank —{bankOptions.length > 0 ? " *" : ""}</option>
                         {(bankOptions as any[]).map((b: any) => (
-                          <option key={b.BId} value={String(b.BId)}>{b.BName}</option>
+                          <option key={b.BId} value={String(b.BId)}>
+                            {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                          </option>
                         ))}
                       </select>
                       {payForm.PaymentMode === "Cheque" && (

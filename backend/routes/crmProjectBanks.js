@@ -34,11 +34,18 @@ router.get("/", requirePageRight("crm-project-banks", "view"), async (req, res) 
 // to scope its deposit-bank dropdown. Deliberately NOT gated behind
 // requirePageRight("crm-project-banks", ...) like its siblings in this file —
 // staff recording a CRM payment/refund/cancellation need this dropdown even
-// if their role has no rights on the Project-Bank tagging screen itself, and
-// the response is just bank id/name pairs (no balances, no account numbers).
+// if their role has no rights on the Project-Bank tagging screen itself.
 // Explicit decision, not an oversight (audited 2026-09; see crmRefunds.js /
 // crmPayments.js / crmCancellations.js callers) — keep this route
 // authenticated-only, do not add a page-right guard here.
+//
+// Still deliberately never returns the full account number — that stays a
+// Bank Master-only detail. BBranch + a masked last-4 (BAccountLast4) were
+// added after a real production mix-up: multiple company bank accounts can
+// share the exact same brand name ("Axis Bank" tagged twice for two
+// different branches/accounts), and the name-only dropdown made them
+// genuinely indistinguishable. Branch name and a masked last-4 are enough
+// to tell accounts apart without exposing the sensitive full number.
 // This is the full rule, resolved server-side so no caller can get it wrong:
 //   1. Any bank(s) tagged to this Project -> return exactly those, nothing
 //      else (a tagged bank is exclusive to its tagged Project(s) and must
@@ -62,7 +69,10 @@ router.get("/for-project/:projectId", async (req, res) => {
     // fell through to branch (2) and leaked every untagged bank in the
     // system into a project meant to be exclusive to specific banks.
     const rows = await pool.request().input("pid", sql.Int, projectId).query(`
-      SELECT ah.LHeadId AS BId, ah.LHeadName AS BName, ah.LHeadStatus AS BStatus
+      SELECT ah.LHeadId AS BId, ah.LHeadName AS BName, ah.LHeadStatus AS BStatus,
+             ah.LBranchName AS BBranch,
+             CASE WHEN LEN(ISNULL(ah.LAccountNo, '')) >= 4
+                  THEN RIGHT(ah.LAccountNo, 4) ELSE NULL END AS BAccountLast4
       FROM dbo.CrmProjectBank pb
       JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = pb.BankLHeadId
       WHERE pb.ProjectId = @pid AND pb.IsActive = 1
@@ -82,12 +92,15 @@ router.get("/for-project/:projectId", async (req, res) => {
       // to a project, its dropdown still shows nothing). Use a truthy check
       // instead so it works regardless of whether the driver hands back a
       // boolean or a 1/0.
-      return res.json(rows.recordset.filter((r) => !!r.BStatus).map(({ BId, BName }) => ({ BId, BName })));
+      return res.json(rows.recordset.filter((r) => !!r.BStatus).map(({ BId, BName, BBranch, BAccountLast4 }) => ({ BId, BName, BBranch, BAccountLast4 })));
     }
 
     // No banks are tagged to this project — show ALL active company banks
     const allBanks = await pool.request().query(`
-      SELECT ah.LHeadId AS BId, ah.LHeadName AS BName
+      SELECT ah.LHeadId AS BId, ah.LHeadName AS BName,
+             ah.LBranchName AS BBranch,
+             CASE WHEN LEN(ISNULL(ah.LAccountNo, '')) >= 4
+                  THEN RIGHT(ah.LAccountNo, 4) ELSE NULL END AS BAccountLast4
       FROM dbo.AccountHeadMaster ah
       WHERE ah.LHeadType = 'B' AND ah.LHeadStatus = 1
       ORDER BY ah.LHeadName
