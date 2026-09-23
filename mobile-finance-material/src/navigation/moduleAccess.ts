@@ -19,7 +19,7 @@ export const MODULE_PAGES: Record<string, string[]> = {
   ticket: ["ticket-dashboard", "tickets"],
   sales: ["sale-order", "sale-invoice", "sales-payment"],
   salesAutomation: ["sa-leads", "sa-inquiry", "sa-site-visits", "sa-campaigns", "sa-ads"],
-  civilworkdpr: ["civilworkdpr-dashboard", "civilworkdpr-dependency", "civilworkdpr-contractor-register", "civilworkdpr-worker-attendance"],
+  civilworkdpr: ["civilworkdpr-dashboard", "civilworkdpr-dependency", "civilworkdpr-worker-attendance"],
 };
 
 export interface ModuleAccess {

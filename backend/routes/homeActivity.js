@@ -368,7 +368,7 @@ const SOURCES = {
   },
 };
 
-router.get("/", cache("home-activity-feed", 45), async (req, res) => {
+router.get("/activity-feed", cache("home-activity-feed", 45), async (req, res) => {
   try {
     const pool = getPool();
 

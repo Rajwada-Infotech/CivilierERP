@@ -389,15 +389,15 @@ export const civilWorkDprSetupItems: SetupItem[] = [
     pageKey: "room-composition-builder",
   },
   {
-    icon: Tag,
-    label: "Room Categories",
+    icon: DoorOpen,
+    label: "Room Master",
     path: "/civilworkdpr/room-category-master",
     color: "text-cyan-500",
     pageKey: "room-category-master",
   },
   {
-    icon: DoorOpen,
-    label: "Room Master",
+    icon: Tag,
+    label: "Flat Master",
     path: "/civilworkdpr/room-master",
     color: "text-cyan-500",
     pageKey: "civilworkdpr-room-master",
@@ -408,20 +408,6 @@ export const civilWorkDprSetupItems: SetupItem[] = [
     path: "/civilworkdpr/work-checkpoint-master",
     color: "text-cyan-500",
     pageKey: "work-checkpoint-master",
-  },
-  {
-    icon: HardHat,
-    label: "Contractor Register",
-    path: "/civilworkdpr/contractor-register",
-    color: "text-cyan-500",
-    pageKey: "civilworkdpr-contractor-register",
-  },
-  {
-    icon: GitBranch,
-    label: "Activity Chain Template",
-    path: "/civilworkdpr/activity-chain-template",
-    color: "text-cyan-500",
-    pageKey: "dpr-activity-chain-template",
   },
 ];
 

@@ -13,10 +13,20 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 // migration 320).
 //
 // "Tower" = dbo.BlockMaster, "Flat" = dbo.UnitMaster (this codebase's own
-// naming) — "Floor" has no master table of its own (dbo.RoomMaster.Floor is
-// free text, migration 136), so the cascade below derives Floor options as
-// the distinct Floor values among Rooms under the selected Tower, and
-// derives Flat/Room options by additionally filtering on the chosen Floor.
+// naming). Floor/Flat used to be derived from dbo.RoomMaster.Floor (free
+// text) — meaning a Tower/Floor/Unit that hadn't had any of its rooms
+// tagged in Flat Master yet was invisible here at all, since a real
+// dbo.UnitMaster row with zero RoomMaster children joined to nothing.
+// Floor/Flat now come from the same canonical CRM Auto Project Setup /
+// dbo.UnitMaster hierarchy Flat Master's own cascade uses (see
+// roomMaster.js's /structure and /units), so a unit shows up here as soon
+// as it exists, whether or not its rooms have been tagged yet. Room stays
+// sourced from dbo.RoomMaster — that's still the only real per-room data.
+//
+// Floor is still passed around as a plain string label ("G", "1", "2", …)
+// for backward compatibility with every dbo.DependencyMaster.Floor value
+// already stored that way — 0 -> "G", same convention roomMaster.js and
+// RoomMaster.tsx's own floorLabel() already use.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── GET /scope-options?level=tower|floor|flat|room&projectId=&towerId=&floor=&flatId= ──
@@ -43,23 +53,35 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
 
     if (level === "floor") {
       if (!Number.isFinite(towerId)) return res.status(400).json({ error: "towerId is required" });
+      // From dbo.UnitMaster directly (not RoomMaster) — a floor shows up here
+      // as soon as it has units, whether or not those units have had any
+      // rooms tagged in Flat Master yet.
       const r = await pool.request().input("TowerId", sql.Int, towerId).query(`
-        SELECT DISTINCT r.Floor AS label
-        FROM dbo.RoomMaster r
-        WHERE r.BlockId = @TowerId AND r.IsActive = 1 AND r.Floor IS NOT NULL AND LTRIM(RTRIM(r.Floor)) <> ''
-        ORDER BY r.Floor
+        SELECT DISTINCT FloorNo
+        FROM dbo.UnitMaster
+        WHERE BlockId = @TowerId AND IsActive = 1 AND FloorNo IS NOT NULL
+        ORDER BY FloorNo
       `);
-      return res.json(r.recordset.map((row) => ({ id: row.label, label: row.label })));
+      return res.json(
+        r.recordset.map(({ FloorNo }) => {
+          const label = FloorNo === 0 ? "G" : String(FloorNo);
+          return { id: label, label };
+        }),
+      );
     }
 
     if (level === "flat") {
       if (!Number.isFinite(towerId) || !floor) return res.status(400).json({ error: "towerId and floor are required" });
-      const r = await pool.request().input("TowerId", sql.Int, towerId).input("Floor", sql.NVarChar(50), floor).query(`
-        SELECT DISTINCT u.Id AS id, u.UnitName AS label
-        FROM dbo.UnitMaster u
-        JOIN dbo.RoomMaster r ON r.UnitId = u.Id
-        WHERE u.BlockId = @TowerId AND r.Floor = @Floor AND u.IsActive = 1 AND r.IsActive = 1
-        ORDER BY u.UnitName
+      // "G" -> 0, otherwise the numeric floor — same convention floor
+      // options above (and roomMaster.js/RoomMaster.tsx's own floorLabel())
+      // already use.
+      const floorNo = floor === "G" ? 0 : parseInt(floor, 10);
+      if (!Number.isFinite(floorNo)) return res.status(400).json({ error: "Invalid floor" });
+      const r = await pool.request().input("TowerId", sql.Int, towerId).input("FloorNo", sql.Int, floorNo).query(`
+        SELECT Id AS id, UnitName AS label
+        FROM dbo.UnitMaster
+        WHERE BlockId = @TowerId AND FloorNo = @FloorNo AND IsActive = 1
+        ORDER BY UnitName
       `);
       return res.json(r.recordset);
     }
