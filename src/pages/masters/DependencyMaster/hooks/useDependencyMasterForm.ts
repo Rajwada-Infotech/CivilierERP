@@ -25,7 +25,7 @@ export function useDependencyMasterForm(editing: DependencyMasterDetail | null, 
       }
     : undefined;
 
-  const cascade = useScopeCascade(initialScope);
+  const cascade = useScopeCascade(initialScope, editing?.id ?? null);
   const [alias, setAlias] = useState(editing?.alias ?? "");
   const [workType, setWorkType] = useState<WorkType>(editing?.workType ?? "INTERNAL");
   const ladder = useActivityLadder(editing?.activities ?? []);
