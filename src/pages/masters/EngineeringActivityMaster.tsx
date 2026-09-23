@@ -1,7 +1,12 @@
+// Engineering's own Activity Master — split from src/pages/masters/ActivityMaster.tsx
+// (migration 463) so Engineering (BOQ, Work Order) and Civil Work DPR can
+// each manage their own activity list independently. Civil Work DPR keeps
+// using the original ActivityMaster.tsx/table unchanged; this page and its
+// API (engineeringActivityMasterApi.ts, engineeringActivityItemsApi.ts) are
+// a fully separate clone from here on.
 import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
-import { useModule } from "@/contexts/ModuleContext";
+import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import {
   MasterPage,
   type DataChangeEvent,
@@ -32,7 +37,7 @@ import {
   deleteActivity,
   toPayload,
   type DbActivity,
-} from "@/api/activityMasterApi";
+} from "@/api/engineeringActivityMasterApi";
 import { getHsn } from "@/api/hsnApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getLedgerOptions } from "@/api/generalLedgerApi";
@@ -40,7 +45,7 @@ import {
   getActivityItems,
   addActivityItem,
   deleteActivityItem,
-} from "@/api/activityItemsApi";
+} from "@/api/engineeringActivityItemsApi";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   Dialog,
@@ -253,29 +258,15 @@ const exportToCSV = (items: DbActivity[], groups: DbActivity[]) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = "activity-master.csv";
+  link.download = "engineering-activity-master.csv";
   link.click();
   URL.revokeObjectURL(url);
 };
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-const MODULE_BREADCRUMB_LABEL: Record<string, string> = {
-  engineering: "Engineering",
-  civilworkdpr: "Civil Work DPR",
-  material: "Material",
-};
-
-const ActivityMaster: React.FC = () => {
+const EngineeringActivityMaster: React.FC = () => {
   const queryClient = useQueryClient();
-  const rights = usePageRights("activity-master");
-  const { activeModule } = useModule();
-  // Civil Work DPR's own Activity Master — Engineering split off onto its
-  // own copy (see src/pages/masters/EngineeringActivityMaster.tsx,
-  // migration 463). Keeping the module-aware breadcrumb rather than
-  // hardcoding "Civil Work DPR" since this page is also still reachable
-  // from the generic Masters area.
-  const moduleBreadcrumb =
-    (activeModule && MODULE_BREADCRUMB_LABEL[activeModule]) || "Masters";
+  const rights = usePageRights("engineering-activity-master");
   const [treeSearch, setTreeSearch] = useState("");
   const [viewRecord, setViewRecord] = useState<DbActivity | null>(null);
   const [addItemOpen, setAddItemOpen] = useState(false);
@@ -297,7 +288,7 @@ const ActivityMaster: React.FC = () => {
     isLoading,
     error,
   } = useQuery<DbActivity[]>({
-    queryKey: ["activities"],
+    queryKey: ["engineering-activities"],
     queryFn: getActivities,
     staleTime: 0,
     refetchOnMount: true,
@@ -305,7 +296,7 @@ const ActivityMaster: React.FC = () => {
 
   // Items linked to the activity currently open in the detail drawer.
   const { data: linkedItems = [] } = useQuery({
-    queryKey: ["activityItems", viewRecord?.id],
+    queryKey: ["engineeringActivityItems", viewRecord?.id],
     queryFn: () => getActivityItems(viewRecord!.id),
     enabled: !!viewRecord && viewRecord.activity_type === 1,
   });
@@ -326,7 +317,7 @@ const ActivityMaster: React.FC = () => {
       await addActivityItem(viewRecord.id, pickedItemId);
       toast.success("Item linked to activity ✓");
       await queryClient.invalidateQueries({
-        queryKey: ["activityItems", viewRecord.id],
+        queryKey: ["engineeringActivityItems", viewRecord.id],
       });
       setAddItemOpen(false);
       setPickedItemId("");
@@ -341,7 +332,7 @@ const ActivityMaster: React.FC = () => {
     try {
       await deleteActivityItem(id);
       await queryClient.invalidateQueries({
-        queryKey: ["activityItems", viewRecord.id],
+        queryKey: ["engineeringActivityItems", viewRecord.id],
       });
     } catch (err: any) {
       toast.error("Failed to unlink item: " + err.message);
@@ -356,11 +347,11 @@ const ActivityMaster: React.FC = () => {
 
   // GL Head options, for the Activity-only field below.
   const { data: glHeadOptions = [] } = useQuery({
-    queryKey: ["gl-heads-for-activity"],
+    queryKey: ["gl-heads-for-engineering-activity"],
     queryFn: getLedgerOptions,
   });
 
-  // Activity Master is engineering-side (services), so only SAC-flagged
+  // Engineering Activity Master is services-side, so only SAC-flagged
   // HSN Master rows are offered here — plain HSN (goods) codes are hidden.
   const hsnOptions: { code: string; desc: string }[] = Array.isArray(hsnRaw)
     ? (hsnRaw as any[])
@@ -402,9 +393,9 @@ const ActivityMaster: React.FC = () => {
   });
 
   const refetch = async () => {
-    queryClient.removeQueries({ queryKey: ["activities"] });
+    queryClient.removeQueries({ queryKey: ["engineering-activities"] });
     await queryClient.fetchQuery({
-      queryKey: ["activities"],
+      queryKey: ["engineering-activities"],
       queryFn: getActivities,
     });
   };
@@ -457,10 +448,10 @@ const ActivityMaster: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", moduleBreadcrumb, "Activity Master"]} />
-      <CivilWorkDprShell
-        title="Activity Master"
-        subtitle="Manage Civil Work DPR's activity groups and their individual activities"
+      <Breadcrumbs items={["Dashboard", "Engineering", "Engineering Activity Master"]} />
+      <EngineeringShell
+        title="Engineering Activity Master"
+        subtitle="Manage activity groups and their individual activities for the Engineering module"
         icon={Activity}
       >
 
@@ -734,7 +725,7 @@ const ActivityMaster: React.FC = () => {
           )}
         </div>
       </div>
-      </CivilWorkDprShell>
+      </EngineeringShell>
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
@@ -1004,4 +995,4 @@ const ActivityMaster: React.FC = () => {
   );
 };
 
-export default ActivityMaster;
+export default EngineeringActivityMaster;

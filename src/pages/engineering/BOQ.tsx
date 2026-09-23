@@ -7,7 +7,7 @@ import { printStatusLabel } from "@/utils/printStatus";
 import { EngineeringShell } from "@/components/engineering/EngineeringShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { type DbItem } from "@/api/itemMasterApi";
-import { type DbActivity } from "@/api/activityMasterApi";
+import { type DbActivity } from "@/api/engineeringActivityMasterApi";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import {
   FileText,
@@ -2146,7 +2146,7 @@ export default function BOQ() {
         apiFetch("/document-type?module=BOQ"),
         apiFetch("/uom-master"),
         apiFetch("/item-master"),
-        apiFetch("/activity-master"),
+        apiFetch("/engineering-activity-master"),
       ]);
 
       const cos = cosResult.status === "fulfilled" ? cosResult.value : [];
