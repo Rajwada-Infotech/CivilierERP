@@ -16,7 +16,13 @@ const {
   backPatchRecordId,
 } = require("../utils/docNumberLock");
 
-router.use(checkPermissionForMethod("Engineering", "BOQ"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Engineering", "BOQ")(req, res, next);
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

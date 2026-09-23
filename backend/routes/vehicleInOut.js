@@ -56,7 +56,13 @@ const router = express.Router();
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // ── Permission guard ─────────────────────────────────────────────────────────
-router.use(checkPermissionForMethod("Material", "VehicleInOut"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Material", "VehicleInOut")(req, res, next);
+});
 
 // ── Multer — memory storage (files go to DB, not disk) ───────────────────────
 const upload = multer({

@@ -26,7 +26,19 @@ const {
   getAllocationsForMany,
 } = require("../services/expenseHeadAllocation");
 
-router.use(checkPermissionForMethod("Finance", "Payments"));
+// Approve/Reject are exempt from this blanket per-module permission gate —
+// transition() (approvalService.js) is the real authority there (role
+// whitelist / approval-inbox edit right / named workflow approver). Without
+// this, a person Approval Setup named as an approver but who never got this
+// module's own CanEdit permission under the legacy Finance/Payments role
+// grid got "Access denied" right here, before transition() ever ran — same
+// bug class already fixed by removing requirePageRight from those two
+// routes directly (this blanket check is a second, separate gate that fix
+// didn't reach).
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Finance", "Payments")(req, res, next);
+});
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
