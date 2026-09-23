@@ -129,10 +129,10 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
   // purchaseOrders.js, expenseBooking.js, workOrder.js, materialIssues.js,
   // chequeMasterSchemas.js, debitNote.js, and cardMasterSchemas.js during a
   // live-DB workflow test.
-  if (!ProjectId) {
+  if (!Number.isFinite(parseInt(ProjectId, 10))) {
     return res.status(400).json({ error: "ProjectId is required." });
   }
-  if (!UnitId) {
+  if (!Number.isFinite(parseInt(UnitId, 10))) {
     return res.status(400).json({ error: "UnitId is required." });
   }
   if (!RoomName || !String(RoomName).trim()) {
@@ -184,10 +184,10 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
   // unconditionally, so omitting any of them here would null out the
   // existing value and crash the same way the create path did before the
   // fix above.
-  if (!ProjectId) {
+  if (!Number.isFinite(parseInt(ProjectId, 10))) {
     return res.status(400).json({ error: "ProjectId is required." });
   }
-  if (!UnitId) {
+  if (!Number.isFinite(parseInt(UnitId, 10))) {
     return res.status(400).json({ error: "UnitId is required." });
   }
   if (!RoomName || !String(RoomName).trim()) {

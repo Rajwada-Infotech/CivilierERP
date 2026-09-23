@@ -158,10 +158,10 @@ router.post("/generate", requirePageRight("dpr-activity-chain-template", "create
   const pool = getPool();
   const actor = req.user?.email || req.user?.name || "system";
   try {
-    const projectId = req.body.ProjectId ? parseInt(req.body.ProjectId, 10) : null;
-    const blockId = req.body.BlockId ? parseInt(req.body.BlockId, 10) : null;
+    const projectId = req.body.ProjectId != null && req.body.ProjectId !== "" ? parseInt(req.body.ProjectId, 10) : null;
+    const blockId = req.body.BlockId != null && req.body.BlockId !== "" ? parseInt(req.body.BlockId, 10) : null;
     const workType = req.body.WorkType === "EXTERNAL" ? "EXTERNAL" : "INTERNAL";
-    if (!projectId) return res.status(400).json({ error: "ProjectId is required" });
+    if (!Number.isFinite(projectId)) return res.status(400).json({ error: "ProjectId is required" });
 
     const rooms = await pool.request()
       .input("pid", sql.Int, projectId)

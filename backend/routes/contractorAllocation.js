@@ -132,8 +132,8 @@ router.post("/", authMiddleware, requirePageRight("civilworkdpr-contractor-regis
   } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
 
-  if (!contractorId) return res.status(400).json({ error: "Contractor is required" });
-  if (!activityId) return res.status(400).json({ error: "Activity is required" });
+  if (!Number.isFinite(parseInt(contractorId, 10))) return res.status(400).json({ error: "Contractor is required" });
+  if (!Number.isFinite(parseInt(activityId, 10))) return res.status(400).json({ error: "Activity is required" });
 
   try {
     const pool = getPool();

@@ -31,7 +31,7 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
     const pool = getPool();
 
     if (level === "tower") {
-      if (!projectId) return res.status(400).json({ error: "projectId is required" });
+      if (!Number.isFinite(projectId)) return res.status(400).json({ error: "projectId is required" });
       const r = await pool.request().input("ProjectId", sql.Int, projectId).query(`
         SELECT Id AS id, BlockName AS label
         FROM dbo.BlockMaster
@@ -42,7 +42,7 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
     }
 
     if (level === "floor") {
-      if (!towerId) return res.status(400).json({ error: "towerId is required" });
+      if (!Number.isFinite(towerId)) return res.status(400).json({ error: "towerId is required" });
       const r = await pool.request().input("TowerId", sql.Int, towerId).query(`
         SELECT DISTINCT r.Floor AS label
         FROM dbo.RoomMaster r
@@ -53,7 +53,7 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
     }
 
     if (level === "flat") {
-      if (!towerId || !floor) return res.status(400).json({ error: "towerId and floor are required" });
+      if (!Number.isFinite(towerId) || !floor) return res.status(400).json({ error: "towerId and floor are required" });
       const r = await pool.request().input("TowerId", sql.Int, towerId).input("Floor", sql.NVarChar(50), floor).query(`
         SELECT DISTINCT u.Id AS id, u.UnitName AS label
         FROM dbo.UnitMaster u
@@ -65,7 +65,7 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
     }
 
     if (level === "room") {
-      if (!flatId || !floor) return res.status(400).json({ error: "flatId and floor are required" });
+      if (!Number.isFinite(flatId) || !floor) return res.status(400).json({ error: "flatId and floor are required" });
       const r = await pool.request().input("FlatId", sql.Int, flatId).input("Floor", sql.NVarChar(50), floor).query(`
         SELECT Id AS id, RoomName AS label
         FROM dbo.RoomMaster
@@ -164,7 +164,17 @@ router.get("/:id", authMiddleware, async (req, res) => {
 
 function validatePayload(body) {
   const { scope, alias, workType, activities } = body;
-  if (!scope || !scope.projectId || !scope.towerId || !scope.floor || !scope.flatId || !scope.roomId) {
+  // projectId/towerId/flatId/roomId are real identity PKs that can
+  // legitimately be 0 (historical identity-reseed corruption — see this
+  // session's migrations 441/450/463 and the Id=0 rows they document), so
+  // this must check presence with `== null`, never plain truthiness, or a
+  // scope pointing at a real Project/Tower/Flat/Room 0 is wrongly rejected
+  // as "missing".
+  if (
+    !scope
+    || scope.projectId == null || scope.towerId == null || scope.flatId == null || scope.roomId == null
+    || !scope.floor
+  ) {
     return "Full scope (Project, Tower, Floor, Flat, Room) is required";
   }
   if (!alias || !String(alias).trim()) return "Alias is required";
