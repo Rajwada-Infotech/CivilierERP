@@ -103,6 +103,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [bankLHeadId, setBankLHeadId] = useState("");
+  const [paymentMode, setPaymentMode] = useState("");
   const [cbName, setCbName] = useState("");
   const [cbAcc, setCbAcc] = useState("");
   const [cbIfsc, setCbIfsc] = useState("");
@@ -163,6 +164,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
         if (!picked) { toast.error("Pick a source"); return; }
         const body: any = { GrossAmount: amt, Reason: reason || null, RefundBankLHeadId: bankLHeadId || null,
           CustomerBankName: cbName || null, CustomerAccountNo: cbAcc || null, CustomerIfscCode: cbIfsc || null,
+          PreferredPaymentMode: paymentMode || null,
           SourceType: picked.SourceType, SourceOnAccountId: picked.OnAccountId };
         const r = await fetchWithAuth(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const d = await r.json();
@@ -281,6 +283,17 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                 <SelectedBankCard bank={findBank(banks as any[], bankLHeadId)} />
               </div>
               <div>
+                <label className="text-xs text-muted-foreground block mb-1">Payment mode (optional — Finance can set this later)</label>
+                <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                  <option value="">Not set yet</option>
+                  <option value="NEFT">NEFT</option>
+                  <option value="RTGS">RTGS</option>
+                  <option value="IMPS">IMPS</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Cheque">Cheque</option>
+                </select>
+              </div>
+              <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="text-[11px] text-muted-foreground">Customer payout account</label>
                   {customerBank && (cbName || cbAcc || cbIfsc) && (
@@ -391,7 +404,7 @@ const CrmRefunds: React.FC = () => {
           )}
           {r.Status === "FinancePending" && rights.canEdit && (
             <>
-              <button onClick={() => { setFinanceDialog(r); setFinanceBank(r.RefundBankLHeadId != null ? String(r.RefundBankLHeadId) : ""); }}
+              <button onClick={() => { setFinanceDialog(r); setFinanceBank(r.RefundBankLHeadId != null ? String(r.RefundBankLHeadId) : ""); setFinanceMode(r.PreferredPaymentMode || ""); }}
                 className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200">Finance Approve</button>
               <button onClick={() => financeAction(r.Id, "finance-reject", { note: "Sent back" })}
                 className="text-xs px-2 py-1 text-red-600 hover:underline">Send back</button>

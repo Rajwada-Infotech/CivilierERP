@@ -21,6 +21,19 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 
 const FINANCE_APPROVER_ROLES = ["accounts_head", "finance_head", "admin", "super_admin"];
 
+// A refund payout is always a real bank transfer to the customer's own
+// account (see excludeCash on crmProjectBanks.js's /for-project) — Cash and
+// Card are never valid here. Post-Dated Cheque is excluded too since this is
+// only ever a same-day mode preference, not a dated instrument. Optional
+// everywhere it's used — never required to raise or approve a refund.
+const ALLOWED_REFUND_MODES = new Set(["Cheque", "NEFT", "RTGS", "IMPS", "UPI"]);
+function validatePaymentMode(raw) {
+  if (raw != null && raw !== "" && !ALLOWED_REFUND_MODES.has(raw)) {
+    throw new Error(`PaymentMode must be one of: ${[...ALLOWED_REFUND_MODES].join(", ")}`);
+  }
+  return raw || "";
+}
+
 // Same gap found and fixed in approvalService.js's transition() for Journal
 // Voucher: finance-approve/finance-reject only ever checked the hardcoded
 // FINANCE_APPROVER_ROLES list, never Approval Setup's own "crm-refunds-
@@ -128,6 +141,7 @@ const REFUND_SELECT = `
     r.SourceType, r.SourceOnAccountId, r.SourceCancellationId,
     r.GrossAmount, r.DeductionPercent, r.DeductionAmount, r.NetAmount,
     r.Reason, r.RefundBankLHeadId, r.CustomerBankName, r.CustomerAccountNo, r.CustomerIfscCode,
+    r.PreferredPaymentMode,
     r.Status, r.RefundDueDate, r.FinanceNewPaymentId,
     r.RequestedBy, r.RequestedAt, r.ApprovedBy, r.ApprovedAt,
     r.FinanceClearedBy, r.FinanceClearedAt, r.PaidAt, r.RejectionNote, r.Notes,
@@ -297,6 +311,10 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
     const gross = Number(b.GrossAmount);
     if (!Number.isFinite(gross) || gross <= 0) return res.status(400).json({ error: "GrossAmount must be a positive number" });
 
+    let preferredMode;
+    try { preferredMode = validatePaymentMode(b.PreferredPaymentMode); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+
     let customerId = null, companyId = null, projectId = null, bookingId = null;
     let sourceOnAccountId = null, sourceCancellationId = null;
     let deductionPct = 0;
@@ -383,20 +401,21 @@ router.post("/", requirePageRight("crm-refunds", "create"), async (req, res) => 
       .input("cba", sql.NVarChar(50), cbAcc)
       .input("cbi", sql.NVarChar(20), cbIfsc)
       .input("due", sql.Date, dueDate)
+      .input("pmode", sql.VarChar(50), preferredMode)
       .input("rb", sql.Int, actorId(req))
       .query(`
         INSERT INTO dbo.CrmRefund
           (RefundNo, CustomerId, CompanyId, ProjectId, BookingId, SourceType,
            SourceOnAccountId, SourceCancellationId, GrossAmount, DeductionPercent,
            DeductionAmount, NetAmount, Reason, RefundBankLHeadId,
-           CustomerBankName, CustomerAccountNo, CustomerIfscCode,
+           CustomerBankName, CustomerAccountNo, CustomerIfscCode, PreferredPaymentMode,
            Status, RefundDueDate, RequestedBy, RequestedAt, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
         VALUES
           (@rno, @cust, @comp, @proj, @bid, @stype,
            @soa, @scxl, @gross, @pct,
            @damt, @net, @reason, @bank,
-           @cbn, @cba, @cbi,
+           @cbn, @cba, @cbi, NULLIF(@pmode, ''),
            'Pending', @due, @rb, SYSDATETIME(), @rb, SYSDATETIME())
       `);
     await bumpCacheVersion("crm-refunds");
@@ -528,7 +547,8 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
     }
     const cur = await pool.request().input("id", sql.Int, id).query(`
       SELECT Id, RefundNo, Status, CustomerId, CompanyId, ProjectId, NetAmount, GrossAmount,
-             SourceOnAccountId, RefundBankLHeadId, CustomerBankName, CustomerAccountNo, FinanceNewPaymentId
+             SourceOnAccountId, RefundBankLHeadId, CustomerBankName, CustomerAccountNo, FinanceNewPaymentId,
+             PreferredPaymentMode
       FROM dbo.CrmRefund WHERE Id = @id
     `);
     if (!cur.recordset.length) return res.status(404).json({ error: "Refund not found" });
@@ -563,17 +583,11 @@ router.put(["/:id/finance-approve", "/:id/finance/approve"], requirePageRight("c
 
     // Payment Mode is optional here, not mandatory — Finance can set it now
     // to skip the follow-up edit on the spawned voucher, or leave it for
-    // later via Payment.tsx's own Update form, same as before. Cash/Card
-    // excluded — a refund is always a bank transfer to the customer's own
-    // account (see the excludeCash fix on /for-project's disbursing-bank
-    // list, same reasoning). Post-Dated Cheque excluded too — a payout
-    // being raised now shouldn't be dated into the future.
-    const ALLOWED_REFUND_MODES = new Set(["Cheque", "NEFT", "RTGS", "IMPS", "UPI"]);
-    const rawMode = req.body?.PaymentMode;
-    if (rawMode != null && rawMode !== "" && !ALLOWED_REFUND_MODES.has(rawMode)) {
-      return res.status(400).json({ error: `PaymentMode must be one of: ${[...ALLOWED_REFUND_MODES].join(", ")}` });
-    }
-    const paymentMode = rawMode || "";
+    // later via Payment.tsx's own Update form. Defaults to whatever was
+    // noted as a preference when the refund was raised, if anything.
+    let paymentMode;
+    try { paymentMode = validatePaymentMode(req.body?.PaymentMode ?? rf.PreferredPaymentMode); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
 
     // Bank name is known the moment bankId is — resolving and storing it
     // now (instead of leaving PBankName blank for Finance to fill in later)
