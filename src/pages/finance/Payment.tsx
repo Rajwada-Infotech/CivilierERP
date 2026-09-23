@@ -5605,16 +5605,23 @@ const Payment: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { label: "Payment Purpose", value: viewingRec.paymentName },
-                  { label: "Paid To", value: [viewingRec.supplierContact, viewingRec.paidTo].filter(Boolean).join(" · ") || "—" },
+                  {
+                    label: "Paid To",
+                    // supplierContact legitimately equals paidTo for a CRM
+                    // customer's auto-created ledger head (no separate
+                    // contact exists for a flat buyer — see
+                    // ensureCrmCustomerLedgerHead in crmLedger.js, which
+                    // defaults LHeadContactPerson to the customer's own
+                    // name). Only show it as a second segment when it's
+                    // actually a different value, not just repeat the name.
+                    value: [viewingRec.paidTo, viewingRec.supplierContact !== viewingRec.paidTo ? viewingRec.supplierContact : null]
+                      .filter(Boolean).join(" · ") || "—",
+                  },
                   { label: "Amount", value: formatINR(viewingRec.amount ?? 0) },
                   { label: "Date", value: viewingRec.date || "—" },
                   { label: "Mode", value: viewingRec.mode || "—" },
                   { label: "Company", value: viewingRec.company || "—" },
                   { label: "Project", value: viewingRec.project || "—" },
-                  {
-                    label: "Project Site",
-                    value: viewingRec.projectSite || "—",
-                  },
                   {
                     label: "Expense Ref",
                     value: viewingRec.expenseRef || viewingRec.jvNo || "—",
