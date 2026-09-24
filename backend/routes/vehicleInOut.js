@@ -694,6 +694,8 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     items, // [{ poItemId, receivedQty }] — quantity received in this lot
   } = req.body;
 
+  if (!poId)
+    return res.status(400).json({ error: "A Purchase Order must be selected before a Vehicle In/Out entry can be created" });
   if (!vehicleNo)
     return res.status(400).json({ error: "vehicleNo is required" });
   if (!challanNo)
@@ -844,6 +846,8 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     items, // [{ poItemId, receivedQty }] — quantity received in this lot
   } = req.body;
 
+  if (!poId)
+    return res.status(400).json({ error: "A Purchase Order must be selected before a Vehicle In/Out entry can be saved" });
   if (!vehicleNo)
     return res.status(400).json({ error: "vehicleNo is required" });
   if (!challanNo)

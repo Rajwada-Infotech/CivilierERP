@@ -83,6 +83,7 @@ function TextField({ value, onChangeText, placeholder, keyboardType, disabled }:
 function validateForm(f: FormState): string | null {
   if (!f.companyId) return "Company is required.";
   if (!f.projectId) return "Project is required.";
+  if (!f.poId) return "A Purchase Order must be selected.";
   if (!f.vehicleNo.trim()) return "Vehicle number is required.";
   if (!f.entryTime) return "Entry time is required.";
   return null;
@@ -357,7 +358,7 @@ export function VehicleInOutFormModal({
             <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.6, marginTop: 6, marginBottom: 10 }}>
               Purchase Order &amp; Supplier
             </Text>
-            <PickerRow label="Purchase Order" value={form.poNumber} placeholder="No PO linked" onPress={() => setPicker("po")} />
+            <PickerRow label="Purchase Order" value={form.poNumber} placeholder="Select a PO…" onPress={() => setPicker("po")} />
             <PickerRow label="Supplier" value={form.supplierName} onPress={() => setPicker("supplier")} disabled={!!form.poId} />
 
             {!!form.poId && (
