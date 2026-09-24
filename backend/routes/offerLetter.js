@@ -7,6 +7,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 
+const { createEmployeeAccountHead } = require("../services/employeeAccountHead");
 const SELECT_COLUMNS = `
   SELECT
     o.OfferId, o.DocNo, o.CandidateId, o.CompanyId, o.FinYearId, o.DesignationId, o.Salary, o.CandidateAddress,
@@ -268,8 +269,10 @@ async function autoCreateEmployeeFromOffer(pool, sql, offerId, createdBy) {
 
   for (let attempt = 0; attempt < 5; attempt++) {
     const employeeCode = await nextEmployeeCode(pool, sql);
+    const tx = pool.transaction();
+    await tx.begin();
     try {
-      const insertRes = await pool
+      const insertRes = await tx
         .request()
         .input("EmployeeCode", sql.NVarChar(30), employeeCode)
         .input("EmployeeName", sql.NVarChar(150), info.CandidateName)
@@ -293,8 +296,15 @@ async function autoCreateEmployeeFromOffer(pool, sql, offerId, createdBy) {
             @CandidateId, 1, @CreatedBy, SYSDATETIME()
           )
         `);
-      return insertRes.recordset[0].EmployeeId;
+      const newEmployeeId = insertRes.recordset[0].EmployeeId;
+      await createEmployeeAccountHead(tx, newEmployeeId, {
+        name: info.CandidateName, phone: info.Contact, email: info.Email, address: info.CandidateAddress, isActive: true,
+      }, createdBy);
+      await tx.commit();
+      await bumpCacheVersion("account-head-master");
+      return newEmployeeId;
     } catch (err) {
+      await tx.rollback().catch(() => {});
       if (/UQ_EmployeeMaster_CandidateId/i.test(err.message || "")) return null; // race: another request created it first
       if (err.number === 2627 || err.number === 2601) continue; // EmployeeCode collision -- retry with the next serial
       throw err;
