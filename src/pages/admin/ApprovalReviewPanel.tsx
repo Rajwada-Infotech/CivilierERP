@@ -27,6 +27,7 @@ import {
   CRM_MODULES,
   CRM_APPROVER_ROLES,
   DATE_APPROVER_ROLES,
+  MR_APPROVER_ROLES,
   RESTRICTED_MODULES,
   openInModulePath,
   fmtDate,
@@ -304,6 +305,22 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
           typeof v !== "object",
       )
     : [];
+
+  // NewPayment's PSupplierName/PSupplierContact columns are reused verbatim
+  // for a CRM Refund payout's customer ledger head (see ensureCrmCustomerLedgerHead
+  // in crmLedger.js) — labelizeKey's generic column-name split would show
+  // "Supplier Name"/"Supplier Contact" for what is actually the customer
+  // being refunded, which reads as a wrong-ledger red flag to a reviewer.
+  // Relabel just those two keys when this record is a CRM Refund voucher.
+  const isCrmRefundPayment = !!(detail as Record<string, unknown> | null)?.SourceCrmRefundId;
+  const labelFor = (k: string): string => {
+    if (isCrmRefundPayment) {
+      const stripped = stripDbPrefix(k).toLowerCase();
+      if (stripped === "suppliername") return "Customer Name";
+      if (stripped === "suppliercontact") return "Customer Contact";
+    }
+    return labelizeKey(k);
+  };
 
   const chainSection = (
     <>
@@ -604,7 +621,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   {extraFields.map(([k, v]) => (
-                    <FormField key={k} label={labelizeKey(k)} value={formatPreviewValue(v)} />
+                    <FormField key={k} label={labelFor(k)} value={formatPreviewValue(v)} />
                   ))}
                 </div>
               )}
@@ -645,6 +662,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             actionPathSuffix={SUB_GATE_SUFFIX[item.Module]}
             approverRoles={
               SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
+              : item.Module === "crm-money-receipts" || item.Module === "crm-refund-payment" ? MR_APPROVER_ROLES
               : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
               : undefined
             }

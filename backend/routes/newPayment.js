@@ -1531,8 +1531,13 @@ router.put("/:id/approve", async (req, res) => {
       }
     }
 
+    // A CRM Refund's payout voucher runs its own single-level workflow
+    // ("crm-refund-payment") instead of the multi-module Payments bundle —
+    // matches Received Payments' single-step approval pattern, per explicit
+    // instruction. refundGate above already fetched SourceCrmRefundId.
+    const approveModule = refundRow?.SourceCrmRefundId ? "crm-refund-payment" : "payments";
     const result = await transition(
-      "payments",
+      approveModule,
       id,
       "Approved",
       userEmail,
@@ -1849,8 +1854,15 @@ router.put("/:id/reject", async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
+    // Same module split as /:id/approve — a CRM Refund payout voucher uses
+    // its own single-level workflow, not the Payments bundle.
+    const pool = getPool();
+    const src = await pool.request().input("id", sql.Int, id)
+      .query("SELECT SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @id");
+    const rejectModule = src.recordset[0]?.SourceCrmRefundId ? "crm-refund-payment" : "payments";
+
     const result = await transition(
-      "payments",
+      rejectModule,
       id,
       "Rejected",
       userEmail,
