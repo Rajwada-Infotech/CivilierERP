@@ -1,4 +1,16 @@
-import type { JournalVoucherLedgerOption } from "@/api/journalVoucherApi";
+import type { JournalVoucherLedgerOption, JournalVoucherLine } from "@/api/journalVoucherApi";
+
+/** "Investment" / "Drawing" badge for a Partner Master line — a Partner has
+ *  two heads sharing one LHeadName (Capital vs Current Account), told apart
+ *  by LHeadCode's "-CAP"/"-CUR" suffix (see partnerMaster.js). Returns null
+ *  for every non-Partner line, so callers can render nothing rather than an
+ *  empty badge. */
+export function partnerLineKind(line: Pick<JournalVoucherLine, "LHeadType" | "LHeadCode">): "Investment" | "Drawing" | null {
+  if (line.LHeadType !== "P" || !line.LHeadCode) return null;
+  if (line.LHeadCode.endsWith("-CAP")) return "Investment";
+  if (line.LHeadCode.endsWith("-CUR")) return "Drawing";
+  return null;
+}
 
 // Display order + labels for the picker's groups. The keys are computed by the
 // server (backend/utils/ledgerOptionGroup.js) because LHeadType alone can't

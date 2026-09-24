@@ -41,6 +41,8 @@ import {
   ArrowUpWideNarrow,
   Search,
   X,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
@@ -1089,6 +1091,20 @@ const ApprovalInbox: React.FC = () => {
   // "JV-2026-00067". Typing a doc number into that filter's search box
   // matched nothing, which is what "document search isn't working" meant.
   const [docSearch, setDocSearch] = useState("");
+  // Which module groups (Material Request, Purchase Order, GRN, ...) are
+  // expanded — collapsed by default, same reasoning as Work Allocation's
+  // dependency chains: 64 flat rows across a dozen module types was the
+  // actual complaint, not any one type's own row count. Keyed by category+
+  // module so two different categories' same-named module (there are none
+  // today, but nothing should assume it) can never collide.
+  const [expandedModuleGroups, setExpandedModuleGroups] = useState<Set<string>>(new Set());
+  const toggleModuleGroup = (key: string) =>
+    setExpandedModuleGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const {
     data: allItems = [],
@@ -1333,14 +1349,57 @@ const ApprovalInbox: React.FC = () => {
                         <span className="text-[10px] text-muted-foreground">({catItems.length})</span>
                       </div>
                     )}
-                    {catItems.map((item) => (
-                      <InboxRow
-                        key={`${item.Module}-${item.RecordId}`}
-                        item={item}
-                        onActionDone={handleActionDone}
-                        onOptimisticUpdate={handleOptimisticUpdate}
-                      />
-                    ))}
+                    {(() => {
+                      // Group this category's items by Module, preserving
+                      // the order they already arrive in (moduleOrderOf,
+                      // then date within a module) — a Map iterates in
+                      // insertion order, so the first item of each module
+                      // fixes that module's position in the list.
+                      const byModule = new Map<string, InboxItem[]>();
+                      for (const item of catItems) {
+                        if (!byModule.has(item.Module)) byModule.set(item.Module, []);
+                        byModule.get(item.Module)!.push(item);
+                      }
+                      return Array.from(byModule.entries()).map(([mod, modItems]) => {
+                        const groupKey = `${cat}:${mod}`;
+                        const expanded = expandedModuleGroups.has(groupKey);
+                        const cfg = MODULE_CONFIG[mod];
+                        const Icon = cfg?.icon ?? ClipboardCheck;
+                        return (
+                          <div key={groupKey}>
+                            <button
+                              type="button"
+                              onClick={() => toggleModuleGroup(groupKey)}
+                              className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left hover:bg-muted/20 transition-colors border-b border-border/60"
+                            >
+                              {expanded ? (
+                                <ChevronDown size={13} className="text-muted-foreground shrink-0" />
+                              ) : (
+                                <ChevronRight size={13} className="text-muted-foreground shrink-0" />
+                              )}
+                              <div className={`p-1.5 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
+                                <Icon size={13} />
+                              </div>
+                              <span className="text-sm font-semibold text-foreground">
+                                {cfg?.label ?? mod}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground">
+                                ({modItems.length})
+                              </span>
+                            </button>
+                            {expanded &&
+                              modItems.map((item) => (
+                                <InboxRow
+                                  key={`${item.Module}-${item.RecordId}`}
+                                  item={item}
+                                  onActionDone={handleActionDone}
+                                  onOptimisticUpdate={handleOptimisticUpdate}
+                                />
+                              ))}
+                          </div>
+                        );
+                      });
+                    })()}
                   </div>
                 ))}
               </div>

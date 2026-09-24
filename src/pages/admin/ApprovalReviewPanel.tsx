@@ -40,6 +40,7 @@ import {
   extractLineItems,
   formatPreviewValue,
 } from "./ApprovalInbox";
+import { partnerLineKind } from "@/pages/finance/journalVoucher/ledgerGroups";
 import {
   X,
   ClipboardCheck,
@@ -487,12 +488,25 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                         {lineItems.map((li, i) => {
                           const debit = Number(li.DebitAmount) || 0;
                           const credit = Number(li.CreditAmount) || 0;
+                          const kind = partnerLineKind({
+                            LHeadType: li.LHeadType as string | undefined,
+                            LHeadCode: li.LHeadCode as string | null | undefined,
+                          });
                           return (
                             <tr key={i} className="hover:bg-muted/20 transition-colors">
                               <td className="px-3 py-2 font-medium">
                                 <span className="flex items-center gap-2">
                                   <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${debit > 0 ? "bg-emerald-500" : "bg-red-500"}`} />
                                   {(li.LHeadName as string) || "—"}
+                                  {kind && (
+                                    <span className={`shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                      kind === "Investment"
+                                        ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                        : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                    }`}>
+                                      {kind}
+                                    </span>
+                                  )}
                                 </span>
                               </td>
                               <td className="px-3 py-2 text-right text-emerald-600 dark:text-emerald-400">
