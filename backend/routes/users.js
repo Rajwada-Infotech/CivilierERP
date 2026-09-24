@@ -29,7 +29,7 @@ const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
 const LEGAL_EXECUTIVE_ROLES = ["legal_head", "legal_person", "super_admin"];
 
 const SALT_ROUNDS = 12;
-const MAX_LOGIN_ATTEMPTS = process.env.NODE_ENV === "development" ? 50 : 10;
+const MAX_LOGIN_ATTEMPTS = 50;
 const LOCKOUT_SECONDS = 15 * 60;
 
 // When an email doesn't exist we still run a bcrypt.compare against this hash
