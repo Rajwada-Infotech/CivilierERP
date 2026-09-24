@@ -127,7 +127,13 @@ router.put("/:id", requirePageRight("id-template-master", "edit"), async (req, r
           UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id
       `);
-    res.json({ success: true });
+    let autoTagged = 0;
+    try {
+      if (isActive !== false) autoTagged = (await autoTagPendingBatchesForProject(pool, pId, actor)).tagged;
+    } catch (tagErr) {
+      console.error("[id-template-master] retro-tagging failed:", tagErr.message);
+    }
+    res.json({ success: true, autoTagged });
   } catch (err) {
     if (err.message?.includes("UNIQUE") || err.message?.includes("duplicate key")) {
       return res.status(409).json({ error: "Another ID template already exists for this project" });

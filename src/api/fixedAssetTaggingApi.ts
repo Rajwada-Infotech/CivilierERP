@@ -79,6 +79,7 @@ export interface PendingBatch {
   SourceType: "GRN" | "IMPORT";
   SourceDocNo: string | null;
   DocDate: string | null;
+  CompanyId: number | null;
   CompanyName: string | null;
   ProjectId: number | null;
   ProjectName: string | null;
@@ -90,6 +91,11 @@ export const getPendingBatches = async (): Promise<PendingBatch[]> => {
   const res = await fetchWithAuth(`${BASE}/pending-batches`);
   if (!res.ok) await handleError(res, "Failed to fetch received stock awaiting tagging");
   return res.json();
+};
+
+export const deletePendingBatch = async (assetId: number): Promise<void> => {
+  const res = await fetchWithAuth(`${BASE}/pending-batches/${assetId}`, { method: "DELETE" });
+  if (!res.ok) await handleError(res, "Failed to delete");
 };
 
 export const getEligibleAssetItems = async (params?: {
