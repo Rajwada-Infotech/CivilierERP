@@ -12,7 +12,6 @@ import {
   ChevronRight,
 
   Landmark,
-  History,
   TrendingUp,
   ClipboardList,
   Grip,
@@ -262,13 +261,6 @@ const financeSetupItems: SetupItem[] = [
     path: "/masters/account-group",
     color: "text-indigo-400",
     pageKey: "account-head",
-  },
-  {
-    icon: History,
-    label: "Audit Trail",
-    path: "/masters/account-group-audit-trail",
-    color: "text-slate-400",
-    pageKey: "account-group-audit-trail",
   },
   {
     icon: Receipt,
