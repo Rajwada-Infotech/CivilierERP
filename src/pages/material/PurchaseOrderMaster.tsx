@@ -1660,6 +1660,27 @@ const PurchaseOrderMaster: React.FC = () => {
     );
   };
 
+  // Lines can arrive with GST already on them (MR/WO/WD-sourced lines are
+  // filled in bulk, and the supplier can be picked after items are added) —
+  // handleItemSelect's own gate only covers hand-picked items. Zero GST on
+  // every line whenever the chosen supplier is non-GST, in create/edit only.
+  useEffect(() => {
+    if (supplierIsGstRegistered) return;
+    if (viewMode !== "create" && viewMode !== "edit") return;
+    setLineItems((prev) => {
+      if (!prev.some((li) => li.gstRate > 0 || li.taxAmount > 0)) return prev;
+      return prev.map((li) => ({
+        ...li,
+        cgstRate: 0,
+        sgstRate: 0,
+        igstRate: 0,
+        gstRate: 0,
+        taxAmount: 0,
+        amount: li.quantity * li.rate,
+      }));
+    });
+  }, [supplierIsGstRegistered, viewMode, lineItems]);
+
   const addLine = () => setLineItems((p) => [...p, EMPTY_LINE()]);
 
   const removeLine = (idx: number) => {
