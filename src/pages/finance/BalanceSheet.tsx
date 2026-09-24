@@ -374,6 +374,10 @@ function PartnersCapitalBlock({
   // profit / remuneration / interest (credited to the Current A/c) −
   // Drawings = closing. The period's Net Profit sits below as its own line
   // until it's allocated to partners (no profit-sharing ratio is stored).
+  // Only worth a line once something has actually been credited to a
+  // partner's Current A/c (profit share, remuneration, interest) — when the
+  // only entries are drawings, an always-zero line is just noise.
+  const showCredits = data.partners.some((p) => Math.abs(p.credits) > 0.005);
   const row = (label: string, amount: number, opts: { sub?: boolean; strong?: boolean; neg?: boolean } = {}) => (
     <tr className={opts.sub ? "border-t border-border/40" : "border-b border-border/20"}>
       <td className={`py-1 pl-10 pr-3 text-[11px] ${opts.strong ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{label}</td>
@@ -410,7 +414,7 @@ function PartnersCapitalBlock({
             </tr>
             {row("Balance as per last account", p.opening)}
             {row("Add: Capital introduced", p.capitalIntroduced)}
-            {row("Add: Share of Profit / Remuneration / Interest", p.credits)}
+            {showCredits && row("Add: Share of Profit / Remuneration / Interest", p.credits)}
             {row("Sub-total", before, { sub: true })}
             {row("Less: Drawings", p.drawings, { neg: true })}
             {row(`Closing balance — ${p.name}`, p.closing, { sub: true, strong: true })}

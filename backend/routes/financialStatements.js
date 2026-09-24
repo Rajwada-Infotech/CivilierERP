@@ -553,9 +553,17 @@ router.get("/balance-sheet", async (req, res) => {
         f.debits = Math.round((f.debits + dCur) * 100) / 100;
         f.total = Math.round((f.total - net) * 100) / 100;
         f.heads.push({ id: h.id, name: h.name, amount: -net });
-        const pKey = isPartnerHead ? headCode.replace(/-(CAP|CUR)$/i, "") : `n:${String(h.name || "").toLowerCase()}`;
+        // A hand-made "Partners Drawings" head isn't any one partner's
+        // account — group all of them into a single clearly-labelled
+        // unassigned row instead of showing it as if it were a partner.
+        const isUnassignedDrawings = !isPartnerHead && RE_DRAWINGS.test(h.name || "");
+        const pKey = isPartnerHead
+          ? headCode.replace(/-(CAP|CUR)$/i, "")
+          : isUnassignedDrawings
+            ? "unassigned-drawings"
+            : `n:${String(h.name || "").toLowerCase()}`;
         if (!partnerRows.has(pKey)) {
-          partnerRows.set(pKey, { key: pKey, name: h.name, opening: 0, capitalIntroduced: 0, credits: 0, drawings: 0, closing: 0 });
+          partnerRows.set(pKey, { key: pKey, name: isUnassignedDrawings ? "Drawings not assigned to a partner" : h.name, opening: 0, capitalIntroduced: 0, credits: 0, drawings: 0, closing: 0 });
         }
         const pr = partnerRows.get(pKey);
         pr.opening += cPrior - dPrior;
@@ -620,8 +628,63 @@ router.get("/balance-sheet", async (req, res) => {
     // invoices/payments posted in earlier financial years, so it's reported
     // as its own "Reserves & Surplus" liability line instead of being
     // folded into Partners' Capital.
+    // A hand-made "Partners Drawings" head has no partner of its own — but
+    // each voucher that debits it (e.g. Dr Partners Drawings / Cr Bikash
+    // Current A/c for director remuneration) names the partner on its other
+    // leg. Attribute those debits to that partner so the credit and its
+    // offsetting drawings net inside the partner's block, instead of a
+    // stray "unassigned" row. Vouchers touching more than one partner stay
+    // unassigned rather than being guessed at.
+    const drawAttrib = await pool
+      .request()
+      .input("asOf", sql.Date, asOf)
+      .input("fyStart", sql.Date, fyStart)
+      .input("companyId", sql.Int, companyId)
+      .input("projectId", sql.Int, projectId)
+      .input("costCenterId", sql.Int, costCenterId).query(`
+        SELECT x.partnerCode,
+          ISNULL(SUM(CASE WHEN x.VoucherDate < @fyStart THEN x.DebitAmount ELSE 0 END), 0) AS debitPrior,
+          ISNULL(SUM(CASE WHEN x.VoucherDate >= @fyStart THEN x.DebitAmount ELSE 0 END), 0) AS debitCurrent
+        FROM (
+          SELECT d.DebitAmount, d.VoucherDate,
+                 (SELECT MIN(pah.LHeadCode) FROM dbo.GeneralLedgerEntry p
+                    JOIN dbo.AccountHeadMaster pah ON pah.LHeadId = p.LHeadId AND pah.LHeadType = 'P'
+                   WHERE p.SourceType = d.SourceType AND p.SourceId = d.SourceId AND p.IsReversed = 0) AS partnerCode,
+                 (SELECT COUNT(DISTINCT REPLACE(REPLACE(pah.LHeadCode, '-CAP', ''), '-CUR', ''))
+                    FROM dbo.GeneralLedgerEntry p
+                    JOIN dbo.AccountHeadMaster pah ON pah.LHeadId = p.LHeadId AND pah.LHeadType = 'P'
+                   WHERE p.SourceType = d.SourceType AND p.SourceId = d.SourceId AND p.IsReversed = 0) AS partnerCount
+          FROM dbo.GeneralLedgerEntry d
+          JOIN dbo.AccountHeadMaster dh ON dh.LHeadId = d.LHeadId
+          WHERE d.IsReversed = 0 AND d.DebitAmount > 0 AND d.VoucherDate <= @asOf
+            AND dh.LHeadType <> 'P' AND dh.LHeadName LIKE '%drawing%'
+            AND (@companyId IS NULL OR d.CompanyId = @companyId)
+            AND (@projectId IS NULL OR d.ProjectId = @projectId)
+            AND (@costCenterId IS NULL OR d.CostCenterId = @costCenterId)
+        ) x
+        WHERE x.partnerCode IS NOT NULL AND x.partnerCount = 1
+        GROUP BY x.partnerCode
+      `);
+    const unassignedRow = partnerRows.get("unassigned-drawings");
+    for (const a of drawAttrib.recordset) {
+      const pKey = String(a.partnerCode).replace(/-(CAP|CUR)$/i, "");
+      const target = partnerRows.get(pKey);
+      const prior = Number(a.debitPrior) || 0;
+      const cur = Number(a.debitCurrent) || 0;
+      if (!target || !unassignedRow) continue;
+      target.opening -= prior;
+      target.drawings += cur;
+      target.closing -= prior + cur;
+      unassignedRow.opening += prior;
+      unassignedRow.drawings -= cur;
+      unassignedRow.closing += prior + cur;
+    }
+    const isZeroRow = (p) =>
+      [p.opening, p.capitalIntroduced, p.credits, p.drawings, p.closing].every((n) => Math.abs(n) < 0.005);
+
     const r2 = (n) => Math.round(n * 100) / 100;
     const partners = Array.from(partnerRows.values())
+      .filter((p) => !isZeroRow(p))
       .map((p) => ({
         key: p.key,
         name: p.name,
@@ -631,7 +694,9 @@ router.get("/balance-sheet", async (req, res) => {
         drawings: r2(p.drawings),
         closing: r2(p.closing),
       }))
-      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+      .sort((a, b) =>
+        (a.key === "unassigned-drawings") - (b.key === "unassigned-drawings") ||
+        String(a.name).localeCompare(String(b.name)));
     const capitalFunds = partnerFunds.capital;
     const currentFunds = partnerFunds.current;
     const capitalOpening = capitalFunds.opening;
