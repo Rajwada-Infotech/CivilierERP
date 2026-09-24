@@ -48,6 +48,22 @@ jobs:
             git checkout "$BRANCH"
             git pull --ff-only origin "$BRANCH"
 
+            # Stamp the real deployed commit into both halves of the app —
+            # same shape ci.yml's "Stamp build info" step bakes into an
+            # artifact release, just written directly into this checkout
+            # before the images build, since this workflow deploys straight
+            # from git instead of a downloaded artifact. Without this,
+            # GET /health and /version.json keep reporting whatever commit
+            # was last deployed via the artifact path (or nothing at all),
+            # even after a real, successful deploy here — exactly the "did
+            # it actually deploy" confusion this stamp exists to prevent.
+            echo "Stamping build info..."
+            COMMIT="$(git rev-parse HEAD)"
+            BUILT_AT="$(date -u +%FT%TZ)"
+            INFO=$(printf '{"commit":"%s","ref":"%s","runNumber":"${{ github.run_number }}","builtAt":"%s"}' "$COMMIT" "$BRANCH" "$BUILT_AT")
+            echo "$INFO" | tee public/version.json
+            echo "$INFO" | tee backend/build-info.json
+
             echo "Rebuilding backend image..."
             docker compose build backend
 

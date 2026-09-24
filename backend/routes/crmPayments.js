@@ -1222,6 +1222,15 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     // carries instead, applied to the milestone only once approved.
     let paymentSubmission = null;
     if (paidRaw != null) {
+      // Required at this staff-facing entry point specifically (not inside
+      // createReceiptForMilestone itself, which the automatic booking-
+      // creation caller also uses with no bank selection available) — a
+      // manually recorded payment with no bank chosen posts to the generic
+      // "CRM Collections A/c" proxy instead of a real, BRS-reconcilable
+      // bank ledger (crmLedger.js's postCrmReceiptToGL).
+      if (b.DepositBankId == null || b.DepositBankId === "") {
+        return res.status(400).json({ error: "Deposit Bank is required to record a payment" });
+      }
       const actorEmail = req.user?.email || req.user?.name || null;
       paymentSubmission = await createReceiptForMilestone(pool, id, {
         Amount: paidRaw,
@@ -1476,6 +1485,14 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
     const b = req.body;
     const amount = parseFloat(b.Amount);
     if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
+    // Required — an on-account deposit with no bank chosen posts to the
+    // generic "CRM Collections A/c" proxy instead of a real, BRS-
+    // reconcilable bank ledger (crmLedger.js's postCrmOnAccountToGL). This
+    // route has no automated caller (unlike createReceiptForMilestone), so
+    // there's no legitimate case for omitting it.
+    if (b.DepositBankId == null || b.DepositBankId === "") {
+      return res.status(400).json({ error: "Deposit Bank is required to record an on-account deposit" });
+    }
 
     const activeErr = await requireActiveBooking(pool, bid);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -1491,7 +1508,6 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
     if (!bkRes.recordset.length) return res.status(404).json({ error: "Booking not found" });
     const booking = bkRes.recordset[0];
 
-    // DepositBankId is optional — record it when provided, skip when not.
 
     const actorEmail = req.user?.email || req.user?.name || null;
     const { createReceivedPaymentInternal, invalidateReceivedPaymentWorkflowCaches } = require("./receivedPayment");
