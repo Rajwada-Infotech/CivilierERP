@@ -235,14 +235,17 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
   if (amount <= 0) return { posted: false, reason: `Receipt ${receiptId} amount is ${amount} (<= 0)` };
 
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  // Debit the real bank the money was actually deposited into when the
-  // receipt recorded one (DepositBankId is already an AccountHeadMaster.
-  // LHeadId — same convention generalLedger.js's postReceivedPaymentApproval
-  // uses for RPDepositBankId) — only fall back to the generic CRM Collections
-  // proxy for the genuinely unknown case, so this books to a real, BRS-able
-  // bank ledger whenever the data exists instead of a permanent suspense
-  // balance that can never reconcile.
-  const collectionsHeadId = row.DepositBankId || await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // Debit the real bank the money was actually deposited into (DepositBankId
+  // is already an AccountHeadMaster.LHeadId — same convention
+  // generalLedger.js's postReceivedPaymentApproval uses for
+  // RPDepositBankId). No fallback to a generic proxy account — the caller
+  // (crmPayments.js's PUT /:id) already requires DepositBankId before a
+  // payment can even be submitted, so a real bank should always be present
+  // here; if it's somehow missing, that's a bug to surface loudly, not
+  // paper over with a suspense balance that can never reconcile.
+  if (!row.DepositBankId)
+    return { posted: false, reason: `Receipt ${receiptId} has no DepositBankId — cannot post without a real bank` };
+  const collectionsHeadId = row.DepositBankId;
 
   // Pricing is GST-inclusive — split via the same canonical getGstSplit()
   // every other CRM money event (including this receipt's own stored
@@ -309,9 +312,11 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
   // per-customer audit trail CRM's own on-account/adjustment UI reads) —
   // just no longer where the GL leg itself lands.
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  // Real deposit bank when known (see postCrmReceiptToGL's identical note) —
-  // only the generic CRM Collections proxy when it genuinely isn't.
-  const collectionsHeadId = row.DepositBankId || await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // No fallback proxy — see postCrmReceiptToGL's identical note.
+  // POST /booking/:bookingId/on-account already requires DepositBankId.
+  if (!row.DepositBankId)
+    return { posted: false, reason: `On-account ${onAccountId} has no DepositBankId — cannot post without a real bank` };
+  const collectionsHeadId = row.DepositBankId;
   // Pooled liability head, same one a standalone (non-CRM) Received
   // Payment advance posts to (see generalLedger.js's postReceivedPaymentApproval) —
   // an on-account deposit with nothing allocated yet is a liability
@@ -553,10 +558,13 @@ async function postCrmCancellationRefundToGL(pool, cancellationId, userEmail) {
   if (amount <= 0) return { none: true, reason: `Cancellation ${cancellationId} refund amount is ${amount} (<= 0) — nothing to refund` };
 
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  // Real bank the refund was actually paid out from when recorded (see
-  // postCrmReceiptToGL's identical note) — only the generic CRM Collections
-  // proxy when it genuinely isn't.
-  const collectionsHeadId = row.RefundBankId || await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // No fallback proxy — see postCrmReceiptToGL's identical note. (This
+  // function is currently unreferenced by any live route — the real
+  // refund-payout path is postCrmRefundPaid/CrmRefund — but kept correct
+  // rather than left with a dead fallback in case it's wired up again.)
+  if (!row.RefundBankId)
+    return { posted: false, reason: `Cancellation ${cancellationId} has no RefundBankId — cannot post without a real bank` };
+  const collectionsHeadId = row.RefundBankId;
   const docNo = row.CancellationNo || `CXLRF-${cancellationId}`;
 
   await postVoucher(pool, {
