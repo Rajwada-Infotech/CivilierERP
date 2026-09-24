@@ -98,6 +98,12 @@ const MODULE_OPTIONS = [
     desc: "Before payments are made",
   },
   {
+    id: "CrmRefundPayment",
+    label: "CRM Refund Payment",
+    icon: "💸",
+    desc: "A CRM refund's payout voucher — single level by default, matching Received Payments' own approval pattern rather than the general Payment workflow above",
+  },
+  {
     id: "MaterialRequests",
     label: "Material Request",
     icon: "📋",
@@ -284,7 +290,7 @@ const MODULE_GROUPS = [
     id: "finance",
     label: "Finance",
     icon: "💰",
-    modules: ["NewPayment", "Expenses", "JournalVoucher", "FundTransfer", "Contract"],
+    modules: ["NewPayment", "CrmRefundPayment", "Expenses", "JournalVoucher", "FundTransfer", "Contract"],
   },
   {
     id: "sales",

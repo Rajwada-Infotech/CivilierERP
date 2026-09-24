@@ -31,7 +31,7 @@ let socket: Socket | null = null;
 export function connectSocket(): Socket | null {
   if (socket?.connected) return socket;
 
-  const token = localStorage.getItem("token");
+  const token = sessionStorage.getItem("token");
   if (!token) {
     // No JWT => don't start socket connection (prevents connect_error spam)
     return null;

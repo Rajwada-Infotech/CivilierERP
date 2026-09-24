@@ -1,14 +1,17 @@
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { Button } from "@/components/ui/button";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { computeGrnNetWithTerms } from "@/pages/material/ExpenseBooking/helpers";
+import { confirmEngineerAssignment } from "@/api/dependencyActivityAssignmentApi";
 import {
   ClipboardCheck,
   ClipboardList,
@@ -43,6 +46,7 @@ import {
   X,
   ChevronDown,
   ChevronRight,
+  Loader2,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
@@ -77,6 +81,15 @@ export interface InboxItem {
   // journal-voucher only — "AccountHead Dr/Cr Amount | AccountHead Dr/Cr Amount"
   // for every line on the voucher, null for all other modules.
   JournalVoucherSummary: string | null;
+  // work-allocation-engineer only — the specific engineer this row's task
+  // confirmation belongs to; null for every other module.
+  AssigneeUserId: number | null;
+  // work-allocation-engineer only — DependencyMasterActivity.Id (the
+  // "rung"), used to fetch the full assignment detail (engineers, days,
+  // materials, checkpoints) via GET /api/dependency-activity-assignment/:rungId
+  // — RecordId itself is the DependencyActivityEngineer row (per-engineer,
+  // needed for the confirm action) and doesn't work as a lookup key there.
+  RungId: number | null;
   // Set by the backend's visibility filter (approvalInbox.js) only when the
   // viewer is named somewhere on this record's workflow but NOT on the
   // level it's currently sitting at — e.g. a Level-2 approver looking at a
@@ -121,6 +134,18 @@ export const MODULE_CONFIG: Record<
     navPath: "/payments",
     apiEndpoint: "/api/new-payment",
     label: "Payments",
+  },
+  // A CRM Refund's payout voucher — same table/route as "payments" above,
+  // just its own Module tag so it resolves its own single-level workflow
+  // (see approvalInbox.js's query split and approvalService.js's
+  // "crm-refund-payment" module) instead of the multi-module Payments
+  // bundle every other payment goes through.
+  "crm-refund-payment": {
+    icon: Banknote,
+    color: "text-orange-600 bg-orange-600/10",
+    navPath: "/payments",
+    apiEndpoint: "/api/new-payment",
+    label: "CRM Refund Payments",
   },
   "goods-receipt": {
     icon: Truck,
@@ -219,6 +244,18 @@ export const MODULE_CONFIG: Record<
     navPath: "/fund-transfer",
     apiEndpoint: "/api/fund-transfer",
     label: "Fund Transfers",
+  },
+  // One specific engineer confirming a task literally assigned to them —
+  // not a document a manager reviews. isVisibleToViewer (approvalInbox.js)
+  // only ever shows this to the named EngineerId (or admin/super_admin),
+  // and its Approve action is a bespoke confirm call (see InboxRow below),
+  // not the shared ApprovalActions role/workflow machinery.
+  "work-allocation-engineer": {
+    icon: UserCheck,
+    color: "text-cyan-600 bg-cyan-600/10",
+    navPath: "/civilworkdpr/work-done",
+    apiEndpoint: "/api/dependency-activity-assignment",
+    label: "Activity Assignments",
   },
   // crm-applications deliberately has no entry here anymore — Applications
   // no longer have their own approve/reject cycle (see approvalInbox.js's
@@ -348,6 +385,7 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
   "work-orders": "WorkOrderHeader",
   "expense-booking": "ExpenseBooking",
   payments: "NewPayment",
+  "crm-refund-payment": "NewPayment",
   "material-issues": "MaterialIssues",
   "material-issue-return": "MaterialIssueReturn",
   "material-requests": "MaterialRequests",
@@ -363,7 +401,7 @@ export const MODULE_APPROVAL_TABLE: Record<string, ApprovalTable> = {
 // dba is deliberately excluded, unlike the system-default APPROVER_ROLES.
 export const CRM_MODULES = new Set(["crm-bookings", "crm-agreements", "crm-brokerage", "crm-cancellations", "crm-noc"]);
 export const CRM_APPROVER_ROLES = ["admin", "super_admin", "marketing_head"];
-const MR_APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
+export const MR_APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
 const CRM_BOOKING_APPROVER_ROLES = ["admin", "super_admin", "marketing_head", "director"];
 // Agreement Date and Sales Deed Director approval are narrower, separate
 // gates — super_admin only, "for now" per instruction, unlike the rest of
@@ -383,6 +421,7 @@ export const RESTRICTED_MODULES = new Set([
   "inter-company-transfer",
   "fund-transfer",
   "crm-money-receipts",
+  "crm-refund-payment",
   ...SUB_GATE_MODULES,
 ]);
 
@@ -426,6 +465,7 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
 
   "work-done": "engineering",
   boq: "engineering",
+  "work-allocation-engineer": "engineering",
 
   "sale-orders": "sales",
   "crm-bookings": "sales",
@@ -475,6 +515,7 @@ const VIEW_PARAM_MODULES = new Set([
   "goods-receipt",
   "expense-booking",
   "payments",
+  "crm-refund-payment",
   "vehicle-in-out",
   "material-requests",
   "crm-brokerage",
@@ -717,6 +758,42 @@ export function formatPreviewValue(value: unknown): string {
   return str;
 }
 
+// One engineer confirming their own task assignment — deliberately not
+// routed through ApprovalActions (that component's whole job is picking an
+// approver role/workflow, which doesn't apply here: isVisibleToViewer
+// already means the only person who can ever see this row IS the engineer
+// it's for).
+const EngineerConfirmButton: React.FC<{ item: InboxItem; onDone: () => void }> = ({ item, onDone }) => {
+  const [loading, setLoading] = useState(false);
+  const handleConfirm = async () => {
+    setLoading(true);
+    try {
+      const result = await confirmEngineerAssignment(Number(item.RecordId));
+      toast.success(
+        result.allApproved
+          ? "Confirmed — activity moved to In Progress"
+          : "Confirmed — waiting on the other assigned engineer(s)",
+      );
+      onDone();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to confirm");
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <Button
+      size="sm"
+      className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"
+      disabled={loading}
+      onClick={handleConfirm}
+    >
+      {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+      Confirm
+    </Button>
+  );
+};
+
 // ─── Inbox row ────────────────────────────────────────────────────────────────
 
 const InboxRow: React.FC<{
@@ -744,7 +821,18 @@ const InboxRow: React.FC<{
       >
         <Eye size={14} />
       </button>
-      {item.Status === "Pending" && item._canAct === false ? (
+      {item.Module === "work-allocation-engineer" ? (
+        // No role/workflow gate applies here at all — isVisibleToViewer
+        // already restricted this row to exactly the engineer it's for, so
+        // reaching this branch means the button is always safe to show.
+        <EngineerConfirmButton
+          item={item}
+          onDone={() => {
+            onOptimisticUpdate(item.RecordId, item.Module);
+            onActionDone();
+          }}
+        />
+      ) : item.Status === "Pending" && item._canAct === false ? (
         // Visible for awareness (named on some other level of this
         // record's workflow) but not their turn yet — Approve/Reject would
         // just 403 from transition()'s own per-level gate. Say so instead
@@ -766,7 +854,10 @@ const InboxRow: React.FC<{
             item.Module === "crm-refunds-finance" ? REFUND_FINANCE_APPROVER_ROLES
             : SUB_GATE_MODULES.has(item.Module) ? DATE_APPROVER_ROLES
             : item.Module === "crm-bookings" ? CRM_BOOKING_APPROVER_ROLES
-            : item.Module === "crm-money-receipts" ? MR_APPROVER_ROLES
+            // Same role set as Received Payments (admin/super_admin/dba/
+            // accounts_head) — matches approvalService.js's
+            // MODULE_APPROVER_ROLE_OVERRIDES["crm-refund-payment"] exactly.
+            : item.Module === "crm-money-receipts" || item.Module === "crm-refund-payment" ? MR_APPROVER_ROLES
             : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
             : undefined
           }

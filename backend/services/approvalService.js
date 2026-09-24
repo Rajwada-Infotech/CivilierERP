@@ -22,6 +22,7 @@ const GL_POSTERS = {
   grn: postGRNApproval,
   "expense-booking": postExpenseBookingApproval,
   payments: postPaymentApproval,
+  "crm-refund-payment": postPaymentApproval,
   "journal-voucher": postJournalVoucherApproval,
   "fund-transfer": postFundTransferApproval,
   "debit-note": postDebitNoteApproval,
@@ -49,6 +50,13 @@ const MODULE_MAP = {
     status: "Status",
   },
   payments: { table: "dbo.NewPayment", pk: "PPaymentID", status: "Status" },
+  // Same table/pk/status as "payments" — a CRM Refund's payout voucher IS a
+  // NewPayment row, just routed through its own single-level workflow (see
+  // WORKFLOW_ID_MAP below) instead of the multi-module bundle regular
+  // Payments (PO/GRN/Expense-sourced) share. newPayment.js's approve/reject
+  // routes pick this module string instead of "payments" when the row's
+  // SourceCrmRefundId is set.
+  "crm-refund-payment": { table: "dbo.NewPayment", pk: "PPaymentID", status: "Status" },
   "material-requests": {
     table: "dbo.MaterialRequests",
     pk: "MRId",
@@ -148,6 +156,7 @@ const MODULE_DOC_LINKS = {
   grn: "GRN",
   "goods-receipt": "GRN",
   payments: "Payment",
+  "crm-refund-payment": "Payment",
   "journal-voucher": "Journal Voucher",
   "inter-company-transfer": "Inter-Company Transfer",
   "fund-transfer": "Fund Transfer",
@@ -208,6 +217,13 @@ const MODULE_APPROVER_ROLE_OVERRIDES = {
   // Query Payment Confirm records government fee payment — marketing_head and
   // above; legal_head included since they coordinate the registry visit.
   "crm-query-payment-confirm": [...CRM_APPROVER_ROLES, "legal_head"],
+  // A CRM Refund's payout voucher gets its own single-level workflow (see
+  // WORKFLOW_ID_MAP) instead of the multi-module Payments bundle — matching
+  // Received Payments' own approver set exactly (receivedPayment.js's
+  // APPROVER_ROLES), per explicit instruction that this should follow the
+  // same pattern Payments/Received Payments already use elsewhere, not a
+  // CRM-only carve-out with different people.
+  "crm-refund-payment": ["admin", "super_admin", "dba", "accounts_head"],
 };
 
 async function validateApprovalModuleMap(log = console) {
@@ -263,6 +279,7 @@ const WORKFLOW_ID_MAP = {
   grn: "GRN",
   "goods-receipt": "GRN",
   payments: "NewPayment",
+  "crm-refund-payment": "CrmRefundPayment",
   "material-requests": "MaterialRequests",
   "material-issues": "MaterialIssues",
   "material-issue-return": "MaterialIssueReturn",

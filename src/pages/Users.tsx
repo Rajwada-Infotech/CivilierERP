@@ -39,7 +39,7 @@ const BASE_URL = "/api/users";
 
 const authHeaders = () => ({
   "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
 });
 
 const getUsers = async (): Promise<User[]> => {
@@ -571,7 +571,7 @@ const Users = () => {
       {/* ── Add / Edit Drawer ── */}
       {drawerOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-40 flex justify-end"
+          className="fixed inset-0 bg-black/50 z-[60] flex justify-end"
           onClick={closeDrawer}
         >
           <div
@@ -799,7 +799,7 @@ const Users = () => {
       {/* ── View User Modal ── */}
       {viewedUser && (
         <div
-          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-[60]"
           onClick={() => setViewUserId(null)}
         >
           <div

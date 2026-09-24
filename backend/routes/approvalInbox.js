@@ -80,6 +80,16 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   const role = (viewerRole || "").toLowerCase();
   if (role === "admin" || role === "super_admin") return { visible: true, canAct: true };
 
+  // Work Allocation's per-engineer confirmation isn't a document approval by
+  // a manager — it's one specific engineer confirming their own task
+  // assignment. Visible ONLY to that engineer (matched by userId), never by
+  // role or Approval Setup workflow — there's no meaningful way to "name" a
+  // whichever-engineer-happens-to-be-on-this-row approver in Approval Setup.
+  if (item.Module === "work-allocation-engineer") {
+    const visible = viewerUserId != null && Number(item.AssigneeUserId) === Number(viewerUserId);
+    return { visible, canAct: visible };
+  }
+
   const map = MODULE_MAP[item.Module];
   const fallbackRoles = MODULE_APPROVER_ROLE_OVERRIDES[item.Module] || APPROVER_ROLES;
   const fallbackVisible = async () =>
@@ -187,7 +197,8 @@ router.use(requirePageRight("approval-inbox", "view"));
 
 // NULL placeholders so every UNION ALL branch has the same column count.
 // Only the expense-booking branch populates GrnTotalAmount, GrnBasicAmount,
-// and BillingTermsData; only journal-voucher populates JournalVoucherSummary.
+// and BillingTermsData; only journal-voucher populates JournalVoucherSummary;
+// only work-allocation-engineer populates AssigneeUserId and RungId.
 const NULL_EXTRA = `
   CAST(NULL AS DECIMAL(18,2)) AS GrnTotalAmount,
   CAST(NULL AS DECIMAL(18,2)) AS GrnBasicAmount,
@@ -195,7 +206,9 @@ const NULL_EXTRA = `
   CAST(NULL AS NVARCHAR(100)) AS SourceTransferDocNo,
   CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
   CAST(NULL AS NVARCHAR(255)) AS ToGodownName,
-  CAST(NULL AS NVARCHAR(MAX)) AS JournalVoucherSummary,`;
+  CAST(NULL AS NVARCHAR(MAX)) AS JournalVoucherSummary,
+  CAST(NULL AS INT) AS AssigneeUserId,
+  CAST(NULL AS INT) AS RungId,`;
 
 // Builds the per-module SELECT list (optionally scoped to one module) shared
 // by both GET / (the full inbox) and GET /count (the badge) — a single
@@ -276,7 +289,37 @@ function buildInboxQueries(module) {
           ''                                   AS RejectionNote,
           CAST(NULL AS DATETIME2)              AS LastModified
         FROM dbo.NewPayment
-        WHERE Status = 'Pending'
+        WHERE Status = 'Pending' AND SourceCrmRefundId IS NULL
+      `);
+    }
+
+    // A CRM Refund's payout voucher is the same dbo.NewPayment row shape as
+    // any other payment, but runs its own single-level workflow ("crm-refund-
+    // payment" — see approvalService.js) instead of the multi-module Payments
+    // bundle. Split into its own query block (same table, own Module tag) so
+    // the level/role/visibility computation below resolves the workflow that
+    // actually governs it — same pattern as crm-refunds vs crm-refunds-finance.
+    if (!module || module === "crm-refund-payment") {
+      queries.push(`
+        SELECT
+          'crm-refund-payment'                 AS Module,
+          'CRM Refund Payment'                 AS ModuleLabel,
+          CAST(PPaymentID AS NVARCHAR)         AS RecordId,
+          ISNULL(DocNo, PPaymentName)          AS Reference,
+          PDate                                AS RecordDate,
+          ISNULL(Status, 'Draft')              AS Status,
+          CAST(NULL AS NVARCHAR)               AS ContractorName,
+          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          PAmount                              AS Amount,
+          ${NULL_EXTRA}
+          CAST(PCreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ISNULL(CAST(PApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ''                                   AS RejectionNote,
+          CAST(NULL AS DATETIME2)              AS LastModified
+        FROM dbo.NewPayment
+        WHERE Status = 'Pending' AND SourceCrmRefundId IS NOT NULL
       `);
     }
 
@@ -323,6 +366,8 @@ function buildInboxQueries(module) {
           fg.GodownName                             AS FromGodownName,
           tg.GodownName                             AS ToGodownName,
           CAST(NULL AS NVARCHAR(MAX))               AS JournalVoucherSummary,
+          CAST(NULL AS INT)                         AS AssigneeUserId,
+          CAST(NULL AS INT)                         AS RungId,
           CAST(ISNULL(po.PurchaseOrderNo, '') AS NVARCHAR(255)) AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -406,6 +451,8 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR(255)) AS FromGodownName,
           CAST(NULL AS NVARCHAR(255)) AS ToGodownName,
           CAST(NULL AS NVARCHAR(MAX)) AS JournalVoucherSummary,
+          CAST(NULL AS INT)           AS AssigneeUserId,
+          CAST(NULL AS INT)           AS RungId,
           CAST(ISNULL(u_created.name, CAST(eb.ECreatedBy AS NVARCHAR(255))) AS NVARCHAR(255))  AS CreatedBy,
           CAST(ISNULL(u_approved.name, '') AS NVARCHAR(255))                                    AS ApprovedBy,
           ''                       AS ApprovedAt,
@@ -633,6 +680,8 @@ function buildInboxQueries(module) {
           fg.GodownName                                 AS FromGodownName,
           tg.GodownName                                 AS ToGodownName,
           CAST(NULL AS NVARCHAR(MAX))                  AS JournalVoucherSummary,
+          CAST(NULL AS INT)                            AS AssigneeUserId,
+          CAST(NULL AS INT)                            AS RungId,
           CAST(so.CreatedBy AS NVARCHAR(255))          AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -711,6 +760,8 @@ function buildInboxQueries(module) {
             JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = l.LHeadId
             WHERE l.JVID = jv.JVID
           )                                    AS JournalVoucherSummary,
+          CAST(NULL AS INT)                     AS AssigneeUserId,
+          CAST(NULL AS INT)                     AS RungId,
           CAST(jv.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,
@@ -789,6 +840,58 @@ function buildInboxQueries(module) {
         LEFT JOIN dbo.enterprise sc ON sc.id = ft.SourceCompanyId
         LEFT JOIN dbo.enterprise dc ON dc.id = ft.DestinationCompanyId
         WHERE ft.Status = 'Pending'
+      `);
+    }
+
+    // Work Allocation — per-engineer task confirmation. One row per engineer
+    // per assignment (dbo.DependencyActivityEngineer), not per assignment —
+    // a multi-engineer rung shows up once for EACH engineer still to
+    // confirm, since it's each person's own individual task, not a document
+    // a manager reviews once. Only ALLOCATED assignments (someone's been
+    // assigned, nobody there has confirmed yet) with an unconfirmed engineer
+    // row are pending here; AssigneeUserId is what isVisibleToViewer below
+    // uses to show this ONLY to that specific engineer (plus admin/
+    // super_admin oversight) — there's no role or Approval Setup workflow
+    // concept that fits "whichever engineer happens to be on this row".
+    if (!module || module === "work-allocation-engineer") {
+      queries.push(`
+        SELECT
+          'work-allocation-engineer'            AS Module,
+          'Activity Assignment'                 AS ModuleLabel,
+          CAST(dae.Id AS NVARCHAR)              AS RecordId,
+          CONCAT(dma.SequenceNo, '. ', am.activity_name) AS Reference,
+          daa.StartDate                         AS RecordDate,
+          'Pending'                             AS Status,
+          CAST(NULL AS NVARCHAR)                AS ContractorName,
+          CONCAT(
+            ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
+            ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+          )                                      AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))           AS Amount,
+          CAST(NULL AS DECIMAL(18,2))           AS GrnTotalAmount,
+          CAST(NULL AS DECIMAL(18,2))           AS GrnBasicAmount,
+          CAST(NULL AS NVARCHAR(MAX))           AS BillingTermsData,
+          CAST(NULL AS NVARCHAR(100))           AS SourceTransferDocNo,
+          CAST(NULL AS NVARCHAR(255))           AS FromGodownName,
+          CAST(NULL AS NVARCHAR(255))           AS ToGodownName,
+          CAST(NULL AS NVARCHAR(MAX))           AS JournalVoucherSummary,
+          dae.EngineerId                        AS AssigneeUserId,
+          dma.Id                                 AS RungId,
+          CAST(daa.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
+          ''                                     AS ApprovedBy,
+          ''                                     AS ApprovedAt,
+          ''                                     AS RejectedBy,
+          ''                                     AS RejectionNote,
+          daa.UpdatedAt                          AS LastModified
+        FROM dbo.DependencyActivityEngineer dae
+        JOIN dbo.DependencyActivityAssignment daa ON daa.Id = dae.AssignmentId
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+        LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+        LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+        WHERE dae.Approved = 0 AND daa.Status = 'ALLOCATED'
       `);
     }
 

@@ -31,6 +31,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 
 const API     = "/api/crm/bookings";
 const APP_API = "/api/crm/applications";
@@ -1016,10 +1017,13 @@ const CrmBooking: React.FC = () => {
                       </SelectTrigger>
                       <SelectContent>
                         {(bankOptions as any[]).map((b: any) => (
-                          <SelectItem key={b.BId} value={String(b.BId)}>{b.BName}</SelectItem>
+                          <SelectItem key={b.BId} value={String(b.BId)}>
+                            {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    <SelectedBankCard bank={findBank(bankOptions as any[], form.DepositBankId)} />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5">

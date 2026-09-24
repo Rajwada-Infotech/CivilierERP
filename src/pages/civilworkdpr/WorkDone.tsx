@@ -8,7 +8,7 @@ import { getRoomsForUnit } from "@/api/roomMasterApi";
 import { getDependencyMasters, getDependencyMaster, type DependencyMasterListRow, type LadderActivity } from "@/api/dependencyMasterApi";
 import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/components/ActivityChainPreview";
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
-import { getReportedAssignments } from "@/api/dependencyActivityAssignmentApi";
+import { getReportedAssignments, ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import {
   Hammer,
@@ -553,6 +553,7 @@ export default function WorkDone() {
                                     rungs.map((rung) => {
                                       const assignment = rung.rungId != null ? allAssignmentByRungId.get(rung.rungId) : undefined;
                                       const done = assignment?.status === "COMPLETED";
+                                      const meta = ASSIGNMENT_STATUS_META[assignment?.status ?? "PENDING"];
                                       return (
                                         <button
                                           key={rung.rungId ?? rung.activityId}
@@ -569,13 +570,9 @@ export default function WorkDone() {
                                             {rung.sequenceNo}. {rung.activityName}
                                           </span>
                                           <span
-                                            className={`text-[9px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
-                                              done
-                                                ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300"
-                                                : "bg-slate-500/15 text-slate-600 dark:text-slate-400"
-                                            }`}
+                                            className={`text-[9px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${meta.className}`}
                                           >
-                                            {done ? "Done" : "Pending"}
+                                            {meta.label}
                                           </span>
                                         </button>
                                       );

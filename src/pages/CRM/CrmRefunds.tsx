@@ -13,6 +13,7 @@ import { ApprovalActions } from "@/components/ApprovalActions";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 
 const API = "/api/crm/refunds";
@@ -58,7 +59,11 @@ async function fetchEligibleSources(customerId?: number): Promise<any[]> {
 }
 async function fetchProjectBanks(projectId?: number | null): Promise<any[]> {
   if (projectId == null) return [];
-  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}`); return r.ok ? r.json() : []; } catch { return []; }
+  // excludeCash=1 — a refund is always disbursed as a bank transfer to the
+  // customer's own account; Cash in Hand (selectable elsewhere, e.g. a cash
+  // payment mode on NewPayment) has no business appearing as a refund's
+  // disbursing bank. See crmProjectBanks.js's /for-project comment.
+  try { const r = await fetchWithAuth(`${PROJECT_BANK_API}/for-project/${projectId}?excludeCash=1`); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchBookings(): Promise<any[]> {
   try { const r = await fetchWithAuth(BKG_API); return r.ok ? r.json() : []; } catch { return []; }
@@ -98,6 +103,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [bankLHeadId, setBankLHeadId] = useState("");
+  const [paymentMode, setPaymentMode] = useState("");
   const [cbName, setCbName] = useState("");
   const [cbAcc, setCbAcc] = useState("");
   const [cbIfsc, setCbIfsc] = useState("");
@@ -158,6 +164,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
         if (!picked) { toast.error("Pick a source"); return; }
         const body: any = { GrossAmount: amt, Reason: reason || null, RefundBankLHeadId: bankLHeadId || null,
           CustomerBankName: cbName || null, CustomerAccountNo: cbAcc || null, CustomerIfscCode: cbIfsc || null,
+          PreferredPaymentMode: paymentMode || null,
           SourceType: picked.SourceType, SourceOnAccountId: picked.OnAccountId };
         const r = await fetchWithAuth(API, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
         const d = await r.json();
@@ -267,7 +274,23 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                 <label className="text-xs text-muted-foreground block mb-1">Company bank (disburses from)</label>
                 <select value={bankLHeadId} onChange={(e) => setBankLHeadId(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
                   <option value="">Finance will pick at approval</option>
-                  {(banks as any[]).map((b) => <option key={b.BId} value={String(b.BId)}>{b.BName}</option>)}
+                  {(banks as any[]).map((b) => (
+                    <option key={b.BId} value={String(b.BId)}>
+                      {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <SelectedBankCard bank={findBank(banks as any[], bankLHeadId)} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Payment mode (optional — Finance can set this later)</label>
+                <select value={paymentMode} onChange={(e) => setPaymentMode(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                  <option value="">Not set yet</option>
+                  <option value="NEFT">NEFT</option>
+                  <option value="RTGS">RTGS</option>
+                  <option value="IMPS">IMPS</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Cheque">Cheque</option>
                 </select>
               </div>
               <div>
@@ -319,6 +342,7 @@ const CrmRefunds: React.FC = () => {
   const [showNew, setShowNew] = useState(false);
   const [financeDialog, setFinanceDialog] = useState<any | null>(null);
   const [financeBank, setFinanceBank] = useState("");
+  const [financeMode, setFinanceMode] = useState("");
 
   const filters = useMemo<Filters>(() => ({ search, status, companyId: cpb.companyId, projectId: cpb.projectId, blockId: cpb.blockId }), [search, status, cpb]);
   const { data: result, isLoading, isFetching, dataUpdatedAt, refetch } = useQuery({
@@ -380,14 +404,14 @@ const CrmRefunds: React.FC = () => {
           )}
           {r.Status === "FinancePending" && rights.canEdit && (
             <>
-              <button onClick={() => { setFinanceDialog(r); setFinanceBank(r.RefundBankLHeadId != null ? String(r.RefundBankLHeadId) : ""); }}
+              <button onClick={() => { setFinanceDialog(r); setFinanceBank(r.RefundBankLHeadId != null ? String(r.RefundBankLHeadId) : ""); setFinanceMode(r.PreferredPaymentMode || ""); }}
                 className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200">Finance Approve</button>
               <button onClick={() => financeAction(r.Id, "finance-reject", { note: "Sent back" })}
                 className="text-xs px-2 py-1 text-red-600 hover:underline">Send back</button>
             </>
           )}
           {r.FinanceNewPaymentId != null && (
-            <button onClick={() => navigate(`/finance/payments?view=${r.FinanceNewPaymentId}`)}
+            <button onClick={() => navigate(`/payments?view=${r.FinanceNewPaymentId}`)}
               className="text-xs text-primary hover:underline flex items-center gap-1">Payment <ExternalLink size={11} /></button>
           )}
           {r.Status === "Paid" && <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 size={12} /> Paid</span>}
@@ -440,7 +464,7 @@ const CrmRefunds: React.FC = () => {
 
         {showNew && <NewRefundDialog onClose={() => setShowNew(false)} onDone={invalidate} />}
 
-        <Dialog open={!!financeDialog} onOpenChange={(o) => { if (!o) { setFinanceDialog(null); setFinanceBank(""); } }}>
+        <Dialog open={!!financeDialog} onOpenChange={(o) => { if (!o) { setFinanceDialog(null); setFinanceBank(""); setFinanceMode(""); } }}>
           <DialogContent className="max-w-md">
             <DialogHeader><DialogTitle className="font-heading">Finance-approve refund {financeDialog?.RefundNo}</DialogTitle></DialogHeader>
             <div className="space-y-3 text-sm">
@@ -453,13 +477,29 @@ const CrmRefunds: React.FC = () => {
                 <label className="text-xs text-muted-foreground block mb-1">Company bank to disburse from *</label>
                 <select value={financeBank} onChange={(e) => setFinanceBank(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
                   <option value="">Select…</option>
-                  {(financeBanks as any[]).map((b) => <option key={b.BId} value={String(b.BId)}>{b.BName}</option>)}
+                  {(financeBanks as any[]).map((b) => (
+                    <option key={b.BId} value={String(b.BId)}>
+                      {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <SelectedBankCard bank={findBank(financeBanks as any[], financeBank)} />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground block mb-1">Payment mode (optional — can be set later)</label>
+                <select value={financeMode} onChange={(e) => setFinanceMode(e.target.value)} className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
+                  <option value="">Not set yet</option>
+                  <option value="NEFT">NEFT</option>
+                  <option value="RTGS">RTGS</option>
+                  <option value="IMPS">IMPS</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Cheque">Cheque</option>
                 </select>
               </div>
               <p className="text-[11px] text-muted-foreground">Approving raises a Finance payment voucher. The refund is marked Paid when that voucher is approved.</p>
               <div className="flex justify-end gap-2">
-                <button onClick={() => { setFinanceDialog(null); setFinanceBank(""); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-                <button onClick={() => financeAction(financeDialog.Id, "finance-approve", { RefundBankLHeadId: financeBank || undefined })}
+                <button onClick={() => { setFinanceDialog(null); setFinanceBank(""); setFinanceMode(""); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                <button onClick={() => financeAction(financeDialog.Id, "finance-approve", { RefundBankLHeadId: financeBank || undefined, PaymentMode: financeMode || undefined })}
                   disabled={!financeBank}
                   className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">Raise Payout</button>
               </div>

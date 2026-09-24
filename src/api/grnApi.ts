@@ -5,7 +5,7 @@ const BASE = "/api/grns";
 
 const getAuthHeaders = () => ({
   "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
 });
 
 export interface Supplier {
@@ -260,7 +260,7 @@ export const uploadGRNAttachments = async (
   const res = await fetch(`${BASE}/upload`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+      Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
       // NOTE: do NOT set Content-Type -- the browser sets the multipart boundary
     },
     body: form,

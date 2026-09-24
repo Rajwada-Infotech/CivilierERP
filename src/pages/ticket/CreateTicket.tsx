@@ -359,7 +359,7 @@ const CreateTicket = () => {
       // Step 2 — upload files (if any) now that we have the ticketId
       // The backend links each attachment to this ticket automatically.
       const token =
-        localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+        sessionStorage.getItem("token") || "";
 
       const uploadOne = async (formData: FormData): Promise<void> => {
         formData.append("ticketId", String(ticketId));
