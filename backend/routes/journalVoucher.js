@@ -56,6 +56,28 @@ function validateLines(lines) {
   return null;
 }
 
+/** Drawings/remuneration must be booked against the specific partner's own
+ * Current Account (Partner Master, "(For Withdrawings)"), never a generic
+ * hand-made "Partners Drawings" head — that head has no partner attached, so
+ * the Balance Sheet can't tell whose drawings they are (it showed up as an
+ * unexplained "Partners Drawings" pseudo-partner). Blocks any line on a
+ * non-partner head whose name or group is a drawings account. */
+async function assertNoGenericDrawingsHead(pool, lines) {
+  const ids = [...new Set(lines.map((l) => parseInt(l.LHeadId, 10)).filter(Number.isFinite))];
+  if (!ids.length) return null;
+  const r = await pool.request().query(`
+    SELECT TOP 1 ISNULL(ahm.DisplayName, ahm.LHeadName) AS name
+    FROM dbo.AccountHeadMaster ahm
+    LEFT JOIN dbo.AccountGroup ag ON ag.AGId = ahm.LBelongsTo
+    WHERE ahm.LHeadId IN (${ids.join(",")})
+      AND ISNULL(ahm.LHeadType, '') <> 'P'
+      AND (ahm.LHeadName LIKE '%drawing%' OR ag.Name LIKE '%drawing%')
+  `);
+  return r.recordset.length
+    ? `"${r.recordset[0].name}" is a generic drawings account with no partner attached. Post drawings/remuneration to the partner's own Current Account ("… (For Withdrawings)") instead, so it shows against the right partner.`
+    : null;
+}
+
 // ── GET / — list, with filters ──────────────────────────────────────────────
 router.get("/", authenticateToken, async (req, res) => {
   try {
@@ -282,6 +304,8 @@ router.post("/", authenticateToken, requirePageRight("journal-voucher", "create"
     if (!JVDate) return res.status(400).json({ error: "JVDate is required." });
     const linesError = validateLines(lines);
     if (linesError) return res.status(400).json({ error: linesError });
+    const drawingsError = await assertNoGenericDrawingsHead(pool, lines);
+    if (drawingsError) return res.status(400).json({ error: drawingsError });
     const modeError = validateSettlementMode(req.body);
     if (modeError) return res.status(400).json({ error: modeError });
     try {
@@ -430,6 +454,8 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
     if (!JVDate) return res.status(400).json({ error: "JVDate is required." });
     const linesError = validateLines(lines);
     if (linesError) return res.status(400).json({ error: linesError });
+    const drawingsError = await assertNoGenericDrawingsHead(pool, lines);
+    if (drawingsError) return res.status(400).json({ error: drawingsError });
     const modeError = validateSettlementMode(req.body);
     if (modeError) return res.status(400).json({ error: modeError });
     try {
