@@ -275,6 +275,9 @@ const TdsMaster = lazy(() => import("./pages/masters/TdsMaster"));
 const AccountGroupMaster = lazy(
   () => import("./pages/masters/AccountGroupMaster"),
 );
+const AccountGroupAuditTrail = lazy(
+  () => import("./pages/masters/AccountGroupAuditTrail"),
+);
 const NamedEntryTypeMaster = lazy(
   () => import("./pages/masters/NamedEntryTypeMaster"),
 );
@@ -1777,6 +1780,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="account-head">
             <AccountGroupMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/account-group-audit-trail"
+        element={
+          <ProtectedRoute pageKey="account-group-audit-trail">
+            <AccountGroupAuditTrail />
           </ProtectedRoute>
         }
       />
