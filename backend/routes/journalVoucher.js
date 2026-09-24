@@ -253,8 +253,8 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const lines = await pool
       .request()
       .input("id", sql.Int, id).query(`
-        SELECT jvl.LineID, jvl.LHeadId, lh.LHeadName, jvl.DebitAmount, jvl.CreditAmount,
-               jvl.Narration, jvl.SortOrder
+        SELECT jvl.LineID, jvl.LHeadId, lh.LHeadName, lh.LHeadType, lh.LHeadCode,
+               jvl.DebitAmount, jvl.CreditAmount, jvl.Narration, jvl.SortOrder
         FROM dbo.JournalVoucherLines jvl
         LEFT JOIN dbo.AccountHeadMaster lh ON lh.LHeadId = jvl.LHeadId
         WHERE jvl.JVID = @id
