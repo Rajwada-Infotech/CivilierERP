@@ -891,6 +891,23 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
       }
     }
 
+    // CRM-linked rows (milestone payment or on-account deposit) post to GL
+    // the moment this approval commits (applyCrmMilestonePaymentApproval /
+    // applyCrmOnAccountPaymentApproval below), debiting whatever bank is on
+    // this row right now — with no bank, that posting either fails outright
+    // or (older code) silently fell back to a proxy clearing account
+    // ("CRM Collections A/c"), producing a real-looking asset balance that
+    // doesn't correspond to any actual bank. Reject the approval itself
+    // instead of letting it commit and only discovering the gap later —
+    // same rollback-with-clear-reason pattern as the predecessor-milestone
+    // check above.
+    if (cur.recordset[0].CrmBookingId != null && !cur.recordset[0].RPDepositBankId) {
+      await tx.rollback();
+      return res.status(400).json({
+        error: "This payment has no Deposit Bank set — add one before approving so it posts to the correct GL account.",
+      });
+    }
+
     await tx
       .request()
       .input("id", sql.Int, pid)
