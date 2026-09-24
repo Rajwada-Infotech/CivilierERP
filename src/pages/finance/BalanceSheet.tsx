@@ -470,34 +470,6 @@ function ReservesAndSurplusBlock({ data }: { data: ReservesAndSurplus }) {
   );
 }
 
-// ─── Partners' Drawings drill-down (own note, referenced from the capital
-// block above) — flat list of drawings heads/groups, same GroupRow pattern
-// as every other section. ─────────────────────────────────────────────────
-
-function PartnersDrawingsNote({ groups, total, openKey, onToggle }: {
-  groups: StatementGroup[]; total: number; openKey: string | null; onToggle: (k: string) => void;
-}) {
-  if (groups.length === 0) return null;
-
-  return (
-    <div className="mt-4 rounded-lg border border-border/60 overflow-hidden">
-      <div className="flex items-center justify-between px-3.5 py-2 bg-muted/30 border-b border-border/60">
-        <span className="text-[11px] font-bold uppercase tracking-wide text-foreground">
-          Partners' Drawings — Detail
-        </span>
-        <span className="text-[11px] font-semibold tabular-nums">{fmt(total)}</span>
-      </div>
-      <table className="w-full border-collapse">
-        <tbody>
-          {groups.map((g) => (
-            <GroupRow key={String(g.groupId)} group={g} openKey={openKey} onToggle={onToggle} indent={2} />
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
 // ─── Vertical Statement ───────────────────────────────────────────────────────
 
 function VerticalStatement({
@@ -613,13 +585,6 @@ function VerticalStatement({
 
         </tbody>
       </table>
-
-      <PartnersDrawingsNote
-        groups={data.partnersDrawings}
-        total={data.partnersDrawings.reduce((s, g) => s + g.total, 0)}
-        openKey={openKey}
-        onToggle={toggle}
-      />
 
       {/* Balance check bar */}
       <div className={`mt-4 mx-0 flex items-center justify-between px-4 py-2.5 rounded-lg border text-xs font-medium ${

@@ -18,9 +18,9 @@ import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getItems } from "@/api/itemMasterApi";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import {
-  getEligibleAssetItems, getFixedAssetTaggings, createFixedAssetTagging,
+  getEligibleAssetItems, getPendingBatches, deletePendingBatch, getFixedAssetTaggings, createFixedAssetTagging,
   updateFixedAssetTagging, deleteFixedAssetTagging,
-  type EligibleAssetItem, type TaggingListItem,
+  type EligibleAssetItem, type PendingBatch, type TaggingListItem,
 } from "@/api/fixedAssetTaggingApi";
 
 function ensureArray<T>(v: unknown): T[] {
@@ -168,6 +168,7 @@ export default function FixedAssetTagging() {
   const [editDocDate, setEditDocDate] = useState("");
   const [editRemarks, setEditRemarks] = useState("");
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deletePendingId, setDeletePendingId] = useState<number | null>(null);
 
   // ── bulk import (Excel/CSV) ──
   const importFileInputRef = useRef<HTMLInputElement>(null);
@@ -176,6 +177,13 @@ export default function FixedAssetTagging() {
   const [importDone, setImportDone] = useState(false);
   const [importSubmitting, setImportSubmitting] = useState(false);
   const [importValidating, setImportValidating] = useState(false);
+
+  // Received Fixed Asset stock (GRN / Inventory Import) not tagged yet — auto-tagging
+  // skips a project that has no ID Template, so this keeps that stock visible.
+  const { data: pendingBatches = [] } = useQuery({
+    queryKey: ["fixed-asset-pending-batches"],
+    queryFn: getPendingBatches,
+  });
 
   const setField = useCallback(<K extends keyof FormState>(k: K, v: FormState[K]) => {
     setForm((p) => ({ ...p, [k]: v }));
@@ -257,6 +265,20 @@ export default function FixedAssetTagging() {
     return r;
   }, [taggings, filterCompany, filterProject, filterFromDate, filterToDate, search]);
 
+  // Received Fixed Asset stock with no tags yet — listed in the same table, above the tagged units.
+  const filteredPending = useMemo(() => {
+    let r = ensureArray<PendingBatch>(pendingBatches);
+    if (filterCompany) r = r.filter((b) => String(b.CompanyId) === filterCompany);
+    if (filterProject) r = r.filter((b) => String(b.ProjectId) === filterProject);
+    if (filterFromDate) r = r.filter((b) => b.DocDate && new Date(b.DocDate) >= new Date(filterFromDate));
+    if (filterToDate)   r = r.filter((b) => b.DocDate && new Date(b.DocDate) <= new Date(`${filterToDate}T23:59:59`));
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      r = r.filter((b) => (b.SourceDocNo || "").toLowerCase().includes(s) || (b.AssetName || "").toLowerCase().includes(s));
+    }
+    return r;
+  }, [pendingBatches, filterCompany, filterProject, filterFromDate, filterToDate, search]);
+
   const stats = useMemo(() => {
     const live = ensureArray<TaggingListItem>(taggings);
     return {
@@ -275,6 +297,7 @@ export default function FixedAssetTagging() {
       });
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
       resetForm();
       setViewMode("list");
@@ -299,11 +322,24 @@ export default function FixedAssetTagging() {
       toast.success("Tagging entry deleted");
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
       setDeleteId(null);
     },
     onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deletePendingMut = useMutation({
+    mutationFn: deletePendingBatch,
+    onSuccess: () => {
+      toast.success("Removed from FA Inventory");
+      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-assets"] });
+      setDeletePendingId(null);
+    },
+    onError: (e: Error) => { toast.error(e.message); setDeletePendingId(null); },
   });
 
   const openEdit = (t: TaggingListItem) => {
@@ -502,6 +538,7 @@ export default function FixedAssetTagging() {
     if (successCount > 0) {
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
     }
     if (errorCount === 0) {
@@ -789,7 +826,7 @@ export default function FixedAssetTagging() {
         <CardContent className="p-0">
           {isLoading ? (
             <div className="text-center py-20 text-muted-foreground text-sm">Loading…</div>
-          ) : filtered.length === 0 ? (
+          ) : filtered.length === 0 && filteredPending.length === 0 ? (
             <div className="flex flex-col items-center gap-3 py-20 text-muted-foreground">
               <span className="inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-muted/60">
                 <TagIcon size={26} className="opacity-40" />
@@ -819,6 +856,39 @@ export default function FixedAssetTagging() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
+                  {filteredPending.map((b) => (
+                    <tr key={`pending-${b.AssetId}`} className="bg-amber-500/5 hover:bg-amber-500/10 transition-colors">
+                      <td className="px-4 py-3 font-mono text-xs">{b.SourceDocNo || "—"}</td>
+                      <td className="px-4 py-3 text-muted-foreground">{fmtDate(b.DocDate)}</td>
+                      <td className="px-4 py-3">
+                        <p className="font-medium truncate">{b.AssetName}</p>
+                        <p className="text-[11px] text-muted-foreground">{b.SourceType === "GRN" ? "Received via GRN" : "Inventory Import"} · Qty {fmt(b.Quantity)}</p>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground">—</td>
+                      <td className="px-4 py-3 text-muted-foreground">
+                        {b.CompanyName || "—"}{b.ProjectName ? ` / ${b.ProjectName}` : ""}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">Untagged</span>
+                      </td>
+                      <td className="px-4 py-3"><span className="text-muted-foreground text-xs">—</span></td>
+                      <td className="px-4 py-3 text-xs text-amber-700 dark:text-amber-400 max-w-[260px]">
+                        {b.Reason === "NO_TEMPLATE"
+                          ? `No Project Alias for ${b.ProjectName || "this project"} — add one in ID Template Master to tag these units automatically.`
+                          : "Ready to tag — use New Tagging."}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          {rights.canDelete && (
+                            <button onClick={() => setDeletePendingId(b.AssetId)} title="Delete"
+                              className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors text-muted-foreground hover:text-red-500">
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                   {filtered.map((t) => {
                     const hasRecord = t.RecordStatus === "Done";
                     return (
@@ -911,6 +981,32 @@ export default function FixedAssetTagging() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* ── delete untagged received stock ── */}
+      {deletePendingId != null && createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
+            <div className="flex items-start gap-3 mb-4">
+              <AlertCircle size={20} className="text-destructive mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold text-sm">Remove this received stock?</p>
+                <p className="text-xs text-muted-foreground mt-0.5">This permanently removes it from FA Inventory and cannot be undone. The GRN itself is not changed.</p>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => setDeletePendingId(null)}
+                className="shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border border-border hover:bg-muted transition-all">
+                Keep
+              </button>
+              <button onClick={() => deletePendingMut.mutate(deletePendingId)} disabled={deletePendingMut.isPending}
+                className="shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-destructive transition-all disabled:opacity-50">
+                {deletePendingMut.isPending ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
 
       {/* ── delete confirm ── */}
       {deleteId && createPortal(

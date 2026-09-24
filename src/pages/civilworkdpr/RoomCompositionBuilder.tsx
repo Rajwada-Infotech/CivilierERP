@@ -10,6 +10,7 @@ import {
   saveBhkTemplate,
   getLayoutTypes,
   addLayoutType,
+  LAYOUT_TYPES_QUERY_KEY,
   type BhkType,
 } from "@/api/unitBhkConfigApi";
 import { Grid3x3, Home, Minus, Plus, Save, X } from "lucide-react";
@@ -35,7 +36,7 @@ export default function RoomCompositionBuilder() {
   const newTypeInputRef = useRef<HTMLInputElement>(null);
 
   const { data: layoutTypes = [], isLoading: loadingTypes } = useQuery({
-    queryKey: ["layout-types"],
+    queryKey: LAYOUT_TYPES_QUERY_KEY,
     queryFn: getLayoutTypes,
     staleTime: 60 * 1000,
   });
@@ -88,14 +89,22 @@ export default function RoomCompositionBuilder() {
     if (!bhkType) return;
     setSaving(true);
     try {
-      await saveBhkTemplate(bhkType, {
+      const saved = await saveBhkTemplate(bhkType, {
         composition: (categories as RoomCategory[]).map((c) => ({
           roomCategoryId: c.id,
           quantity: quantities[c.id] ?? 0,
         })),
       });
-      toast.success(`${selectedLabel} template saved`);
+      const sync = saved.roomSync;
+      toast.success(
+        sync && sync.roomsAdded > 0
+          ? `${selectedLabel} template saved — ${sync.roomsAdded} new room(s) added to ${sync.unitsUpdated} existing unit(s)`
+          : `${selectedLabel} template saved`,
+      );
+      if (sync && sync.failed > 0) toast.error(`${sync.failed} unit(s) couldn't be updated with the new rooms — check the server log.`);
       qc.invalidateQueries({ queryKey: ["bhk-template", bhkType] });
+      // Room counts/summaries feed the CRM Auto Setup + Unit Master pickers.
+      qc.invalidateQueries({ queryKey: LAYOUT_TYPES_QUERY_KEY });
     } catch (e: any) {
       toast.error(e.message ?? "Save failed");
     } finally {
@@ -110,7 +119,7 @@ export default function RoomCompositionBuilder() {
     try {
       const created = await addLayoutType(label);
       toast.success(`"${created.label}" added`);
-      await qc.invalidateQueries({ queryKey: ["layout-types"] });
+      await qc.invalidateQueries({ queryKey: LAYOUT_TYPES_QUERY_KEY });
       setBhkType(created.typeKey);
       setNewTypeLabel("");
       setAddingType(false);
@@ -170,6 +179,12 @@ export default function RoomCompositionBuilder() {
                         }`}
                       >
                         {t.label}
+                        {t.roomCount === 0 && (
+                          <span
+                            className="w-1.5 h-1.5 rounded-full bg-amber-500"
+                            title="No rooms defined yet — this type can't be picked for units until it has a layout"
+                          />
+                        )}
                       </button>
                     ))}
 
@@ -239,7 +254,8 @@ export default function RoomCompositionBuilder() {
                     <>
                       <p className="text-xs text-muted-foreground">
                         This layout applies to every unit tagged {selectedLabel} across every project,
-                        tower, and floor — set it once here instead of per unit.
+                        tower, and floor — set it once here instead of per unit. Saving adds any new
+                        rooms to units whose rooms are already built; existing rooms are never removed.
                       </p>
 
                       <div className="space-y-2">

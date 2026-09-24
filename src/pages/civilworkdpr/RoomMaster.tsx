@@ -301,6 +301,91 @@ function UnitRoomConfigCard({ unitId }: { unitId: string }) {
   );
 }
 
+// Bulk counterpart of the per-unit "Create Rooms" above: builds the rooms of
+// every unit in a project (or one block) from each unit's own Unit
+// Composition layout. For units that existed before rooms were generated
+// automatically — units created from now on get theirs at creation.
+// Idempotent/add-only server-side (roomMaster.js POST /generate-bulk).
+function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
+  const qc = useQueryClient();
+  const [projectId, setProjectId] = React.useState("");
+  const [blockId, setBlockId] = React.useState("");
+  const [running, setRunning] = React.useState(false);
+
+  const { data: projects = [] } = useQuery<{ Id: number; Name: string }[]>({
+    queryKey: ["room-master-projects"],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${API}/projects`);
+      if (!res.ok) throw new Error("Failed to fetch projects");
+      return res.json().catch(() => []);
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const projectIdsWithUnits = React.useMemo(() => new Set(units.map((u) => String(u.ProjectId))), [units]);
+  const projectOptions = projects.filter((p) => projectIdsWithUnits.has(String(p.Id)));
+  const blockOptions = React.useMemo(() => {
+    const m = new Map<string, string>();
+    units.filter((u) => String(u.ProjectId) === projectId)
+      .forEach((u) => m.set(String(u.BlockId), u.BlockName ?? `Block ${u.BlockId}`));
+    return [...m.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [units, projectId]);
+  const unitCount = units.filter((u) => String(u.ProjectId) === projectId && (!blockId || String(u.BlockId) === blockId)).length;
+
+  const handleRun = async () => {
+    if (!projectId) return;
+    const scope = blockId ? blockOptions.find(([id]) => id === blockId)?.[1] ?? "this block" : "this project";
+    if (!window.confirm(`Generate rooms for all ${unitCount} unit(s) in ${scope} from their Unit Composition layouts? Existing rooms are kept; only missing ones are added.`)) return;
+    setRunning(true);
+    try {
+      const res = await fetchWithAuth(`${API}/generate-bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ProjectId: parseInt(projectId, 10), BlockId: blockId ? parseInt(blockId, 10) : null }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || "Failed to generate rooms");
+      if (body.failed?.length) toast.warning(body.message);
+      else toast.success(body.message || "Rooms generated");
+      await qc.invalidateQueries({ queryKey: ["room-master"] });
+      await qc.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
+    } catch (e: any) {
+      toast.error(e.message ?? "Failed to generate rooms");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const selectCls = "h-8 rounded-lg border border-border bg-background px-2 text-xs outline-none focus:border-primary min-w-[10rem]";
+  return (
+    <div className="rounded-xl border border-border bg-card p-4 flex flex-wrap items-end gap-3">
+      <div className="flex-1 min-w-[14rem]">
+        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Generate Rooms in Bulk</p>
+        <p className="text-[11px] text-muted-foreground mt-0.5">
+          Builds every unit's rooms from its Unit Composition layout. Only adds what's missing.
+        </p>
+      </div>
+      <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setBlockId(""); }} className={selectCls}>
+        <option value="">Select Project</option>
+        {projectOptions.map((p) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+      </select>
+      <select value={blockId} onChange={(e) => setBlockId(e.target.value)} disabled={!projectId} className={`${selectCls} disabled:opacity-50`}>
+        <option value="">All Blocks</option>
+        {blockOptions.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+      </select>
+      <button
+        type="button"
+        onClick={handleRun}
+        disabled={!projectId || running || unitCount === 0}
+        className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-medium bg-gradient-to-r from-cyan-500 to-teal-400 text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+      >
+        {running ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+        {running ? "Generating…" : projectId ? `Generate for ${unitCount} unit(s)` : "Generate"}
+      </button>
+    </div>
+  );
+}
+
 // Sentinel for a unit with no FloorNo set — real floor numbers are >= 0
 // (0 = Ground), so this can never collide with an actual value.
 const NO_FLOOR = "__none__";
@@ -666,6 +751,7 @@ const RoomMaster: React.FC = () => {
         title="Flat Master"
         icon={DoorOpen}
       >
+      {rights.canCreate && <BulkGenerateRoomsPanel units={allUnits} />}
       <MasterPage
         title="Room"
         // Rooms are only ever created via the Room Configuration card's

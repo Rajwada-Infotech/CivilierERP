@@ -229,31 +229,9 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL((
             SELECT SUM(gle.DebitAmount) FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId AND gle.IsReversed = 0
-              -- 'OnAccountAdjustment' is the real GL leg posted when a
-              -- pooled on-account advance is applied to an invoice — it
-              -- always pairs with a dbo.OnAccountLedger DEBIT row for the
-              -- same amount, and both are already excluded from this
-              -- head's on-account contribution below (onAccountAdvanceByHead
-              -- only sums CREDIT rows), so counting this GL leg too would
-              -- double it. Same fix as vendorLedger.js's fetchOnAccountRows
-              -- and trialBalance.js's per-account drill-down.
-              -- Only exclude this leg when the head actually has a matching
-              -- OnAccountLedger addback (a real Supplier/Contractor party
-              -- ledger — onAccountAdvanceByHead re-adds the equivalent
-              -- amount below, so excluding it here avoids double-counting).
-              -- A head with no such addback (e.g. "Company On Account A/c",
-              -- the pooled clearing account itself, not a party ledger)
-              -- needs this leg counted normally — it's the only entry that
-              -- ever reduces that head's balance as advances get applied,
-              -- and excluding it unconditionally left the pool permanently
-              -- overstated by every advance ever applied to an invoice.
-              AND (
-                gle.SourceType <> 'OnAccountAdjustment'
-                OR NOT EXISTS (
-                  SELECT 1 FROM dbo.OnAccountLedger oal
-                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
-                )
-              )
+              -- Pure ledger read: on-account advances already sit in the
+              -- 'Company On Account A/c' asset, so no add-back / exclusion here
+              -- (that used to count the same advance twice and unbalance the sheet).
               AND gle.VoucherDate <= @asOf
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
@@ -264,40 +242,11 @@ router.get("/balance-sheet", async (req, res) => {
           ISNULL((
             SELECT SUM(gle.CreditAmount) FROM dbo.GeneralLedgerEntry gle
             WHERE gle.LHeadId = ahm.LHeadId AND gle.IsReversed = 0
-              -- Only exclude this leg when the head actually has a matching
-              -- OnAccountLedger addback (a real Supplier/Contractor party
-              -- ledger — onAccountAdvanceByHead re-adds the equivalent
-              -- amount below, so excluding it here avoids double-counting).
-              -- A head with no such addback (e.g. "Company On Account A/c",
-              -- the pooled clearing account itself, not a party ledger)
-              -- needs this leg counted normally — it's the only entry that
-              -- ever reduces that head's balance as advances get applied,
-              -- and excluding it unconditionally left the pool permanently
-              -- overstated by every advance ever applied to an invoice.
-              AND (
-                gle.SourceType <> 'OnAccountAdjustment'
-                OR NOT EXISTS (
-                  SELECT 1 FROM dbo.OnAccountLedger oal
-                  WHERE oal.PartyId = ahm.LHeadId AND oal.PartyType IN ('Supplier', 'Vendor', 'Contractor')
-                )
-              )
               AND gle.VoucherDate <= @asOf
               AND (@companyId IS NULL OR gle.CompanyId = @companyId)
               AND (@projectId IS NULL OR gle.ProjectId = @projectId)
               AND (@costCenterId IS NULL OR gle.CostCenterId = @costCenterId)
           ), 0) AS credit
-          -- Supplier/Contractor on-account advance is folded into the DEBIT
-          -- side separately below (onAccountAdvanceByHead, a live SUM over
-          -- dbo.OnAccountLedger CREDIT rows) instead of the
-          -- AccountHeadMaster.OnAccountBalance
-          -- cached column that used to be added here — that column double-
-          -- counted every advance (once via this flat total, again via the
-          -- GL leg an applied/adjusted portion of it already posts), the
-          -- exact bug vendorLedger.js's own OPENING_ADJ_SQL comment
-          -- documents and fixed for the Vendor Ledger report. Balance Sheet
-          -- had the same bug unfixed, which is why a Supplier/Contractor's
-          -- Balance Sheet figure could diverge sharply from that same
-          -- head's own Vendor Ledger closing balance.
         FROM dbo.AccountHeadMaster ahm
         -- No LHeadStatus filter — same universe of heads and the same
         -- opening/txn balance computation trialBalance.js's own main query
@@ -312,35 +261,10 @@ router.get("/balance-sheet", async (req, res) => {
         WHERE ahm.LBelongsTo IS NOT NULL
       `);
 
-    // Live per-head on-account advance, asOf-scoped — CREDIT rows only (a
-    // standalone advance/excess payment pooled against "Company On Account
-    // A/c", not yet applied to any invoice). A DEBIT row ("applied to
-    // invoice") is deliberately excluded, same reasoning as
-    // vendorLedger.js's fetchOnAccountRows: it always pairs with the
-    // OnAccountAdjustment GL leg already excluded above, and counting
-    // both/neither keeps the net contribution correct either way. Despite
-    // TxnType='CREDIT' being the SQL column name, this is a DEBIT-side
-    // contribution to the party's own ledger (see the per-head loop below,
-    // and vendorLedger.js's mapOnAccountRow) — paying an advance reduces
-    // what's owed, it doesn't increase it.
-    const onAccountRes = await pool
-      .request()
-      .input("asOf", sql.Date, asOf)
-      .input("companyId", sql.Int, companyId)
-      .input("projectId", sql.Int, projectId)
-      .query(`
-        SELECT PartyId, SUM(Amount) AS advance
-        FROM dbo.OnAccountLedger
-        WHERE PartyType IN ('Supplier', 'Vendor', 'Contractor') AND TxnType = 'CREDIT'
-          AND TxnDate <= @asOf
-          AND (@companyId IS NULL OR CompanyId = @companyId)
-          AND (@projectId IS NULL OR ProjectId = @projectId)
-        GROUP BY PartyId
-      `);
-    const onAccountAdvanceByHead = new Map(
-      onAccountRes.recordset.map((r) => [Number(r.PartyId), Number(r.advance) || 0]),
-    );
-
+    // Balances are a pure read of the ledger. On-account advances to suppliers
+    // sit in the 'Company On Account A/c' asset, so they are NOT added back
+    // onto the party heads (that counted each advance twice and left the
+    // sheet out of balance by the total advances).
     // Net P&L (income - expenses, life-to-date through asOf) rolls into
     // Partners' Capital as Net Profit — same as any statutory Balance
     // Sheet, since the ledger has no year-end closing/transfer entry to
@@ -474,8 +398,10 @@ router.get("/balance-sheet", async (req, res) => {
       // DebitAmount there. This was flipped to the credit side here
       // initially, which didn't just fail to fix the Vendor-Ledger-vs-
       // Balance-Sheet mismatch — it doubled it in the wrong direction.
-      const onAccountAdvance = onAccountAdvanceByHead.get(Number(h.id)) || 0;
-      const debit = (Number(h.debit) || 0) + onAccountAdvance;
+      // Pure ledger balance — on-account advances are already a debit
+      // in the 'Company On Account A/c' asset; adding them back onto the
+      // supplier as well counted each advance twice.
+      const debit = Number(h.debit) || 0;
       const credit = Number(h.credit) || 0;
       const net = Math.round((debit - credit) * 100) / 100;
       if (Math.abs(net) < 0.005) continue; // zero-balance heads add no signal
@@ -672,8 +598,12 @@ router.get("/balance-sheet", async (req, res) => {
       const prior = Number(a.debitPrior) || 0;
       const cur = Number(a.debitCurrent) || 0;
       if (!target || !unassignedRow) continue;
+      // Dr Partners Drawings / Cr the partner's Current A/c cancel each
+      // other out for that partner — take the matching credit off instead
+      // of also adding the debit as drawings (that showed it in both
+      // places: Add: Share of Profit AND Less: Drawings).
       target.opening -= prior;
-      target.drawings += cur;
+      target.credits -= cur;
       target.closing -= prior + cur;
       unassignedRow.opening += prior;
       unassignedRow.drawings -= cur;

@@ -8,6 +8,7 @@ import { Building2, Layers, Ruler, Car, CheckCircle2, Lock, ExternalLink, Pencil
 import CrmProjectAutoSetupParking from "./CrmProjectAutoSetupParking";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 
 const API = "/api/crm/project-auto-setup";
 const PROJECTS_API = "/api/unit-master/projects";
@@ -15,11 +16,11 @@ const DROPDOWN_API = "/api/business/dropdown";
 
 type NamingScheme = "Alphabetical" | "Numeric" | "Custom";
 
-async function fetchUnitTypes(): Promise<{ label: string }[]> {
-  try {
-    const r = await fetchWithAuth("/api/unit-bhk-config/types");
-    return r.ok ? r.json() : [];
-  } catch { return []; }
+// Unit Types come from Unit Composition (dbo.RoomLayoutType) — only types
+// with a defined room layout are offered for a new pick (see unitTypeOptions),
+// since every generated unit's rooms are built from its layout.
+function firstPickableType(types: LayoutType[]): string {
+  return types.find((t) => t.roomCount > 0)?.label ?? "";
 }
 
 type TemplateRow = { UnitType: string; Count: string; AreaSqFt: string; CarpetAreaSqFt: string; BuiltUpAreaSqFt: string; SuperBuiltUpAreaSqFt: string; OpenTerraceAreaSqFt: string; RatePerSqFt: string };
@@ -202,7 +203,7 @@ const CrmProjectAutoSetup: React.FC = () => {
 
   const { data: companies = [] } = useQuery({ queryKey: ["business-dropdown-companies"], queryFn: fetchCompanies, staleTime: 5 * 60_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["unit-master-projects"], queryFn: fetchProjects, staleTime: 5 * 60_000 });
-  const { data: unitTypesMaster = [] } = useQuery<{ label: string }[]>({ queryKey: ["unit-bhk-config-types"], queryFn: fetchUnitTypes, staleTime: 10 * 60_000 });
+  const { data: unitTypesMaster = [] } = useQuery<LayoutType[]>({ queryKey: LAYOUT_TYPES_QUERY_KEY, queryFn: getLayoutTypes, staleTime: 60_000 });
   const { data: applicablePlans = [] } = useQuery<PaymentPlan[]>({
     queryKey: ["applicable-plans-for-project", projectId],
     queryFn: () => fetchApplicablePlans(projectId),
@@ -227,6 +228,11 @@ const CrmProjectAutoSetup: React.FC = () => {
     qc.invalidateQueries({ queryKey: ["crm-unit-matrix"] });
     qc.invalidateQueries({ queryKey: ["crm-parking-matrix"] });
     qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
+    // Flat Master (Civil Work DPR) — generating/editing units here also
+    // builds/adjusts their rooms there.
+    qc.invalidateQueries({ queryKey: ["room-master"] });
+    qc.invalidateQueries({ queryKey: ["room-master-units"] });
+    qc.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
   };
 
   const blocksForNames: any[] = status?.blocks || [];
@@ -303,7 +309,7 @@ const CrmProjectAutoSetup: React.FC = () => {
               OpenTerraceAreaSqFt: it.OpenTerraceAreaSqFt != null ? String(it.OpenTerraceAreaSqFt) : "",
               RatePerSqFt: it.RatePerSqFt != null ? String(it.RatePerSqFt) : "",
             }))
-          : [{ UnitType: unitTypesMaster[0]?.label ?? "", Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }];
+          : [{ UnitType: firstPickableType(unitTypesMaster), Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }];
         setTemplates((m) => ({ ...m, [b.Id]: rows }));
         if (data.paymentPlanIds?.length) {
           setBlockPaymentPlans((m) => ({ ...m, [b.Id]: data.paymentPlanIds }));
@@ -489,7 +495,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     setEditingUnit({
       UnitName: unit.UnitName || "",
       FloorNo: unit.FloorNo != null ? String(unit.FloorNo) : "",
-      UnitType: unit.UnitType || unitTypesMaster[0]?.label || "",
+      UnitType: unit.UnitType || firstPickableType(unitTypesMaster),
       AreaSqFt: unit.AreaSqFt != null ? String(unit.AreaSqFt) : "",
       CarpetAreaSqFt: unit.CarpetAreaSqFt != null ? String(unit.CarpetAreaSqFt) : "",
       BuiltUpAreaSqFt: unit.BuiltUpAreaSqFt != null ? String(unit.BuiltUpAreaSqFt) : "",
@@ -528,7 +534,16 @@ const CrmProjectAutoSetup: React.FC = () => {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to update unit");
-      toast.success(data.message || "Unit updated");
+      // A Unit Type change rebuilds the unit's rooms from the new layout.
+      const rs = data.roomSync;
+      toast.success(
+        (data.message || "Unit updated")
+        + (rs?.added ? ` — ${rs.added} room(s) added from the ${rs.layout} layout` : "")
+        + (rs?.deactivated ? `, ${rs.deactivated} old room(s) deactivated` : ""),
+      );
+      if (rs?.keptWithWork?.length) {
+        toast.warning(`Kept ${rs.keptWithWork.join(", ")} — not in the new layout but has DPR work recorded against it.`);
+      }
       setFloorUnits((m) => ({
         ...m,
         [floorId]: (m[floorId] || []).map((u) => u.Id === unit.Id
@@ -555,7 +570,7 @@ const CrmProjectAutoSetup: React.FC = () => {
   const templateTotal = (blockId: number) => (templates[blockId] || []).reduce((s, r) => s + (parseInt(r.Count, 10) || 0), 0);
 
   const addTemplateRow = (blockId: number) =>
-    setTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { UnitType: unitTypesMaster[0]?.label ?? "", Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }] }));
+    setTemplates((m) => ({ ...m, [blockId]: [...(m[blockId] || []), { UnitType: firstPickableType(unitTypesMaster), Count: "1", AreaSqFt: "", CarpetAreaSqFt: "", BuiltUpAreaSqFt: "", SuperBuiltUpAreaSqFt: "", OpenTerraceAreaSqFt: "", RatePerSqFt: "" }] }));
   const removeTemplateRow = (blockId: number, idx: number) =>
     setTemplates((m) => ({ ...m, [blockId]: (m[blockId] || []).filter((_, i) => i !== idx) }));
   const updateTemplateRow = (blockId: number, idx: number, patch: Partial<TemplateRow>) =>
@@ -623,7 +638,18 @@ const CrmProjectAutoSetup: React.FC = () => {
       if (data.createdCount === 0) {
         toast.info("No eligible floors to generate — set a unit count on at least one floor first");
       } else {
-        toast.success(`${data.createdCount} unit(s) created — e.g. ${data.sample.slice(0, 3).join(", ")}`);
+        toast.success(
+          `${data.createdCount} unit(s) created — e.g. ${data.sample.slice(0, 3).join(", ")}`
+          + (data.roomsCreated ? ` · ${data.roomsCreated} room(s) built in Flat Master from their layouts` : ""),
+        );
+        const noRooms: { unitType: string; count: number }[] = data.unitsWithoutRooms ?? [];
+        if (noRooms.length) {
+          toast.warning(
+            `No rooms built for ${noRooms.map((r) => `${r.count} × ${r.unitType}`).join(", ")} — that Unit Type has no layout yet. `
+            + "Define it in Civil Work DPR › Unit Composition, then use Flat Master's \"Generate Rooms in Bulk\".",
+            { duration: 12000 },
+          );
+        }
       }
       refetchStatus();
       invalidateSyncedMasters();
@@ -1224,12 +1250,19 @@ const CrmProjectAutoSetup: React.FC = () => {
                             this total still gets typed by cycling through
                             this same sequence (see getBlockUnitSequence). */}
                         <div className="space-y-1.5">
+                          {!firstPickableType(unitTypesMaster) && (
+                            <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                              No Unit Type has a room layout yet — define one in Civil Work DPR › Unit Composition first.
+                            </p>
+                          )}
                           {rows.map((row, idx) => (
                             <div key={idx} className="rounded border border-border/50 bg-muted/20 p-2 space-y-1.5">
                               <div className="flex items-center gap-2">
                                 <select value={row.UnitType} onChange={(e) => updateTemplateRow(b.Id, idx, { UnitType: e.target.value })}
+                                  title={unitTypesMaster.find((t) => t.label === row.UnitType)?.summary || undefined}
                                   className={`${inputCls} !py-1 flex-1`}>
-                                  {unitTypesMaster.map((t) => <option key={t.label} value={t.label}>{t.label}</option>)}
+                                  {!row.UnitType && <option value="" disabled>Select Unit Type</option>}
+                                  {unitTypeOptions(unitTypesMaster, row.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
                                 </select>
                                 <input type="number" min={1} max={100} placeholder="Count" value={row.Count}
                                   onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })}
@@ -1479,7 +1512,7 @@ const BlockFloorTree: React.FC<{
   onCancelEditUnit: () => void;
   onSaveUnit: (floorId: number, unit: any) => void;
   onDeleteUnit: (floorId: number, unit: any) => void;
-  unitTypesMaster: { label: string }[];
+  unitTypesMaster: LayoutType[];
 }> = ({ blockFloors, expandedFloorId, onToggleFloor, floorUnits, loadingUnitsFloorId, editingUnitId, editingUnit, savingUnitId, onStartEditUnit, onEditUnitChange, onCancelEditUnit, onSaveUnit, onDeleteUnit, unitTypesMaster }) => (
   <div className="space-y-0.5">
     {blockFloors.length === 0 ? (
@@ -1550,7 +1583,7 @@ const FloorUnitList: React.FC<{
   editingUnitId: number | null;
   editingUnit: UnitEdit | null;
   savingUnitId: number | null;
-  unitTypesMaster: { label: string }[];
+  unitTypesMaster: LayoutType[];
   onStartEdit: (unit: any) => void;
   onEditChange: (patch: Partial<UnitEdit>) => void;
   onCancelEdit: () => void;
@@ -1596,8 +1629,10 @@ const FloorUnitList: React.FC<{
                       className="h-7 rounded border border-border bg-background px-2 text-[11px] font-mono outline-none focus:border-primary" />
                     <select value={editingUnit.UnitType}
                       onChange={(e) => onEditChange({ UnitType: e.target.value })}
+                      title={unitTypesMaster.find((t) => t.label === editingUnit.UnitType)?.summary || undefined}
                       className="h-7 rounded border border-border bg-background px-1 text-[11px] outline-none focus:border-primary">
-                      {unitTypesMaster.map((t) => <option key={t.label} value={t.label}>{t.label}</option>)}
+                      {!editingUnit.UnitType && <option value="" disabled>Select Unit Type</option>}
+                      {unitTypeOptions(unitTypesMaster, u.UnitType).map((o) => <option key={o.value} value={o.value} title={o.title}>{o.label}</option>)}
                     </select>
                   </div>
                   {/* Floor No. input — only shown for Unassigned units (FloorNo IS NULL)

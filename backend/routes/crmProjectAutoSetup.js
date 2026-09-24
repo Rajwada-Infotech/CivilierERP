@@ -11,6 +11,7 @@ const { bumpCacheVersion } = require("../redis");
 const { isValidShortCode, ensureProjectShortCode } = require("../services/projectShortCode");
 const { getBlockLockReason, getFloorLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
+const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, bumpFlatMasterCaches } = require("../services/unitLayout");
 
 // Mirrors unitMaster.js's syncUnitPaymentPlanTags — deactivate all, then
 // upsert each valid plan ID back in. Called after generating each unit so
@@ -201,6 +202,7 @@ async function syncExistingStructure(pool, projectId) {
     const typeRows = await pool.request().input("bid", sql.Int, BlockId).query(`
       SELECT
         UnitType,
+        MAX(LayoutTypeId) AS LayoutTypeId,
         -- Units-per-floor: total / distinct floors — that is what the template
         -- Count column means. Minimum 1 so the template row is never a no-op.
         GREATEST(1, COUNT(*) / NULLIF(COUNT(DISTINCT FloorNo), 0)) AS Cnt,
@@ -221,6 +223,7 @@ async function syncExistingStructure(pool, projectId) {
         .input("bid",  sql.Int,          BlockId)
         .input("so",   sql.Int,          so++)
         .input("type", sql.NVarChar(50), tr.UnitType)
+        .input("lt",   sql.Int,          tr.LayoutTypeId ?? null)
         .input("cnt",  sql.Int,          tr.Cnt)
         .input("ca",   sql.Decimal(18,2), tr.AvgCarpet  ?? null)
         .input("bua",  sql.Decimal(18,2), tr.AvgBuiltUp ?? null)
@@ -229,14 +232,15 @@ async function syncExistingStructure(pool, projectId) {
         .input("rate", sql.Decimal(18,2), tr.AvgRate    ?? null)
         .query(`
           INSERT INTO dbo.CrmProjectAutoSetupUnitTemplate
-            (BlockId, SortOrder, UnitType, Count, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedAt)
-          VALUES (@bid, @so, @type, @cnt, @ca, @bua, @sbu, @ot, @rate, 1, SYSDATETIME())
+            (BlockId, SortOrder, UnitType, LayoutTypeId, Count, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedAt)
+          VALUES (@bid, @so, @type, @lt, @cnt, @ca, @bua, @sbu, @ot, @rate, 1, SYSDATETIME())
         `);
       // Also write-through to BlockUnitTypeSpec (forward-fill anchor).
       if (tr.AvgCarpet || tr.AvgBuiltUp || tr.AvgSBU || tr.AvgRate) {
         await pool.request()
           .input("bid",  sql.Int,          BlockId)
           .input("ut",   sql.NVarChar(50), tr.UnitType)
+          .input("lt",   sql.Int,          tr.LayoutTypeId ?? null)
           .input("ca",   sql.Decimal(18,2), tr.AvgCarpet  ?? null)
           .input("bua",  sql.Decimal(18,2), tr.AvgBuiltUp ?? null)
           .input("sbu",  sql.Decimal(18,2), tr.AvgSBU     ?? null)
@@ -248,10 +252,11 @@ async function syncExistingStructure(pool, projectId) {
               ON tgt.BlockId = src.BlockId AND tgt.UnitType = src.UnitType
             WHEN MATCHED AND (tgt.CarpetAreaSqFt IS NULL AND tgt.SuperBuiltUpAreaSqFt IS NULL) THEN
               UPDATE SET CarpetAreaSqFt=@ca, BuiltUpAreaSqFt=@bua, SuperBuiltUpAreaSqFt=@sbu,
-                         OpenTerraceAreaSqFt=@ot, BaseRatePerSqFt=@rate, UpdatedAt=SYSDATETIME()
+                         OpenTerraceAreaSqFt=@ot, BaseRatePerSqFt=@rate,
+                         LayoutTypeId=ISNULL(tgt.LayoutTypeId, @lt), UpdatedAt=SYSDATETIME()
             WHEN NOT MATCHED THEN
-              INSERT (BlockId, UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, BaseRatePerSqFt)
-              VALUES (@bid, @ut, @ca, @bua, @sbu, @ot, @rate);
+              INSERT (BlockId, UnitType, LayoutTypeId, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, BaseRatePerSqFt)
+              VALUES (@bid, @ut, @lt, @ca, @bua, @sbu, @ot, @rate);
           `);
       }
     }
@@ -527,6 +532,7 @@ router.post("/blocks", requirePageRight("crm-auto-project-setup", "create"), asy
       }
       await tx.commit();
       await bumpCacheVersion("block-master");
+      await bumpFlatMasterCaches();
       res.status(201).json({ blocks: created });
     } catch (e) {
       await tx.rollback();
@@ -562,6 +568,7 @@ router.put("/blocks/:id", requirePageRight("crm-auto-project-setup", "edit"), as
     await pool.request().input("id", sql.Int, id).input("name", sql.NVarChar(100), name).input("ub", sql.Int, updatedBy)
       .query("UPDATE dbo.BlockMaster SET BlockName = @name, UpdatedBy = @ub, UpdatedAt = SYSDATETIME() WHERE Id = @id");
     await bumpCacheVersion("block-master");
+    await bumpFlatMasterCaches();
     res.json({ message: "Block renamed", Id: id, BlockName: name });
   } catch (e) {
     console.error("[crm-project-auto-setup] PUT /blocks/:id error:", e.message);
@@ -610,6 +617,7 @@ router.delete("/blocks/:id", requirePageRight("crm-auto-project-setup", "delete"
       throw e;
     }
     await bumpCacheVersion("block-master");
+    await bumpFlatMasterCaches();
     res.json({ message: `Block "${BlockName}" deleted` });
   } catch (e) {
     console.error("[crm-project-auto-setup] DELETE /blocks/:id error:", e.message);
@@ -627,7 +635,7 @@ router.get("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
     const blockId = parseId(req.params.id);
     if (blockId === null) return res.status(400).json({ error: "Invalid id" });
     const items = await pool.request().input("bid", sql.Int, blockId).query(`
-      SELECT Id, SortOrder, UnitType, Count, AreaSqFt,
+      SELECT Id, SortOrder, UnitType, LayoutTypeId, Count, AreaSqFt,
              CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
       FROM dbo.CrmProjectAutoSetupUnitTemplate
       WHERE BlockId = @bid AND IsActive = 1
@@ -670,6 +678,27 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
     if (!block.recordset.length) return res.status(404).json({ error: "Block not found" });
     const projectId = block.recordset[0].ProjectId;
 
+    // Every row's Unit Type must be a Unit Composition layout type with its
+    // rooms defined (that's what the generated units' rooms are built
+    // from). A type this block's template ALREADY uses may stay even if its
+    // layout isn't defined yet, so re-saving an older template never fails
+    // over a row nobody touched. Each row's UnitType is normalized to the
+    // layout's own Label and its LayoutTypeId stored alongside.
+    const currentRows = await pool.request().input("bid", sql.Int, blockId)
+      .query("SELECT UnitType, LayoutTypeId FROM dbo.CrmProjectAutoSetupUnitTemplate WHERE BlockId = @bid AND IsActive = 1");
+    const keepLayoutIds = currentRows.recordset.map((r) => r.LayoutTypeId).filter(Boolean);
+    const keepTexts = new Set(currentRows.recordset.filter((r) => !r.LayoutTypeId).map((r) => String(r.UnitType || "").trim()));
+    for (const it of items) {
+      const text = String(it.UnitType || "").trim();
+      const resolved = await resolveUnitTypeInput(
+        pool,
+        { LayoutTypeId: it.LayoutTypeId, UnitType: text },
+        { requireComposition: true, keepLayoutIds, keepText: keepTexts.has(text) ? text : null },
+      );
+      it.UnitType = resolved.unitType;
+      it.LayoutTypeId = resolved.layoutTypeId;
+    }
+
     const tx = pool.transaction();
     await tx.begin();
     try {
@@ -680,6 +709,7 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
           .input("bid", sql.Int, blockId)
           .input("so", sql.Int, i + 1)
           .input("type", sql.NVarChar(50), String(items[i].UnitType).trim())
+          .input("lt", sql.Int, items[i].LayoutTypeId ?? null)
           .input("count", sql.Int, parseInt(items[i].Count, 10))
           .input("area", sql.Decimal(18, 2), items[i].AreaSqFt != null && items[i].AreaSqFt !== "" ? parseFloat(items[i].AreaSqFt) : null)
           .input("carpetArea", sql.Decimal(18, 2), items[i].CarpetAreaSqFt != null && items[i].CarpetAreaSqFt !== "" ? parseFloat(items[i].CarpetAreaSqFt) : null)
@@ -690,8 +720,8 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
           .input("cb", sql.Int, updatedBy)
           .query(`
             INSERT INTO dbo.CrmProjectAutoSetupUnitTemplate
-              (BlockId, SortOrder, UnitType, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
-            VALUES (@bid, @so, @type, @count, @area, @carpetArea, @builtUpArea, @superBuiltUpArea, @openTerraceArea, @rate, 1, @cb, SYSDATETIME())
+              (BlockId, SortOrder, UnitType, LayoutTypeId, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
+            VALUES (@bid, @so, @type, @lt, @count, @area, @carpetArea, @builtUpArea, @superBuiltUpArea, @openTerraceArea, @rate, 1, @cb, SYSDATETIME())
           `);
       }
       await tx.commit();
@@ -714,6 +744,7 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
       await pool.request()
         .input("bid",  sql.Int,          blockId)
         .input("ut",   sql.NVarChar(50), String(item.UnitType).trim())
+        .input("lt",   sql.Int,          item.LayoutTypeId ?? null)
         .input("ca",   sql.Decimal(18,2), carpetArea)
         .input("bua",  sql.Decimal(18,2), builtUpArea)
         .input("sbu",  sql.Decimal(18,2), sbuArea)
@@ -730,10 +761,11 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
               SuperBuiltUpAreaSqFt = @sbu,
               OpenTerraceAreaSqFt  = @ot,
               BaseRatePerSqFt      = @rate,
+              LayoutTypeId         = ISNULL(@lt, tgt.LayoutTypeId),
               UpdatedAt            = SYSDATETIME()
           WHEN NOT MATCHED THEN
-            INSERT (BlockId, UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, BaseRatePerSqFt)
-            VALUES (@bid, @ut, @ca, @bua, @sbu, @ot, @rate);
+            INSERT (BlockId, UnitType, LayoutTypeId, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, BaseRatePerSqFt)
+            VALUES (@bid, @ut, @lt, @ca, @bua, @sbu, @ot, @rate);
         `);
     }
 
@@ -752,6 +784,7 @@ router.put("/blocks/:id/unit-template", requirePageRight("crm-auto-project-setup
     const total = items.reduce((s, it) => s + parseInt(it.Count, 10), 0);
     res.json({ message: "Template saved", total });
   } catch (e) {
+    if (e instanceof LayoutValidationError) return res.status(400).json({ error: e.message });
     console.error("[crm-project-auto-setup] PUT /blocks/:id/unit-template error:", e.message);
     res.status(500).json({ error: e.message });
   }
@@ -1008,6 +1041,7 @@ router.post("/floors", requirePageRight("crm-auto-project-setup", "create"), asy
       SELECT Id, BlockId, FloorNo, FloorLabel, UnitCount, HasUnits, IsGenerated
       FROM dbo.CrmProjectAutoSetupFloor WHERE ProjectId = @pid AND IsActive = 1 ORDER BY BlockId, FloorNo
     `);
+    await bumpFlatMasterCaches();
     res.status(201).json({ floors: floors.recordset });
   } catch (e) {
     console.error("[crm-project-auto-setup] POST /floors error:", e.message);
@@ -1062,6 +1096,7 @@ router.put("/floors/:id", requirePageRight("crm-auto-project-setup", "edit"), as
           UnitCount = @uc, HasUnits = @hu, UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id
       `);
+    await bumpFlatMasterCaches();
     res.json({ message: "Floor updated", Id: id, UnitCount: unitCount, HasUnits: hasUnits });
   } catch (e) {
     console.error("[crm-project-auto-setup] PUT /floors/:id error:", e.message);
@@ -1091,6 +1126,7 @@ router.delete("/floors/:id", requirePageRight("crm-auto-project-setup", "delete"
     // so a real permanent delete is safe here with no further checks.
     await pool.request().input("id", sql.Int, id)
       .query("DELETE FROM dbo.CrmProjectAutoSetupFloor WHERE Id = @id");
+    await bumpFlatMasterCaches();
     res.json({ message: `Floor "${floor.FloorLabel}" deleted` });
   } catch (e) {
     console.error("[crm-project-auto-setup] DELETE /floors/:id error:", e.message);
@@ -1171,7 +1207,7 @@ router.get("/floors/:id/units", requirePageRight("crm-auto-project-setup", "view
 // exactly like before this feature existed.
 async function getBlockUnitSequence(pool, blockId) {
   const rows = await pool.request().input("bid", sql.Int, blockId).query(`
-    SELECT UnitType, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
+    SELECT UnitType, LayoutTypeId, Count, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt
     FROM dbo.CrmProjectAutoSetupUnitTemplate
     WHERE BlockId = @bid AND IsActive = 1 ORDER BY SortOrder
   `);
@@ -1180,6 +1216,7 @@ async function getBlockUnitSequence(pool, blockId) {
     for (let i = 0; i < r.Count; i++) {
       sequence.push({
         UnitType: r.UnitType,
+        LayoutTypeId: r.LayoutTypeId,
         AreaSqFt: r.AreaSqFt,
         CarpetAreaSqFt: r.CarpetAreaSqFt,
         BuiltUpAreaSqFt: r.BuiltUpAreaSqFt,
@@ -1245,6 +1282,18 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
     const floors = await req0.query(query);
 
     let totalCreated = 0;
+    let roomsCreated = 0;
+    // Units that got NO rooms because their Unit Type has no layout (or no
+    // type at all) — reported back so the user knows to set the layout up in
+    // Unit Composition and then run Flat Master's bulk "Generate Rooms".
+    const noRoomTypes = new Map(); // type label -> unit count
+    const tallyRooms = (rs, unitType) => {
+      roomsCreated += rs.created + rs.reactivated;
+      if (rs.skipped === "no-layout" || rs.skipped === "no-composition") {
+        const key = unitType || "No Unit Type";
+        noRoomTypes.set(key, (noRoomTypes.get(key) || 0) + 1);
+      }
+    };
     const sample = [];
     const sequenceByBlock = new Map();
     // Pre-fetch payment plan tags per block — forward-fill to each generated unit.
@@ -1287,6 +1336,7 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                 .input("id",             sql.Int,         reactivatedId)
                 .input("fno",            sql.Int,         floor.FloorNo)
                 .input("utype",          sql.NVarChar(50),typeSlot?.UnitType || null)
+                .input("ltype",          sql.Int,         typeSlot?.LayoutTypeId ?? null)
                 .input("area",           sql.Decimal(18,2),typeSlot?.AreaSqFt ?? null)
                 .input("carpetArea",     sql.Decimal(18,2),typeSlot?.CarpetAreaSqFt ?? null)
                 .input("builtUp",        sql.Decimal(18,2),typeSlot?.BuiltUpAreaSqFt ?? null)
@@ -1296,6 +1346,9 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                 .query(`UPDATE dbo.UnitMaster SET
                   IsActive = 1, FloorNo = @fno,
                   UnitType           = ISNULL(UnitType, @utype),
+                  -- SET clauses read pre-update values: only take the slot's
+                  -- layout when the slot's UnitType is the one being taken.
+                  LayoutTypeId       = CASE WHEN UnitType IS NULL THEN @ltype ELSE LayoutTypeId END,
                   AreaSqFt           = ISNULL(AreaSqFt, @area),
                   CarpetAreaSqFt     = ISNULL(CarpetAreaSqFt, @carpetArea),
                   BuiltUpAreaSqFt    = ISNULL(BuiltUpAreaSqFt, @builtUp),
@@ -1304,6 +1357,10 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
                   RatePerSqFt          = ISNULL(RatePerSqFt, @rate),
                   UpdatedAt = SYSDATETIME()
                 WHERE Id = @id`);
+              // Its rooms, from its layout, in the same transaction (add-only;
+              // a reactivated unit's existing rooms are kept).
+              const rs = await syncUnitRooms(tx, reactivatedId, { removeUnused: false, createdBy });
+              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType);
               await tx.commit();
               if (blockPlanIds.length) await syncUnitPaymentPlanTags(pool, reactivatedId, blockPlanIds);
               totalCreated++;
@@ -1318,6 +1375,7 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
               .input("name",         sql.NVarChar(100),unitName)
               .input("fno",          sql.Int,          floor.FloorNo)
               .input("utype",        sql.NVarChar(50), typeSlot?.UnitType || null)
+              .input("ltype",        sql.Int,          typeSlot?.LayoutTypeId ?? null)
               .input("area",         sql.Decimal(18,2),typeSlot?.AreaSqFt ?? null)
               .input("carpetArea",   sql.Decimal(18,2),typeSlot?.CarpetAreaSqFt ?? null)
               .input("builtUp",      sql.Decimal(18,2),typeSlot?.BuiltUpAreaSqFt ?? null)
@@ -1327,16 +1385,22 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
               .input("cb",           sql.Int,          createdBy)
               .query(`
                 INSERT INTO dbo.UnitMaster
-                  (ProjectId, BlockId, UnitName, FloorNo, UnitType,
+                  (ProjectId, BlockId, UnitName, FloorNo, UnitType, LayoutTypeId,
                    AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt,
                    IsActive, CreatedBy, CreatedAt)
                 OUTPUT INSERTED.Id
                 VALUES
-                  (@pid, @bid, @name, @fno, @utype,
+                  (@pid, @bid, @name, @fno, @utype, @ltype,
                    @area, @carpetArea, @builtUp, @superBuiltUp, @openTerrace, @rate,
                    1, @cb, SYSDATETIME())
               `);
             const newId = ins.recordset[0]?.Id;
+            // The new unit's rooms (Bedroom 1, Kitchen, ...) from its layout,
+            // in the same transaction as the unit itself.
+            if (newId) {
+              const rs = await syncUnitRooms(tx, newId, { removeUnused: false, createdBy });
+              tallyRooms(rs, rs.layout?.label ?? typeSlot?.UnitType);
+            }
             await tx.commit();
             if (newId && blockPlanIds.length) await syncUnitPaymentPlanTags(pool, newId, blockPlanIds);
             totalCreated++;
@@ -1356,7 +1420,18 @@ router.post("/generate-units", requirePageRight("crm-auto-project-setup", "creat
     }
 
     if (totalCreated > 0) await bumpCacheVersion("unit-master");
-    res.status(201).json({ message: "Units generated", createdCount: totalCreated, sample, floorsGenerated: floors.recordset.length });
+    // Flat Master shows these units (and the rooms just built for them)
+    // under its Block > Floor tree — refresh its caches so they appear
+    // immediately rather than after the cache TTL.
+    if (totalCreated > 0 || roomsCreated > 0 || floors.recordset.length > 0) await bumpFlatMasterCaches();
+    res.status(201).json({
+      message: "Units generated",
+      createdCount: totalCreated,
+      roomsCreated,
+      unitsWithoutRooms: [...noRoomTypes.entries()].map(([unitType, count]) => ({ unitType, count })),
+      sample,
+      floorsGenerated: floors.recordset.length,
+    });
   } catch (e) {
     console.error("[crm-project-auto-setup] POST /generate-units error:", e.message);
     res.status(500).json({ error: e.message });
