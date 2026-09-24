@@ -10,6 +10,11 @@ const { bumpCacheVersion } = require("../redis");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { pickStructureVersion, calculateStructure } = require("../lib/formulaEngine");
 const salaryStructureRoutes = require("./salaryStructure");
+const { createEmployeeAccountHead, syncEmployeeAccountHead, deleteAccountHeadById } = require("../services/employeeAccountHead");
+
+const headFields = (body) => ({
+  name: body.EmployeeName, phone: body.Mobile, email: body.Email, address: body.Address, isActive: body.IsActive !== false,
+});
 
 const SELECT_COLUMNS = "e.EmployeeId, e.EmployeeCode, e.EmployeeName, e.PhotoBase64, e.DateOfBirth, e.Gender, e.Mobile, e.Email, e.Address, e.EmergencyContactName, e.EmergencyContactPhone, e.JoiningDate, e.ConfirmationDate, e.CompanyId, comp.name AS CompanyName, e.Department, e.Designation, e.BranchLocation, e.ReportingManagerId, mgr.EmployeeName AS ReportingManagerName, e.EmploymentType, e.GradeLevel, e.CostCenterId, cc.Name AS CostCenterName, e.CandidateId, cand.CandidateCode AS CandidateCode, cand.CandidateName AS CandidateName, e.BankName, e.BankAccountNumber, e.BankIFSC, e.PAN, e.Aadhaar, e.UAN, e.ESICNumber, e.PFNumber, e.NomineeName, e.NomineeRelationship, e.NomineeContact, e.CTCAmount, e.CTCFrequency, e.SalaryStructureCode, e.IsActive, e.CreatedBy, e.CreatedAt, e.UpdatedBy, e.UpdatedAt, (SELECT COUNT(*) FROM dbo.EmployeeDocuments d WHERE d.EmployeeId = e.EmployeeId) AS DocumentCount";
 
@@ -89,10 +94,15 @@ router.post("/", requirePageRight("employee-master", "create"), async (req, res)
     return res.status(400).json({ error: "Employee Code and Employee Name are required" });
   try {
     const pool = getPool();
-    let request = pool.request();
+    const actor = (req.user && (req.user.name || req.user.email)) || null;
+    const tx = pool.transaction();
+    await tx.begin();
+    let newId;
+    try {
+    let request = tx.request();
     request = bindEmployeeFields(request, req.body);
     const result = await request
-      .input("CreatedBy", sql.NVarChar(150), (req.user && (req.user.name || req.user.email)) || null)
+      .input("CreatedBy", sql.NVarChar(150), actor)
       .query(
         "INSERT INTO dbo.EmployeeMaster (" +
         "EmployeeCode, EmployeeName, PhotoBase64, DateOfBirth, Gender, Mobile, Email, Address, " +
@@ -107,8 +117,12 @@ router.post("/", requirePageRight("employee-master", "create"), async (req, res)
         "@CostCenterId, @CandidateId, @BankName, @BankAccountNumber, @BankIFSC, @PAN, @Aadhaar, @UAN, @ESICNumber, @PFNumber, " +
         "@NomineeName, @NomineeRelationship, @NomineeContact, @CTCAmount, @CTCFrequency, @SalaryStructureCode, @IsActive, @CreatedBy, SYSDATETIME())"
       );
-    const newId = result.recordset[0].EmployeeId;
+    newId = result.recordset[0].EmployeeId;
+    await createEmployeeAccountHead(tx, newId, headFields(req.body), actor);
+    await tx.commit();
+    } catch (e) { await tx.rollback(); throw e; }
     await bumpCacheVersion("employee-master");
+    await bumpCacheVersion("account-head-master");
     res.json({ message: "Employee added", id: newId });
   } catch (err) {
     if (err.number === 2627 || err.number === 2601) {
@@ -132,10 +146,14 @@ router.put("/:id", requirePageRight("employee-master", "edit"), async (req, res)
     if (req.body.ReportingManagerId && Number(req.body.ReportingManagerId) === id)
       return res.status(400).json({ error: "An employee cannot report to themselves" });
     const pool = getPool();
-    let request = pool.request().input("EmployeeId", sql.Int, id);
+    const actor = (req.user && (req.user.name || req.user.email)) || null;
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+    let request = tx.request().input("EmployeeId", sql.Int, id);
     request = bindEmployeeFields(request, req.body);
-    await request
-      .input("UpdatedBy", sql.NVarChar(150), (req.user && (req.user.name || req.user.email)) || null)
+    const upd = await request
+      .input("UpdatedBy", sql.NVarChar(150), actor)
       .query(
         "UPDATE dbo.EmployeeMaster SET " +
         "EmployeeCode = @EmployeeCode, EmployeeName = @EmployeeName, PhotoBase64 = @PhotoBase64, " +
@@ -151,7 +169,11 @@ router.put("/:id", requirePageRight("employee-master", "edit"), async (req, res)
         "IsActive = @IsActive, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME() " +
         "WHERE EmployeeId = @EmployeeId"
       );
+    if (upd.rowsAffected[0] > 0) await syncEmployeeAccountHead(tx, id, headFields(req.body), actor);
+    await tx.commit();
+    } catch (e) { await tx.rollback(); throw e; }
     await bumpCacheVersion("employee-master");
+    await bumpCacheVersion("account-head-master");
     res.json({ message: "Employee updated" });
   } catch (err) {
     if (err.number === 2627 || err.number === 2601) {
@@ -169,15 +191,30 @@ router.delete("/:id", requirePageRight("employee-master", "delete"), async (req,
     const id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
     const pool = getPool();
-    await pool.request().input("EmployeeId", sql.Int, id)
-      .query("UPDATE dbo.EmployeeMaster SET ReportingManagerId = NULL WHERE ReportingManagerId = @EmployeeId");
-    const delResult = await pool.request().input("EmployeeId", sql.Int, id)
-      .query("DELETE FROM dbo.EmployeeMaster WHERE EmployeeId = @EmployeeId");
-    if (delResult.rowsAffected[0] === 0)
-      return res.status(404).json({ error: "Employee not found" });
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const cur = await tx.request().input("EmployeeId", sql.Int, id)
+        .query("SELECT AccountHeadId FROM dbo.EmployeeMaster WHERE EmployeeId = @EmployeeId");
+      if (!cur.recordset.length) { await tx.rollback(); return res.status(404).json({ error: "Employee not found" }); }
+      const headId = cur.recordset[0].AccountHeadId;
+      await tx.request().input("EmployeeId", sql.Int, id)
+        .query("UPDATE dbo.EmployeeMaster SET ReportingManagerId = NULL WHERE ReportingManagerId = @EmployeeId");
+      await tx.request().input("EmployeeId", sql.Int, id)
+        .query("DELETE FROM dbo.EmployeeMaster WHERE EmployeeId = @EmployeeId");
+      // The employee's Account Head goes with it (hard delete) -- in the same
+      // transaction, so a head already used by a ledger/payment blocks the
+      // whole delete instead of leaving an orphan or a dangling reference.
+      await deleteAccountHeadById(tx, headId);
+      await tx.commit();
+    } catch (e) { await tx.rollback(); throw e; }
     await bumpCacheVersion("employee-master");
+    await bumpCacheVersion("account-head-master");
     res.json({ message: "Employee deleted" });
   } catch (err) {
+    if (err.number === 547) {
+      return res.status(409).json({ error: "This employee can't be deleted — their account head is already used in ledger, payroll or payment entries." });
+    }
     res.status(500).json({ error: err.message });
   }
 });

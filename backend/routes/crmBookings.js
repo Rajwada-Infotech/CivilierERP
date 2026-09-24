@@ -21,6 +21,8 @@ const { generateInvoicePdf, getInvoicePdfBuffer } = require("../services/invoice
 const { normalizeRole } = require("../middleware/role");
 const { recalculateBookingGst } = require("../services/crmGst");
 const { verifyFileMatchesDeclaredType } = require("../services/fileSignature");
+const { postCrmInvoiceToGL } = require("../services/crmLedger");
+const { recordGLPosting } = require("../services/approvalService");
 // Bookings land in Pending on creation and only ever reach Approved/Rejected
 // through this shared engine — gated to admin/super_admin/marketing_head via
 // the Admin Approval Inbox, same as every other CRM approval flow.
@@ -1718,11 +1720,28 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
       `);
       const mRow = m.recordset[0];
       if (!mRow) return res.status(404).json({ error: "Milestone not found on this booking" });
-      // Invoice is a billing document — generated after Demand is raised, BEFORE
-      // On Account Adjustment settles the milestone. Flow: Demand → Invoice → On Account
-      // Adjustment → Milestone Settlement. Do NOT gate on Status = Paid.
       if (mRow.DemandStatus === CrmStatus.PENDING) {
         return res.status(400).json({ error: `A demand must be raised for "${mRow.MilestoneName}" (from the Demands page) before its invoice can be generated` });
+      }
+      // Business requirement: the whole booking must be 100% collected before
+      // ANY of its milestones can be invoiced — money is held as a pure
+      // liability (Advance from Customer) until the full flat/parking value
+      // is in hand, and only then does invoicing recognise it as income
+      // (Sale of Flat/Parking — see postCrmInvoiceToGL in crmLedger.js).
+      // Deliberately checked against the booking's total, not this one
+      // milestone's own AmountDue/AmountPaid.
+      const fullyPaidCheck = await pool.request().input("bid", sql.Int, id).query(`
+        SELECT bk.GrandTotal, ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = bk.Id), 0) AS TotalCleared
+        FROM dbo.CrmBooking bk WHERE bk.Id = @bid
+      `);
+      const fp = fullyPaidCheck.recordset[0];
+      const grandTotal = Number(fp?.GrandTotal || 0);
+      const totalCleared = Number(fp?.TotalCleared || 0);
+      if (totalCleared < grandTotal) {
+        const shortfall = grandTotal - totalCleared;
+        return res.status(400).json({
+          error: `This booking must be fully paid before any invoice can be generated — ₹${shortfall.toLocaleString("en-IN")} still outstanding.`,
+        });
       }
       _diagStep.step = "dupCheck"; _diagStep.mid = milestoneId;
       const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid AND Status <> 'Void'");
@@ -1826,6 +1845,21 @@ router.post("/:id/invoices", requirePageRight("crm-bookings", "edit"), async (re
     } catch (pdfErr) {
       console.error("[crm-bookings] invoice PDF generation failed:", pdfErr.message);
     }
+    // Income recognition — only for the flat/parking sale itself
+    // (Milestone/Booking types), never Maintenance/Other/OnAccount, which
+    // aren't part of the sale price. Never blocks the invoice response —
+    // same try/catch + recordGLPosting pattern used across every other CRM
+    // money event (see crmParking.js/crmPayments.js/crmRefunds.js).
+    if (type === "Milestone" || type === "Booking") {
+      const actorEmail = req.user?.name || req.user?.email || "system";
+      try {
+        const outcome = await postCrmInvoiceToGL(pool, invoiceId, actorEmail);
+        await recordGLPosting("crm-invoice", invoiceId, outcome, actorEmail);
+      } catch (glErr) {
+        console.error("[crm-bookings] invoice GL posting failed:", glErr.message);
+        await recordGLPosting("crm-invoice", invoiceId, { failed: true, reason: glErr.message }, actorEmail);
+      }
+    }
     res.status(201).json({ success: true, id: invoiceId, InvoiceNo: invoiceNo });
   } catch (e) {
     // Two near-simultaneous requests can both pass the app-level duplicate
@@ -1875,6 +1909,22 @@ async function generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, 
     const e = new Error(`A demand must be raised for "${mRow.MilestoneName}" before its invoice can be generated`);
     e.status = 400; throw e;
   }
+  // Same whole-booking-must-be-fully-paid gate as POST /:id/invoices — see
+  // that route's comment for the business rationale. Duplicated here rather
+  // than shared because this function and that route were already two
+  // independent invoice-creation implementations before this change.
+  const fullyPaidCheck = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT bk.GrandTotal, ISNULL((SELECT SUM(AmountPaid) FROM dbo.CrmPaymentMilestone WHERE BookingId = bk.Id), 0) AS TotalCleared
+    FROM dbo.CrmBooking bk WHERE bk.Id = @bid
+  `);
+  const fp = fullyPaidCheck.recordset[0];
+  const grandTotal = Number(fp?.GrandTotal || 0);
+  const totalCleared = Number(fp?.TotalCleared || 0);
+  if (totalCleared < grandTotal) {
+    const shortfall = grandTotal - totalCleared;
+    const e = new Error(`This booking must be fully paid before any invoice can be generated — ₹${shortfall.toLocaleString("en-IN")} still outstanding.`);
+    e.status = 400; throw e;
+  }
   const already = await pool.request().input("mid", sql.Int, milestoneId).query("SELECT Id FROM dbo.CrmInvoice WHERE MilestoneId = @mid AND Status <> 'Void'");
   if (already.recordset.length) { const e = new Error(`"${mRow.MilestoneName}" already has an invoice`); e.status = 400; throw e; }
 
@@ -1915,6 +1965,21 @@ async function generateMilestoneInvoiceForBooking(pool, bookingId, milestoneId, 
     await generateInvoicePdf(pool, invoiceId);
   } catch (pdfErr) {
     console.error("[crm-bookings] bulk invoice PDF generation failed:", pdfErr.message);
+  }
+
+  // Same income recognition as POST /:id/invoices — see postCrmInvoiceToGL's
+  // own comment. This helper only ever creates "Milestone" invoices (hardcoded
+  // above), so no type check is needed the way the single-invoice route has.
+  {
+    const emailRow = await pool.request().input("uid", sql.Int, actorUserId).query("SELECT email FROM dbo.users WHERE id = @uid");
+    const actorEmail = emailRow.recordset[0]?.email || "system";
+    try {
+      const outcome = await postCrmInvoiceToGL(pool, invoiceId, actorEmail);
+      await recordGLPosting("crm-invoice", invoiceId, outcome, actorEmail);
+    } catch (glErr) {
+      console.error("[crm-bookings] bulk invoice GL posting failed:", glErr.message);
+      await recordGLPosting("crm-invoice", invoiceId, { failed: true, reason: glErr.message }, actorEmail);
+    }
   }
 
   return { id: invoiceId, InvoiceNo: invoiceNo, MilestoneName: mRow.MilestoneName };

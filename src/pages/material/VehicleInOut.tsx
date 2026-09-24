@@ -940,6 +940,7 @@ export default function VehicleInOut() {
     const errs: Record<string, string> = {};
     if (!form.companyId) errs.companyId = "Company is required";
     if (!form.projectId) errs.projectId = "Project is required";
+    if (!form.poId) errs.poId = "A Purchase Order must be selected";
     if (!form.vehicleNo.trim()) errs.vehicleNo = "Vehicle number is required";
     if (!form.entryTime) errs.entryTime = "Entry time is required";
     if (!form.challanNo.trim()) errs.challanNo = "Supplier ref / Challan No is required";
@@ -958,7 +959,7 @@ export default function VehicleInOut() {
     setErrors(errs);
     if (Object.keys(errs).length > 0) {
       toast.error(
-        errs.items || errs.companyId || errs.projectId || errs.vehicleNo || errs.entryTime || errs.challanNo || "Please fix the errors",
+        errs.items || errs.companyId || errs.projectId || errs.poId || errs.vehicleNo || errs.entryTime || errs.challanNo || "Please fix the errors",
       );
       return false;
     }
@@ -1619,7 +1620,7 @@ export default function VehicleInOut() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* PO */}
                   <div>
-                    <FieldLabel>Purchase Order</FieldLabel>
+                    <FieldLabel required>Purchase Order</FieldLabel>
                     <div className="relative">
                       <select
                         value={form.poId ?? ""}
@@ -1653,7 +1654,7 @@ export default function VehicleInOut() {
                           setPhotoByItem({});
                           setQualityByItem({});
                         }}
-                        className={inpSel}
+                        className={`${inpSel} ${errors.poId ? "border-destructive/60" : ""}`}
                       >
                         <option value="">
                           {filteredPOs.length === 0 ? "No POs available" : "Select PO…"}
@@ -1673,6 +1674,11 @@ export default function VehicleInOut() {
                         className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
                     </div>
+                    {errors.poId && (
+                      <p className="text-[10px] text-destructive mt-1">
+                        {errors.poId}
+                      </p>
+                    )}
                   </div>
 
                   {/* Supplier — auto-filled from the selected PO and locked

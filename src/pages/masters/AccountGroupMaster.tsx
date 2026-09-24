@@ -14,6 +14,7 @@ import {
   AccountGroupDeleteError,
 } from "@/api/accountApi";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
+import { AccountGroupAuditTrailModal } from "./components/AccountGroupAuditTrailModal";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -35,6 +36,7 @@ import {
   Eye,
   XCircle,
   AlertCircle,
+  History,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -284,6 +286,7 @@ const AccountGroupMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
+  const [auditTrailOpen, setAuditTrailOpen] = useState(false);
 
   const {
     data: dbData,
@@ -501,12 +504,21 @@ const AccountGroupMaster: React.FC = () => {
         title="Account Group Master"
         subtitle="Organise accounts into parent groups and sub-groups"
         action={
-          <span
-            className="text-xs font-heading px-3 py-1.5 rounded-lg"
-            style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
-          >
-            {rootCount} Parent · {subCount} Sub
-          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setAuditTrailOpen(true)}
+              className="inline-flex items-center gap-1.5 text-xs font-heading px-3 py-1.5 rounded-lg text-muted-foreground hover:text-foreground border border-border hover:border-border/80 transition-colors"
+            >
+              <History size={13} /> Audit Trail
+            </button>
+            <span
+              className="text-xs font-heading px-3 py-1.5 rounded-lg"
+              style={{ background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.25)", color: "#818cf8" }}
+            >
+              {rootCount} Parent · {subCount} Sub
+            </span>
+          </div>
         }
       >
 
@@ -1014,6 +1026,8 @@ const AccountGroupMaster: React.FC = () => {
           </div>
         </div>
       )}
+
+      <AccountGroupAuditTrailModal open={auditTrailOpen} onClose={() => setAuditTrailOpen(false)} />
     </>
   );
 };
