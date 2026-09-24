@@ -72,6 +72,32 @@ async function handleError(res: Response, fallback: string) {
   throw new Error((err as { error?: string }).error || fallback);
 }
 
+export interface PendingBatch {
+  AssetId: number;
+  AssetName: string;
+  Quantity: number;
+  SourceType: "GRN" | "IMPORT";
+  SourceDocNo: string | null;
+  DocDate: string | null;
+  CompanyId: number | null;
+  CompanyName: string | null;
+  ProjectId: number | null;
+  ProjectName: string | null;
+  GodownName: string | null;
+  Reason: "NO_TEMPLATE" | "READY";
+}
+
+export const getPendingBatches = async (): Promise<PendingBatch[]> => {
+  const res = await fetchWithAuth(`${BASE}/pending-batches`);
+  if (!res.ok) await handleError(res, "Failed to fetch received stock awaiting tagging");
+  return res.json();
+};
+
+export const deletePendingBatch = async (assetId: number): Promise<void> => {
+  const res = await fetchWithAuth(`${BASE}/pending-batches/${assetId}`, { method: "DELETE" });
+  if (!res.ok) await handleError(res, "Failed to delete");
+};
+
 export const getEligibleAssetItems = async (params?: {
   godownId?: number;
   companyId?: number;
