@@ -222,6 +222,7 @@ export const ADMIN_ONLY_PAGES: PageKey[] = [
   "users", "role-master",
   "dba-control-panel", "dba-ads", "dba-reminders",
   "dba-payment-logs", "dba-dashboard", "dba-profile",
+  "dba-gl-posting-failures",
 ];
 
 // Updated to use centralized PRIVILEGED_ROLES

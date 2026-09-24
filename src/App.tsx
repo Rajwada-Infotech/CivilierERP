@@ -482,6 +482,7 @@ const MaterialAmendment = lazy(() => import("./pages/material/MaterialAmendment"
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
+const GLPostingFailures = lazy(() => import("./pages/dba/GLPostingFailures"));
 
 // Engineering Pages
 const EngineeringDashboard = lazy(
@@ -1978,6 +1979,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="dba-payment-logs">
             <PaymentLogs />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/gl-posting-failures"
+        element={
+          <ProtectedRoute pageKey="dba-gl-posting-failures">
+            <GLPostingFailures />
           </ProtectedRoute>
         }
       />

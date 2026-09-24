@@ -52,3 +52,26 @@ export const getDbHealth = async () => {
   if (!res.ok) throw new Error("Failed to fetch DB health");
   return res.json().catch(() => ({}));
 };
+
+export interface GLPostingFailure {
+  LogId: number;
+  Module: string;
+  RecordId: number;
+  Outcome: "skipped" | "failed" | "none" | "posted";
+  Reason: string | null;
+  ApproverEmail: string | null;
+  CreatedAt: string;
+}
+
+export const getGLPostingFailures = async (showAll = false): Promise<GLPostingFailure[]> => {
+  const res = await fetchWithAuth(`${BASE}/gl-posting-failures${showAll ? "?outcome=all" : ""}`);
+  if (!res.ok) throw new Error("Failed to fetch GL posting failures");
+  return res.json().catch(() => []);
+};
+
+export const retryGLPosting = async (logId: number) => {
+  const res = await fetchWithAuth(`${BASE}/gl-posting-failures/${logId}/retry`, { method: "POST" });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || "Retry failed");
+  return body as { outcome: { posted?: boolean; failed?: boolean; reason?: string } };
+};

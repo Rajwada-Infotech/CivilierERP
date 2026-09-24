@@ -294,6 +294,7 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
 
   const r = await pool.request().input("id", sql.Int, onAccountId).query(`
     SELECT oa.Id, oa.ReceiptNo, oa.Amount, oa.ReceivedDate, oa.PaymentMode, oa.DepositBankId,
+           oa.SourceReceivedPaymentId,
            b.Id AS BookingId, b.CompanyId, b.ProjectId, a.CustomerId, a.ApplicantName
     FROM dbo.CrmOnAccountPayment oa
     JOIN dbo.CrmBooking b ON b.Id = oa.BookingId
@@ -314,6 +315,30 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
   // No fallback proxy — see postCrmReceiptToGL's identical note.
   // POST /booking/:bookingId/on-account already requires DepositBankId.
+  //
+  // But this row may instead have come from applyCrmOnAccountPaymentApproval
+  // (Finance approving a ReceivedPayment), which snapshots DepositBankId off
+  // that ReceivedPayment at approval time — if the bank hadn't been added to
+  // the ReceivedPayment yet, the snapshot is NULL and posting fails here. If
+  // the ReceivedPayment has since had a bank added (the normal way someone
+  // fixes this), pick it up now rather than requiring a manual backfill
+  // every time this happens — self-heals on the next retry.
+  if (!row.DepositBankId && row.SourceReceivedPaymentId) {
+    const srcBank = await pool.request().input("srp", sql.Int, row.SourceReceivedPaymentId).query(`
+      SELECT RPDepositBankId, RPDepositBankName FROM dbo.ReceivedPayment WHERE RPPaymentID = @srp
+    `);
+    const src = srcBank.recordset[0];
+    if (src?.RPDepositBankId) {
+      await pool.request()
+        .input("id", sql.Int, onAccountId)
+        .input("bkid", sql.Int, src.RPDepositBankId)
+        .input("bkname", sql.NVarChar(200), src.RPDepositBankName || null)
+        .query(`
+          UPDATE dbo.CrmOnAccountPayment SET DepositBankId = @bkid, DepositBankName = @bkname WHERE Id = @id
+        `);
+      row.DepositBankId = src.RPDepositBankId;
+    }
+  }
   if (!row.DepositBankId)
     return { posted: false, reason: `On-account ${onAccountId} has no DepositBankId — cannot post without a real bank` };
   const collectionsHeadId = row.DepositBankId;
