@@ -19,6 +19,11 @@ const { getGLHeadId, postVoucher, hasPosting, GL_ACCOUNTS } = require("./general
 const CRM_COLLECTIONS_ACCOUNT = "CRM Collections A/c";
 const CRM_STAMP_DUTY_ACCOUNT = "Stamp Duty & Registration Expense";
 const CRM_GST_OUTPUT_ACCOUNT = "GST Output Liability - CRM Sales";
+// Migration 472. Recognised only once a booking's invoice is generated —
+// which itself only happens once the booking is 100% collected (see
+// crmBookings.js's full-payment gate) — never on cash receipt, since until
+// then the money is a pure liability, not yet earned income.
+const CRM_SALE_INCOME_ACCOUNT = "Sale of Flat/Parking";
 // Income head the company keeps when a cancelled booking is refunded (not
 // re-booked). Seeded by migration 416.
 const CRM_FORFEITURE_ACCOUNT = "Booking Cancellation Forfeiture";
@@ -230,14 +235,17 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
   if (amount <= 0) return { posted: false, reason: `Receipt ${receiptId} amount is ${amount} (<= 0)` };
 
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  // Debit the real bank the money was actually deposited into when the
-  // receipt recorded one (DepositBankId is already an AccountHeadMaster.
-  // LHeadId — same convention generalLedger.js's postReceivedPaymentApproval
-  // uses for RPDepositBankId) — only fall back to the generic CRM Collections
-  // proxy for the genuinely unknown case, so this books to a real, BRS-able
-  // bank ledger whenever the data exists instead of a permanent suspense
-  // balance that can never reconcile.
-  const collectionsHeadId = row.DepositBankId || await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // Debit the real bank the money was actually deposited into (DepositBankId
+  // is already an AccountHeadMaster.LHeadId — same convention
+  // generalLedger.js's postReceivedPaymentApproval uses for
+  // RPDepositBankId). No fallback to a generic proxy account — the caller
+  // (crmPayments.js's PUT /:id) already requires DepositBankId before a
+  // payment can even be submitted, so a real bank should always be present
+  // here; if it's somehow missing, that's a bug to surface loudly, not
+  // paper over with a suspense balance that can never reconcile.
+  if (!row.DepositBankId)
+    return { posted: false, reason: `Receipt ${receiptId} has no DepositBankId — cannot post without a real bank` };
+  const collectionsHeadId = row.DepositBankId;
 
   // Pricing is GST-inclusive — split via the same canonical getGstSplit()
   // every other CRM money event (including this receipt's own stored
@@ -304,9 +312,11 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
   // per-customer audit trail CRM's own on-account/adjustment UI reads) —
   // just no longer where the GL leg itself lands.
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  // Real deposit bank when known (see postCrmReceiptToGL's identical note) —
-  // only the generic CRM Collections proxy when it genuinely isn't.
-  const collectionsHeadId = row.DepositBankId || await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // No fallback proxy — see postCrmReceiptToGL's identical note.
+  // POST /booking/:bookingId/on-account already requires DepositBankId.
+  if (!row.DepositBankId)
+    return { posted: false, reason: `On-account ${onAccountId} has no DepositBankId — cannot post without a real bank` };
+  const collectionsHeadId = row.DepositBankId;
   // Pooled liability head, same one a standalone (non-CRM) Received
   // Payment advance posts to (see generalLedger.js's postReceivedPaymentApproval) —
   // an on-account deposit with nothing allocated yet is a liability
@@ -548,10 +558,13 @@ async function postCrmCancellationRefundToGL(pool, cancellationId, userEmail) {
   if (amount <= 0) return { none: true, reason: `Cancellation ${cancellationId} refund amount is ${amount} (<= 0) — nothing to refund` };
 
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  // Real bank the refund was actually paid out from when recorded (see
-  // postCrmReceiptToGL's identical note) — only the generic CRM Collections
-  // proxy when it genuinely isn't.
-  const collectionsHeadId = row.RefundBankId || await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // No fallback proxy — see postCrmReceiptToGL's identical note. (This
+  // function is currently unreferenced by any live route — the real
+  // refund-payout path is postCrmRefundPaid/CrmRefund — but kept correct
+  // rather than left with a dead fallback in case it's wired up again.)
+  if (!row.RefundBankId)
+    return { posted: false, reason: `Cancellation ${cancellationId} has no RefundBankId — cannot post without a real bank` };
+  const collectionsHeadId = row.RefundBankId;
   const docNo = row.CancellationNo || `CXLRF-${cancellationId}`;
 
   await postVoucher(pool, {
@@ -849,9 +862,63 @@ async function postCrmParkingPaymentToGL(pool, allotmentId, userEmail) {
   return { posted: true };
 }
 
+/**
+ * Income recognition — the whole reason a booking's money sat in Advance
+ * from Customer instead of anywhere else. Only ever called once an invoice
+ * is actually created, and invoice creation itself is gated on the booking
+ * being 100% collected (crmBookings.js's POST /:id/invoices and
+ * generateMilestoneInvoiceForBooking) — so by the time this runs, every
+ * rupee of the invoiced amount is already real, received cash sitting in
+ * Advance from Customer, never a forward-looking accrual.
+ *   Dr Advance from Customer .... releases the liability
+ *   Cr Sale of Flat/Parking ..... recognised as income
+ *
+ * Invoice type "Milestone"/"Booking" only — Maintenance/Other/OnAccount
+ * invoices aren't part of the flat/parking sale price and don't touch this
+ * income head at all.
+ */
+async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
+  if (await hasPosting(pool, "CrmInvoice", invoiceId))
+    return { posted: true, reason: "already posted (idempotent)" };
+
+  const r = await pool.request().input("id", sql.Int, invoiceId).query(`
+    SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate,
+           b.CompanyId, b.ProjectId
+    FROM dbo.CrmInvoice inv
+    JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
+    WHERE inv.Id = @id
+  `);
+  const row = r.recordset[0];
+  if (!row) return { posted: false, reason: `CrmInvoice ${invoiceId} not found` };
+  if (row.InvoiceType !== "Milestone" && row.InvoiceType !== "Booking")
+    return { none: true, reason: `Invoice type "${row.InvoiceType}" is not a flat/parking sale invoice — no income to recognise` };
+
+  const amount = Number(row.Amount) || 0;
+  if (amount <= 0) return { posted: false, reason: `Invoice ${invoiceId} amount is ${amount} (<= 0)` };
+
+  const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
+  const incomeHeadId = await getGLHeadId(pool, CRM_SALE_INCOME_ACCOUNT);
+
+  await postVoucher(pool, {
+    voucherNo: row.InvoiceNo,
+    voucherDate: row.InvoiceDate,
+    sourceType: "CrmInvoice",
+    sourceId: invoiceId,
+    companyId: row.CompanyId ?? null,
+    projectId: row.ProjectId ?? null,
+    createdBy: userEmail,
+    legs: [
+      { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
+      { lHeadId: incomeHeadId, credit: amount, narration: `${row.InvoiceNo} — flat/parking sale income recognised` },
+    ],
+  });
+  return { posted: true };
+}
+
 module.exports = {
   CRM_COLLECTIONS_ACCOUNT,
   CRM_GST_OUTPUT_ACCOUNT,
+  CRM_SALE_INCOME_ACCOUNT,
   ensureCrmCustomerLedgerHead,
   syncCrmCustomerLedgerHead,
   getGstRateForBooking,
@@ -866,4 +933,5 @@ module.exports = {
   postCrmHeldCreditCrossCompanyMirror,
   postCrmSalesDeedStatutoryToGL,
   postCrmParkingPaymentToGL,
+  postCrmInvoiceToGL,
 };
