@@ -11,7 +11,7 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 
 const PHOTO_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"]);
 const PHOTO_PHASES = new Set(["before", "after"]);
 
-const STATUS_VALUES = new Set(["PENDING", "IN_PROGRESS", "HOLD", "CANCELLED", "APPROVED", "REWORK", "COMPLETED"]);
+const STATUS_VALUES = new Set(["PENDING", "ALLOCATED", "IN_PROGRESS", "HOLD", "CANCELLED", "APPROVED", "REWORK", "COMPLETED"]);
 const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
 
 // GET / — every rung that has been assigned an engineer/material at least
@@ -145,6 +145,64 @@ router.patch(
     res.json({ success: true, status, remarks });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /engineer-approval/:id/confirm — one assigned engineer confirming
+// their own task. :id is dbo.DependencyActivityEngineer.Id (one row per
+// engineer per assignment), not the assignment or rung id — each engineer
+// on a multi-engineer rung confirms independently. Deliberately NOT gated
+// through requirePageRight/transition() (approvalService.js) — this isn't a
+// document a manager approves by role or Approval Setup level, it's one
+// specific person confirming a task literally assigned to them, so the only
+// check that makes sense is "is the caller that exact person". Once every
+// engineer on the assignment has confirmed, the parent Status moves
+// ALLOCATED -> IN_PROGRESS automatically.
+router.put("/engineer-approval/:id/confirm", authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  const userId = req.user?.userId ?? req.user?.id ?? null;
+  if (userId == null) return res.status(401).json({ error: "Invalid token - missing user id" });
+
+  try {
+    const pool = await getPool();
+    const row = (await pool.request().input("id", sql.Int, id).query(`
+      SELECT dae.Id, dae.AssignmentId, dae.EngineerId, dae.Approved
+      FROM dbo.DependencyActivityEngineer dae
+      WHERE dae.Id = @id
+    `)).recordset[0];
+    if (!row) return res.status(404).json({ error: "Assignment not found" });
+    if (Number(row.EngineerId) !== Number(userId)) {
+      return res.status(403).json({ error: "This activity isn't assigned to you." });
+    }
+
+    if (!row.Approved) {
+      await pool.request()
+        .input("id", sql.Int, id)
+        .query(`UPDATE dbo.DependencyActivityEngineer SET Approved = 1, ApprovedAt = SYSDATETIME() WHERE Id = @id`);
+    }
+
+    const counts = (await pool.request().input("assignmentId", sql.Int, row.AssignmentId).query(`
+      SELECT COUNT(*) AS total, SUM(CASE WHEN Approved = 1 THEN 1 ELSE 0 END) AS approved
+      FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @assignmentId
+    `)).recordset[0];
+    const allApproved = Number(counts.total) > 0 && Number(counts.approved) === Number(counts.total);
+
+    let newStatus = null;
+    if (allApproved) {
+      const updated = await pool.request().input("assignmentId", sql.Int, row.AssignmentId).query(`
+        UPDATE dbo.DependencyActivityAssignment
+        SET Status = 'IN_PROGRESS'
+        OUTPUT INSERTED.Status
+        WHERE Id = @assignmentId AND Status = 'ALLOCATED'
+      `);
+      newStatus = updated.recordset[0]?.Status ?? null;
+    }
+
+    res.json({ success: true, allApproved, newStatus });
+  } catch (err) {
+    console.error("[dependency-activity-assignment] PUT /engineer-approval/:id/confirm error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -446,18 +504,51 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         `);
     }
 
-    await pool.request().input("assignmentId", sql.Int, assignmentId)
-      .query(`DELETE FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @assignmentId`);
-    for (const engineerId of engineerIds || []) {
-      const id = parseInt(engineerId, 10);
-      if (!Number.isFinite(id)) continue;
+    // Reconciled by EngineerId, not deleted and re-inserted — an engineer
+    // who's already confirmed their assignment (Approved=1) must keep that
+    // flag across an unrelated edit (dates, remarks, another engineer added)
+    // instead of silently being asked to reconfirm every time the admin
+    // saves. Only engineers actually added/removed touch a row.
+    const keptEngineerIds = new Set(
+      (engineerIds || []).map((v) => parseInt(v, 10)).filter(Number.isFinite),
+    );
+    const existingEngineers = (await pool.request().input("assignmentId", sql.Int, assignmentId)
+      .query(`SELECT EngineerId FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @assignmentId`))
+      .recordset.map((r) => Number(r.EngineerId));
+    const existingEngineerSet = new Set(existingEngineers);
+    for (const engineerId of existingEngineers) {
+      if (keptEngineerIds.has(engineerId)) continue;
       await pool.request()
         .input("assignmentId", sql.Int, assignmentId)
-        .input("engineerId", sql.Int, id)
+        .input("engineerId", sql.Int, engineerId)
+        .query(`DELETE FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @assignmentId AND EngineerId = @engineerId`);
+    }
+    for (const engineerId of keptEngineerIds) {
+      if (existingEngineerSet.has(engineerId)) continue;
+      await pool.request()
+        .input("assignmentId", sql.Int, assignmentId)
+        .input("engineerId", sql.Int, engineerId)
         .query(`
           INSERT INTO dbo.DependencyActivityEngineer (AssignmentId, EngineerId)
           VALUES (@assignmentId, @engineerId)
         `);
+    }
+
+    // Auto status transition, driven purely by whether anyone's assigned:
+    // PENDING (nobody assigned) <-> ALLOCATED (assigned, awaiting each
+    // engineer's own confirmation — see PATCH /engineer-approval/:id/confirm
+    // below, which moves ALLOCATED -> IN_PROGRESS once everyone's confirmed).
+    // Only touches these two statuses — once work is actually IN_PROGRESS or
+    // further along, adding/removing an engineer here never regresses it.
+    const currentStatusRow = (await pool.request().input("id", sql.Int, assignmentId)
+      .query(`SELECT Status FROM dbo.DependencyActivityAssignment WHERE Id = @id`)).recordset[0];
+    const currentStatus = currentStatusRow?.Status;
+    let nextStatus = null;
+    if (keptEngineerIds.size > 0 && currentStatus === "PENDING") nextStatus = "ALLOCATED";
+    else if (keptEngineerIds.size === 0 && currentStatus === "ALLOCATED") nextStatus = "PENDING";
+    if (nextStatus) {
+      await pool.request().input("id", sql.Int, assignmentId).input("status", sql.NVarChar(20), nextStatus)
+        .query(`UPDATE dbo.DependencyActivityAssignment SET Status = @status WHERE Id = @id`);
     }
 
     // Checkpoints are reconciled by id rather than deleted and re-inserted: a daily

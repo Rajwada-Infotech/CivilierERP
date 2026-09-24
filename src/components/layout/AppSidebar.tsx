@@ -216,7 +216,7 @@ function useApprovalCount() {
       timerRef.current = setTimeout(poll, 60_000);
       return;
     }
-    const token = localStorage.getItem("token");
+    const token = sessionStorage.getItem("token");
     window
       .fetch("/api/approval-inbox/count", {
         headers: token ? { Authorization: `Bearer ${token}` } : {},

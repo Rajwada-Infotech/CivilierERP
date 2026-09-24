@@ -54,13 +54,13 @@ describe("AuthContext: real-time rights refresh via socket", () => {
   const originalFetch = global.fetch;
 
   beforeEach(() => {
-    localStorage.clear();
+    sessionStorage.clear();
     Object.keys(mockSocketHandlers).forEach((k) => delete mockSocketHandlers[k]);
     mockSocket.on.mockClear();
     mockSocket.off.mockClear();
 
-    localStorage.setItem("token", "fake-jwt-token");
-    localStorage.setItem(
+    sessionStorage.setItem("token", "fake-jwt-token");
+    sessionStorage.setItem(
       "user",
       JSON.stringify({
         id: "10",
@@ -113,7 +113,7 @@ describe("AuthContext: real-time rights refresh via socket", () => {
       </AuthProvider>,
     );
 
-    // Before the push: still the old, stale permission set from localStorage.
+    // Before the push: still the old, stale permission set from sessionStorage.
     expect(screen.getByTestId("pages").textContent).toBe("old-page");
 
     // Simulate the backend pushing the event (as roles.js/userRights.js now do).
@@ -125,14 +125,14 @@ describe("AuthContext: real-time rights refresh via socket", () => {
 
     // The refreshed permissions must also be persisted so a reload doesn't
     // regress back to the stale set.
-    const stored = JSON.parse(localStorage.getItem("user") || "{}");
+    const stored = JSON.parse(sessionStorage.getItem("user") || "{}");
     expect(stored.pagePermissions).toEqual([
       { page: "new-page", actions: ["view", "edit"] },
     ]);
   });
 
   it("does not subscribe at all for privileged roles (they always have full access)", () => {
-    localStorage.setItem(
+    sessionStorage.setItem(
       "user",
       JSON.stringify({
         id: "1",

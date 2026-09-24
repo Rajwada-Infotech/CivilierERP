@@ -23,8 +23,8 @@ api.interceptors.response.use(
     const isUsersListRoute = error.config?.url === "/users";
     // Only auto-redirect on 401 for authenticated routes — never for the login call itself
     if (error.response?.status === 401 && !isLoginRoute && !isUsersListRoute) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
+      sessionStorage.removeItem("token");
+      sessionStorage.removeItem("user");
       window.location.href = "/login";
     }
     return Promise.reject(error);

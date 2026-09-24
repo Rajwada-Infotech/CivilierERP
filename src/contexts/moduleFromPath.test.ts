@@ -57,7 +57,7 @@ describe("rememberModuleForRoute", () => {
   const store = new Map<string, string>();
   beforeEach(() => {
     store.clear();
-    vi.stubGlobal("localStorage", {
+    vi.stubGlobal("sessionStorage", {
       getItem: (k: string) => store.get(k) ?? null,
       setItem: (k: string, v: string) => void store.set(k, v),
       removeItem: (k: string) => void store.delete(k),

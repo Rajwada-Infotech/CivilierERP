@@ -5,7 +5,7 @@ const BASE = "/api/vehicle-in-out";
 
 const authHeaders = () => ({
   "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
 });
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -242,7 +242,7 @@ export async function uploadVehicleAttachments(
   attachments: VehicleAttachment[];
   ids: number[];
 }> {
-  const token = localStorage.getItem("token") ?? "";
+  const token = sessionStorage.getItem("token") ?? "";
   const form = new FormData();
   for (const file of files) form.append("file", file);
 

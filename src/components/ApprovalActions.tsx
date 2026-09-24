@@ -16,7 +16,7 @@ import { CheckCircle2, SendHorizonal, XCircle, Loader2, ClipboardCheck } from "l
 // Reads role from JWT stored in localStorage under "token".
 function getUserRole(): string | null {
   try {
-    const token = localStorage.getItem("token");
+    const token = sessionStorage.getItem("token");
     if (!token) return null;
     const payload = JSON.parse(atob(token.split(".")[1]));
     return payload.role ?? null;
@@ -34,7 +34,7 @@ function isApprover(allowedRoles: string[]): boolean {
 
 // ─── fetchWithAuth helper (inline — avoids import path assumptions) ───────────
 async function authFetch(url: string, method: string, body?: object) {
-  const token = localStorage.getItem("token");
+  const token = sessionStorage.getItem("token");
   const res = await fetch(url, {
     method,
     headers: {

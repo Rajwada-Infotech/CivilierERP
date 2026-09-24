@@ -1,7 +1,10 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { FileText, Upload, DoorOpen, Sparkles, Loader2, CheckCircle2 } from "lucide-react";
+import {
+  FileText, Upload, DoorOpen, Sparkles, Loader2, CheckCircle2,
+  ChevronDown, ChevronRight, Eye, Printer, Pencil, Trash2, Building2,
+} from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
@@ -12,6 +15,10 @@ import {
   type RecordWithId,
   type FieldDef,
 } from "@/components/MasterPage";
+import { ExportMenu } from "@/components/ExportMenu";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
@@ -43,6 +50,28 @@ async function openBlueprint(roomId: string | number) {
   } catch (err: any) {
     toast.error(err.message || "Could not open blueprint");
   }
+}
+
+// Extracted out of the (now hidden, see hideTable below) MasterPage table's
+// onPrint prop so the custom grouped table's own Print button can call it
+// directly.
+function printRoom(row: RecordWithId) {
+  const win = window.open("", "_blank", "width=600,height=400");
+  if (!win) return;
+  win.document.write(safeHtml`
+    <html><head><title>Room — ${row.roomName}</title>
+    <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+    </head><body><h2>Room Card</h2><table>
+      <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
+      <tr><td>Block</td><td>${row.blockName || "—"}</td></tr>
+      <tr><td>Unit</td><td>${row.unitName || "—"}</td></tr>
+      <tr><td>Room Name</td><td>${row.roomName || "—"}</td></tr>
+      <tr><td>Floor</td><td>${row.floor || "—"}</td></tr>
+      <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
+    </table></body></html>
+  `);
+  win.document.close();
+  win.print();
 }
 
 // The "custom" field's render prop is just a function, not a component, so
@@ -116,90 +145,6 @@ function BlueprintUploadField({
   );
 }
 
-// Suggests Room Master's active room-type aliases (the same list Room
-// Composition Builder and Work Done's Room dropdown read) instead of typing
-// a name from scratch — but stays a real text input, not a strict dropdown,
-// because a unit can have more than one room of the same category
-// ("Bedroom 1", "Bedroom 2", same convention the template-based generator
-// below also respects — each generated room keeps a plain category name so
-// it still matches these suggestions) and an existing room's saved name
-// still needs to display correctly even once it no longer matches an alias
-// exactly.
-let roomCategoryOptionsCache: { value: string; label: string }[] | null = null;
-function RoomNameField({
-  value,
-  onChange,
-}: {
-  value: string | undefined;
-  onChange: (v: unknown) => void;
-}) {
-  const { data: categories = [] } = useQuery({
-    queryKey: ["room-master-room-category-options"],
-    queryFn: fetchRoomCategoryOptions,
-    staleTime: 5 * 60 * 1000,
-    initialData: roomCategoryOptionsCache ?? undefined,
-  });
-  React.useEffect(() => {
-    roomCategoryOptionsCache = categories;
-  }, [categories]);
-
-  // Custom suggestion panel instead of a native <datalist> — a datalist's
-  // popup is rendered entirely by the browser (plain white list, no way to
-  // theme it), which looked jarringly out of place against every other
-  // themed dropdown in the app. This keeps the same "pick a suggestion or
-  // type your own" behaviour (still a real text input underneath, so
-  // "Bedroom 1"/"Bedroom 2" etc. still work) with a panel styled to match.
-  const [open, setOpen] = React.useState(false);
-  const wrapRef = React.useRef<HTMLDivElement>(null);
-
-  React.useEffect(() => {
-    if (!open) return;
-    const onClickOutside = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onClickOutside);
-    return () => document.removeEventListener("mousedown", onClickOutside);
-  }, [open]);
-
-  const query = (value ?? "").trim().toLowerCase();
-  const suggestions = query
-    ? categories.filter((c) => c.label.toLowerCase().includes(query))
-    : categories;
-
-  return (
-    <div ref={wrapRef} className="relative">
-      <input
-        type="text"
-        value={value ?? ""}
-        onChange={(e) => onChange(e.target.value)}
-        onFocus={() => setOpen(true)}
-        placeholder="Pick a category or type a name"
-        className="w-full h-9 px-3 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-      />
-      {open && suggestions.length > 0 && (
-        <div className="absolute z-20 mt-1 w-full max-h-56 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg py-1">
-          {suggestions.map((c) => (
-            <button
-              key={c.value}
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                onChange(c.value);
-                setOpen(false);
-              }}
-              className="w-full text-left px-3 py-1.5 text-sm text-foreground hover:bg-muted transition-colors"
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── API helpers ────────────────────────────────────────────────────────────────
 async function fetchRooms(): Promise<any[]> {
   const res = await fetchWithAuth(API);
@@ -214,21 +159,6 @@ async function fetchProjectOptions(): Promise<
   if (!res.ok) throw new Error("Failed to fetch projects");
   const data: { Id: number; Name: string }[] = await res.json().catch(() => []);
   return data.map((p) => ({ value: String(p.Id), label: p.Name }));
-}
-
-// Same active-categories list Room Composition Builder and Work Done's Room
-// dropdown both read (GET /options, ordered by SortOrder) — Room Name now
-// picks from here instead of free text, so a room is always named after one
-// of the categories actually set up in Room Master.
-async function fetchRoomCategoryOptions(): Promise<
-  { value: string; label: string }[]
-> {
-  const res = await fetchWithAuth("/api/room-category-master/options");
-  if (!res.ok) throw new Error("Failed to fetch room categories");
-  const data: { id: number; categoryName: string; alias: string }[] = await res
-    .json()
-    .catch(() => []);
-  return data.map((c) => ({ value: c.alias, label: c.alias }));
 }
 
 type UnitOption = {
@@ -455,22 +385,10 @@ const fields: FieldDef[] = [
         .map((u) => ({ value: String(u.Id), label: u.Name }));
     },
   },
-  {
-    name: "roomName",
-    label: "Room Name",
-    type: "custom",
-    required: true,
-    render: ({ value, onChange }) => (
-      <RoomNameField value={value as string | undefined} onChange={onChange} />
-    ),
-  },
-  // Once a Unit is picked above, shows that unit's room template (from Unit
-  // Composition) and a one-click bulk-create — the fast path for "give me
-  // every room this unit's layout calls for" instead of filling Room Name
-  // one room at a time. Lives inside this same form (reading the Unit
-  // already selected above) rather than as a separate section with its own
-  // Project/Unit pickers — a standalone panel like that was tried before and
-  // pulled for being clumsy/duplicative; this reuses the form's own Unit.
+  // Rooms are created exclusively from the unit's template below (Create
+  // Rooms) — there's no more manual "type a Room Name and Save" path, so
+  // that field was removed; canCreate is hardcoded false on MasterPage to
+  // match (the Save button only ever does Edit now).
   {
     name: "roomConfigPreview",
     label: "Room Configuration",
@@ -515,6 +433,39 @@ const exportColumns: ExportColumn[] = [
   { header: "Room Name", accessor: "roomName" },
   { header: "Floor", accessor: "floor" },
   { header: "Status", accessor: "isActive" },
+];
+
+// Shared between MasterPage's own view modal (viewConfig, still reachable
+// while the Add/Edit form is open) and the custom grouped table's own View
+// dialog below, so the two never drift apart.
+const roomViewFields: {
+  key: string;
+  label: string;
+  render?: (val: unknown, row: RecordWithId) => React.ReactNode;
+}[] = [
+  { key: "projectName", label: "Project" },
+  { key: "blockName", label: "Block" },
+  { key: "unitName", label: "Unit" },
+  { key: "roomName", label: "Room Name" },
+  { key: "floor", label: "Floor" },
+  { key: "isActive", label: "Status" },
+  {
+    key: "blueprintFileName",
+    label: "Blueprint",
+    render: (val, row) =>
+      val ? (
+        <button
+          type="button"
+          onClick={() => openBlueprint(row._id)}
+          className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+        >
+          <FileText size={13} className="shrink-0" />
+          <span className="truncate">{String(val)}</span>
+        </button>
+      ) : (
+        <p className="text-sm text-muted-foreground">Not uploaded</p>
+      ),
+  },
 ];
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -568,6 +519,56 @@ const RoomMaster: React.FC = () => {
       blueprintMimeType: item.BlueprintMimeType ?? null,
     }));
   }, [rooms]);
+
+  // Rooms grouped by their owning Unit — collapsible, same "PO grouping its
+  // GRNs" pattern GRN.tsx uses. Sorted by Project/Block/Unit so the list
+  // reads in the same order the old flat table's default sort did.
+  const roomGroups = React.useMemo(() => {
+    const unitTypeById = new Map(allUnits.map((u) => [String(u.Id), u.UnitType]));
+    const map = new Map<string, { key: string; projectName: string; blockName: string; unitName: string; bhkType: string | null; rooms: RecordWithId[] }>();
+    for (const r of mappedData) {
+      const key = `${r.projectId}-${r.blockId}-${r.unitId}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          projectName: (r.projectName as string) || "",
+          blockName: (r.blockName as string) || "",
+          unitName: (r.unitName as string) || "",
+          bhkType: unitTypeById.get(r.unitId as string) ?? null,
+          rooms: [],
+        });
+      }
+      map.get(key)!.rooms.push(r);
+    }
+    return Array.from(map.values()).sort((a, b) =>
+      `${a.projectName}-${a.blockName}-${a.unitName}`.localeCompare(`${b.projectName}-${b.blockName}-${b.unitName}`),
+    );
+  }, [mappedData, allUnits]);
+
+  // Collapsed by default — the same reasoning as every other "N rows under
+  // one parent" list in this app (Work Allocation's dependency chains,
+  // Approval Inbox's per-module groups): a flat 21-row table was the actual
+  // complaint, not any one unit's own room count.
+  const [expandedUnits, setExpandedUnits] = React.useState<Set<string>>(new Set());
+  const toggleUnit = (key: string) =>
+    setExpandedUnits((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  // Edit re-opens MasterPage's own Add/Edit form from outside — the table
+  // itself is hidden (hideTable below) in favour of this grouped view, so
+  // there's no in-table Edit button to click anymore.
+  const [requestEditId, setRequestEditId] = React.useState<string | null>(null);
+  const [requestEditKey, setRequestEditKey] = React.useState(0);
+  const requestEdit = (id: string) => {
+    setRequestEditId(id);
+    setRequestEditKey((k) => k + 1);
+  };
+  const [viewRoom, setViewRoom] = React.useState<RecordWithId | null>(null);
+  const [deletingRoom, setDeletingRoom] = React.useState<RecordWithId | null>(null);
 
   // externalFormPatch injects __units into the form so optionsProvider/render can filter/look up
   const unitsPatch = React.useMemo(() => ({ __units: allUnits }), [allUnits]);
@@ -623,10 +624,15 @@ const RoomMaster: React.FC = () => {
       }
     }
     if (event.action === "update") {
+      // toPayload's RoomName is always null now (the field is gone from the
+      // form) — carry the room's existing name through instead, since the
+      // backend still requires it and this form no longer edits it.
+      const existing = mappedData.find((m) => m._id === event.id);
+      const payload = { ...toPayload(event.record), RoomName: (existing?.roomName as string) || null };
       const res = await fetchWithAuth(`${API}/${event.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(toPayload(event.record)),
+        body: JSON.stringify(payload),
       });
       if (!res.ok)
         throw new Error((await res.json()).error || "Failed to update room");
@@ -662,13 +668,24 @@ const RoomMaster: React.FC = () => {
       >
       <MasterPage
         title="Room"
-        canCreate={rights.canCreate}
+        // Rooms are only ever created via the Room Configuration card's
+        // "Create Rooms" (template-driven) — the manual Save-a-new-room path
+        // is gone, so Save is disabled in Add mode regardless of the create
+        // right. Edit still works, for toggling Active / swapping a blueprint.
+        canCreate={false}
         canEdit={rights.canEdit}
         canDelete={rights.canDelete}
         fields={fields}
         columns={columns}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        // The records table itself is hidden in favour of the grouped-by-
+        // Unit view below — requestEditId/requestEditKey re-opens this same
+        // Add/Edit form from that view's own Edit button, exactly as if a
+        // (now nonexistent) in-table Edit button had been clicked.
+        hideTable
+        requestEditId={requestEditId}
+        requestEditKey={requestEditKey}
         // Inject __units + cascade-reset the fields below whichever level changed
         externalFormPatch={unitsPatch}
         externalFormPatchKey={allUnits.length}
@@ -684,58 +701,186 @@ const RoomMaster: React.FC = () => {
           }
           return form;
         }}
-        exportConfig={{
-          title: "Flat Master",
-          filename: "room-master",
-          columns: exportColumns,
-        }}
-        viewConfig={{
-          title: "Room Details",
-          fields: [
-            { key: "projectName", label: "Project" },
-            { key: "blockName", label: "Block" },
-            { key: "unitName", label: "Unit" },
-            { key: "roomName", label: "Room Name" },
-            { key: "floor", label: "Floor" },
-            { key: "isActive", label: "Status" },
-            {
-              key: "blueprintFileName",
-              label: "Blueprint",
-              render: (val, row) =>
-                val ? (
+      />
+
+      {/* ── Room Records — grouped by Unit, collapsible, same "PO groups its
+          GRNs" pattern GRN.tsx uses. Row-level actions (View/Print/Edit/
+          Delete) are unchanged from the old flat table, just reached from
+          here instead. ── */}
+      <div className="mt-4 rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border bg-muted/20">
+          <div>
+            <p className="text-sm font-heading font-semibold text-foreground">Room Records</p>
+            <p className="text-[11px] text-muted-foreground">{mappedData.length} record{mappedData.length === 1 ? "" : "s"}</p>
+          </div>
+          <ExportMenu
+            data={mappedData}
+            columns={exportColumns}
+            title="Flat Master"
+            filename="room-master"
+            disabled={mappedData.length === 0}
+          />
+        </div>
+
+        {roomGroups.length === 0 ? (
+          <p className="px-4 py-10 text-center text-sm text-muted-foreground">No rooms recorded yet.</p>
+        ) : (
+          <div className="divide-y divide-border">
+            {roomGroups.map((g) => {
+              const expanded = expandedUnits.has(g.key);
+              return (
+                <div key={g.key}>
                   <button
                     type="button"
-                    onClick={() => openBlueprint(row._id)}
-                    className="inline-flex items-center gap-1.5 text-sm text-primary hover:underline"
+                    onClick={() => toggleUnit(g.key)}
+                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left hover:bg-muted/20 transition-colors"
                   >
-                    <FileText size={13} className="shrink-0" />
-                    <span className="truncate">{String(val)}</span>
+                    {expanded ? (
+                      <ChevronDown size={13} className="text-muted-foreground shrink-0" />
+                    ) : (
+                      <ChevronRight size={13} className="text-muted-foreground shrink-0" />
+                    )}
+                    <Building2 size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
+                    <span className="text-sm font-medium text-foreground">{g.unitName || "—"}</span>
+                    <span className="text-xs text-muted-foreground truncate">
+                      · {g.projectName}{g.blockName ? ` — ${g.blockName}` : ""}
+                    </span>
+                    {g.bhkType && (
+                      <span className="text-[10px] font-medium text-cyan-700 dark:text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full shrink-0">
+                        {g.bhkType}
+                      </span>
+                    )}
+                    <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                      {g.rooms.length} room{g.rooms.length === 1 ? "" : "s"}
+                    </span>
                   </button>
-                ) : (
-                  <p className="text-sm text-muted-foreground">Not uploaded</p>
-                ),
-            },
-          ],
-        }}
-        onPrint={(row) => {
-          const win = window.open("", "_blank", "width=600,height=400");
-          if (!win) return;
-          win.document.write(safeHtml`
-            <html><head><title>Room — ${row.roomName}</title>
-            <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-            </head><body><h2>Room Card</h2><table>
-              <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
-              <tr><td>Block</td><td>${row.blockName || "—"}</td></tr>
-              <tr><td>Unit</td><td>${row.unitName || "—"}</td></tr>
-              <tr><td>Room Name</td><td>${row.roomName || "—"}</td></tr>
-              <tr><td>Floor</td><td>${row.floor || "—"}</td></tr>
-              <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
-            </table></body></html>
-          `);
-          win.document.close();
-          win.print();
-        }}
-      />
+
+                  {expanded && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border text-left text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide bg-muted/10">
+                            <th className="pl-12 pr-3 py-2">Room Name</th>
+                            <th className="px-3 py-2">Floor</th>
+                            <th className="px-3 py-2">Status</th>
+                            <th className="px-5 py-2 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {g.rooms.map((room) => (
+                            <tr key={room._id} className="border-b border-border last:border-0 hover:bg-muted/10">
+                              <td className="pl-12 pr-3 py-2.5 font-medium text-foreground">{room.roomName as string}</td>
+                              <td className="px-3 py-2.5 text-muted-foreground">{(room.floor as string) || "—"}</td>
+                              <td className="px-3 py-2.5">
+                                {room.isActive ? (
+                                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />Active
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-border inline-block" />Inactive
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-5 py-2.5">
+                                <div className="flex items-center justify-end gap-1">
+                                  <button
+                                    onClick={() => setViewRoom(room)}
+                                    className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                    title="View"
+                                  >
+                                    <Eye size={13} />
+                                  </button>
+                                  <button
+                                    onClick={() => printRoom(room)}
+                                    className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                                    title="Print"
+                                  >
+                                    <Printer size={13} />
+                                  </button>
+                                  {rights.canEdit && (
+                                    <button
+                                      onClick={() => requestEdit(room._id)}
+                                      className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                      title="Edit"
+                                    >
+                                      <Pencil size={13} />
+                                    </button>
+                                  )}
+                                  {rights.canDelete && (
+                                    <button
+                                      onClick={() => setDeletingRoom(room)}
+                                      className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                      title="Delete"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── View dialog — same fields MasterPage's own viewConfig would have shown ── */}
+      <Dialog open={!!viewRoom} onOpenChange={(open) => !open && setViewRoom(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Room Details</DialogTitle>
+          </DialogHeader>
+          {viewRoom && (
+            <div className="space-y-3 pt-1">
+              {roomViewFields.map((f) => (
+                <div key={f.key} className="space-y-0.5">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{f.label}</p>
+                  <div className="text-sm text-foreground">
+                    {f.render ? f.render(viewRoom[f.key], viewRoom) : String(viewRoom[f.key] ?? "—")}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Delete confirm dialog ── */}
+      <Dialog open={!!deletingRoom} onOpenChange={(open) => !open && setDeletingRoom(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Room</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground pt-1">
+            Delete <strong>{deletingRoom?.roomName as string}</strong>? This can't be undone.
+          </p>
+          <DialogFooter className="pt-2">
+            <button onClick={() => setDeletingRoom(null)} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                if (!deletingRoom) return;
+                try {
+                  await handleDataEvent({ action: "delete", id: deletingRoom._id, records: mappedData });
+                } finally {
+                  setDeletingRoom(null);
+                }
+              }}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+            >
+              Delete
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       </CivilWorkDprShell>
     </>
   );
