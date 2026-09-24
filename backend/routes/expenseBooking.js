@@ -1167,7 +1167,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.EDocNo, eb.EEmiPayment, eb.EInstallmentCount, eb.EEmiAmount,
           eb.EEmiStartDate, eb.EReminder, eb.ERemarks, eb.EStatus,
           eb.ECreatedAt, eb.EUpdatedAt, eb.ECompanyId, eb.EDocTypeId,
-          eb.EFinYear, eb.ECreatedBy, eb.ESourceType, eb.ESourceId,
+          eb.EFinYear, eb.ECreatedBy, ecu.name AS CreatedByName, eb.ESourceType, eb.ESourceId,
           eb.ELinkedGrnIds,
           eb.EName, eb.EBillingTermsData, eb.EDiscountData, eb.EEmiData,
           eb.EBillingTermId, eb.EBillingTermName,
@@ -1223,6 +1223,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           END AS EGrnTotalAmount,
           COUNT(*) OVER() AS _total
         FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.users ecu ON ecu.id = eb.ECreatedBy
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id          = eb.ECompanyId
         CROSS APPLY (SELECT TRY_CAST(eb.EProjectName AS INT) AS _projId) _p
@@ -1622,6 +1623,7 @@ router.get("/:id", async (req, res) => {
     const result = await pool.request().input("Eid", sql.Int, id).query(`
         SELECT eb.*,
                eb.Eid AS id,
+               ecu.name AS CreatedByName,
                CASE
                  WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + ' — ' + t.Description
                  WHEN t.Prefix IS NOT NULL THEN t.Prefix
@@ -1656,6 +1658,7 @@ router.get("/:id", async (req, res) => {
                gl.LHeadCode AS EGLAccountCode,
                gl.LBelongsTo AS EGLAccountGroupId
         FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.users ecu ON ecu.id = eb.ECreatedBy
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
         CROSS APPLY (SELECT TRY_CAST(eb.EProjectName AS INT) AS _projId) _p

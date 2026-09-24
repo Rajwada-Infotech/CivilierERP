@@ -21,6 +21,7 @@ export interface SaleInvoice {
   PaymentStatus: PaymentStatus;
   HasPurchaseOrder?: boolean;
   CreatedBy: string | null;
+  CreatedByName?: string | null;
   CreatedAt: string;
   UpdatedAt: string | null;
 }

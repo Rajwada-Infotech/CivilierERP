@@ -682,6 +682,7 @@ async function getPOSelect(pool) {
     po.Remarks,
     po.Status,
     po.CreatedBy,
+    COALESCE(cu.name, po.CreatedBy) AS CreatedByName,
     po.CreatedAt,
     po.UpdatedAt,
     po.ApprovedBy,
@@ -745,6 +746,7 @@ async function getPOSelect(pool) {
   LEFT JOIN dbo.FinYear           fy ON fy.FId        = po.fy_id
   LEFT JOIN dbo.TypeOfDoc         td ON td.TypeOfDocId = po.DocTypeId
   LEFT JOIN dbo.Quotations        qt ON qt.QuotationId = po.SourceQTId
+  LEFT JOIN dbo.users             cu ON LOWER(cu.email) = LOWER(po.CreatedBy)
   ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = po.CostCenterId" : ""}
   ${hasPT ? "LEFT JOIN dbo.VendorPaymentTerm pt ON pt.PaymentTermId = po.PaymentTermId" : ""}
 `;

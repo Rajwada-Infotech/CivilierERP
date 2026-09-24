@@ -2380,6 +2380,7 @@ export default function VehicleInOut() {
                         : "—",
                     },
                     { label: "Fin Year", value: viewingRec.FinYear || "—" },
+                    { label: "Created By", value: viewingRec.CreatedByName || viewingRec.CreatedBy || "—" },
                     { label: "Company", value: viewingRec.CompanyName || "—" },
                     { label: "Project", value: viewingRec.ProjectName || "—" },
                     {

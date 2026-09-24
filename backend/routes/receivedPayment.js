@@ -151,8 +151,10 @@ router.get("/:id", async (req, res) => {
           RPRejectedBy, RPRejectedAt, RPRejectionNote,
           RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
           RPCustomerName, RPDepositBankId, RPDepositBankName,
-          SourceSaleInvoiceId, SourceSaleInvoiceDocNo
+          SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
+          COALESCE(cu.name, RPCreatedBy) AS CreatedByName
         FROM dbo.ReceivedPayment
+        LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(RPCreatedBy)
         WHERE RPPaymentID = @id
       `);
     if (!result.recordset.length) return res.status(404).json({ error: "Received payment not found" });

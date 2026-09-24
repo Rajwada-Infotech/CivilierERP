@@ -1775,6 +1775,7 @@ export default function MaterialRequest() {
                 { label: "Required By", value: fmtDate(viewingRecord.RequiredByDate) },
                 { label: "Company", value: viewingRecord.CompanyName },
                 { label: "Project / Site", value: viewingRecord.ProjectName },
+                { label: "Created By", value: viewingRecord.CreatedBy },
               ] as { label: string; value: any; mono?: boolean }[]).map(({ label, value, mono }) => (
                 <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
                   <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>

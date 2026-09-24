@@ -125,6 +125,7 @@ export type PaymentMode =
 export type ReceivedPayment = {
   id: string;
   docNo: string;
+  createdByName?: string;
   companyId?: number;
   companyName: string;
   projectId?: number;
@@ -161,6 +162,7 @@ function mapReceivedPaymentRow(r: ReceivedPaymentRecord): ReceivedPayment {
   return {
     id: String(r.RPPaymentID),
     docNo: (r as any).RPDocNo || `REC/${String(r.RPPaymentID).padStart(6, "0")}`,
+    createdByName: r.CreatedByName || r.RPCreatedBy || undefined,
     companyId: (r as any).RPCompanyId ?? undefined,
     companyName: r.RPCompanyName ?? "",
     projectId: (r as any).RPProjectId ?? undefined,
@@ -2251,6 +2253,7 @@ export default function ReceivedPaymentPage() {
                 },
                 { label: "Company", value: viewingPayment.companyName },
                 { label: "Project", value: viewingPayment.projectName },
+                { label: "Created By", value: viewingPayment.createdByName || "—" },
                 {
                   label: "Deposit Bank",
                   value: viewingPayment.depositBankName || "—",

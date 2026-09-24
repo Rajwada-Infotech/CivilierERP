@@ -972,6 +972,7 @@ export function ExpenseBookingPreviewModal({
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {([
                 { label: "Booking Date", value: previewRecord.bookingDate },
+                { label: "Created By", value: previewRecord.createdByName || "—" },
                 { label: "Due Date", value: previewRecord.dueDate },
                 { label: "Document Type", value: previewRecord.docTypeName || previewRecord.materialCategory },
                 {

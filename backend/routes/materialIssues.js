@@ -345,8 +345,10 @@ router.get("/:id", authenticateToken, async (req, res) => {
         c.name   AS CompanyName,
         p.name   AS ProjectName,
         fy.FName AS FinYearName,
-        g.GodownName, g.GodownCode
+        g.GodownName, g.GodownCode,
+        cu.name  AS CreatedByName
       FROM dbo.MaterialIssues mi
+      LEFT JOIN dbo.users      cu ON cu.id = mi.CreatedBy
       LEFT JOIN dbo.enterprise c  ON mi.CompanyId = c.id
       LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
       LEFT JOIN dbo.FinYear    fy ON mi.FinYearId = fy.FId
