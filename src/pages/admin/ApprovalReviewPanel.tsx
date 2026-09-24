@@ -43,6 +43,13 @@ import {
 } from "./ApprovalInbox";
 import { partnerLineKind } from "@/pages/finance/journalVoucher/ledgerGroups";
 import {
+  getRungAssignment,
+  getEngineers,
+  SOURCE_META,
+  type RungAssignmentDetail,
+  type Engineer,
+} from "@/api/dependencyActivityAssignmentApi";
+import {
   X,
   ClipboardCheck,
   Package,
@@ -52,6 +59,10 @@ import {
   Clock,
   UserCheck,
   SendHorizonal,
+  Circle,
+  CalendarDays,
+  UserRound,
+  ListChecks,
 } from "lucide-react";
 
 // ─── Approval chain types — matches GET /api/approval-workflows/trail ────────
@@ -206,9 +217,20 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   const Icon = cfg?.icon ?? ClipboardCheck;
   const approvalTable: ApprovalTable | undefined = MODULE_APPROVAL_TABLE[item.Module];
 
+  const isWorkAllocationEngineer = item.Module === "work-allocation-engineer";
+
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [detailFailed, setDetailFailed] = useState(false);
+
+  // work-allocation-engineer's "record" is a per-engineer confirmation row
+  // (dae.Id), not the assignment itself — the generic cfg.apiEndpoint/
+  // RecordId fetch above can't return anything useful for it. This fetches
+  // the same full assignment detail (engineers, days, materials,
+  // checkpoints) RungAssignmentModal.tsx shows, keyed off RungId instead.
+  const [rungDetail, setRungDetail] = useState<RungAssignmentDetail | null>(null);
+  const [engineers, setEngineers] = useState<Engineer[]>([]);
+  const [loadingRungDetail, setLoadingRungDetail] = useState(false);
 
   const [chain, setChain] = useState<ChainData | null>(null);
   const [loadingChain, setLoadingChain] = useState(false);
@@ -228,7 +250,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     let cancelled = false;
     setDetail(null);
     setDetailFailed(false);
-    if (cfg?.apiEndpoint) {
+    if (cfg?.apiEndpoint && !isWorkAllocationEngineer) {
       setLoadingDetail(true);
       fetchWithAuth(`${cfg.apiEndpoint}/${item.RecordId}`)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
@@ -240,6 +262,23 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
         })
         .finally(() => {
           if (!cancelled) setLoadingDetail(false);
+        });
+    }
+
+    setRungDetail(null);
+    if (isWorkAllocationEngineer && item.RungId != null) {
+      setLoadingRungDetail(true);
+      Promise.all([getRungAssignment(item.RungId), getEngineers()])
+        .then(([rd, eng]) => {
+          if (cancelled) return;
+          setRungDetail(rd);
+          setEngineers(eng);
+        })
+        .catch(() => {
+          if (!cancelled) setDetailFailed(true);
+        })
+        .finally(() => {
+          if (!cancelled) setLoadingRungDetail(false);
         });
     }
 
@@ -262,7 +301,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     return () => {
       cancelled = true;
     };
-  }, [open, item.Module, item.RecordId, cfg?.apiEndpoint, approvalTable]);
+  }, [open, item.Module, item.RecordId, item.RungId, isWorkAllocationEngineer, cfg?.apiEndpoint, approvalTable]);
 
   if (!open) return null;
 
@@ -423,10 +462,14 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             >
               <div className="px-5 py-4">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                  {rawTdsAmount > 0 ? "Total Amount (Before TDS)" : "Total Amount"}
+                  {isWorkAllocationEngineer ? "Total Days" : rawTdsAmount > 0 ? "Total Amount (Before TDS)" : "Total Amount"}
                 </p>
                 <p className="text-3xl font-bold font-heading text-foreground tabular-nums tracking-tight">
-                  {fmtAmount(effectiveAmount)}
+                  {isWorkAllocationEngineer
+                    ? rungDetail?.assignment?.days != null
+                      ? `${rungDetail.assignment.days} day${rungDetail.assignment.days === 1 ? "" : "s"}`
+                      : "—"
+                    : fmtAmount(effectiveAmount)}
                 </p>
                 {item.Status === "Pending" && (
                   <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1 font-medium">
@@ -434,7 +477,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                   </p>
                 )}
               </div>
-              {rawTdsAmount > 0 && (
+              {!isWorkAllocationEngineer && rawTdsAmount > 0 && (
                 <div className="grid grid-cols-2 divide-x divide-border border-t border-border/60 bg-background/40">
                   <div className="px-5 py-3">
                     <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
@@ -463,10 +506,14 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Overview</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                <FormField label="Date" value={fmtDate(item.RecordDate)} />
+                <FormField label={isWorkAllocationEngineer ? "Start Date" : "Date"} value={fmtDate(item.RecordDate)} />
                 <FormField label="Party" value={party} />
                 <FormField label="Created By" value={item.CreatedBy || "—"} />
-                <FormField label="Last Modified" value={fmtDate(item.LastModified)} />
+                {isWorkAllocationEngineer ? (
+                  <FormField label="End Date" value={fmtDate(rungDetail?.assignment?.endDate ?? null)} />
+                ) : (
+                  <FormField label="Last Modified" value={fmtDate(item.LastModified)} />
+                )}
                 {item.Module === "goods-receipt" && item.SourceTransferDocNo && (
                   <FormField label="Transfer Ref" value={item.SourceTransferDocNo} />
                 )}
@@ -474,6 +521,125 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                 {item.ToGodownName && <FormField label="To Godown" value={item.ToGodownName} />}
               </div>
             </div>
+
+            {/* Work Allocation — engineers, labour/material source, description,
+                checkpoints. Same fields RungAssignmentModal.tsx's "Assign
+                engineers & material" form shows, read-only here for review. */}
+            {isWorkAllocationEngineer && (
+              loadingRungDetail ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="h-[46px] rounded-lg bg-muted animate-pulse" />
+                  ))}
+                </div>
+              ) : rungDetail?.assignment ? (
+                <>
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                      <UserRound size={10} className="text-cyan-500" /> Engineers
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {rungDetail.assignment.engineerIds.length === 0 ? (
+                        <span className="text-xs text-muted-foreground italic">None assigned</span>
+                      ) : (
+                        rungDetail.assignment.engineerIds.map((id) => (
+                          <span
+                            key={id}
+                            className="text-xs font-medium bg-muted border border-border px-2.5 py-1 rounded-lg text-foreground"
+                          >
+                            {engineers.find((e) => e.id === id)?.name || `#${id}`}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {rungDetail.assignment.labourSource && (
+                      <FormField
+                        label="Labour Given By"
+                        value={
+                          <span
+                            className={`text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.labourSource].className}`}
+                          >
+                            {SOURCE_META[rungDetail.assignment.labourSource].label}
+                          </span>
+                        }
+                      />
+                    )}
+                    {rungDetail.assignment.materialSource && (
+                      <FormField
+                        label="Material Given By"
+                        value={
+                          <span
+                            className={`text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${SOURCE_META[rungDetail.assignment.materialSource].className}`}
+                          >
+                            {SOURCE_META[rungDetail.assignment.materialSource].label}
+                          </span>
+                        }
+                      />
+                    )}
+                  </div>
+
+                  {rungDetail.assignment.description && (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Description</p>
+                      <p className="text-xs text-foreground bg-muted/30 border border-border rounded-lg px-3 py-2.5">
+                        {rungDetail.assignment.description}
+                      </p>
+                    </div>
+                  )}
+
+                  {rungDetail.assignment.materials.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <Package size={10} className="text-emerald-500" /> Materials ({rungDetail.assignment.materials.length})
+                      </p>
+                      <div className="rounded-xl border border-border divide-y divide-border/50">
+                        {rungDetail.assignment.materials.map((m, i) => {
+                          const candidate = rungDetail.candidateItems.find((c) => c.itemId === m.itemId);
+                          return (
+                            <div key={i} className="flex items-center justify-between px-3 py-2 text-xs">
+                              <span className="font-medium text-foreground">{candidate?.itemName || `#${m.itemId}`}</span>
+                              <span className="text-muted-foreground shrink-0">
+                                {m.quantity.toLocaleString("en-IN")}{candidate?.uom ? ` ${candidate.uom}` : ""}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  {rungDetail.assignment.checkpoints.length > 0 && (
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
+                        <ListChecks size={10} className="text-cyan-500" /> Checkpoints ({rungDetail.assignment.checkpoints.length})
+                      </p>
+                      <div className="rounded-xl border border-border divide-y divide-border/50">
+                        {rungDetail.assignment.checkpoints.map((cp) => (
+                          <div key={cp.id ?? cp.fieldName} className="flex items-center gap-2 px-3 py-2 text-xs">
+                            {cp.isChecked ? (
+                              <CheckCircle2 size={13} className="text-emerald-500 shrink-0" />
+                            ) : (
+                              <Circle size={13} className="text-muted-foreground/40 shrink-0" />
+                            )}
+                            <span className={cp.isChecked ? "text-foreground" : "text-muted-foreground"}>{cp.fieldName}</span>
+                            {cp.isDaily && (
+                              <span className="ml-auto text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/70 flex items-center gap-1">
+                                <CalendarDays size={10} /> Daily{cp.updateCount ? ` · ${cp.updateCount}` : ""}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-xs text-muted-foreground">Couldn't load the full assignment — showing summary only.</p>
+              )
+            )}
 
             {item.RejectionNote && (
               <div className="rounded-lg border border-red-400/20 bg-red-500/5 px-3 py-2">
@@ -605,8 +771,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               </div>
             )}
 
-            {/* Details — the rest of the record, form-style */}
-            <div>
+            {/* Details — the rest of the record, form-style. Not shown for
+                work-allocation-engineer — its own Engineers/Materials/
+                Checkpoints sections above already cover its full record. */}
+            {!isWorkAllocationEngineer && <div>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Details</p>
               {loadingDetail ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
@@ -625,7 +793,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                   ))}
                 </div>
               )}
-            </div>
+            </div>}
 
             {/* Chain shows here too on small screens, where the sidebar collapses out */}
             <div className="lg:hidden pt-1">{chainSection}</div>

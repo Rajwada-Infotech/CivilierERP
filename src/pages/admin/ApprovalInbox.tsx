@@ -1,14 +1,17 @@
 import React, { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { AdminShell } from "@/components/admin/AdminShell";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { Button } from "@/components/ui/button";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { formatINR } from "@/utils/formatCurrency";
 import { computeGrnNetWithTerms } from "@/pages/material/ExpenseBooking/helpers";
+import { confirmEngineerAssignment } from "@/api/dependencyActivityAssignmentApi";
 import {
   ClipboardCheck,
   ClipboardList,
@@ -43,6 +46,7 @@ import {
   X,
   ChevronDown,
   ChevronRight,
+  Loader2,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
@@ -77,6 +81,15 @@ export interface InboxItem {
   // journal-voucher only — "AccountHead Dr/Cr Amount | AccountHead Dr/Cr Amount"
   // for every line on the voucher, null for all other modules.
   JournalVoucherSummary: string | null;
+  // work-allocation-engineer only — the specific engineer this row's task
+  // confirmation belongs to; null for every other module.
+  AssigneeUserId: number | null;
+  // work-allocation-engineer only — DependencyMasterActivity.Id (the
+  // "rung"), used to fetch the full assignment detail (engineers, days,
+  // materials, checkpoints) via GET /api/dependency-activity-assignment/:rungId
+  // — RecordId itself is the DependencyActivityEngineer row (per-engineer,
+  // needed for the confirm action) and doesn't work as a lookup key there.
+  RungId: number | null;
   // Set by the backend's visibility filter (approvalInbox.js) only when the
   // viewer is named somewhere on this record's workflow but NOT on the
   // level it's currently sitting at — e.g. a Level-2 approver looking at a
@@ -231,6 +244,18 @@ export const MODULE_CONFIG: Record<
     navPath: "/fund-transfer",
     apiEndpoint: "/api/fund-transfer",
     label: "Fund Transfers",
+  },
+  // One specific engineer confirming a task literally assigned to them —
+  // not a document a manager reviews. isVisibleToViewer (approvalInbox.js)
+  // only ever shows this to the named EngineerId (or admin/super_admin),
+  // and its Approve action is a bespoke confirm call (see InboxRow below),
+  // not the shared ApprovalActions role/workflow machinery.
+  "work-allocation-engineer": {
+    icon: UserCheck,
+    color: "text-cyan-600 bg-cyan-600/10",
+    navPath: "/civilworkdpr/work-done",
+    apiEndpoint: "/api/dependency-activity-assignment",
+    label: "Activity Assignments",
   },
   // crm-applications deliberately has no entry here anymore — Applications
   // no longer have their own approve/reject cycle (see approvalInbox.js's
@@ -440,6 +465,7 @@ export const MODULE_CATEGORY: Record<string, CategoryId> = {
 
   "work-done": "engineering",
   boq: "engineering",
+  "work-allocation-engineer": "engineering",
 
   "sale-orders": "sales",
   "crm-bookings": "sales",
@@ -732,6 +758,42 @@ export function formatPreviewValue(value: unknown): string {
   return str;
 }
 
+// One engineer confirming their own task assignment — deliberately not
+// routed through ApprovalActions (that component's whole job is picking an
+// approver role/workflow, which doesn't apply here: isVisibleToViewer
+// already means the only person who can ever see this row IS the engineer
+// it's for).
+const EngineerConfirmButton: React.FC<{ item: InboxItem; onDone: () => void }> = ({ item, onDone }) => {
+  const [loading, setLoading] = useState(false);
+  const handleConfirm = async () => {
+    setLoading(true);
+    try {
+      const result = await confirmEngineerAssignment(Number(item.RecordId));
+      toast.success(
+        result.allApproved
+          ? "Confirmed — activity moved to In Progress"
+          : "Confirmed — waiting on the other assigned engineer(s)",
+      );
+      onDone();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Failed to confirm");
+    } finally {
+      setLoading(false);
+    }
+  };
+  return (
+    <Button
+      size="sm"
+      className="gap-1.5 h-auto px-3 py-1.5 text-xs font-heading font-semibold bg-emerald-600 hover:bg-emerald-700 text-white [&_svg]:size-3.5"
+      disabled={loading}
+      onClick={handleConfirm}
+    >
+      {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+      Confirm
+    </Button>
+  );
+};
+
 // ─── Inbox row ────────────────────────────────────────────────────────────────
 
 const InboxRow: React.FC<{
@@ -759,7 +821,18 @@ const InboxRow: React.FC<{
       >
         <Eye size={14} />
       </button>
-      {item.Status === "Pending" && item._canAct === false ? (
+      {item.Module === "work-allocation-engineer" ? (
+        // No role/workflow gate applies here at all — isVisibleToViewer
+        // already restricted this row to exactly the engineer it's for, so
+        // reaching this branch means the button is always safe to show.
+        <EngineerConfirmButton
+          item={item}
+          onDone={() => {
+            onOptimisticUpdate(item.RecordId, item.Module);
+            onActionDone();
+          }}
+        />
+      ) : item.Status === "Pending" && item._canAct === false ? (
         // Visible for awareness (named on some other level of this
         // record's workflow) but not their turn yet — Approve/Reject would
         // just 403 from transition()'s own per-level gate. Say so instead

@@ -236,15 +236,15 @@ export default function RoomCategoryMaster() {
                 onChange={(e) => setForm((p) => ({ ...p, sortOrder: e.target.value }))}
               />
             </div>
-            <div className="flex items-center justify-between rounded-lg border border-border px-4 py-3">
-              <div>
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-border px-4 py-3">
+              <div className="min-w-0">
                 <p className="text-sm font-medium">Active</p>
                 <p className="text-xs text-muted-foreground">Inactive categories won't appear in the composition builder or Work Allocation</p>
               </div>
               <button
                 type="button"
                 onClick={() => setForm((p) => ({ ...p, isActive: !p.isActive }))}
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none ${form.isActive ? "bg-emerald-500" : "bg-muted"}`}
+                className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors focus:outline-none ${form.isActive ? "bg-emerald-500" : "bg-muted"}`}
               >
                 <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transform transition-transform ${form.isActive ? "translate-x-6" : "translate-x-1"}`} />
               </button>

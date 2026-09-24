@@ -7,7 +7,7 @@ const RIGHTS_BASE_URL = "/api/user-rights";
 
 const getAuthHeaders = () => ({
   "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+  Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}`,
 });
 
 export interface User {

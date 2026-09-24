@@ -229,7 +229,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
   useEffect(() => {
     setUomLoading(true);
     fetch("/api/unit-of-measurement", {
-      headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
+      headers: { Authorization: `Bearer ${sessionStorage.getItem("token") ?? ""}` },
     })
       .then((r) => r.json())
       .then((data: any[]) => {

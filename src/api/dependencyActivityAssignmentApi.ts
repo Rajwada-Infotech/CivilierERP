@@ -181,6 +181,7 @@ export const saveRungAssignment = async (
 // constraint (see migration 334).
 export const ASSIGNMENT_STATUSES = [
   "PENDING",
+  "ALLOCATED",
   "IN_PROGRESS",
   "HOLD",
   "CANCELLED",
@@ -195,6 +196,11 @@ export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 // bearing on the order rows can move through.
 export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; className: string }> = {
   PENDING: { label: "Pending", className: "bg-slate-500/10 text-slate-600 dark:text-slate-400" },
+  // Set automatically the moment an engineer is assigned (POST /:rungId) —
+  // waiting on that engineer's own confirmation in the Approval Inbox, not
+  // something anyone picks from this dropdown by hand. Moves to IN_PROGRESS
+  // by itself once every assigned engineer has confirmed.
+  ALLOCATED: { label: "Allocated", className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
   IN_PROGRESS: { label: "In Progress", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
   HOLD: { label: "Hold", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
   CANCELLED: { label: "Cancelled", className: "bg-red-500/10 text-red-600 dark:text-red-400" },
@@ -239,6 +245,18 @@ export const getReportedAssignments = async (dependencyMasterId?: number): Promi
   const url = dependencyMasterId ? `${BASE}?dependencyMasterId=${dependencyMasterId}` : BASE;
   const res = await fetchWithAuth(url);
   return handleResponse<ReportedAssignment[]>(res);
+};
+
+// One assigned engineer confirming their own task — id is
+// dbo.DependencyActivityEngineer.Id (from the Approval Inbox row's
+// RecordId), not the assignment or rung id. Once every engineer on the
+// assignment has confirmed, the backend moves the parent Status
+// ALLOCATED -> IN_PROGRESS on its own.
+export const confirmEngineerAssignment = async (
+  id: number,
+): Promise<{ success: boolean; allApproved: boolean; newStatus: AssignmentStatus | null }> => {
+  const res = await fetchWithAuth(`${BASE}/engineer-approval/${id}/confirm`, { method: "PUT" });
+  return handleResponse<{ success: boolean; allApproved: boolean; newStatus: AssignmentStatus | null }>(res);
 };
 
 export const updateAssignmentStatus = async (

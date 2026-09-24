@@ -64,7 +64,7 @@ async function fetchBrokers(): Promise<any[]> {
 // Customize dialog. The backend re-checks independently — this only affects rendering.
 function getUserRole(): string | null {
   try {
-    const token = localStorage.getItem("token");
+    const token = sessionStorage.getItem("token");
     if (!token) return null;
     return JSON.parse(atob(token.split(".")[1])).role ?? null;
   } catch { return null; }
@@ -158,7 +158,7 @@ const CrmBrokerage: React.FC = () => {
     if (editingId == null) return;
     setApproving(true);
     try {
-      const token = localStorage.getItem("token");
+      const token = sessionStorage.getItem("token");
       const res = await fetch(`${API}/${editingId}/approve`, {
         method: "PUT",
         headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
