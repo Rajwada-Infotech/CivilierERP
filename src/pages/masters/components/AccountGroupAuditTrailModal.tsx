@@ -1,9 +1,7 @@
 import { useEffect, useState } from "react";
 import { History, PlusCircle, Pencil, Trash2 } from "lucide-react";
-import { FinanceShell } from "@/components/finance/FinanceShell";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
-import { usePageRights } from "@/hooks/usePageRights";
 import { getAuditTrail, type AuditTrailEntry } from "@/api/auditTrailApi";
 import { toast } from "sonner";
 
@@ -46,10 +44,7 @@ function summarizeDetails(entry: AuditTrailEntry): string {
       }
       return changed.length ? changed.join("; ") : "No field changes";
     }
-    if (entry.Action === "CREATE") {
-      return `Name: ${parsed.Name ?? "—"}, Code: ${parsed.Code ?? "—"}`;
-    }
-    if (entry.Action === "DELETE") {
+    if (entry.Action === "CREATE" || entry.Action === "DELETE") {
       return `Name: ${parsed.Name ?? "—"}, Code: ${parsed.Code ?? "—"}`;
     }
     return JSON.stringify(parsed);
@@ -58,12 +53,19 @@ function summarizeDetails(entry: AuditTrailEntry): string {
   }
 }
 
-export default function AccountGroupAuditTrail() {
-  usePageRights("account-group-audit-trail");
+interface Props {
+  open: boolean;
+  onClose: () => void;
+}
+
+// Audit trail lives inside Account Group Master itself, not as its own
+// menu entry — opened from a button on the page rather than navigated to.
+export function AccountGroupAuditTrailModal({ open, onClose }: Props) {
   const [rows, setRows] = useState<AuditTrailEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!open) return;
     let cancelled = false;
     setLoading(true);
     getAuditTrail("AccountGroup")
@@ -79,7 +81,7 @@ export default function AccountGroupAuditTrail() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [open]);
 
   const columns: ColumnDef<AuditTrailEntry, unknown>[] = [
     {
@@ -102,13 +104,13 @@ export default function AccountGroupAuditTrail() {
       id: "EntityName",
       accessorKey: "EntityName",
       header: "Account Group",
-      size: 180,
+      size: 160,
       cell: ({ getValue }) => <span className="font-medium truncate block">{String(getValue() || "—")}</span>,
     },
     {
       id: "Details",
       header: "What changed",
-      size: 320,
+      size: 300,
       cell: ({ row }) => (
         <span className="text-xs text-muted-foreground break-words">{summarizeDetails(row.original)}</span>
       ),
@@ -117,7 +119,7 @@ export default function AccountGroupAuditTrail() {
       id: "UserName",
       accessorKey: "UserName",
       header: "User",
-      size: 150,
+      size: 140,
       cell: ({ getValue }) => <span className="truncate block">{String(getValue() || "—")}</span>,
     },
     {
@@ -132,21 +134,23 @@ export default function AccountGroupAuditTrail() {
   ];
 
   return (
-    <FinanceShell
-      title="Audit Trail"
-      subtitle="Who created, edited, or deleted an Account Group entry, and when."
-      icon={History}
-    >
-      <Breadcrumbs items={[{ label: "Account Group" }, { label: "Audit Trail" }]} />
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-1.5">
+            <History size={16} /> Account Group — Audit Trail
+          </DialogTitle>
+        </DialogHeader>
 
-      <DataTable
-        data={rows}
-        columns={columns}
-        loading={loading}
-        searchable
-        searchPlaceholder="Search by group name, user..."
-        emptyMessage="No account group activity recorded yet."
-      />
-    </FinanceShell>
+        <DataTable
+          data={rows}
+          columns={columns}
+          loading={loading}
+          searchable
+          searchPlaceholder="Search by group name, user..."
+          emptyMessage="No account group activity recorded yet."
+        />
+      </DialogContent>
+    </Dialog>
   );
 }
