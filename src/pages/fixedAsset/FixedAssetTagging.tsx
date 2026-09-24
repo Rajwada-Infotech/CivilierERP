@@ -18,9 +18,9 @@ import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getItems } from "@/api/itemMasterApi";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import {
-  getEligibleAssetItems, getFixedAssetTaggings, createFixedAssetTagging,
+  getEligibleAssetItems, getPendingBatches, getFixedAssetTaggings, createFixedAssetTagging,
   updateFixedAssetTagging, deleteFixedAssetTagging,
-  type EligibleAssetItem, type TaggingListItem,
+  type EligibleAssetItem, type PendingBatch, type TaggingListItem,
 } from "@/api/fixedAssetTaggingApi";
 
 function ensureArray<T>(v: unknown): T[] {
@@ -177,6 +177,13 @@ export default function FixedAssetTagging() {
   const [importSubmitting, setImportSubmitting] = useState(false);
   const [importValidating, setImportValidating] = useState(false);
 
+  // Received Fixed Asset stock (GRN / Inventory Import) not tagged yet — auto-tagging
+  // skips a project that has no ID Template, so this keeps that stock visible.
+  const { data: pendingBatches = [] } = useQuery({
+    queryKey: ["fixed-asset-pending-batches"],
+    queryFn: getPendingBatches,
+  });
+
   const setField = useCallback(<K extends keyof FormState>(k: K, v: FormState[K]) => {
     setForm((p) => ({ ...p, [k]: v }));
   }, []);
@@ -275,6 +282,7 @@ export default function FixedAssetTagging() {
       });
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
       resetForm();
       setViewMode("list");
@@ -299,6 +307,7 @@ export default function FixedAssetTagging() {
       toast.success("Tagging entry deleted");
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fa-unassigned-codes"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
       setDeleteId(null);
@@ -502,6 +511,7 @@ export default function FixedAssetTagging() {
     if (successCount > 0) {
       qc.invalidateQueries({ queryKey: ["fixed-asset-taggings"] });
       qc.invalidateQueries({ queryKey: ["fixed-asset-eligible-items"] });
+      qc.invalidateQueries({ queryKey: ["fixed-asset-pending-batches"] });
       qc.invalidateQueries({ queryKey: ["fixed-assets"] });
     }
     if (errorCount === 0) {
@@ -717,6 +727,51 @@ export default function FixedAssetTagging() {
         ) : undefined
       }
     >
+      {ensureArray<PendingBatch>(pendingBatches).length > 0 && (
+        <Card className="border-amber-500/40 bg-amber-500/5 shadow-sm mb-5">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <AlertCircle size={16} className="text-amber-600 dark:text-amber-400 shrink-0" />
+              <p className="text-sm font-semibold">Received stock awaiting tagging</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[640px]">
+                <thead>
+                  <tr className="text-muted-foreground text-xs uppercase tracking-wide">
+                    <th className="py-1.5 pr-3 text-left">Item</th>
+                    <th className="py-1.5 pr-3 text-right">Qty</th>
+                    <th className="py-1.5 pr-3 text-left">Source</th>
+                    <th className="py-1.5 pr-3 text-left">Project / Godown</th>
+                    <th className="py-1.5 text-left">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/60">
+                  {ensureArray<PendingBatch>(pendingBatches).map((b) => (
+                    <tr key={b.AssetId}>
+                      <td className="py-2 pr-3 font-medium">{b.AssetName}</td>
+                      <td className="py-2 pr-3 text-right font-mono tabular-nums">{fmt(b.Quantity)}</td>
+                      <td className="py-2 pr-3 text-muted-foreground">{b.SourceType === "GRN" ? "GRN" : "Import"} {b.SourceDocNo || ""}</td>
+                      <td className="py-2 pr-3 text-muted-foreground">{b.ProjectName || "—"}{b.GodownName ? ` / ${b.GodownName}` : ""}</td>
+                      <td className="py-2 text-xs">
+                        {b.Reason === "NO_TEMPLATE" ? (
+                          <span className="text-amber-700 dark:text-amber-400">
+                            No Project Alias for {b.ProjectName || "this project"} — add one in{" "}
+                            <a href="/fixed-asset/id-template-master" className="underline font-semibold">ID Template Master</a>{" "}
+                            and these units are tagged automatically.
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">Ready — tag it with New Tagging.</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
         <SummaryCard label="Tagging Entries" value={fmt(stats.count)} icon={Boxes} />
         <SummaryCard label="Total Tagged Qty" value={fmt(stats.totalQty)} color="text-emerald-600 dark:text-emerald-400" icon={TagIcon} />

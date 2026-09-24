@@ -9,6 +9,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { generateFAItemCodes } = require("../services/faItemCodeGenerator");
+const { listUntaggedBatches } = require("../services/fixedAssetAutoAlloc");
 
 router.use(authenticateToken);
 
@@ -79,6 +80,17 @@ router.get("/eligible-items", requirePageRight("fixed-asset-tagging", "view"), a
     res.json(result.recordset);
   } catch (err) {
     console.error("[fixedAssetTagging] GET /eligible-items:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /pending-batches — received Fixed Asset stock (GRN / Inventory Import)
+// that has no tags yet, and why (e.g. its project has no ID Template) ─────────
+router.get("/pending-batches", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
+  try {
+    res.json(await listUntaggedBatches(getPool()));
+  } catch (err) {
+    console.error("[fixedAssetTagging] GET /pending-batches:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

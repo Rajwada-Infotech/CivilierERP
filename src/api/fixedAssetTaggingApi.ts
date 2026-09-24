@@ -72,6 +72,26 @@ async function handleError(res: Response, fallback: string) {
   throw new Error((err as { error?: string }).error || fallback);
 }
 
+export interface PendingBatch {
+  AssetId: number;
+  AssetName: string;
+  Quantity: number;
+  SourceType: "GRN" | "IMPORT";
+  SourceDocNo: string | null;
+  DocDate: string | null;
+  CompanyName: string | null;
+  ProjectId: number | null;
+  ProjectName: string | null;
+  GodownName: string | null;
+  Reason: "NO_TEMPLATE" | "READY";
+}
+
+export const getPendingBatches = async (): Promise<PendingBatch[]> => {
+  const res = await fetchWithAuth(`${BASE}/pending-batches`);
+  if (!res.ok) await handleError(res, "Failed to fetch received stock awaiting tagging");
+  return res.json();
+};
+
 export const getEligibleAssetItems = async (params?: {
   godownId?: number;
   companyId?: number;

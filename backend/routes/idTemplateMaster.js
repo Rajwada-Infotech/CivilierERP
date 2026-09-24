@@ -5,6 +5,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { autoTagPendingBatchesForProject } = require("../services/fixedAssetAutoAlloc");
 
 router.use(authMiddleware);
 
@@ -77,7 +78,15 @@ router.post("/", requirePageRight("id-template-master", "create"), async (req, r
         OUTPUT INSERTED.Id AS id
         VALUES (@ProjectId, @ProjectAlias, @IsActive, @CreatedBy)
       `);
-    res.status(201).json({ success: true, id: result.recordset[0].id });
+    // Stock received before this project had an alias is waiting untagged --
+    // tag it now (non-fatal: the template itself is already saved).
+    let autoTagged = 0;
+    try {
+      if (isActive) autoTagged = (await autoTagPendingBatchesForProject(pool, pId, actor)).tagged;
+    } catch (tagErr) {
+      console.error("[id-template-master] retro-tagging failed:", tagErr.message);
+    }
+    res.status(201).json({ success: true, id: result.recordset[0].id, autoTagged });
   } catch (err) {
     if (err.message?.includes("UNIQUE") || err.message?.includes("duplicate key")) {
       return res.status(409).json({ error: "This project already has an ID template configured" });
