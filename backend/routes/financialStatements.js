@@ -514,6 +514,28 @@ router.get("/balance-sheet", async (req, res) => {
       }
 
       if (root === rootIds.ASSETS) {
+        // A Partner Master Current Account head (LHeadType='P', LHeadCode
+        // ending "-CUR" — see partnerMaster.js) tracks day-to-day partner
+        // movements: profit share, interest, and drawings. A debit here is
+        // exactly what "Partners' Drawings" means in standard partnership
+        // accounting, so it's folded into the same partnersDrawings bucket
+        // the liability-side RE_DRAWINGS-matched group below already feeds
+        // — same "amounts withdrawn during the period" movement treatment,
+        // not the head's full life-to-date balance, and the same "leave it
+        // out of its normal section entirely" handling. Without this, a
+        // partner's withdrawal just sat under the generic Current Assets
+        // section (as "Current Account") with no accounting significance
+        // attached to it at all.
+        if (h.type === "P" && h.code && h.code.endsWith("-CUR")) {
+          const mv = movementByHeadId.get(Number(h.id));
+          const currentAmt = mv
+            ? Math.round(((Number(mv.debitCurrent) || 0) - (Number(mv.creditCurrent) || 0)) * 100) / 100
+            : net;
+          if (Math.abs(currentAmt) > 0.005) {
+            pushHead(sectionBuckets.partnersDrawings, gid, groupName, { id: h.id, name: h.name, amount: currentAmt });
+          }
+          continue;
+        }
         // Asset head: positive (debit) balance is normal. A credit balance
         // on an asset head still reports under Assets, shown as a negative
         // figure, rather than silently flipping sides.
