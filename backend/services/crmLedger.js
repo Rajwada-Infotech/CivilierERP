@@ -234,7 +234,11 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
   const amount = Number(row.Amount) || 0;
   if (amount <= 0) return { posted: false, reason: `Receipt ${receiptId} amount is ${amount} (<= 0)` };
 
-  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
+  // Still ensured (not used in a GL leg below anymore — see the Advance
+  // from Customer note further down) because other CRM reports/screens
+  // (Customer 360, statements) look this head up directly and expect it to
+  // exist for any customer with a real payment on record.
+  await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
   // Debit the real bank the money was actually deposited into (DepositBankId
   // is already an AccountHeadMaster.LHeadId — same convention
   // generalLedger.js's postReceivedPaymentApproval uses for
@@ -253,16 +257,32 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
   // with what the receipt itself records. A booking with no GST recorded
   // posts exactly as before this feature existed: the full amount credited
   // to the customer, no GST leg.
+  // Explicit business rule: ALL money received from a customer is held as
+  // Advance from Customer (liability) until the booking is 100% collected
+  // and invoiced — see crmBookings.js's full-payment gate and
+  // postCrmInvoiceToGL's own income recognition. A milestone receipt via
+  // the "Pay" button runs at exactly that pre-invoice stage (an invoice
+  // can't exist yet for the milestone this receipt is against, by the same
+  // rule), so it must land on the SAME pooled Advance from Customer head
+  // postCrmOnAccountToGL already uses — not the customer's own Sundry
+  // Debtors-style head, which would bury it as an invisible credit balance
+  // instead of a clean liability line, and would be inconsistent with an
+  // on-account deposit of the exact same kind of money.
+  const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
   const { gstAmount, baseAmount } = await getGstSplit(pool, row.BookingId, amount);
   const legs = [
     { lHeadId: collectionsHeadId, debit: amount, narration: `${row.ReceiptNo} — CRM payment received (${row.PaymentMode || "—"})` },
   ];
   if (gstAmount > 0) {
+    // GST on an advance for under-construction property is due at receipt
+    // (Section 13 CGST Act) — that timing is independent of when the SALE
+    // itself is recognised as income, so this leg is unaffected by the
+    // liability-vs-income question above and still posts on every receipt.
     const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
-    legs.push({ lHeadId: customerHeadId, credit: baseAmount, narration: `${row.ReceiptNo} — CRM payment received (base, excl. GST)` });
+    legs.push({ lHeadId: advanceHeadId, credit: baseAmount, narration: `${row.ReceiptNo} — CRM payment received (base, excl. GST)` });
     legs.push({ lHeadId: gstHeadId, credit: gstAmount, narration: `${row.ReceiptNo} — GST output liability` });
   } else {
-    legs.push({ lHeadId: customerHeadId, credit: amount, narration: `${row.ReceiptNo} — CRM payment received` });
+    legs.push({ lHeadId: advanceHeadId, credit: amount, narration: `${row.ReceiptNo} — CRM payment received` });
   }
 
   await postVoucher(pool, {
@@ -386,29 +406,25 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
 }
 
 /**
- * An on-account deposit being applied to a specific milestone.
+ * An on-account deposit being applied (earmarked) to a specific milestone.
  *
- * Before postCrmOnAccountToGL pooled the deposit into "Advance from
- * Customers A/c", this needed no GL entry at all — the deposit's own
- * credit already sat directly on the customer's head, so the milestone's
- * later invoice debit (raised separately) netted against it automatically
- * with nothing further to do here. Now that the deposit's credit lands on
- * the pooled head instead, that self-netting no longer happens on its
- * own — this now posts the real reallocation: Dr the pooled head (shrink
- * the liability) / Cr the customer's own head (recreate the offset the
- * milestone invoice's own debit needs), same wash-pair shape as the
- * supplier side's OnAccountAdjustment. Still not new cash — the deposit's
- * cash was already posted when it was received — just moving which head
- * carries it. Also DEBITs the OnAccountLedger to reduce the tracked
- * balance, mirroring newPayment.js's auto-apply-OA-to-invoice pattern.
+ * No GL entry, deliberately — and this is now a permanent design decision,
+ * not a gap. Explicit business rule: ALL customer money stays as Advance
+ * from Customer (liability) until the whole booking is 100% collected and
+ * invoiced (see crmBookings.js's full-payment gate + postCrmInvoiceToGL,
+ * which is the ONE place this liability ever moves, straight to Sale of
+ * Flat/Parking income). "Applying" a deposit to a milestone mid-booking is
+ * purely an internal bookkeeping step — which milestone this money is
+ * earmarked for — with no invoice yet to net against, so there is nothing
+ * for the GL to move here. It used to reallocate Dr Advance from Customer
+ * / Cr the customer's own head, back when invoices were raised per
+ * milestone as each one was demanded (see postCrmReceiptToGL's own note on
+ * why receipts changed too) — that premise no longer holds.
  *
- * Pre-existing CrmOnAccountPayment rows posted before this pooled-head
- * change credited the customer's own head directly (old logic), so their
- * self-netting already happens with zero further GL entries needed — the
- * reallocation voucher below only applies to deposits whose ORIGINAL
- * CrmOnAccountPayment posting actually landed on the pooled Advance head.
- * Checked by inspecting that original posting's own legs rather than a
- * flag, so this stays correct with no backfill/migration required.
+ * Still updates the OnAccountLedger / AccountHeadMaster.OnAccountBalance
+ * tracking below — that is a separate, still-valid "how much of this
+ * customer's deposit is earmarked vs free" figure several screens read,
+ * independent of which GL head the underlying cash actually sits on.
  */
 async function postCrmOnAccountApplied(pool, onAccountId, appliedAmount, userEmail, txnDate) {
   const r = await pool.request().input("id", sql.Int, onAccountId).query(`
@@ -422,41 +438,9 @@ async function postCrmOnAccountApplied(pool, onAccountId, appliedAmount, userEma
   if (!row?.CustomerId) return { posted: false, reason: `On-account ${onAccountId}: no linked CrmCustomer` };
   if (!(Number(appliedAmount) > 0)) return { posted: false, reason: `Applied amount ${appliedAmount} (<= 0)` };
 
-  const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
-
-  const originalLeg = await pool.request()
-    .input("id", sql.Int, onAccountId)
-    .input("advHead", sql.Int, advanceHeadId)
-    .query(`
-      SELECT TOP 1 1 AS found
-      FROM dbo.GeneralLedgerEntry
-      WHERE SourceType = 'CrmOnAccountPayment' AND SourceId = @id
-        AND IsReversed = 0 AND LHeadId = @advHead AND CreditAmount > 0
-    `);
-  const depositOnPooledHead = originalLeg.recordset.length > 0;
-
+  // Still ensured for the same reason postCrmReceiptToGL keeps calling it —
+  // other CRM screens look this head up directly.
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-
-  if (depositOnPooledHead) {
-    const customerLabel = row.ApplicantName || `Customer #${row.CustomerId}`;
-    await postVoucher(pool, {
-      voucherNo: row.ReceiptNo,
-      voucherDate: txnDate || new Date(),
-      sourceType: "CrmOnAccountAdjustment",
-      sourceId: onAccountId,
-      companyId: row.CompanyId ?? null,
-      projectId: row.ProjectId ?? null,
-      createdBy: userEmail,
-      legs: [
-        { lHeadId: advanceHeadId, debit: appliedAmount, narration: `${row.ReceiptNo} — on-account deposit applied for ${customerLabel}` },
-        { lHeadId: customerHeadId, credit: appliedAmount, narration: `${row.ReceiptNo} — on-account deposit applied` },
-      ],
-    });
-  }
-  // Pre-pooled-head deposit: original credit already sits on the customer's
-  // own head, so the milestone invoice's debit nets against it with no
-  // further GL entry — same as this function's behavior before the pooled
-  // head existed.
 
   await pool.request()
     .input("PartyId", sql.Int, customerHeadId)
