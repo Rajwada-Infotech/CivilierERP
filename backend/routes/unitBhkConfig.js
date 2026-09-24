@@ -5,15 +5,18 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
-
-// UnitMaster.UnitType is free-typed at unit-creation time and stored with a
-// space ("3 BHK"), while every layout-type key in this feature is stored
-// space-free ("3BHK") — normalize whenever crossing that boundary instead
-// of requiring UnitType itself to change format. Custom types (Duplex,
-// Penthouse, ...) go through the same normalization: "Duplex" -> "DUPLEX".
-function normalizeTypeKey(raw) {
-  return String(raw || "").toUpperCase().replace(/\s+/g, "");
-}
+const { bumpCacheVersion } = require("../redis");
+// UnitMaster.UnitType is stored with a space ("3 BHK"), every layout-type
+// key space-free ("3BHK") — normalizeTypeKey crosses that boundary. Shared
+// with every other route through services/unitLayout.js.
+const {
+  normalizeTypeKey,
+  listLayoutTypes,
+  resolveLayoutType,
+  getLayoutComposition,
+  syncRoomsForUnits,
+  bumpFlatMasterCaches,
+} = require("../services/unitLayout");
 
 // A real layout can reasonably have a handful of any one room category —
 // even a big custom Duplex/Triplex template — but not a typo like "40
@@ -22,19 +25,23 @@ function normalizeTypeKey(raw) {
 // since that client-side cap can be bypassed by calling this API directly.
 const MAX_ROOM_QTY = 10;
 
-// GET /types — every registered layout type (the 4 seeded BHK defaults
-// plus any custom ones added via POST /types), for the composition
-// builder's picker.
+// GET /types — every registered layout type (the seeded BHK defaults plus
+// any custom ones added via POST /types), each with its id (the value
+// UnitMaster.LayoutTypeId / the CRM auto-setup template store), how many
+// rooms its composition has, and a one-line summary. roomCount = 0 means
+// no layout defined yet — CRM Auto Setup and Unit Master only offer types
+// with roomCount > 0 for new picks.
 router.get("/types", authMiddleware, async (req, res) => {
   try {
     const pool = await getPool();
-    const r = await pool.request().query(`
-      SELECT TypeKey AS typeKey, Label AS label, IsSystem AS isSystem
-      FROM dbo.RoomLayoutType
-      WHERE IsActive = 1
-      ORDER BY SortOrder ASC, Label ASC
-    `);
-    res.json(r.recordset.map((row) => ({ ...row, isSystem: !!row.isSystem })));
+    const types = await listLayoutTypes(pool);
+    res.json(types.map((t) => ({
+      id: t.id,
+      typeKey: t.typeKey,
+      label: t.label,
+      roomCount: t.roomCount,
+      summary: t.summary,
+    })));
   } catch (err) {
     console.error("[unit-bhk-config] GET /types error:", err.message);
     res.status(500).json({ error: err.message });
@@ -56,28 +63,30 @@ router.post("/types", authMiddleware, requirePageRight("room-composition-builder
 
   try {
     const pool = await getPool();
-    const existing = await pool.request().input("typeKey", sql.NVarChar(20), typeKey)
-      .query(`SELECT TypeKey, Label FROM dbo.RoomLayoutType WHERE TypeKey = @typeKey`);
+    const existing = await pool.request().input("typeKey", sql.NVarChar(50), typeKey)
+      .query(`SELECT Id, TypeKey, Label FROM dbo.RoomLayoutType WHERE TypeKey = @typeKey`);
     if (existing.recordset.length) {
       // Already registered — hand back the existing one instead of erroring,
       // so re-adding "Duplex" a second time just selects it.
-      return res.json({ typeKey: existing.recordset[0].TypeKey, label: existing.recordset[0].Label, isSystem: false });
+      const row = existing.recordset[0];
+      return res.json({ id: row.Id, typeKey: row.TypeKey, label: row.Label });
     }
 
     const maxSort = await pool.request().query(`SELECT ISNULL(MAX(SortOrder), 40) AS m FROM dbo.RoomLayoutType`);
     const nextSort = (maxSort.recordset[0].m || 40) + 10;
 
-    await pool.request()
-      .input("typeKey", sql.NVarChar(20), typeKey)
+    const inserted = await pool.request()
+      .input("typeKey", sql.NVarChar(50), typeKey)
       .input("label", sql.NVarChar(50), label)
       .input("sortOrder", sql.Int, nextSort)
       .input("createdBy", sql.NVarChar(200), actor)
       .query(`
         INSERT INTO dbo.RoomLayoutType (TypeKey, Label, IsSystem, SortOrder, CreatedBy)
+        OUTPUT INSERTED.Id AS id
         VALUES (@typeKey, @label, 0, @sortOrder, @createdBy)
       `);
 
-    res.status(201).json({ typeKey, label, isSystem: false });
+    res.status(201).json({ id: inserted.recordset[0].id, typeKey, label });
   } catch (err) {
     console.error("[unit-bhk-config] POST /types error:", err.message);
     res.status(500).json({ error: err.message });
@@ -93,8 +102,14 @@ router.get("/template/:bhkType", authMiddleware, async (req, res) => {
 
   try {
     const pool = await getPool();
-    const configRes = await pool.request().input("typeKey", sql.NVarChar(20), typeKey).query(`
-      SELECT Id, BhkType, IsActive FROM dbo.UnitRoomConfig WHERE BhkType = @typeKey
+    // Same lookup order as POST: the FK-linked config first, the BhkType
+    // text match only for a legacy row without LayoutTypeId.
+    const configRes = await pool.request().input("typeKey", sql.NVarChar(50), typeKey).query(`
+      SELECT TOP 1 cfg.Id, cfg.BhkType, cfg.IsActive
+      FROM dbo.UnitRoomConfig cfg
+      LEFT JOIN dbo.RoomLayoutType lt ON lt.Id = cfg.LayoutTypeId
+      WHERE lt.TypeKey = @typeKey OR (cfg.LayoutTypeId IS NULL AND cfg.BhkType = @typeKey)
+      ORDER BY CASE WHEN cfg.LayoutTypeId IS NOT NULL THEN 0 ELSE 1 END, cfg.Id
     `);
     const config = configRes.recordset[0] || null;
     if (!config) return res.json({ config: null, composition: [] });
@@ -146,65 +161,112 @@ router.post(
       // Layout type must already be registered (via GET /types' seeded
       // defaults or POST /types) — saving against an unregistered key would
       // create an orphan template no picker ever shows again.
-      const typeCheck = await pool.request().input("typeKey", sql.NVarChar(20), typeKey)
-        .query(`SELECT TypeKey FROM dbo.RoomLayoutType WHERE TypeKey = @typeKey AND IsActive = 1`);
+      const typeCheck = await pool.request().input("typeKey", sql.NVarChar(50), typeKey)
+        .query(`SELECT Id FROM dbo.RoomLayoutType WHERE TypeKey = @typeKey AND IsActive = 1`);
       if (!typeCheck.recordset.length) {
         return res.status(404).json({ error: "This layout type isn't registered — add it first." });
       }
+      const layoutTypeId = typeCheck.recordset[0].Id;
 
-      // One UnitRoomConfig row per layout type — reactivate/update the
-      // existing one if it's already there instead of ever creating a
-      // duplicate.
-      const existing = await pool.request().input("typeKey", sql.NVarChar(20), typeKey)
-        .query(`SELECT Id FROM dbo.UnitRoomConfig WHERE BhkType = @typeKey`);
-
+      // Config row + its composition rows are one atomic save.
+      const tx = pool.transaction();
+      await tx.begin();
       let configId;
-      if (existing.recordset.length) {
-        configId = existing.recordset[0].Id;
-        await pool.request()
-          .input("id", sql.Int, configId)
-          .input("updatedBy", sql.NVarChar(200), actor)
+      try {
+        // One UnitRoomConfig row per layout type (UX_UnitRoomConfig_LayoutType)
+        // — reactivate/update the existing one instead of ever creating a
+        // duplicate. BhkType match is the fallback for a legacy row that
+        // didn't get LayoutTypeId backfilled.
+        const existing = await tx.request()
+          .input("layoutTypeId", sql.Int, layoutTypeId)
+          .input("typeKey", sql.NVarChar(50), typeKey)
           .query(`
-            UPDATE dbo.UnitRoomConfig SET IsActive = 1,
-              UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
-            WHERE Id = @id
+            SELECT TOP 1 Id FROM dbo.UnitRoomConfig
+            WHERE LayoutTypeId = @layoutTypeId OR (LayoutTypeId IS NULL AND BhkType = @typeKey)
+            ORDER BY CASE WHEN LayoutTypeId IS NOT NULL THEN 0 ELSE 1 END, Id
           `);
-      } else {
-        const inserted = await pool.request()
-          .input("typeKey", sql.NVarChar(20), typeKey)
-          .input("createdBy", sql.NVarChar(200), actor)
-          .query(`
-            INSERT INTO dbo.UnitRoomConfig (BhkType, IsActive, CreatedBy)
-            OUTPUT INSERTED.Id AS id
-            VALUES (@typeKey, 1, @createdBy)
-          `);
-        configId = inserted.recordset[0].id;
+
+        if (existing.recordset.length) {
+          configId = existing.recordset[0].Id;
+          await tx.request()
+            .input("id", sql.Int, configId)
+            .input("layoutTypeId", sql.Int, layoutTypeId)
+            .input("updatedBy", sql.NVarChar(200), actor)
+            .query(`
+              UPDATE dbo.UnitRoomConfig SET IsActive = 1, LayoutTypeId = @layoutTypeId,
+                UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
+              WHERE Id = @id
+            `);
+        } else {
+          const inserted = await tx.request()
+            .input("typeKey", sql.NVarChar(50), typeKey)
+            .input("layoutTypeId", sql.Int, layoutTypeId)
+            .input("createdBy", sql.NVarChar(200), actor)
+            .query(`
+              INSERT INTO dbo.UnitRoomConfig (BhkType, LayoutTypeId, IsActive, CreatedBy)
+              OUTPUT INSERTED.Id AS id
+              VALUES (@typeKey, @layoutTypeId, 1, @createdBy)
+            `);
+          configId = inserted.recordset[0].id;
+        }
+
+        // Every active category must be represented, even at quantity 0 —
+        // categories not present in the payload (e.g. one deactivated between
+        // page-load and save) are simply skipped rather than erroring the
+        // whole save.
+        for (const row of composition) {
+          const categoryId = parseInt(row.roomCategoryId, 10);
+          const quantity = Math.max(0, parseInt(row.quantity, 10) || 0);
+          if (!Number.isFinite(categoryId)) continue;
+
+          await tx.request()
+            .input("configId", sql.Int, configId)
+            .input("categoryId", sql.Int, categoryId)
+            .input("quantity", sql.Int, quantity)
+            .query(`
+              MERGE dbo.RoomComposition AS tgt
+              USING (SELECT @configId AS UnitRoomConfigId, @categoryId AS RoomCategoryId) AS src
+              ON tgt.UnitRoomConfigId = src.UnitRoomConfigId AND tgt.RoomCategoryId = src.RoomCategoryId
+              WHEN MATCHED THEN UPDATE SET Quantity = @quantity, UpdatedAt = SYSDATETIME()
+              WHEN NOT MATCHED THEN INSERT (UnitRoomConfigId, RoomCategoryId, Quantity)
+                VALUES (@configId, @categoryId, @quantity);
+            `);
+        }
+        await tx.commit();
+      } catch (e) {
+        try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+        throw e;
       }
 
-      // Every active category must be represented, even at quantity 0 —
-      // categories not present in the payload (e.g. one deactivated between
-      // page-load and save) are simply skipped rather than erroring the
-      // whole save.
-      for (const row of composition) {
-        const categoryId = parseInt(row.roomCategoryId, 10);
-        const quantity = Math.max(0, parseInt(row.quantity, 10) || 0);
-        if (!Number.isFinite(categoryId)) continue;
+      // Propagate to units that already have their rooms built: ADD any room
+      // the new composition calls for (e.g. a 2nd Bathroom), never remove
+      // one — an existing room may already have DPR work/blueprints on it.
+      // Units whose rooms haven't been generated yet are left to Room
+      // Master's bulk "Generate rooms" action.
+      const affected = await pool.request()
+        .input("layoutTypeId", sql.Int, layoutTypeId)
+        .input("typeKey", sql.NVarChar(50), typeKey)
+        .query(`
+          SELECT u.Id FROM dbo.UnitMaster u
+          WHERE u.IsActive = 1
+            AND (u.LayoutTypeId = @layoutTypeId
+                 OR (u.LayoutTypeId IS NULL AND UPPER(REPLACE(LTRIM(RTRIM(u.UnitType)), ' ', '')) = @typeKey))
+            AND EXISTS (SELECT 1 FROM dbo.RoomMaster r WHERE r.UnitId = u.Id AND r.IsActive = 1 AND r.RoomCategoryId IS NOT NULL)
+        `);
+      const sync = await syncRoomsForUnits(pool, affected.recordset.map((r) => r.Id), { removeUnused: false, createdBy: req.user?.userId || null });
+      if (sync.created || sync.reactivated || sync.renamed) await bumpFlatMasterCaches();
+      if (sync.failed.length) console.error("[unit-bhk-config] POST /template room sync failures:", sync.failed);
 
-        await pool.request()
-          .input("configId", sql.Int, configId)
-          .input("categoryId", sql.Int, categoryId)
-          .input("quantity", sql.Int, quantity)
-          .query(`
-            MERGE dbo.RoomComposition AS tgt
-            USING (SELECT @configId AS UnitRoomConfigId, @categoryId AS RoomCategoryId) AS src
-            ON tgt.UnitRoomConfigId = src.UnitRoomConfigId AND tgt.RoomCategoryId = src.RoomCategoryId
-            WHEN MATCHED THEN UPDATE SET Quantity = @quantity, UpdatedAt = SYSDATETIME()
-            WHEN NOT MATCHED THEN INSERT (UnitRoomConfigId, RoomCategoryId, Quantity)
-              VALUES (@configId, @categoryId, @quantity);
-          `);
-      }
-
-      res.json({ success: true, configId });
+      res.json({
+        success: true,
+        configId,
+        roomSync: {
+          unitsChecked: sync.units,
+          unitsUpdated: sync.unitsChanged,
+          roomsAdded: sync.created + sync.reactivated,
+          failed: sync.failed.length,
+        },
+      });
     } catch (err) {
       console.error("[unit-bhk-config] POST /template error:", err.message);
       res.status(500).json({ error: err.message });
@@ -230,22 +292,20 @@ router.get("/room-instances/:unitId", authMiddleware, async (req, res) => {
     const pool = await getPool();
 
     const unitRes = await pool.request().input("unitId", sql.Int, unitId).query(`
-      SELECT UnitType FROM dbo.UnitMaster WHERE Id = @unitId
+      SELECT UnitType, LayoutTypeId FROM dbo.UnitMaster WHERE Id = @unitId
     `);
     if (!unitRes.recordset.length) return res.status(404).json({ error: "Unit not found" });
-    const typeKey = normalizeTypeKey(unitRes.recordset[0].UnitType);
-    if (!typeKey) return res.json([]); // no UnitType set on this Unit yet
+    const unit = unitRes.recordset[0];
+    // LayoutTypeId (FK) first; the UnitType text match only for a unit that
+    // predates migration 477's backfill.
+    const layout = unit.LayoutTypeId
+      ? await resolveLayoutType(pool, { layoutTypeId: unit.LayoutTypeId })
+      : await resolveLayoutType(pool, { unitType: unit.UnitType });
+    if (!layout) return res.json([]); // no (registered) Unit Type set on this Unit yet
 
-    const result = await pool.request().input("typeKey", sql.NVarChar(20), typeKey).query(`
-      SELECT rc.RoomCategoryId AS categoryId, rc.Quantity AS quantity, cat.Alias AS alias
-      FROM dbo.UnitRoomConfig cfg
-      JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id
-      JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId
-      WHERE cfg.BhkType = @typeKey AND cfg.IsActive = 1 AND cat.IsActive = 1 AND rc.Quantity > 0
-      ORDER BY cat.SortOrder ASC, cat.Alias ASC
-    `);
+    const composition = await getLayoutComposition(pool, layout.id);
     const instances = [];
-    for (const row of result.recordset) {
+    for (const row of composition) {
       for (let i = 1; i <= row.quantity; i++) {
         // Mirror the label convention used by POST /generate/:unitId — omit
         // the numeric suffix when there is only one of this category (e.g.
@@ -267,7 +327,7 @@ router.get("/room-instances/:unitId", authMiddleware, async (req, res) => {
     if (instances.length > 0) {
       const namesParam = instances.map((_, idx) => `@n${idx}`).join(", ");
       const rmReq = pool.request().input("unitId", sql.Int, unitId);
-      instances.forEach((inst, idx) => rmReq.input(`n${idx}`, sql.NVarChar(100), inst.label));
+      instances.forEach((inst, idx) => rmReq.input(`n${idx}`, sql.NVarChar(160), inst.label));
       const rmRes = await rmReq.query(`
         SELECT Id, RoomName FROM dbo.RoomMaster
         WHERE UnitId = @unitId AND IsActive = 1 AND RoomName IN (${namesParam})

@@ -15,17 +15,30 @@ import {
 import type { ExportColumn } from "@/lib/export";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
+import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 
 const API = "/api/unit-master";
 const DROPDOWN_API = "/api/business/dropdown";
 
-// Fixed vocabulary shared with every page that consumes Unit Master
-// (CrmBooking, etc.) so "Type of Unit" is picked once here and auto-fetched
-// everywhere the unit itself is selected — never re-typed per transaction.
-const UNIT_TYPES = [
-  "1 BHK", "1.5 BHK", "2 BHK", "2.5 BHK", "3 BHK", "3.5 BHK", "4 BHK", "4+ BHK",
-  "Studio", "Villa", "Plot", "Commercial", "Other",
-];
+// "Type of Unit" is picked once here and auto-fetched everywhere the unit
+// itself is selected (CrmBooking, etc.) — never re-typed per transaction.
+// The vocabulary is Unit Composition's layout types (dbo.RoomLayoutType),
+// the same list CRM Auto Setup uses, and only types with a defined room
+// layout can be newly picked: the unit's Room Master rows are built from it.
+// Injected as __layoutTypes through externalFormPatch below.
+
+// Unit add/edit also builds/adjusts the unit's Room Master rows from its
+// layout — the response's roomSync says what happened to them.
+type RoomSync = { layout: string | null; added: number; renamed: number; deactivated: number; keptWithWork: string[] } | null;
+function toastUnitSaved(base: string, roomSync: RoomSync) {
+  const parts: string[] = [];
+  if (roomSync?.added) parts.push(`${roomSync.added} room(s) added from the ${roomSync.layout} layout`);
+  if (roomSync?.deactivated) parts.push(`${roomSync.deactivated} room(s) no longer in the layout deactivated`);
+  toast.success(parts.length ? `${base} — ${parts.join(", ")}` : base);
+  if (roomSync?.keptWithWork?.length) {
+    toast.warning(`Kept ${roomSync.keptWithWork.join(", ")} — not in the new layout but has DPR work recorded against it.`);
+  }
+}
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 async function fetchUnits(): Promise<any[]> {
@@ -105,7 +118,9 @@ const fields: FieldDef[] = [
     name: "unitType",
     label: "Type of Unit",
     type: "select",
-    options: UNIT_TYPES,
+    optionsProvider: (_data, _currentId, form) =>
+      unitTypeOptions(((form?.__layoutTypes as any) ?? []) as LayoutType[], form?.unitType as string | undefined)
+        .map((o) => ({ value: o.value, label: o.label })),
   },
   {
     name: "paymentPlanIds",
@@ -352,6 +367,12 @@ const UnitMaster: React.FC = () => {
   const companies = dropdownData?.companies ?? [];
   const projectsList = dropdownData?.projects ?? [];
 
+  const { data: layoutTypes = [] } = useQuery<LayoutType[]>({
+    queryKey: LAYOUT_TYPES_QUERY_KEY,
+    queryFn: getLayoutTypes,
+    staleTime: 60 * 1000,
+  });
+
   // Backend → frontend shape; also inject __blocks so optionsProvider can see them
   const mappedData: RecordWithId[] = React.useMemo(() => {
     if (!Array.isArray(units)) return [];
@@ -412,8 +433,9 @@ const UnitMaster: React.FC = () => {
       __blockPlanTags: blockPlanTags,
       __companies: companies,
       __projects: projectsList,
+      __layoutTypes: layoutTypes,
     }),
-    [allBlocks, allPaymentPlans, blockPlanTags, companies, projectsList],
+    [allBlocks, allPaymentPlans, blockPlanTags, companies, projectsList, layoutTypes],
   );
 
   const toPayload = (r: Record<string, any>) => ({
@@ -438,9 +460,10 @@ const UnitMaster: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(toPayload(event.record)),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok)
-        throw new Error((await res.json()).error || "Failed to add unit");
-      toast.success("Unit added!");
+        throw new Error(data.error || "Failed to add unit");
+      toastUnitSaved("Unit added!", data.roomSync ?? null);
     }
     if (event.action === "update") {
       const res = await fetchWithAuth(`${API}/${event.id}`, {
@@ -448,9 +471,10 @@ const UnitMaster: React.FC = () => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(toPayload(event.record)),
       });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok)
-        throw new Error((await res.json()).error || "Failed to update unit");
-      toast.success("Unit updated!");
+        throw new Error(data.error || "Failed to update unit");
+      toastUnitSaved("Unit updated!", data.roomSync ?? null);
     }
     if (event.action === "delete") {
       const res = await fetchWithAuth(`${API}/${event.id}`, {
@@ -461,6 +485,10 @@ const UnitMaster: React.FC = () => {
       toast.success("Unit deleted!");
     }
     await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
+    // Flat Master — a unit add/edit/delete builds/adjusts/removes its rooms.
+    queryClient.invalidateQueries({ queryKey: ["room-master"] });
+    queryClient.invalidateQueries({ queryKey: ["room-master-units"] });
+    queryClient.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
   };
 
   if (isLoading)
@@ -504,7 +532,7 @@ const UnitMaster: React.FC = () => {
         }
         // Inject __blocks + reset blockId when project changes
         externalFormPatch={blocksPatch}
-        externalFormPatchKey={`${allBlocks.length}:${allPaymentPlans.length}:${blockPlanTags.length}:${companies.length}:${projectsList.length}`}
+        externalFormPatchKey={`${allBlocks.length}:${allPaymentPlans.length}:${blockPlanTags.length}:${companies.length}:${projectsList.length}:${layoutTypes.map((t) => `${t.id}-${t.roomCount}`).join(",")}`}
         onFieldChange={(form, fieldName) => {
           if (fieldName === "companyId") {
             return { ...form, projectId: "", blockId: "" };

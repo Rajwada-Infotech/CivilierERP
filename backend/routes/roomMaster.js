@@ -7,6 +7,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { resolveLayoutType, getLayoutComposition, syncUnitRooms, syncRoomsForUnits, inferRoomCategoryId, bumpFlatMasterCaches, ROOM_NAME_MAX } = require("../services/unitLayout");
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
@@ -174,10 +175,14 @@ router.get("/floor-units/:floorId", async (req, res) => {
         u.Id, u.UnitName, u.FloorNo, u.UnitType,
         (SELECT COUNT(*) FROM dbo.RoomMaster r WHERE r.UnitId = u.Id AND r.IsActive = 1) AS GeneratedRoomCount,
         (
-          SELECT SUM(rc.Quantity) FROM dbo.UnitRoomConfig cfg
+          SELECT SUM(rc.Quantity)
+          FROM dbo.RoomLayoutType lt
+          JOIN dbo.UnitRoomConfig cfg
+            ON (cfg.LayoutTypeId = lt.Id OR (cfg.LayoutTypeId IS NULL AND cfg.BhkType = lt.TypeKey))
           JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id
           JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId
-          WHERE cfg.BhkType = REPLACE(UPPER(ISNULL(u.UnitType, '')), ' ', '')
+          WHERE (lt.Id = u.LayoutTypeId
+                 OR (u.LayoutTypeId IS NULL AND lt.TypeKey = REPLACE(UPPER(ISNULL(u.UnitType, '')), ' ', '')))
             AND cfg.IsActive = 1 AND cat.IsActive = 1 AND rc.Quantity > 0
         ) AS TemplateRoomCount
       FROM dbo.UnitMaster u
@@ -203,22 +208,16 @@ router.get("/unit-rooms/:unitId", async (req, res) => {
   try {
     const pool = getPool();
     const unitRes = await pool.request().input("UnitId", sql.Int, unitId).query(`
-      SELECT Id, ProjectId, BlockId, UnitName, FloorNo, UnitType FROM dbo.UnitMaster WHERE Id = @UnitId AND IsActive = 1
+      SELECT Id, ProjectId, BlockId, UnitName, FloorNo, UnitType, LayoutTypeId FROM dbo.UnitMaster WHERE Id = @UnitId AND IsActive = 1
     `);
     if (!unitRes.recordset.length) return res.status(404).json({ error: "Unit not found" });
     const unit = unitRes.recordset[0];
-    const typeKey = String(unit.UnitType || "").toUpperCase().replace(/\s+/g, "");
-
-    const template = typeKey
-      ? await pool.request().input("typeKey", sql.NVarChar(20), typeKey).query(`
-          SELECT rc.Quantity AS quantity, cat.Alias AS alias
-          FROM dbo.UnitRoomConfig cfg
-          JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id
-          JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId
-          WHERE cfg.BhkType = @typeKey AND cfg.IsActive = 1 AND cat.IsActive = 1 AND rc.Quantity > 0
-          ORDER BY cat.SortOrder ASC, cat.Alias ASC
-        `)
-      : { recordset: [] };
+    // FK first; UnitType text only for a unit not yet linked (pre-477).
+    const layout = unit.LayoutTypeId
+      ? await resolveLayoutType(pool, { layoutTypeId: unit.LayoutTypeId })
+      : await resolveLayoutType(pool, { unitType: unit.UnitType });
+    const composition = layout ? await getLayoutComposition(pool, layout.id) : [];
+    const template = { recordset: composition.map((c) => ({ quantity: c.quantity, alias: c.alias })) };
 
     const existing = await pool.request().input("UnitId", sql.Int, unitId).query(`
       SELECT Id, RoomName, Floor, IsActive, BlueprintFileName
@@ -275,13 +274,20 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
     const { BlockId, FloorNo } = unitRow.recordset[0];
     const Floor = FloorNo === 0 ? "G" : FloorNo != null ? String(FloorNo) : null;
 
+    // Every room should carry its Room Category — it's what the unit's
+    // layout sync counts (services/unitLayout.js) and what the DPR Activity
+    // Chain Template keys off. The form doesn't send one, so a name picked
+    // from the category suggestions ("Bedroom", "Bedroom 3") is mapped back
+    // to its category; a genuinely custom name stays uncategorized.
+    const categoryId = RoomCategoryId ? parseInt(RoomCategoryId, 10) : await inferRoomCategoryId(pool, RoomName);
+
     const insertRes = await pool
       .request()
       .input("ProjectId", sql.Int, parseInt(ProjectId))
       .input("BlockId",   sql.Int, BlockId)
       .input("UnitId",    sql.Int, parseInt(UnitId))
-      .input("RoomName",  sql.NVarChar(100), RoomName)
-      .input("RoomCategoryId", sql.Int, RoomCategoryId ? parseInt(RoomCategoryId) : null)
+      .input("RoomName",  sql.NVarChar(ROOM_NAME_MAX), RoomName)
+      .input("RoomCategoryId", sql.Int, categoryId)
       .input("Floor",     sql.NVarChar(50), Floor || null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
@@ -330,14 +336,28 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     const { BlockId, FloorNo } = unitRow.recordset[0];
     const Floor = FloorNo === 0 ? "G" : FloorNo != null ? String(FloorNo) : null;
 
+    // The Flat Master form never sends RoomCategoryId — previously this
+    // UPDATE wrote NULL over it on every edit (even just attaching a
+    // blueprint), which turned a generated "Kitchen" into an uncategorized
+    // room and made the next layout sync add a duplicate Kitchen. Now: an
+    // explicit value wins; otherwise the new name's category if it maps to
+    // one; otherwise the room keeps the category it already had (a renamed
+    // kitchen is still the kitchen).
+    const current = await pool.request().input("Id", sql.Int, parseInt(id))
+      .query("SELECT RoomCategoryId FROM dbo.RoomMaster WHERE Id = @Id");
+    if (!current.recordset.length) return res.status(404).json({ error: "Room not found" });
+    const categoryId = RoomCategoryId !== undefined
+      ? (RoomCategoryId ? parseInt(RoomCategoryId, 10) : null)
+      : (await inferRoomCategoryId(pool, RoomName)) ?? current.recordset[0].RoomCategoryId;
+
     await pool
       .request()
       .input("Id",        sql.Int, parseInt(id))
       .input("ProjectId", sql.Int, parseInt(ProjectId))
       .input("BlockId",   sql.Int, BlockId)
       .input("UnitId",    sql.Int, parseInt(UnitId))
-      .input("RoomName",  sql.NVarChar(100), RoomName)
-      .input("RoomCategoryId", sql.Int, RoomCategoryId ? parseInt(RoomCategoryId) : null)
+      .input("RoomName",  sql.NVarChar(ROOM_NAME_MAX), RoomName)
+      .input("RoomCategoryId", sql.Int, categoryId)
       .input("Floor",     sql.NVarChar(50), Floor || null)
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("UpdatedBy", sql.Int, updatedBy)
@@ -477,98 +497,88 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
   try {
     const pool = getPool();
     const unitRes = await pool.request().input("UnitId", sql.Int, unitId).query(`
-      SELECT Id, ProjectId, BlockId, UnitType, FloorNo FROM dbo.UnitMaster WHERE Id = @UnitId AND IsActive = 1
+      SELECT Id, UnitType, LayoutTypeId FROM dbo.UnitMaster WHERE Id = @UnitId AND IsActive = 1
     `);
     if (!unitRes.recordset.length) return res.status(404).json({ error: "Unit not found" });
     const unit = unitRes.recordset[0];
-    // Same 'G' / numbered-string convention CrmProjectAutoSetupFloor.FloorLabel
-    // uses, so a generated room's Floor reads the same as the tree it was
-    // generated from. Legacy units with no FloorNo just get a null Floor,
-    // same as before this field was ever populated here.
-    const floorLabel = unit.FloorNo === 0 ? "G" : unit.FloorNo != null ? String(unit.FloorNo) : null;
-    const typeKey = String(unit.UnitType || "").toUpperCase().replace(/\s+/g, "");
-    if (!typeKey) {
+    if (!unit.LayoutTypeId && !String(unit.UnitType || "").trim()) {
       return res.status(400).json({
         error: "This unit has no Unit Type set — set one in Unit Master (or the auto project setup's Unit Type template) first.",
       });
     }
 
-    const compRes = await pool.request().input("typeKey", sql.NVarChar(20), typeKey).query(`
-      SELECT rc.Quantity AS quantity, cat.Alias AS alias, cat.Id AS categoryId
-      FROM dbo.UnitRoomConfig cfg
-      JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id
-      JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId
-      WHERE cfg.BhkType = @typeKey AND cfg.IsActive = 1 AND cat.IsActive = 1 AND rc.Quantity > 0
-      ORDER BY cat.SortOrder ASC, cat.Alias ASC
-    `);
-    if (!compRes.recordset.length) {
+    // Shared with CRM generate-units / Unit Master (services/unitLayout.js):
+    // matches by room category count, reactivates a soft-deleted room before
+    // inserting a new one, never removes anything here.
+    const tx = pool.transaction();
+    await tx.begin();
+    let r;
+    try {
+      r = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy });
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw e;
+    }
+    if (r.skipped === "no-layout") {
+      return res.status(400).json({ error: `"${unit.UnitType}" isn't a registered layout type — add it in Unit Composition first.` });
+    }
+    if (r.skipped === "no-composition") {
       return res.status(400).json({
-        error: `No unit composition template set up for "${unit.UnitType}" yet — set one in Unit Composition first.`,
+        error: `No unit composition template set up for "${r.layout?.label ?? unit.UnitType}" yet — set one in Unit Composition first.`,
       });
     }
 
-    const names = [];
-    for (const row of compRes.recordset) {
-      for (let i = 1; i <= row.quantity; i++) {
-        names.push({ name: row.quantity > 1 ? `${row.alias} ${i}` : row.alias, categoryId: row.categoryId });
-      }
-    }
-
-    // Check ALL rooms for this unit — active AND inactive — so we can
-    // reactivate a soft-deleted room rather than inserting a duplicate.
-    // Previously only checked IsActive=1, so soft-deleted rooms would get
-    // a brand-new row inserted on regenerate, leaving two rows with the
-    // same name (one inactive orphan, one new active).
-    const existing = await pool.request().input("UnitId", sql.Int, unitId).query(`
-      SELECT Id, RoomName, IsActive FROM dbo.RoomMaster WHERE UnitId = @UnitId
-    `);
-    const activeSet = new Set(
-      existing.recordset.filter((r) => r.IsActive).map((r) => String(r.RoomName).toLowerCase())
-    );
-    const inactiveMap = new Map(
-      existing.recordset.filter((r) => !r.IsActive).map((r) => [String(r.RoomName).toLowerCase(), r.Id])
-    );
-
-    let created = 0;
-    for (const { name, categoryId } of names) {
-      const lower = name.toLowerCase();
-      if (activeSet.has(lower)) continue; // already exists and is active
-      if (inactiveMap.has(lower)) {
-        // Reactivate the soft-deleted row — preserves its Id, blueprints, etc.
-        // Also backfills RoomCategoryId in case this row predates migration 466.
-        await pool.request()
-          .input("Id", sql.Int, inactiveMap.get(lower))
-          .input("Floor", sql.NVarChar(50), floorLabel)
-          .input("CategoryId", sql.Int, categoryId)
-          .query(`UPDATE dbo.RoomMaster SET IsActive = 1, Floor = @Floor, RoomCategoryId = ISNULL(RoomCategoryId, @CategoryId) WHERE Id = @Id`);
-        created++;
-        continue;
-      }
-      // Brand-new room — insert
-      await pool.request()
-        .input("ProjectId", sql.Int, unit.ProjectId)
-        .input("BlockId", sql.Int, unit.BlockId)
-        .input("UnitId", sql.Int, unitId)
-        .input("RoomName", sql.NVarChar(100), name)
-        .input("Floor", sql.NVarChar(50), floorLabel)
-        .input("CategoryId", sql.Int, categoryId)
-        .input("CreatedBy", sql.Int, createdBy)
-        .input("CreatedAt", sql.DateTime2(3), new Date())
-        .query(`
-          INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, RoomCategoryId, Floor, IsActive, CreatedBy, CreatedAt)
-          VALUES (@ProjectId, @BlockId, @UnitId, @RoomName, @CategoryId, @Floor, 1, @CreatedBy, @CreatedAt)
-        `);
-      created++;
-    }
-
-    if (created > 0) await bumpCacheVersion("room-master");
+    const created = r.created + r.reactivated;
+    if (created > 0 || r.renamed > 0) await bumpFlatMasterCaches();
     res.json({
-      message: created > 0 ? `${created} room(s) generated from ${unit.UnitType} layout` : "Every room from this layout already exists",
+      message: created > 0 ? `${created} room(s) generated from ${r.layout.label} layout` : "Every room from this layout already exists",
       createdCount: created,
-      total: names.length,
+      renamedCount: r.renamed,
+      total: r.layout.roomCount,
     });
   } catch (err) {
     console.error("[room-master] POST /generate/:unitId error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /generate-bulk — { ProjectId, BlockId? }: builds the rooms of every
+// active unit in the project (or one block of it) from each unit's own
+// layout, same add-only rule as POST /generate/:unitId. For backfilling
+// units that existed before rooms were generated automatically (new units
+// get theirs at creation). Idempotent — re-running only fills gaps. Units
+// with no layout type / no composition are skipped and counted.
+router.post("/generate-bulk", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  const projectId = parseInt(req.body?.ProjectId, 10);
+  const blockId = req.body?.BlockId != null && req.body.BlockId !== "" ? parseInt(req.body.BlockId, 10) : null;
+  if (!Number.isFinite(projectId) || projectId <= 0) return res.status(400).json({ error: "ProjectId is required" });
+  if (blockId !== null && (!Number.isFinite(blockId) || blockId <= 0)) return res.status(400).json({ error: "Invalid BlockId" });
+  try {
+    const pool = getPool();
+    const request = pool.request().input("pid", sql.Int, projectId);
+    let where = "u.ProjectId = @pid AND u.IsActive = 1";
+    if (blockId !== null) {
+      request.input("bid", sql.Int, blockId);
+      where += " AND u.BlockId = @bid";
+    }
+    const units = await request.query(`SELECT u.Id FROM dbo.UnitMaster u WHERE ${where} ORDER BY u.BlockId, u.FloorNo, u.UnitName`);
+    const totals = await syncRoomsForUnits(pool, units.recordset.map((u) => u.Id), { removeUnused: false, createdBy: req.user?.userId || null });
+    if (totals.created || totals.reactivated || totals.renamed) await bumpFlatMasterCaches();
+    if (totals.failed.length) console.error("[room-master] POST /generate-bulk failures:", totals.failed);
+    const added = totals.created + totals.reactivated;
+    res.json({
+      message: `${added} room(s) generated across ${totals.unitsChanged} unit(s)`
+        + (totals.skippedNoLayout ? ` — ${totals.skippedNoLayout} unit(s) skipped (no Unit Type / no layout defined)` : "")
+        + (totals.failed.length ? ` — ${totals.failed.length} unit(s) failed` : ""),
+      unitsChecked: totals.units,
+      unitsUpdated: totals.unitsChanged,
+      roomsAdded: added,
+      skippedNoLayout: totals.skippedNoLayout,
+      failed: totals.failed,
+    });
+  } catch (err) {
+    console.error("[room-master] POST /generate-bulk error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

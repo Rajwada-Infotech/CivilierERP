@@ -8,6 +8,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { getBlockLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
+const { resolveLayoutType, bumpFlatMasterCaches } = require("../services/unitLayout");
 
 // A Block can be tagged with 1+ Payment Plans (dbo.CrmBlockPaymentPlan,
 // many-to-many) — the middle tier of the Project -> Block -> Unit cascade
@@ -193,6 +194,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
         `);
       if (Array.isArray(PaymentPlanIds)) await syncBlockPaymentPlanTags(pool, existing.Id, validPlanIds);
       await bumpCacheVersion("block-master");
+      await bumpFlatMasterCaches();
       return res.json({ message: "Block reactivated successfully" });
     }
 
@@ -209,6 +211,7 @@ router.post("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => 
       `);
     if (validPlanIds.length) await syncBlockPaymentPlanTags(pool, inserted.recordset[0].Id, validPlanIds);
     await bumpCacheVersion("block-master");
+    await bumpFlatMasterCaches();
     res.json({ message: "Block added successfully" });
   } catch (err) {
     // Backstop for the race-condition case the pre-check above can't catch
@@ -289,6 +292,7 @@ router.put("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res) =
     if (validPlanIds) await syncBlockPaymentPlanTags(pool, parseInt(id), validPlanIds);
 
     await bumpCacheVersion("block-master");
+    await bumpFlatMasterCaches();
     res.json({ message: "Block updated successfully" });
   } catch (err) {
     if (err.message?.includes("UNIQUE") || err.message?.includes("duplicate key")) {
@@ -349,6 +353,7 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
       .query("DELETE FROM dbo.BlockMaster WHERE Id = @Id");
 
     await bumpCacheVersion("block-master");
+    await bumpFlatMasterCaches();
     res.json({ message: `Block "${BlockName}" deleted` });
   } catch (err) {
     console.error("[block-master] DELETE error:", err.message);
@@ -455,10 +460,14 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
       const sbu      = toDb(s.SuperBuiltUpAreaSqFt);
       const openTerr = toDb(s.OpenTerraceAreaSqFt);
       const rate     = toDb(s.BaseRatePerSqFt);
+      // Keep the FK to the Unit Composition layout (migration 477) — this
+      // full replace would otherwise drop it.
+      const layout = await resolveLayoutType(pool, { unitType: s.UnitType });
 
       await pool.request()
         .input("blockId",    sql.Int, blockId)
         .input("unitType",   sql.NVarChar(50),   s.UnitType.trim())
+        .input("layoutTypeId", sql.Int,          layout?.id ?? null)
         .input("carpet",     sql.Decimal(18, 2), carpet)
         .input("builtUp",    sql.Decimal(18, 2), builtUp)
         .input("sbu",        sql.Decimal(18, 2), sbu)
@@ -466,10 +475,10 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
         .input("rate",       sql.Decimal(18, 2), rate)
         .query(`
           INSERT INTO dbo.BlockUnitTypeSpec
-            (BlockId, UnitType, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt,
+            (BlockId, UnitType, LayoutTypeId, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt,
              OpenTerraceAreaSqFt, BaseRatePerSqFt, UpdatedAt)
           VALUES
-            (@blockId, @unitType, @carpet, @builtUp, @sbu, @openTerr, @rate, SYSDATETIME())
+            (@blockId, @unitType, @layoutTypeId, @carpet, @builtUp, @sbu, @openTerr, @rate, SYSDATETIME())
         `);
 
       // Cascade spec changes to every unit in this block that shares the
@@ -497,6 +506,7 @@ router.put("/:id/unit-type-specs", allowRoles("admin", "super_admin", "dba"), as
         `);
     }
     await bumpCacheVersion("block-master");
+    await bumpFlatMasterCaches();
     await bumpCacheVersion("unit-master");
     res.json({ message: "Unit type specs saved" });
   } catch (err) {

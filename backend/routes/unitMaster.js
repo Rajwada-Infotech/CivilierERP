@@ -9,6 +9,19 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { getUnitLockReason, getUnitHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
+const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, removeUnitRoomsForDelete, bumpFlatMasterCaches } = require("../services/unitLayout");
+
+// Compact, client-facing view of a syncUnitRooms() result.
+function summarizeRoomSync(r) {
+  if (!r) return null;
+  return {
+    layout: r.layout?.label ?? null,
+    added: r.created + r.reactivated,
+    renamed: r.renamed,
+    deactivated: r.deactivated,
+    keptWithWork: r.keptWithWork,
+  };
+}
 
 bumpCacheVersion("unit-master").catch(() => {});
 
@@ -62,6 +75,7 @@ router.get("/", cache("unit-master", 300), async (req, res) => {
         u.UnitName,
         u.FloorNo,
         u.UnitType,
+        u.LayoutTypeId,
         u.AreaSqFt,
         u.CarpetAreaSqFt,
         u.BuiltUpAreaSqFt,
@@ -173,7 +187,7 @@ router.get("/applicable-payment-plans", async (req, res) => {
 
 // POST — add unit
 router.post("/", requirePageRight("followup-unit-master", "create"), async (req, res) => {
-  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, PaymentPlanIds } = req.body;
+  const { ProjectId, BlockId, UnitName, FloorNo, LayoutTypeId, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, PaymentPlanIds } = req.body;
   const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
   const createdBy = req.user?.userId || null;
   const userName = req.user?.name || req.user?.email || null;
@@ -186,6 +200,14 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
 
   try {
     const pool = getPool();
+
+    // Unit Type must be a Unit Composition layout type with its rooms
+    // defined — that's what the unit's Room Master rows are built from.
+    // Stored as both the FK (LayoutTypeId) and the layout's own Label
+    // (UnitType, the display copy bookings/reports read).
+    const { layoutTypeId, unitType: UnitType } = await resolveUnitTypeInput(
+      pool, { LayoutTypeId, UnitType: req.body.UnitType }, { requireComposition: true },
+    );
 
     // Fetch block-level spec for this unit type.
     // Inheritance chain: explicit value → block spec → null.
@@ -246,12 +268,18 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
         return res.status(409).json({ error: `Unit "${UnitName}" already exists in this Block.` });
       }
       // A soft-deleted unit with this exact name already exists — reactivate
-      // and update it instead of inserting a duplicate row.
-      await pool
+      // and update it instead of inserting a duplicate row. The unit write
+      // and its room sync are one transaction.
+      const rtx = pool.transaction();
+      await rtx.begin();
+      let roomSync;
+      try {
+      await rtx
         .request()
         .input("Id", sql.Int, existing.Id)
         .input("FloorNo", sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null)
         .input("UnitType", sql.NVarChar(50), UnitType || null)
+        .input("LayoutTypeId", sql.Int, layoutTypeId)
         .input("Area",         sql.Decimal(18, 2), effectiveArea)
         .input("CarpetArea",   sql.Decimal(18, 2), carpetArea)
         .input("BuiltUpArea",  sql.Decimal(18, 2), builtUpArea)
@@ -263,6 +291,7 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
           UPDATE dbo.UnitMaster SET
             FloorNo = @FloorNo,
             UnitType = @UnitType,
+            LayoutTypeId = @LayoutTypeId,
             AreaSqFt = @Area,
             CarpetAreaSqFt = @CarpetArea,
             BuiltUpAreaSqFt = @BuiltUpArea,
@@ -274,19 +303,36 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
             UpdatedAt = @UpdatedAt
           WHERE Id = @Id
         `);
+        // Reactivated with a (possibly different) type — same rule as a type
+        // change on PUT: add the layout's rooms, retire unused ones that
+        // have no work.
+        roomSync = await syncUnitRooms(rtx, existing.Id, { removeUnused: true, createdBy });
+        await rtx.commit();
+      } catch (e) {
+        try { await rtx.rollback(); } catch (_) { /* already rolled back */ }
+        throw e;
+      }
       await syncUnitPaymentPlanTags(pool, existing.Id, planIds);
       await bumpCacheVersion("unit-master");
+      await bumpFlatMasterCaches();
       await logAudit({ module: "UnitMaster", recordId: existing.Id, recordNo: UnitName, action: "Reactivated", changedBy: req.user?.userId ?? null });
-      return res.json({ message: "Unit reactivated successfully" });
+      return res.json({ message: "Unit reactivated successfully", roomSync: summarizeRoomSync(roomSync) });
     }
 
-    const result = await pool
+    // Unit insert + its rooms (from the layout) in one transaction.
+    const tx = pool.transaction();
+    await tx.begin();
+    let result;
+    let roomSync;
+    try {
+    result = await tx
       .request()
       .input("ProjectId", sql.Int, parseInt(ProjectId))
       .input("BlockId",   sql.Int, parseInt(BlockId))
       .input("UnitName",  sql.NVarChar(100), UnitName)
       .input("FloorNo",   sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null)
       .input("UnitType",  sql.NVarChar(50), UnitType || null)
+      .input("LayoutTypeId", sql.Int, layoutTypeId)
       .input("Area",      sql.Decimal(18,2), effectiveArea)
       .input("CarpetArea",      sql.Decimal(18,2), carpetArea)
       .input("BuiltUpArea",     sql.Decimal(18,2), builtUpArea)
@@ -296,15 +342,23 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
       .input("IsActive",  sql.Bit, IsActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
-        INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
+        INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, LayoutTypeId, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
-        VALUES (@ProjectId, @BlockId, @UnitName, @FloorNo, @UnitType, @Area, @CarpetArea, @BuiltUpArea, @SuperBuiltUpArea, @OpenTerraceArea, @Rate, @IsActive, @CreatedBy, @CreatedAt)
+        VALUES (@ProjectId, @BlockId, @UnitName, @FloorNo, @UnitType, @LayoutTypeId, @Area, @CarpetArea, @BuiltUpArea, @SuperBuiltUpArea, @OpenTerraceArea, @Rate, @IsActive, @CreatedBy, @CreatedAt)
       `);
+      roomSync = await syncUnitRooms(tx, result.recordset[0].Id, { removeUnused: false, createdBy });
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw e;
+    }
     await syncUnitPaymentPlanTags(pool, result.recordset[0].Id, planIds);
     await bumpCacheVersion("unit-master");
+    await bumpFlatMasterCaches();
     await logAudit({ module: "UnitMaster", recordId: result.recordset[0].Id, recordNo: UnitName, action: "Created", changedBy: req.user?.userId ?? null });
-    res.json({ message: "Unit added successfully" });
+    res.json({ message: "Unit added successfully", roomSync: summarizeRoomSync(roomSync) });
   } catch (err) {
+    if (err instanceof LayoutValidationError) return res.status(400).json({ error: err.message });
     console.error("[unit-master] POST error:", err.message);
     res.status(500).json({ error: err.message });
   }
@@ -313,7 +367,7 @@ router.post("/", requirePageRight("followup-unit-master", "create"), async (req,
 // PUT — update unit
 router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req, res) => {
   const { id } = req.params;
-  const { ProjectId, BlockId, UnitName, FloorNo, UnitType, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, PaymentPlanIds } = req.body;
+  const { ProjectId, BlockId, UnitName, FloorNo, LayoutTypeId, AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt, RatePerSqFt, IsActive, PaymentPlanIds } = req.body;
   const requestedPlanIds = Array.isArray(PaymentPlanIds) ? PaymentPlanIds.map((x) => parseInt(x)).filter(Number.isFinite) : [];
   const updatedBy = req.user?.userId || null;
   const userName = req.user?.name || req.user?.email || null;
@@ -322,6 +376,23 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
   }
   try {
     const pool = getPool();
+
+    const currentRes = await pool.request().input("Id", sql.Int, parseInt(id))
+      .query("SELECT UnitType, LayoutTypeId FROM dbo.UnitMaster WHERE Id = @Id");
+    if (!currentRes.recordset.length) return res.status(404).json({ error: "Unit not found" });
+    const current = currentRes.recordset[0];
+
+    // Same rule as POST, except the unit may keep the type it already has
+    // even if that layout's rooms aren't defined yet (or, for a legacy
+    // unlinked value, even if it isn't registered) — only a NEW pick has to
+    // be a type with a defined layout.
+    const { layoutTypeId, unitType: UnitType } = await resolveUnitTypeInput(
+      pool,
+      { LayoutTypeId, UnitType: req.body.UnitType },
+      { requireComposition: true, keepLayoutIds: current.LayoutTypeId ? [current.LayoutTypeId] : [], keepText: current.UnitType },
+    );
+    const typeChanged = layoutTypeId !== (current.LayoutTypeId ?? null)
+      || (layoutTypeId == null && (UnitType ?? null) !== (current.UnitType ?? null));
 
     // Fetch block-level spec for this unit type.
     // Inheritance chain: explicit value → block spec → null.
@@ -383,7 +454,12 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
       });
     }
 
-    await pool
+    // Unit update + keeping its rooms in step with it, in one transaction.
+    const tx = pool.transaction();
+    await tx.begin();
+    let roomSync = null;
+    try {
+    await tx
       .request()
       .input("Id",        sql.Int, parseInt(id))
       .input("ProjectId", sql.Int, parseInt(ProjectId))
@@ -391,6 +467,7 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
       .input("UnitName",  sql.NVarChar(100), UnitName)
       .input("FloorNo",   sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo) : null)
       .input("UnitType",  sql.NVarChar(50), UnitType || null)
+      .input("LayoutTypeId", sql.Int, layoutTypeId)
       .input("Area",      sql.Decimal(18,2), effectiveArea)
       .input("CarpetArea",      sql.Decimal(18,2), carpetArea)
       .input("BuiltUpArea",     sql.Decimal(18,2), builtUpArea)
@@ -406,6 +483,7 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
           UnitName  = @UnitName,
           FloorNo   = @FloorNo,
           UnitType  = @UnitType,
+          LayoutTypeId = @LayoutTypeId,
           AreaSqFt  = @Area,
           CarpetAreaSqFt = @CarpetArea,
           BuiltUpAreaSqFt = @BuiltUpArea,
@@ -417,13 +495,36 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
           UpdatedAt = @UpdatedAt
         WHERE Id = @Id
       `);
+      // A room carries its unit's Project/Block/Floor — keep them in step if
+      // the unit was moved.
+      await tx.request()
+        .input("Id",        sql.Int, parseInt(id))
+        .input("ProjectId", sql.Int, parseInt(ProjectId))
+        .input("BlockId",   sql.Int, parseInt(BlockId))
+        .input("Floor",     sql.NVarChar(50), FloorNo != null && FloorNo !== "" ? (parseInt(FloorNo) === 0 ? "G" : String(parseInt(FloorNo))) : null)
+        .query(`
+          UPDATE dbo.RoomMaster SET ProjectId = @ProjectId, BlockId = @BlockId, Floor = @Floor
+          WHERE UnitId = @Id AND (ProjectId <> @ProjectId OR BlockId <> @BlockId OR ISNULL(Floor, '') <> ISNULL(@Floor, ''))
+        `);
+      // Type changed: add the new layout's rooms, soft-deactivate rooms it
+      // doesn't have — only those with no DPR work (kept ones are reported).
+      if (typeChanged) {
+        roomSync = await syncUnitRooms(tx, parseInt(id), { removeUnused: true, createdBy: updatedBy });
+      }
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw e;
+    }
     if (Array.isArray(PaymentPlanIds)) {
       await syncUnitPaymentPlanTags(pool, parseInt(id), planIds);
     }
     await bumpCacheVersion("unit-master");
+    await bumpFlatMasterCaches();
     await logAudit({ module: "UnitMaster", recordId: parseInt(id), recordNo: UnitName, action: "Updated", changedBy: req.user?.userId ?? null });
-    res.json({ message: "Unit updated successfully" });
+    res.json({ message: "Unit updated successfully", roomSync: summarizeRoomSync(roomSync) });
   } catch (err) {
+    if (err instanceof LayoutValidationError) return res.status(400).json({ error: err.message });
     console.error("[unit-master] PUT error:", err.message);
     res.status(500).json({ error: err.message });
   }
@@ -477,15 +578,31 @@ router.delete("/:id", requirePageRight("followup-unit-master", "delete"), async 
       });
     }
 
-    const hardBlockers = await getUnitHardDeleteBlockers(pool, id);
+    // RoomMaster is handled below instead: the unit's rooms (auto-generated
+    // from its layout) go with it, unless any of them has DPR work.
+    const hardBlockers = await getUnitHardDeleteBlockers(pool, id, { skipTables: ["RoomMaster"] });
     if (hardBlockers) {
       return res.status(409).json({
         error: `Unit "${UnitName}" ${hardBlockers}.`,
       });
     }
 
-    await pool.request().input("Id", sql.Int, id).query("DELETE FROM dbo.UnitMaster WHERE Id = @Id");
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const roomBlocker = await removeUnitRoomsForDelete(tx, id);
+      if (roomBlocker) {
+        await tx.rollback();
+        return res.status(409).json({ error: `Unit "${UnitName}" ${roomBlocker}.` });
+      }
+      await tx.request().input("Id", sql.Int, id).query("DELETE FROM dbo.UnitMaster WHERE Id = @Id");
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw e;
+    }
     await bumpCacheVersion("unit-master");
+    await bumpFlatMasterCaches();
     await logAudit({ module: "UnitMaster", recordId: id, recordNo: UnitName, action: "Deleted", changedBy: req.user?.userId ?? null });
     res.json({ message: `Unit "${UnitName}" deleted` });
   } catch (err) {

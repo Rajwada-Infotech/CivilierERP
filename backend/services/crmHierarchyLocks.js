@@ -165,8 +165,13 @@ const UNIT_HARD_DELETE_REFS = [
   { table: "RoomMaster", column: "UnitId", label: "Room(s)" },
 ];
 
-async function getUnitHardDeleteBlockers(pool, unitId) {
+// `skipTables`: refs the caller resolves itself in the same transaction —
+// unitMaster.js's DELETE passes ["RoomMaster"] because it removes the unit's
+// auto-generated rooms along with it (services/unitLayout.js
+// removeUnitRoomsForDelete, which refuses if any of them has DPR work).
+async function getUnitHardDeleteBlockers(pool, unitId, { skipTables = [] } = {}) {
   for (const ref of UNIT_HARD_DELETE_REFS) {
+    if (skipTables.includes(ref.table)) continue;
     const r = await pool.request().input("id", sql.Int, unitId)
       .query(`SELECT COUNT(*) AS c FROM dbo.${ref.table} WHERE ${ref.column} = @id`);
     if (r.recordset[0].c > 0) {

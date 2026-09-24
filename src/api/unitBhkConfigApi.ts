@@ -10,9 +10,41 @@ const BASE = "/api/unit-bhk-config";
 export type BhkType = string;
 
 export interface LayoutType {
+  /** dbo.RoomLayoutType.Id — what UnitMaster.LayoutTypeId points at. */
+  id: number;
   typeKey: string;
+  /** Display label, also the value stored as UnitMaster.UnitType ("2 BHK"). */
   label: string;
-  isSystem: boolean;
+  /** Total rooms in its Unit Composition; 0 = no layout defined yet. */
+  roomCount: number;
+  /** e.g. "2 Bedroom · 1 Hall Room · 1 Kitchen"; empty when roomCount = 0. */
+  summary: string;
+}
+
+// Query key shared by every page that lists layout types, so saving a
+// composition refreshes the CRM / Unit Master pickers too.
+export const LAYOUT_TYPES_QUERY_KEY = ["layout-types"] as const;
+
+// Options for a Unit Type picker: only types with a defined layout (a unit's
+// rooms are built from it), plus the record's current value if it isn't one
+// of those, so an existing unit/template row still shows what it has.
+export function unitTypeOptions(types: LayoutType[], current?: string | null): { value: string; label: string; title?: string }[] {
+  const opts = types
+    .filter((t) => t.roomCount > 0)
+    .map((t) => ({ value: t.label, label: t.label, title: t.summary }));
+  const cur = (current ?? "").trim();
+  if (cur && !opts.some((o) => o.value === cur)) {
+    const known = types.find((t) => t.label === cur);
+    opts.push({ value: cur, label: known ? `${cur} (no layout yet)` : `${cur} (not in Unit Composition)`, title: undefined });
+  }
+  return opts;
+}
+
+export interface RoomSyncResult {
+  unitsChecked: number;
+  unitsUpdated: number;
+  roomsAdded: number;
+  failed: number;
 }
 
 export interface RoomCompositionRow {
@@ -77,7 +109,7 @@ export const saveBhkTemplate = (
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  }).then((r) => handle(r));
+  }).then((r) => handle<{ success: boolean; configId: number; roomSync?: RoomSyncResult }>(r));
 
 // Work Allocation page's Room dropdown source — generated {alias} {index}
 // instances for the given Unit, resolved via its own UnitType against the
