@@ -445,7 +445,7 @@ async function createApp() {
   if (!isTest) {
     const loginLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
-      max: 10,
+      max: 20,
       message: { error: "Too many login attempts. Try again later." },
       store: makeStore("rl:login:"),
       skip: (req) => isDev && isLocalRequest(req),
