@@ -235,6 +235,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const result = await dataRequest.query(`
       SELECT
         np.*,
+        COALESCE(pcu.name, np.PCreatedBy)                  AS CreatedByName,
         -- Company name (resolved from enterprise table via PCompany text match)
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         -- Project name (resolved from EB → enterprise, or PO → enterprise)
@@ -337,6 +338,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           ELSE np.Status
         END                                                AS DisplayStatus
       FROM dbo.NewPayment np
+      LEFT JOIN dbo.users pcu ON LOWER(pcu.email) = LOWER(np.PCreatedBy)
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
       LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
@@ -1892,6 +1894,7 @@ router.get("/:id", async (req, res) => {
     const result = await pool.request().input("id", sql.Int, id).query(`
       SELECT
         np.*,
+        COALESCE(pcu.name, np.PCreatedBy)                  AS CreatedByName,
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         COALESCE(ep.name, po_proj.name, np_proj.name, np.PProject) AS PProjectName,
         COALESCE(
@@ -1950,6 +1953,7 @@ router.get("/:id", async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
       LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadName = np.PBankName AND ahm.LHeadType = 'B'
+      LEFT JOIN dbo.users pcu ON LOWER(pcu.email) = LOWER(np.PCreatedBy)
       WHERE np.PPaymentID = @id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Payment not found" });

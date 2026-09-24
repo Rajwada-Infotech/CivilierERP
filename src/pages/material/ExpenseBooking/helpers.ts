@@ -409,6 +409,7 @@ export function dbToRecord(row: any): ExpenseRecord {
     docTypeName: row.DocTypeName ?? "",
     docTypeId: row.EDocTypeId != null ? Number(row.EDocTypeId) : null,
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
+    createdByName: (row as any).CreatedByName || "",
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
     financialYear: row.EFinYear ?? "",
     companyId: row.ECompanyId ? parseInt(row.ECompanyId, 10) : null,

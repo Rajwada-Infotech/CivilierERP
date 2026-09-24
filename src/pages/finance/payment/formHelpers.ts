@@ -83,6 +83,7 @@ export function dbToRecord(item: DbPayment): PaymentRecord {
     expenseId: item.PExpenseId ? String(item.PExpenseId) : "",
     jvNo: item.JVNo || null,
     docNo: item.DocNo || "",
+    createdByName: (item as any).CreatedByName || (item as any).PCreatedBy || "",
     parentDocNo: item.ParentDocNo || "",
     rootExBDocNo: item.RootExBDocNo || "",
     docType: item.PDocType || "",

@@ -1676,6 +1676,7 @@ export default function Issues() {
       { label: "Company", value: viewingRecord.CompanyName },
       { label: "Project", value: viewingRecord.ProjectName },
       { label: "Financial Year", value: viewingRecord.FinYearName },
+      { label: "Created By", value: viewingRecord.CreatedByName || "—" },
       { label: "Source Godown", value: viewingRecord.GodownName ? `${viewingRecord.GodownName}${viewingRecord.GodownCode ? ` (${viewingRecord.GodownCode})` : ""}` : "—" },
       ...(viewingRecord.BlockName ? [{ label: "Block", value: viewingRecord.BlockName }] : []),
       ...(viewingRecord.FloorNo != null
@@ -1726,6 +1727,7 @@ export default function Issues() {
                             { label: "Company", value: rec.CompanyName },
                             { label: "Project", value: rec.ProjectName },
                             { label: "Financial Year", value: rec.FinYearName },
+                            { label: "Created By", value: rec.CreatedByName },
                             { label: "Source Godown", value: rec.GodownName },
                             { label: "Block", value: rec.BlockName },
                             { label: "Floor", value: rec.FloorNo === 0 ? "Ground Floor" : rec.FloorNo != null ? `Floor ${rec.FloorNo}` : null },

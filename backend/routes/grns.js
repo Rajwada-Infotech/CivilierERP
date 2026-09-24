@@ -974,7 +974,8 @@ router.get("/:id", async (req, res) => {
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription,
           vio.DocNo AS VehicleInOutDocNo,
-          vio.VehicleNo AS VehicleInOutVehicleNo
+          vio.VehicleNo AS VehicleInOutVehicleNo,
+          COALESCE(cu.name, ds.IssuedBy) AS CreatedBy
         FROM GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
         LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
@@ -982,6 +983,9 @@ router.get("/:id", async (req, res) => {
         LEFT JOIN dbo.enterprise co ON co.id = p.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
         LEFT JOIN dbo.VehicleInOut vio ON vio.VehicleInOutID = grn.VehicleInOutID
+        LEFT JOIN dbo.DocNumberSequence ds ON ds.TableName = 'GoodsReceiptNotes'
+                                          AND ds.DocNo = COALESCE(grn.DocNo, grn.GRNNo)
+        LEFT JOIN dbo.Users cu ON LOWER(cu.email) = LOWER(ds.IssuedBy)
         WHERE grn.GRNID = @GRNID
       `);
 

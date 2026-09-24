@@ -5613,6 +5613,7 @@ const Payment: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { label: "Payment Purpose", value: viewingRec.paymentName },
+                  { label: "Created By", value: viewingRec.createdByName || "—" },
                   {
                     label: "Paid To",
                     // supplierContact legitimately equals paidTo for a CRM

@@ -3202,6 +3202,10 @@ export default function GRN() {
                           value: viewingGrn.PONumber || "—",
                         },
                         {
+                          label: "Created By",
+                          value: viewingGrn.CreatedBy || "—",
+                        },
+                        {
                           label: "Company",
                           value: viewingGrn.CompanyName || "—",
                         },

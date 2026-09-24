@@ -30,6 +30,7 @@ export interface ReceivedPaymentRecord {
   RPEmiPaying: string | null; // JSON string
   RPStatus: string;
   RPCreatedBy: string | null;
+  CreatedByName?: string | null;
   RPCreatedAt: string;
   RPUpdatedBy: string | null;
   RPUpdatedAt: string | null;

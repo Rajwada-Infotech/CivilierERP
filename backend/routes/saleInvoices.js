@@ -65,6 +65,7 @@ const SI_SELECT = `
     fy.FName                          AS FinYearName,
     si.Remarks,
     si.CreatedBy,
+    COALESCE(cu.name, si.CreatedBy) AS CreatedByName,
     si.CreatedAt,
     si.UpdatedBy,
     si.UpdatedAt,
@@ -94,6 +95,7 @@ const SI_SELECT = `
   LEFT JOIN dbo.enterprise          pr ON pr.id           = si.ProjectId
   LEFT JOIN dbo.FinYear             fy ON fy.FId          = si.fy_id
   LEFT JOIN dbo.TypeOfDoc           td ON td.TypeOfDocId  = si.DocTypeId
+  LEFT JOIN dbo.users               cu ON LOWER(cu.email) = LOWER(si.CreatedBy)
   WHERE si.IsDeleted = 0
 `;
 

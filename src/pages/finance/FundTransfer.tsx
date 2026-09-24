@@ -392,6 +392,7 @@ function TransferDetailDialog({
 
             <div>
               <DetailRow label="Transfer Date" value={fmtDate(detail.TransferDate)} />
+              <DetailRow label="Created By" value={detail.CreatedByName || detail.CreatedBy || "—"} />
               <DetailRow label="Amount" value={<span className="font-mono font-semibold">{formatINR(detail.Amount || 0)}</span>} />
               <DetailRow label="Source Company" value={detail.SourceCompanyName || "—"} />
               <DetailRow label="Source Bank" value={detail.SourceBankName || "—"} />

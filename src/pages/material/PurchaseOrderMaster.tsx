@@ -3156,6 +3156,10 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           label: "Status",
                           value: viewingPO.Status ?? viewingPO.status ?? "—",
                         },
+                        {
+                          label: "Created By",
+                          value: viewingPO.CreatedByName ?? viewingPO.CreatedBy ?? "—",
+                        },
                       ] as { label: string; value: any; mono?: boolean }[]
                     ).map(({ label, value, mono }) => (
                       <div

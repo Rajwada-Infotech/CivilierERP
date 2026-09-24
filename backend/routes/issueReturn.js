@@ -104,8 +104,10 @@ router.get("/:id", requirePageRight("material-issue-return", "view"), async (req
     const [header, items] = await Promise.all([
       pool.request().input("ReturnId", sql.Int, id).query(`
         SELECT ir.*, mi.DocNo AS IssueDocNo,
-               co.name AS CompanyName, pr.name AS ProjectName
+               co.name AS CompanyName, pr.name AS ProjectName,
+               cu.name AS CreatedByName
         FROM dbo.MaterialIssueReturn ir
+        LEFT JOIN dbo.users cu ON cu.id = ir.CreatedBy
         LEFT JOIN dbo.MaterialIssues mi ON mi.IssueId = ir.IssueId
         LEFT JOIN dbo.enterprise co ON co.id = ir.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = ir.ProjectId

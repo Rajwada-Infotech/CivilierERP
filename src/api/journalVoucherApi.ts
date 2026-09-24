@@ -43,6 +43,7 @@ export interface JournalVoucherSummary {
   ProjectName?: string | null;
   Status: "Draft" | "Pending" | "Approved" | "Rejected";
   CreatedBy: string | null;
+  CreatedByName?: string | null;
   CreatedAt: string;
   TotalAmount: number | null;
   PostedToGL?: boolean;

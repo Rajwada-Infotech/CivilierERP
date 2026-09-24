@@ -926,6 +926,7 @@ export default function JournalVoucher() {
                   {fmtDate(viewingJV.JVDate)}
                   {viewingJV.CompanyName ? ` · ${viewingJV.CompanyName}` : ""}
                   {viewingJV.ProjectName ? ` · ${viewingJV.ProjectName}` : ""}
+                  {viewingJV.CreatedByName || viewingJV.CreatedBy ? ` · Created by ${viewingJV.CreatedByName || viewingJV.CreatedBy}` : ""}
                 </DialogDescription>
               </DialogHeader>
 

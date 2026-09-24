@@ -80,6 +80,7 @@ export interface FundTransferSummary {
   IsPostDated: boolean;
   DigitalRefNumber: string | null;
   CreatedBy: string | null;
+  CreatedByName?: string | null;
   CreatedAt: string;
 }
 
