@@ -75,9 +75,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
   const setActiveModule = useCallback((m: Module) => {
     setActiveModuleState(m);
     if (m) {
-      localStorage.setItem("activeModule", m);
+      sessionStorage.setItem("activeModule", m);
     } else {
-      localStorage.removeItem("activeModule");
+      sessionStorage.removeItem("activeModule");
     }
   }, []);
 
@@ -86,9 +86,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     setActiveModuleState((prev) => {
       const next = prev === m ? null : m;
       if (next) {
-        localStorage.setItem("activeModule", next);
+        sessionStorage.setItem("activeModule", next);
       } else {
-        localStorage.removeItem("activeModule");
+        sessionStorage.removeItem("activeModule");
       }
       return next;
     });
@@ -108,15 +108,15 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     if (resolved === "none") {
       // Landing page after login — always neutral, no module pre-selected
       setActiveModuleState(null);
-      localStorage.removeItem("activeModule");
+      sessionStorage.removeItem("activeModule");
     } else if (resolved === "keep") {
       // Ambiguous path (e.g. /masters/*, /reports) — trust localStorage if valid,
       // but do NOT force a module when there's nothing stored
-      const stored = localStorage.getItem("activeModule");
+      const stored = sessionStorage.getItem("activeModule");
       setActiveModuleState(stored && isModuleId(stored) ? stored : null);
     } else {
       setActiveModuleState(resolved);
-      localStorage.setItem("activeModule", resolved);
+      sessionStorage.setItem("activeModule", resolved);
     }
   }, [location.pathname]); // re-run on every navigation
 

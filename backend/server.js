@@ -147,6 +147,7 @@ function isLocalRequest(req) {
 // ─── Routes ──────────────────────────────────────────────────────────────────
 const ALL_ROUTES = [
   { path: "/api/amendments", file: "./routes/amendmentLog" },
+  { path: "/api/audit-trail", file: "./routes/auditTrail" },
   { path: "/api/roles", file: "./routes/roles" },
   { path: "/api/user-rights", file: "./routes/userRights" },
   { path: "/api/user-widget-rights", file: "./routes/userWidgetRights" },
@@ -444,7 +445,7 @@ async function createApp() {
   if (!isTest) {
     const loginLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
-      max: 10,
+      max: 20,
       message: { error: "Too many login attempts. Try again later." },
       store: makeStore("rl:login:"),
       skip: (req) => isDev && isLocalRequest(req),

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, GitBranch, Loader2, CheckCircle2, Circle } from "lucide-react";
+import { ArrowLeft, GitBranch, Loader2, CheckCircle2, Circle, Copy } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
 import { EngineeringShell } from "@/components/engineering/EngineeringShell";
@@ -13,6 +13,7 @@ import { AliasInput } from "./components/AliasInput";
 import { ScopeToggle } from "./components/ScopeToggle";
 import { ActivityLadder } from "./components/ActivityLadder";
 import { ActivityPickerModal } from "./components/ActivityPickerModal";
+import { CopyChainModal } from "./components/CopyChainModal";
 import { DependencyReviewPanel } from "./components/DependencyReviewPanel";
 
 const STEPS = ["Task Scope", "Alias", "Work Type", "Activity Chain"] as const;
@@ -29,6 +30,7 @@ export default function DependencyMasterFormPage() {
   const qc = useQueryClient();
   usePageRights("dependency-master");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [copyModalOpen, setCopyModalOpen] = useState(false);
 
   const { data: editing, isLoading: loadingEditing } = useQuery({
     queryKey: ["dependency-master-detail", editingId],
@@ -111,9 +113,20 @@ export default function DependencyMasterFormPage() {
             )}
 
             <div>
-              <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1.5">
-                4. Activity Chain
-              </p>
+              <div className="flex items-center justify-between mb-1.5">
+                <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60">
+                  4. Activity Chain
+                </p>
+                {!editingId && form.ladderActive && (
+                  <button
+                    type="button"
+                    onClick={() => setCopyModalOpen(true)}
+                    className="inline-flex items-center gap-1 text-[10px] font-medium text-primary hover:text-primary/80 transition-colors"
+                  >
+                    <Copy size={11} /> Copy from existing chain
+                  </button>
+                )}
+              </div>
               <ActivityLadder
                 active={form.ladderActive}
                 rungs={form.ladder.rungs}
@@ -176,12 +189,20 @@ export default function DependencyMasterFormPage() {
       <ActivityPickerModal
         open={pickerOpen}
         onClose={() => setPickerOpen(false)}
-        onPick={(activityId, activityName) => {
-          form.ladder.add(activityId, activityName, form.workType);
+        onPick={(picks) => {
+          form.ladder.addMany(picks, form.workType);
           setPickerOpen(false);
         }}
         excludeIds={form.ladder.rungs.map((r) => r.activityId)}
       />
+
+      {!editingId && (
+        <CopyChainModal
+          open={copyModalOpen}
+          onClose={() => setCopyModalOpen(false)}
+          onCopy={(activities) => form.ladder.reset(activities)}
+        />
+      )}
     </>
   );
 }

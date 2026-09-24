@@ -26,7 +26,19 @@ const {
   getAllocationsForMany,
 } = require("../services/expenseHeadAllocation");
 
-router.use(checkPermissionForMethod("Finance", "Payments"));
+// Approve/Reject are exempt from this blanket per-module permission gate —
+// transition() (approvalService.js) is the real authority there (role
+// whitelist / approval-inbox edit right / named workflow approver). Without
+// this, a person Approval Setup named as an approver but who never got this
+// module's own CanEdit permission under the legacy Finance/Payments role
+// grid got "Access denied" right here, before transition() ever ran — same
+// bug class already fixed by removing requirePageRight from those two
+// routes directly (this blanket check is a second, separate gate that fix
+// didn't reach).
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Finance", "Payments")(req, res, next);
+});
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
@@ -223,6 +235,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const result = await dataRequest.query(`
       SELECT
         np.*,
+        COALESCE(pcu.name, np.PCreatedBy)                  AS CreatedByName,
         -- Company name (resolved from enterprise table via PCompany text match)
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         -- Project name (resolved from EB → enterprise, or PO → enterprise)
@@ -325,6 +338,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           ELSE np.Status
         END                                                AS DisplayStatus
       FROM dbo.NewPayment np
+      LEFT JOIN dbo.users pcu ON LOWER(pcu.email) = LOWER(np.PCreatedBy)
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
       LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.card_master cmast ON cmast.id = np.PCardId
@@ -1441,7 +1455,11 @@ router.put("/:id/submit", requirePageRight("new-payment", "edit"), async (req, r
 });
 
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
-router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, res) => {
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -1830,7 +1848,7 @@ router.put("/:id/approve", requirePageRight("new-payment", "edit"), async (req, 
 });
 
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
-router.put("/:id/reject", requirePageRight("new-payment", "edit"), async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   const { note } = req.body;
@@ -1876,6 +1894,7 @@ router.get("/:id", async (req, res) => {
     const result = await pool.request().input("id", sql.Int, id).query(`
       SELECT
         np.*,
+        COALESCE(pcu.name, np.PCreatedBy)                  AS CreatedByName,
         ISNULL(ec.name, np.PCompany)                       AS PCompanyName,
         COALESCE(ep.name, po_proj.name, np_proj.name, np.PProject) AS PProjectName,
         COALESCE(
@@ -1934,6 +1953,7 @@ router.get("/:id", async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
       LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadName = np.PBankName AND ahm.LHeadType = 'B'
+      LEFT JOIN dbo.users pcu ON LOWER(pcu.email) = LOWER(np.PCreatedBy)
       WHERE np.PPaymentID = @id
     `);
     if (!result.recordset.length) return res.status(404).json({ error: "Payment not found" });
@@ -2097,6 +2117,7 @@ router.get(/^\/chain\/(.+)$/, async (req, res) => {
           eb.Eid, eb.EDocNo, eb.ENetAmount, eb.EAmount, eb.ESourceType,
           eb.ETotalPaid, eb.ERemainingAmount, eb.EBillStatus,
           ISNULL(eb.TDSAmount, 0) AS TDSAmount,
+          eb.ECostCenter,
           COALESCE(proj.name, eb.EProjectName, '') AS ProjectName,
           eb.EName AS PartyName,
           grn.TotalAmount AS GrnTotalAmount

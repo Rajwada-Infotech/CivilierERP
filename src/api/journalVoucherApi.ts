@@ -21,6 +21,12 @@ export interface JournalVoucherLine {
   LineID?: number;
   LHeadId: number | null;
   LHeadName?: string;
+  /** Set on GET /:id (not on the create/edit payload) — used to tell a
+   *  Partner Master line's Capital head from its Current head, since both
+   *  share one LHeadName. See LHeadCode's "-CAP"/"-CUR" suffix convention
+   *  in backend/routes/partnerMaster.js. */
+  LHeadType?: string;
+  LHeadCode?: string | null;
   DebitAmount: number;
   CreditAmount: number;
   Narration?: string;
@@ -37,6 +43,7 @@ export interface JournalVoucherSummary {
   ProjectName?: string | null;
   Status: "Draft" | "Pending" | "Approved" | "Rejected";
   CreatedBy: string | null;
+  CreatedByName?: string | null;
   CreatedAt: string;
   TotalAmount: number | null;
   PostedToGL?: boolean;

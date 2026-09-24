@@ -9,8 +9,8 @@ const jsonResponse = (body: unknown, status = 200) =>
 
 describe("hsnApi", () => {
   beforeEach(() => {
-    localStorage.clear();
-    localStorage.setItem("token", "test-token");
+    sessionStorage.clear();
+    sessionStorage.setItem("token", "test-token");
     vi.restoreAllMocks();
   });
 

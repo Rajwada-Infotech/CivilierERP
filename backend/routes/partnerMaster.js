@@ -222,8 +222,13 @@ router.post("/", requirePageRight("partner-master", "create"), async (req, res) 
     // Partner's heads share the same LHeadName, which would otherwise show
     // up twice with no way to tell them apart. DisplayName disambiguates
     // everywhere at once instead of patching every consumer's own query.
-    const capitalHeadId = await insertHead(`${baseCode}${CAP_SUFFIX}`, groups.capital.id, `${name} (Capital Account)`);
-    const currentHeadId = await insertHead(`${baseCode}${CUR_SUFFIX}`, groups.current.id, `${name} (Current Account)`);
+    // Suffix wording is "(For Capital)" / "(For Withdrawings)" — plain-
+    // language framing for pickers, not the underlying accounting terms.
+    // The GL heads themselves stay named/grouped as Capital/Current Account
+    // throughout (LHeadName, groups, codes) — only this DisplayName suffix
+    // reads differently.
+    const capitalHeadId = await insertHead(`${baseCode}${CAP_SUFFIX}`, groups.capital.id, `${name} (For Capital)`);
+    const currentHeadId = await insertHead(`${baseCode}${CUR_SUFFIX}`, groups.current.id, `${name} (For Withdrawings)`);
     await tx.commit();
 
     await bumpCacheVersion("partner-master");
@@ -287,8 +292,8 @@ router.put("/:code", requirePageRight("partner-master", "edit"), async (req, res
       .input("CapCode", sql.NVarChar(20), `${baseCode}${CAP_SUFFIX}`)
       .input("CurCode", sql.NVarChar(20), `${baseCode}${CUR_SUFFIX}`)
       .input("LHeadName", sql.NVarChar(200), newName)
-      .input("CapDisplayName", sql.NVarChar(200), newName ? `${newName} (Capital Account)` : null)
-      .input("CurDisplayName", sql.NVarChar(200), newName ? `${newName} (Current Account)` : null)
+      .input("CapDisplayName", sql.NVarChar(200), newName ? `${newName} (For Capital)` : null)
+      .input("CurDisplayName", sql.NVarChar(200), newName ? `${newName} (For Withdrawings)` : null)
       .input(
         "LHeadStatus",
         sql.Bit,

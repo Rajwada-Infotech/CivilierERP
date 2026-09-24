@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, type ReactNode } from "react";
+import { Fragment, useEffect, useState, useCallback, type ReactNode } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -46,6 +46,16 @@ interface StatementGroup {
   total: number;
 }
 
+interface PartnerRollForward {
+  key: string;
+  name: string;
+  opening: number;
+  capitalIntroduced: number;
+  credits: number;
+  drawings: number;
+  closing: number;
+}
+
 interface PartnersCapital {
   openingCapital: number;
   furtherCapital: number;
@@ -53,6 +63,7 @@ interface PartnersCapital {
   drawings: number;
   total: number;
   capitalHeads: Head[];
+  partners: PartnerRollForward[];
 }
 
 interface ReservesAndSurplus {
@@ -351,90 +362,74 @@ function GrandTotalRow({ label, amount, variant }: { label: string; amount: numb
 // heads (one per partner's Capital A/c) expand separately.
 
 function PartnersCapitalBlock({
-  data, openKey, onToggle, noteRef,
+  data,
 }: {
   data: PartnersCapital;
   openKey: string | null;
   onToggle: (k: string) => void;
   noteRef: NoteRef;
 }) {
-  const capitalKey = "capital-heads";
-  const capitalOpen = openKey === capitalKey;
-  // Only "Opening Partners' Capital" is an actual chart-of-accounts group
-  // (it expands to the individual Capital A/c heads) — the Retained
-  // Earnings/Further Capital/Net Profit/Drawings lines below are computed
-  // roll-forward figures, not groups, so they carry no note number.
-  const openingNoteNum = data.capitalHeads.length > 0 ? noteRef.current++ : null;
+  // One block per partner, laid out like a firm's printed partners' capital
+  // schedule: Balance as per last account + Capital introduced + Share of
+  // profit / remuneration / interest (credited to the Current A/c) −
+  // Drawings = closing. The period's Net Profit sits below as its own line
+  // until it's allocated to partners (no profit-sharing ratio is stored).
+  const row = (label: string, amount: number, opts: { sub?: boolean; strong?: boolean; neg?: boolean } = {}) => (
+    <tr className={opts.sub ? "border-t border-border/40" : "border-b border-border/20"}>
+      <td className={`py-1 pl-10 pr-3 text-[11px] ${opts.strong ? "font-semibold text-foreground" : "text-muted-foreground"}`}>{label}</td>
+      <td className="w-16" />
+      <td className="py-1 px-3 text-right text-[11px] tabular-nums text-muted-foreground/80 w-32">
+        {!opts.strong && (opts.neg ? `(${fmt(amount)})` : <Signed amount={amount} />)}
+      </td>
+      <td className="py-1 pl-3 pr-5 text-right text-[11px] tabular-nums w-36">
+        {opts.strong && <span className="font-semibold"><Signed amount={amount} /></span>}
+      </td>
+    </tr>
+  );
 
   return (
     <>
       <tr>
         <td colSpan={4} className="pt-2.5 pb-0.5 pl-5">
-          <span className="text-[11px] font-bold text-foreground uppercase tracking-wide">Partners' Capital</span>
+          <span className="text-[11px] font-bold text-foreground uppercase tracking-wide">Partners' Capital Account</span>
         </td>
       </tr>
 
-      <tr
-        className={`border-b border-border/30 ${data.capitalHeads.length > 0 ? "cursor-pointer hover:bg-muted/25" : ""}`}
-        onClick={() => data.capitalHeads.length > 0 && onToggle(capitalKey)}
-      >
-        <td className="py-1.5 pl-8 pr-3 text-[11px] text-foreground">
-          <div className="flex items-center gap-2">
-            {data.capitalHeads.length > 0 ? (
-              capitalOpen
-                ? <ChevronDown size={10} className="text-primary/60 shrink-0" />
-                : <ChevronRight size={10} className="text-muted-foreground/50 shrink-0" />
-            ) : <span className="w-[10px] shrink-0" />}
-            Opening Partners' Capital
-          </div>
-        </td>
-        <td className="py-1.5 px-3 text-right text-[9px] text-muted-foreground/40 w-16">{openingNoteNum ?? ""}</td>
-        <td className="py-1.5 px-3 text-right text-[11px] tabular-nums text-muted-foreground/70 w-32">
-          {data.capitalHeads.length > 1 ? fmt(data.openingCapital) : ""}
-        </td>
-        <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.openingCapital} /></td>
-      </tr>
-      {capitalOpen && data.capitalHeads.length > 0 && (
-        <tr>
-          <td colSpan={4} className="pb-1.5">
-            <div className="ml-16 mr-5 border-l-2 border-primary/20 pl-3 py-1 space-y-0.5">
-              {data.capitalHeads.map((h) => (
-                <div key={h.id ?? h.name} className="flex items-center justify-between text-[10px] text-muted-foreground">
-                  <span className="truncate pr-4">{h.name} <span className="opacity-50">(life-to-date)</span></span>
-                  <Signed amount={h.amount} className="shrink-0 font-medium" />
-                </div>
-              ))}
-            </div>
-          </td>
-        </tr>
+      {data.partners.length === 0 && (
+        <tr><td colSpan={4} className="py-1.5 pl-8 text-[11px] italic text-muted-foreground">No partner capital recorded</td></tr>
       )}
 
-      <tr className="border-b border-border/30">
-        <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">+ Further Capital</td>
-        <td className="w-16" />
-        <td className="w-32" />
-        <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.furtherCapital} /></td>
-      </tr>
+      {data.partners.map((p) => {
+        const before = p.opening + p.capitalIntroduced + p.credits;
+        return (
+          <Fragment key={p.key}>
+            <tr>
+              <td colSpan={4} className="pt-2 pb-0.5 pl-8">
+                <span className="text-[11px] font-semibold underline underline-offset-2 text-foreground">{p.name} :</span>
+              </td>
+            </tr>
+            {row("Balance as per last account", p.opening)}
+            {row("Add: Capital introduced", p.capitalIntroduced)}
+            {row("Add: Share of Profit / Remuneration / Interest", p.credits)}
+            {row("Sub-total", before, { sub: true })}
+            {row("Less: Drawings", p.drawings, { neg: true })}
+            {row(`Closing balance — ${p.name}`, p.closing, { sub: true, strong: true })}
+          </Fragment>
+        );
+      })}
 
-      <tr className="border-b border-border/30">
-        <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">+ Net Profit (Current Period)</td>
+      <tr className="border-t border-border/40">
+        <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">
+          Add: Net Profit / (Loss) for the period <span className="opacity-60">(not yet allocated to partners)</span>
+        </td>
         <td className="w-16" />
         <td className="w-32" />
         <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36"><Signed amount={data.netProfitCurrent} /></td>
       </tr>
 
-      <tr className="border-b border-border/30">
-        <td className="py-1.5 pl-8 pr-3 text-[11px] text-muted-foreground">− Partners' Drawings</td>
-        <td className="w-16" />
-        <td className="w-32" />
-        <td className="py-1.5 pl-3 pr-5 text-right text-[11px] tabular-nums font-medium w-36 text-red-600 dark:text-red-400">
-          {data.drawings > 0.005 ? `(${fmt(data.drawings)})` : fmt(0)}
-        </td>
-      </tr>
-
       <tr className="border-t border-border/60">
-        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Partners' Capital</td>
-        <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36">{fmt(data.total)}</td>
+        <td colSpan={3} className="py-1.5 pl-8 pr-3 text-xs font-semibold text-muted-foreground">Sub-total — Partners' Capital Account</td>
+        <td className="py-1.5 pl-3 pr-5 text-right text-xs font-semibold tabular-nums text-foreground w-36"><Signed amount={data.total} /></td>
       </tr>
       <tr><td colSpan={4} className="py-1"><div className="border-t border-dashed border-border/40 mx-5" /></td></tr>
     </>

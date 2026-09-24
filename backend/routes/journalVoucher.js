@@ -241,8 +241,10 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const header = await pool
       .request()
       .input("id", sql.Int, id).query(`
-        SELECT jv.*, co.name AS CompanyName, pr.name AS ProjectName, bk.LHeadName AS BankName
+        SELECT jv.*, co.name AS CompanyName, pr.name AS ProjectName, bk.LHeadName AS BankName,
+               COALESCE(cu.name, jv.CreatedBy) AS CreatedByName
         FROM dbo.JournalVoucher jv
+        LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(jv.CreatedBy)
         LEFT JOIN dbo.enterprise co ON co.id = jv.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = jv.ProjectId
         LEFT JOIN dbo.AccountHeadMaster bk ON bk.LHeadId = jv.BankId
@@ -253,8 +255,8 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const lines = await pool
       .request()
       .input("id", sql.Int, id).query(`
-        SELECT jvl.LineID, jvl.LHeadId, lh.LHeadName, jvl.DebitAmount, jvl.CreditAmount,
-               jvl.Narration, jvl.SortOrder
+        SELECT jvl.LineID, jvl.LHeadId, lh.LHeadName, lh.LHeadType, lh.LHeadCode,
+               jvl.DebitAmount, jvl.CreditAmount, jvl.Narration, jvl.SortOrder
         FROM dbo.JournalVoucherLines jvl
         LEFT JOIN dbo.AccountHeadMaster lh ON lh.LHeadId = jvl.LHeadId
         WHERE jvl.JVID = @id
@@ -657,8 +659,17 @@ router.delete("/:id", authenticateToken, requirePageRight("journal-voucher", "de
   }
 });
 
-// ── PUT /:id/approve — Pending → Approved (super_admin only) ────────────────
-router.put("/:id/approve", authenticateToken, requirePageRight("journal-voucher", "edit"), async (req, res) => {
+// ── PUT /:id/approve — Pending → Approved (super_admin, OR anyone named as
+// an approver on this JV's current level in Approval Setup) ────────────────
+// requirePageRight("journal-voucher", "edit") used to gate this route too —
+// that 403'd anyone who wasn't a super_admin before the request ever reached
+// transition() below, even someone Approval Setup explicitly named as an
+// approver (e.g. Prashant) on this record's current level. transition()
+// already implements the full, correct authorization (role whitelist,
+// approval-inbox edit right, or named workflow approver) — it's the single
+// authority for who can approve/reject here, so this route only needs to be
+// authenticated, not additionally gated on the ordinary page-edit right.
+router.put("/:id/approve", authenticateToken, async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 
@@ -705,8 +716,8 @@ router.put("/:id/approve", authenticateToken, requirePageRight("journal-voucher"
   }
 });
 
-// ── PUT /:id/reject — Pending → Rejected (super_admin only) ─────────────────
-router.put("/:id/reject", authenticateToken, requirePageRight("journal-voucher", "edit"), async (req, res) => {
+// ── PUT /:id/reject — same authorization as /:id/approve above ──────────────
+router.put("/:id/reject", authenticateToken, async (req, res) => {
   const user = requireUser(req, res);
   if (!user) return;
 

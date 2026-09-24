@@ -45,6 +45,7 @@ import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
 import { LedgerHeadPicker } from "./journalVoucher/LedgerHeadPicker";
+import { partnerLineKind } from "./journalVoucher/ledgerGroups";
 import { SettlementModeSection } from "./journalVoucher/SettlementModeSection";
 import {
   emptySettlement,
@@ -925,6 +926,7 @@ export default function JournalVoucher() {
                   {fmtDate(viewingJV.JVDate)}
                   {viewingJV.CompanyName ? ` · ${viewingJV.CompanyName}` : ""}
                   {viewingJV.ProjectName ? ` · ${viewingJV.ProjectName}` : ""}
+                  {viewingJV.CreatedByName || viewingJV.CreatedBy ? ` · Created by ${viewingJV.CreatedByName || viewingJV.CreatedBy}` : ""}
                 </DialogDescription>
               </DialogHeader>
 
@@ -970,6 +972,7 @@ export default function JournalVoucher() {
                   </div>
                   {viewingJV.lines.map((l) => {
                     const isDebit = Number(l.DebitAmount) > 0;
+                    const kind = partnerLineKind(l);
                     return (
                       <div
                         key={l.LineID}
@@ -978,7 +981,18 @@ export default function JournalVoucher() {
                         <div className="flex items-center gap-2 min-w-0 pl-1">
                           <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${isDebit ? "bg-emerald-500" : "bg-rose-500"}`} />
                           <div className="min-w-0">
-                            <p className="text-[11px] sm:text-xs text-foreground truncate">{l.LHeadName || "—"}</p>
+                            <p className="text-[11px] sm:text-xs text-foreground truncate flex items-center gap-1.5">
+                              <span className="truncate">{l.LHeadName || "—"}</span>
+                              {kind && (
+                                <span className={`shrink-0 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                  kind === "Investment"
+                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                }`}>
+                                  {kind}
+                                </span>
+                              )}
+                            </p>
                             {l.Narration && (
                               <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{l.Narration}</p>
                             )}

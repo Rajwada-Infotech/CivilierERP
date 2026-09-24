@@ -88,11 +88,22 @@ router.get("/scope-options", authMiddleware, async (req, res) => {
 
     if (level === "room") {
       if (!Number.isFinite(flatId) || !floor) return res.status(400).json({ error: "flatId and floor are required" });
-      const r = await pool.request().input("FlatId", sql.Int, flatId).input("Floor", sql.NVarChar(50), floor).query(`
-        SELECT Id AS id, RoomName AS label
-        FROM dbo.RoomMaster
-        WHERE UnitId = @FlatId AND Floor = @Floor AND IsActive = 1
-        ORDER BY RoomName
+      // Flags rooms that already have a Dependency Chain (one room = one
+      // chain, see POST/PUT's own guard) so the picker can show/disable
+      // them instead of only failing on save. excludeId lets an edit skip
+      // flagging its own current room as "taken".
+      const excludeId = req.query.excludeId ? parseInt(req.query.excludeId, 10) : null;
+      const request = pool.request().input("FlatId", sql.Int, flatId).input("Floor", sql.NVarChar(50), floor);
+      if (excludeId) request.input("ExcludeId", sql.Int, excludeId);
+      const r = await request.query(`
+        SELECT
+          rm.Id AS id, rm.RoomName AS label,
+          dm.Alias AS linkedAlias
+        FROM dbo.RoomMaster rm
+        LEFT JOIN dbo.DependencyMaster dm
+          ON dm.RoomId = rm.Id ${excludeId ? "AND dm.Id <> @ExcludeId" : ""}
+        WHERE rm.UnitId = @FlatId AND rm.Floor = @Floor AND rm.IsActive = 1
+        ORDER BY rm.RoomName
       `);
       return res.json(r.recordset);
     }
@@ -214,6 +225,20 @@ router.post("/", authMiddleware, requirePageRight("dependency-master", "create")
 
   try {
     const pool = getPool();
+
+    // One Room can only ever have one Dependency Chain — a second chain on
+    // the same room would mean two independent, overlapping activity
+    // sequences claiming the same physical space, with no way to tell
+    // which one Work Allocation/Reporting should actually follow.
+    const dupe = await pool.request().input("RoomId", sql.Int, scope.roomId).query(`
+      SELECT TOP 1 Id, Alias FROM dbo.DependencyMaster WHERE RoomId = @RoomId
+    `);
+    if (dupe.recordset.length) {
+      return res.status(409).json({
+        error: `This room already has a linked Dependency Chain ("${dupe.recordset[0].Alias}") — a room can only have one.`,
+      });
+    }
+
     const insertRes = await pool
       .request()
       .input("ProjectId", sql.Int, scope.projectId)
@@ -280,6 +305,18 @@ router.put("/:id", authMiddleware, requirePageRight("dependency-master", "edit")
     const pool = getPool();
     const existing = await pool.request().input("Id", sql.Int, id).query(`SELECT Id FROM dbo.DependencyMaster WHERE Id = @Id`);
     if (!existing.recordset.length) return res.status(404).json({ error: "Dependency record not found" });
+
+    // Same one-chain-per-room rule as POST / — excludes this record itself
+    // so re-saving without actually changing the room doesn't self-conflict.
+    const dupe = await pool.request()
+      .input("RoomId", sql.Int, scope.roomId)
+      .input("Id", sql.Int, id)
+      .query(`SELECT TOP 1 Id, Alias FROM dbo.DependencyMaster WHERE RoomId = @RoomId AND Id <> @Id`);
+    if (dupe.recordset.length) {
+      return res.status(409).json({
+        error: `This room already has a linked Dependency Chain ("${dupe.recordset[0].Alias}") — a room can only have one.`,
+      });
+    }
 
     tx = pool.transaction();
     await tx.begin();

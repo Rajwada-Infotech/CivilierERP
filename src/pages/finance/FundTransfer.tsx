@@ -47,6 +47,8 @@ import { fetchChequeLots, fetchChequeNumbers } from "@/pages/finance/payment/api
 import type { ChequeLot } from "@/pages/finance/payment/types";
 import { formatINR } from "@/utils/formatCurrency";
 import { usePageRights } from "@/hooks/usePageRights";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 import { useAuth } from "@/contexts/AuthContext";
 
 const PAYMENT_MODES: FundTransferMode[] = ["Cash", "Cheque", "Post-Dated Cheque", "NEFT", "UPI", "RTGS", "IMPS", "Card"];
@@ -170,6 +172,27 @@ function LoanLink({ loanId, loanNo, status }: { loanId: number; loanNo: string |
 // Approval Inbox (see MODULE_CONFIG in src/pages/admin/ApprovalInbox.tsx),
 // so this is purely informational: full party/bank breakdown, GL posting
 // confirmation, and a link out to the linked loan if there is one.
+const fmtExportDate = (v: unknown) => (v ? new Date(String(v)).toLocaleDateString("en-IN") : "");
+
+const FT_EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "DocNo" },
+  { header: "Transfer Date", accessor: (r) => fmtExportDate(r.TransferDate) },
+  { header: "Type", accessor: (r) => (r.TransferType === "Inter" ? "Inter-Company" : "Intra-Company") },
+  { header: "Source Company", accessor: "SourceCompanyName" },
+  { header: "Source Bank", accessor: "SourceBankName" },
+  { header: "Destination Company", accessor: "DestinationCompanyName" },
+  { header: "Destination Bank", accessor: "DestinationBankName" },
+  { header: "Amount", accessor: "Amount" },
+  { header: "Mode", accessor: "Mode" },
+  { header: "Cheque No", accessor: "ChequeNo" },
+  { header: "Reference No", accessor: "DigitalRefNumber" },
+  { header: "Linked Loan", accessor: "LinkedLoanNo" },
+  { header: "Status", accessor: "Status" },
+  { header: "Narration", accessor: "Narration" },
+  { header: "Created By", accessor: (r) => r.CreatedByName || r.CreatedBy || "" },
+  { header: "Created At", accessor: (r) => fmtExportDate(r.CreatedAt) },
+];
+
 function DetailRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
     <div className="flex items-start justify-between gap-4 py-2 border-b border-border/60 last:border-0">
@@ -392,6 +415,7 @@ function TransferDetailDialog({
 
             <div>
               <DetailRow label="Transfer Date" value={fmtDate(detail.TransferDate)} />
+              <DetailRow label="Created By" value={detail.CreatedByName || detail.CreatedBy || "—"} />
               <DetailRow label="Amount" value={<span className="font-mono font-semibold">{formatINR(detail.Amount || 0)}</span>} />
               <DetailRow label="Source Company" value={detail.SourceCompanyName || "—"} />
               <DetailRow label="Source Bank" value={detail.SourceBankName || "—"} />
@@ -915,7 +939,8 @@ export default function FundTransfer() {
           </div>
         )}
 
-        <div className="relative mb-4">
+        <div className="flex items-center gap-2 mb-4">
+        <div className="relative flex-1">
           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
             value={search}
@@ -928,6 +953,14 @@ export default function FundTransfer() {
               <X size={12} />
             </button>
           )}
+        </div>
+        <ExportMenu
+          data={filtered as unknown as Record<string, unknown>[]}
+          columns={FT_EXPORT_COLUMNS}
+          title="Fund Transfers"
+          filename="fund-transfers"
+          disabled={filtered.length === 0 || !rights.canExport}
+        />
         </div>
 
         {(statusFilter || typeFilter) && (

@@ -65,7 +65,7 @@ async function getVehicleInOutItemsEnriched(pool, vehicleInOutId) {
     SELECT
       vi.VehicleInOutItemID, vi.POItemId, vi.ReceivedQty AS VehicleQty,
       poi.ItemId, poi.ItemName, poi.ItemCode, poi.UomId, poi.UomName,
-      poi.Rate, poi.TaxPct
+      poi.Rate, poi.TaxPct, poi.CostCenterId
     FROM dbo.VehicleInOutItems vi
     JOIN dbo.PurchaseOrderItems poi ON poi.Id = vi.POItemId
     WHERE vi.VehicleInOutID = @ID

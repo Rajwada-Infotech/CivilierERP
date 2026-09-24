@@ -40,7 +40,13 @@ const {
   getDocumentChainForGRN,
 } = require("../services/poVehicleGrnChain");
 
-router.use(checkPermissionForMethod("Material", "GRN"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Material", "GRN")(req, res, next);
+});
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
@@ -968,7 +974,8 @@ router.get("/:id", async (req, res) => {
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription,
           vio.DocNo AS VehicleInOutDocNo,
-          vio.VehicleNo AS VehicleInOutVehicleNo
+          vio.VehicleNo AS VehicleInOutVehicleNo,
+          COALESCE(cu.name, ds.IssuedBy) AS CreatedBy
         FROM GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
         LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
@@ -976,6 +983,9 @@ router.get("/:id", async (req, res) => {
         LEFT JOIN dbo.enterprise co ON co.id = p.CompanyId
         LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
         LEFT JOIN dbo.VehicleInOut vio ON vio.VehicleInOutID = grn.VehicleInOutID
+        LEFT JOIN dbo.DocNumberSequence ds ON ds.TableName = 'GoodsReceiptNotes'
+                                          AND ds.DocNo = COALESCE(grn.DocNo, grn.GRNNo)
+        LEFT JOIN dbo.Users cu ON LOWER(cu.email) = LOWER(ds.IssuedBy)
         WHERE grn.GRNID = @GRNID
       `);
 
@@ -1826,9 +1836,12 @@ router.put(
 );
 
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
 router.put(
   "/:id/approve",
-  requirePageRight("grn-master", "edit"),
   async (req, res) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid id" });
@@ -1863,7 +1876,6 @@ router.put(
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
 router.put(
   "/:id/reject",
-  requirePageRight("grn-master", "edit"),
   async (req, res) => {
     const id = parseId(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid id" });

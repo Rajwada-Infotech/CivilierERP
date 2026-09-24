@@ -136,6 +136,11 @@ router.get("/item-options", authenticateToken, async (req, res) => {
       WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_UOM'
     `);
     const hasUOM = colCheck.recordset[0].cnt > 0;
+    const ccCheck = await pool.request().query(`
+      SELECT COUNT(1) AS cnt FROM sys.columns
+      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_CostCenterId'
+    `);
+    const hasCC = ccCheck.recordset[0].cnt > 0;
 
     const req2 = pool.request();
     const godownFilter = godownId
@@ -145,6 +150,8 @@ router.get("/item-options", authenticateToken, async (req, res) => {
 
     const result = await req2.query(`
       SELECT img.M_Id, img.M_Name, img.M_Group,
+             ${hasCC ? "img.M_CostCenterId," : "NULL AS M_CostCenterId,"}
+             ${hasCC ? "cc.Name AS CostCenterName," : "NULL AS CostCenterName,"}
              ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END), 0)
            - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END), 0)
              AS AvailableStock,
@@ -167,8 +174,9 @@ router.get("/item-options", authenticateToken, async (req, res) => {
       LEFT JOIN dbo.StockLedger sl
         ON  CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
         ${godownFilter}
+      ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = img.M_CostCenterId" : ""}
       WHERE  (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
-      GROUP  BY img.M_Id, img.M_Name, img.M_Group${hasUOM ? ", img.M_UOM" : ""}
+      GROUP  BY img.M_Id, img.M_Name, img.M_Group${hasUOM ? ", img.M_UOM" : ""}${hasCC ? ", img.M_CostCenterId, cc.Name" : ""}
       ORDER  BY img.M_Name
     `);
     res.json(result.recordset);
@@ -337,8 +345,10 @@ router.get("/:id", authenticateToken, async (req, res) => {
         c.name   AS CompanyName,
         p.name   AS ProjectName,
         fy.FName AS FinYearName,
-        g.GodownName, g.GodownCode
+        g.GodownName, g.GodownCode,
+        cu.name  AS CreatedByName
       FROM dbo.MaterialIssues mi
+      LEFT JOIN dbo.users      cu ON cu.id = mi.CreatedBy
       LEFT JOIN dbo.enterprise c  ON mi.CompanyId = c.id
       LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
       LEFT JOIN dbo.FinYear    fy ON mi.FinYearId = fy.FId
@@ -360,6 +370,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const itemsResult = await itemsReq.query(`
       SELECT
         mii.IssueItemId, mii.ItemId, mii.UOMCode, mii.Quantity, mii.Remarks,
+        mii.CostCenterId, cc.Name AS CostCenterName,
         img.M_Name AS ItemName, img.M_Group AS ItemGroup,
         uom.UOMName, uom.Symbol AS UOMSymbol,
         ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END),0)
@@ -369,12 +380,13 @@ router.get("/:id", authenticateToken, async (req, res) => {
       LEFT JOIN dbo.Item_Master_Group img
         ON CONVERT(NVARCHAR(100), img.M_Id) = mii.ItemId
       LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = mii.UOMCode
+      LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = mii.CostCenterId
       LEFT JOIN dbo.StockLedger sl
         ON CONVERT(NVARCHAR(100), sl.ItemID) = mii.ItemId
         ${godownJoin}
       WHERE mii.IssueId = @id
       GROUP BY mii.IssueItemId, mii.ItemId, mii.UOMCode, mii.Quantity, mii.Remarks,
-               img.M_Name, img.M_Group, uom.UOMName, uom.Symbol
+               mii.CostCenterId, cc.Name, img.M_Name, img.M_Group, uom.UOMName, uom.Symbol
     `);
 
     res.json({ ...headerResult.recordset[0], items: itemsResult.recordset });
@@ -561,9 +573,10 @@ router.post("/", authenticateToken, requirePageRight("material-issues", "create"
           .input("ItemId", sql.NVarChar(100), itemId)
           .input("UOMCode", sql.NVarChar(20), uomCode)
           .input("Quantity", sql.Decimal(18, 2), qty)
-          .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null).query(`
-          INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks)
-          VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks)
+          .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null)
+          .input("CostCenterId", sql.Int, Number.isFinite(parseInt(it.CostCenterId, 10)) ? parseInt(it.CostCenterId, 10) : null).query(`
+          INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks, CostCenterId)
+          VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks, @CostCenterId)
         `);
 
         await tx
@@ -735,9 +748,10 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
           .input("ItemId", sql.NVarChar(100), itemId)
           .input("UOMCode", sql.NVarChar(20), uomCode)
           .input("Quantity", sql.Decimal(18, 2), qty)
-          .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null).query(`
-            INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks)
-            VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks)
+          .input("Remarks", sql.NVarChar(sql.MAX), it.Remarks || null)
+          .input("CostCenterId", sql.Int, Number.isFinite(parseInt(it.CostCenterId, 10)) ? parseInt(it.CostCenterId, 10) : null).query(`
+            INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks, CostCenterId)
+            VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks, @CostCenterId)
           `);
 
         await tx

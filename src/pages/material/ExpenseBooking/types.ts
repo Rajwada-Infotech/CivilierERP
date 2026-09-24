@@ -103,6 +103,7 @@ export interface ExpenseRecord {
    *  financialYear changes on an existing booking; not sent on save. */
   docTypeId?: number | null;
   bookingDate: string;
+  createdByName?: string;
   dueDate: string;
   financialYear: string;
   companyId: number | null;

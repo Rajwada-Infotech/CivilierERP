@@ -456,8 +456,15 @@ router.get("/balance-sheet", async (req, res) => {
     };
 
     let incomeSummaryBalance = 0;
-    let capitalOpening = 0;
-    let capitalFurther = 0;
+    const partnerFunds = {
+      capital: { opening: 0, credits: 0, debits: 0, total: 0, heads: [] },
+      current: { opening: 0, credits: 0, debits: 0, total: 0, heads: [] },
+    };
+    // Per-partner roll-forward (Balance b/f + Capital introduced + Share of
+    // profit/remuneration/interest − Drawings), keyed by the partner's base
+    // code (head code minus the -CAP/-CUR suffix) or, for hand-made heads,
+    // the head name.
+    const partnerRows = new Map();
 
     for (const h of headsRes.recordset) {
       // An OnAccountLedger CREDIT row is the advance itself — paying it
@@ -513,6 +520,56 @@ router.get("/balance-sheet", async (req, res) => {
         continue;
       }
 
+      // Partners' funds (Capital + Current Account + Drawings). Resolved
+      // BEFORE the generic asset/liability section logic, and by head
+      // identity first (Partner Master's LHeadType='P' with a -CAP/-CUR
+      // code), then by the group chain / head name for hand-made heads. The
+      // old group-name walk mis-filed these: "Capital Account & Reserve"
+      // matched /reserve/ and landed in Provisions & Reserves, "Current
+      // Account" fell through to Fixed Liabilities, and a Current Account
+      // head under Assets contributed only its FY drawings movement (its
+      // opening balance vanished, so the sheet could never balance).
+      const chain = chainNames(groupMap, gid);
+      const headCode = String(h.code || "");
+      const isPartnerHead = h.type === "P";
+      const isLiab = root === rootIds.LIABILITIES;
+      let partnerKind = null;
+      if (isPartnerHead && /-CAP$/i.test(headCode)) partnerKind = "capital";
+      else if (isPartnerHead && /-CUR$/i.test(headCode)) partnerKind = "current";
+      else if (isLiab && (RE_DRAWINGS.test(h.name || "") || chainMatches(chain, RE_DRAWINGS))) partnerKind = "current";
+      else if (isLiab && chain.some((n) => /^current account$/i.test(n))) partnerKind = "current";
+      else if (isLiab && chain.some((n) => /capital account/i.test(n))) partnerKind = "capital";
+      else if (isLiab && classifyLiabilitySection(groupMap, gid, rootIds.LIABILITIES) === "partnersCapital") partnerKind = "capital";
+
+      if (partnerKind) {
+        const mv = movementByHeadId.get(Number(h.id)) || {};
+        const dPrior = Number(mv.debitPrior) || 0;
+        const cPrior = Number(mv.creditPrior) || 0;
+        const dCur = Number(mv.debitCurrent) || 0;
+        const cCur = Number(mv.creditCurrent) || 0;
+        const f = partnerFunds[partnerKind];
+        f.opening = Math.round((f.opening + cPrior - dPrior) * 100) / 100;
+        f.credits = Math.round((f.credits + cCur) * 100) / 100;
+        f.debits = Math.round((f.debits + dCur) * 100) / 100;
+        f.total = Math.round((f.total - net) * 100) / 100;
+        f.heads.push({ id: h.id, name: h.name, amount: -net });
+        const pKey = isPartnerHead ? headCode.replace(/-(CAP|CUR)$/i, "") : `n:${String(h.name || "").toLowerCase()}`;
+        if (!partnerRows.has(pKey)) {
+          partnerRows.set(pKey, { key: pKey, name: h.name, opening: 0, capitalIntroduced: 0, credits: 0, drawings: 0, closing: 0 });
+        }
+        const pr = partnerRows.get(pKey);
+        pr.opening += cPrior - dPrior;
+        pr.closing += -net;
+        if (partnerKind === "capital") pr.capitalIntroduced += cCur - dCur;
+        else { pr.credits += cCur; pr.drawings += dCur; }
+        // Drawings drill-down (own note): this FY's debits on the partner's
+        // Current Account / drawings head.
+        if (partnerKind === "current" && dCur > 0.005) {
+          pushHead(sectionBuckets.partnersDrawings, gid, groupName, { id: h.id, name: h.name, amount: dCur });
+        }
+        continue;
+      }
+
       if (root === rootIds.ASSETS) {
         // Asset head: positive (debit) balance is normal. A credit balance
         // on an asset head still reports under Assets, shown as a negative
@@ -521,28 +578,6 @@ router.get("/balance-sheet", async (req, res) => {
         pushHead(sectionBuckets[section], gid, groupName, { id: h.id, name: h.name, amount: net });
       } else if (root === rootIds.LIABILITIES) {
         const section = classifyLiabilitySection(groupMap, gid, rootIds.LIABILITIES);
-
-        if (section === "partnersDrawings") {
-          // "Amounts withdrawn during the period" — current-FY movement
-          // only, not the head's full life-to-date balance.
-          const mv = movementByHeadId.get(Number(h.id));
-          const currentAmt = mv
-            ? Math.round(((Number(mv.debitCurrent) || 0) - (Number(mv.creditCurrent) || 0)) * 100) / 100
-            : net;
-          if (Math.abs(currentAmt) > 0.005) {
-            pushHead(sectionBuckets.partnersDrawings, gid, groupName, { id: h.id, name: h.name, amount: currentAmt });
-          }
-          continue;
-        }
-
-        if (section === "partnersCapital") {
-          const mv = movementByHeadId.get(Number(h.id));
-          if (mv) {
-            capitalOpening = Math.round((capitalOpening + (Number(mv.creditPrior) || 0) - (Number(mv.debitPrior) || 0)) * 100) / 100;
-            capitalFurther = Math.round((capitalFurther + (Number(mv.creditCurrent) || 0) - (Number(mv.debitCurrent) || 0)) * 100) / 100;
-          }
-        }
-
         pushHead(sectionBuckets[section], gid, groupName, { id: h.id, name: h.name, amount: -net });
       }
       // REVENUE/EXPENSES heads never carry a Balance Sheet closing balance in
@@ -568,7 +603,6 @@ router.get("/balance-sheet", async (req, res) => {
     const investments = toRows(sectionBuckets.investments);
     const currentAssets = toRows(sectionBuckets.currentAssets);
     const fictitiousAssets = toRows(sectionBuckets.fictitiousAssets);
-    const capitalHeads = toRows(sectionBuckets.partnersCapital).flatMap((g) => g.heads);
 
     const sumTotal = (rows) => Math.round(rows.reduce((s, g) => s + g.total, 0) * 100) / 100;
     const totalProvisionsReserves = sumTotal(provisionsReserves);
@@ -586,8 +620,24 @@ router.get("/balance-sheet", async (req, res) => {
     // invoices/payments posted in earlier financial years, so it's reported
     // as its own "Reserves & Surplus" liability line instead of being
     // folded into Partners' Capital.
+    const r2 = (n) => Math.round(n * 100) / 100;
+    const partners = Array.from(partnerRows.values())
+      .map((p) => ({
+        key: p.key,
+        name: p.name,
+        opening: r2(p.opening),
+        capitalIntroduced: r2(p.capitalIntroduced),
+        credits: r2(p.credits),
+        drawings: r2(p.drawings),
+        closing: r2(p.closing),
+      }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    const capitalFunds = partnerFunds.capital;
+    const currentFunds = partnerFunds.current;
+    const capitalOpening = capitalFunds.opening;
+    const capitalFurther = Math.round((capitalFunds.credits - capitalFunds.debits) * 100) / 100;
     const partnersCapitalTotal = Math.round(
-      (capitalOpening + capitalFurther + netProfitCurrent - totalDrawings) * 100,
+      (capitalFunds.total + currentFunds.total + netProfitCurrent) * 100,
     ) / 100;
 
     const totalLiabilities = Math.round(
@@ -633,7 +683,24 @@ router.get("/balance-sheet", async (req, res) => {
         netProfitCurrent,
         drawings: totalDrawings,
         total: partnersCapitalTotal,
-        capitalHeads,
+        capitalHeads: capitalFunds.heads,
+        // Full partners' funds roll-forward: Capital A/c (opening + capital
+        // introduced) and Current A/c (opening + credits − drawings), each
+        // with its closing balance and per-partner heads.
+        partners,
+        capitalAccount: {
+          opening: capitalOpening,
+          further: capitalFurther,
+          closing: capitalFunds.total,
+          heads: capitalFunds.heads,
+        },
+        currentAccount: {
+          opening: currentFunds.opening,
+          credits: currentFunds.credits,
+          drawings: currentFunds.debits,
+          closing: currentFunds.total,
+          heads: currentFunds.heads,
+        },
       },
       // Retained Earnings b/f (prior years' net P&L, adjusted for whatever's
       // already been transferred via the Income Summary head) — reported as

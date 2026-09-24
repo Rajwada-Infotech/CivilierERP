@@ -1420,6 +1420,7 @@ export default function GRN() {
           totalAmount,
           gstPct,
           gstAmount: totalAmount * (gstPct / 100),
+          costCenterId: it.CostCenterId != null ? String(it.CostCenterId) : null,
         };
       });
 
@@ -3199,6 +3200,10 @@ export default function GRN() {
                         {
                           label: "Purchase Order",
                           value: viewingGrn.PONumber || "—",
+                        },
+                        {
+                          label: "Created By",
+                          value: viewingGrn.CreatedBy || "—",
                         },
                         {
                           label: "Company",

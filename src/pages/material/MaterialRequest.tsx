@@ -99,6 +99,9 @@ interface CartItem {
   Remarks: string;
   AvailableStock?: number;
   DefaultUOM?: string;
+  // From the selected item's own Item Master tag (M_CostCenterId) — same
+  // auto-fill convention Purchase Order's line items already use.
+  CostCenterId?: string;
 }
 
 interface FormHeader {
@@ -462,6 +465,7 @@ export default function MaterialRequest() {
                 AvailableStock: Number(found?.AvailableStock ?? 0),
                 DefaultUOM: defaultUom,
                 UOMCode: defaultUom,
+                CostCenterId: found?.M_CostCenterId ? String(found.M_CostCenterId) : "",
               }
             : ci,
         ),
@@ -596,6 +600,7 @@ export default function MaterialRequest() {
       Quantity: String(it.Quantity ?? ""),
       Remarks: it.Remarks ?? "",
       AvailableStock: Number(itemMap[it.ItemId]?.AvailableStock ?? 0),
+      CostCenterId: it.CostCenterId != null ? String(it.CostCenterId) : "",
     }));
     setCart(items.length > 0 ? items : [blankCartItem()]);
     setEditingId(record.MRId);
@@ -644,6 +649,7 @@ export default function MaterialRequest() {
         UOMCode: ci.UOMCode,
         Quantity: Number(ci.Quantity),
         Remarks: ci.Remarks || null,
+        CostCenterId: ci.CostCenterId || null,
       })),
     };
     if (editingId != null) {
@@ -1769,6 +1775,7 @@ export default function MaterialRequest() {
                 { label: "Required By", value: fmtDate(viewingRecord.RequiredByDate) },
                 { label: "Company", value: viewingRecord.CompanyName },
                 { label: "Project / Site", value: viewingRecord.ProjectName },
+                { label: "Created By", value: viewingRecord.CreatedBy },
               ] as { label: string; value: any; mono?: boolean }[]).map(({ label, value, mono }) => (
                 <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
                   <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>

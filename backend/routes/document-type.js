@@ -57,9 +57,16 @@ const MODULE_LINKS = {
 };
 
 // ── GET / — list all doc types, optionally filtered by ?module= ───────────────
+// Read-only reference data consumed by every document-creation form (MR, PO,
+// WO, GRN, BOQ, Expense Booking, ...) via fetchDocTypes()/DocNumberPreview —
+// not just the Admin > Document Type Master page. Gating this behind
+// Admin/DocumentType/CanView meant any role without that specific Admin
+// right silently got an empty doc-type list everywhere it's used (the
+// fetch swallows non-OK responses), not just on the admin master page.
+// Matches GET /companies, /projects, /entrytypes below, which were never
+// gated this way — only auth (already applied globally) is required here.
 router.get(
   "/",
-  ...bypassOrCheck("Admin", "DocumentType", "CanView"),
   cache("document-type", 300, { shared: true }),
   async (req, res) => {
     try {

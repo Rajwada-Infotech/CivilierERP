@@ -30,6 +30,7 @@ export interface ReceivedPaymentRecord {
   RPEmiPaying: string | null; // JSON string
   RPStatus: string;
   RPCreatedBy: string | null;
+  CreatedByName?: string | null;
   RPCreatedAt: string;
   RPUpdatedBy: string | null;
   RPUpdatedAt: string | null;
@@ -145,7 +146,10 @@ export async function approveReceivedPayment(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ note: rejectionNote }),
   });
-  if (!res.ok) throw new Error("Approval action failed");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Approval action failed");
+  }
 }
 
 export interface ReceivedPaymentPostingAccount {

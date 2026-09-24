@@ -3,6 +3,8 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { recordGLPosting } = require("../services/approvalService");
+const { postCrmOnAccountToGL } = require("../services/crmLedger");
 
 // ======================
 //  DBA ROUTES - SECURED
@@ -476,6 +478,54 @@ router.get("/gl-posting-failures", async (req, res) => {
     if (String(err.message).includes("Invalid object name")) return res.json([]);
     console.error("Error fetching GL posting failures:", err);
     res.status(500).json({ error: "Failed to fetch GL posting failures" });
+  }
+});
+
+// Which log Modules a retry can actually be dispatched for — deliberately
+// small and explicit rather than guessing at every recordGLPosting() call
+// site's poster function. Add an entry here as each module's retry path
+// gets verified safe (idempotent — every poster already guards against
+// double-posting via hasPosting()).
+const RETRY_POSTERS = {
+  "crm-on-account-payment": postCrmOnAccountToGL,
+};
+
+// POST /gl-posting-failures/:logId/retry — re-run the same poster that
+// failed/skipped the first time. Safe to call repeatedly: every poster in
+// RETRY_POSTERS checks hasPosting() up front and no-ops if it already
+// succeeded, so a retry on an already-fixed record just confirms it.
+router.post("/gl-posting-failures/:logId/retry", async (req, res) => {
+  const logId = parseInt(req.params.logId, 10);
+  if (!Number.isFinite(logId)) return res.status(400).json({ error: "Invalid logId" });
+
+  try {
+    const pool = getPool();
+    const logResult = await pool.request().input("LogId", sql.Int, logId).query(`
+      SELECT LogId, Module, RecordId FROM dbo.GLPostingLog WHERE LogId = @LogId
+    `);
+    const logRow = logResult.recordset[0];
+    if (!logRow) return res.status(404).json({ error: "Log entry not found" });
+
+    const poster = RETRY_POSTERS[logRow.Module];
+    if (!poster) {
+      return res.status(400).json({
+        error: `Retry isn't wired up yet for "${logRow.Module}" — ask engineering to add it to RETRY_POSTERS in backend/routes/dba.js.`,
+      });
+    }
+
+    const actorEmail = req.user?.name || req.user?.email || "dba-retry";
+    let outcome;
+    try {
+      outcome = await poster(pool, logRow.RecordId, actorEmail);
+    } catch (postErr) {
+      outcome = { failed: true, reason: postErr.message };
+    }
+    await recordGLPosting(logRow.Module, logRow.RecordId, outcome, actorEmail);
+
+    res.json({ outcome });
+  } catch (err) {
+    console.error("Error retrying GL posting:", err);
+    res.status(500).json({ error: "Failed to retry GL posting" });
   }
 });
 

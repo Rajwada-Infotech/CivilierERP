@@ -314,7 +314,13 @@ function resolveGrnIds(eb) {
   return primary ? [primary] : [];
 }
 
-router.use(checkPermissionForMethod("Finance", "ExpenseBooking"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Finance", "ExpenseBooking")(req, res, next);
+});
 
 // Helper: Require authenticated user email
 const requireUserEmail = (req, res) => {
@@ -1161,7 +1167,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.EDocNo, eb.EEmiPayment, eb.EInstallmentCount, eb.EEmiAmount,
           eb.EEmiStartDate, eb.EReminder, eb.ERemarks, eb.EStatus,
           eb.ECreatedAt, eb.EUpdatedAt, eb.ECompanyId, eb.EDocTypeId,
-          eb.EFinYear, eb.ECreatedBy, eb.ESourceType, eb.ESourceId,
+          eb.EFinYear, eb.ECreatedBy, ecu.name AS CreatedByName, eb.ESourceType, eb.ESourceId,
           eb.ELinkedGrnIds,
           eb.EName, eb.EBillingTermsData, eb.EDiscountData, eb.EEmiData,
           eb.EBillingTermId, eb.EBillingTermName,
@@ -1217,6 +1223,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           END AS EGrnTotalAmount,
           COUNT(*) OVER() AS _total
         FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.users ecu ON ecu.id = eb.ECreatedBy
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id          = eb.ECompanyId
         CROSS APPLY (SELECT TRY_CAST(eb.EProjectName AS INT) AS _projId) _p
@@ -1616,6 +1623,7 @@ router.get("/:id", async (req, res) => {
     const result = await pool.request().input("Eid", sql.Int, id).query(`
         SELECT eb.*,
                eb.Eid AS id,
+               ecu.name AS CreatedByName,
                CASE
                  WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + ' — ' + t.Description
                  WHEN t.Prefix IS NOT NULL THEN t.Prefix
@@ -1650,6 +1658,7 @@ router.get("/:id", async (req, res) => {
                gl.LHeadCode AS EGLAccountCode,
                gl.LBelongsTo AS EGLAccountGroupId
         FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.users ecu ON ecu.id = eb.ECreatedBy
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
         CROSS APPLY (SELECT TRY_CAST(eb.EProjectName AS INT) AS _projId) _p
@@ -3996,7 +4005,11 @@ router.put("/:id/submit", requirePageRight("expense-booking", "edit"), async (re
   }
 });
 
-router.put("/:id/approve", requirePageRight("expense-booking", "edit"), async (req, res) => {
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid id" });
   try {
@@ -4040,7 +4053,6 @@ router.put("/:id/approve", requirePageRight("expense-booking", "edit"), async (r
 
 router.put(
   "/:id/reject",
-  requirePageRight("expense-booking", "edit"),
   validateBody(expenseRejectSchema),
   async (req, res) => {
     const id = parseId(req.params.id);

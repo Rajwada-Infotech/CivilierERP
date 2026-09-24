@@ -32,7 +32,7 @@ const EMPTY: ScopeSelection = {
  * everything below it (a new Tower invalidates whatever Floor/Flat/Room was
  * chosen under the old one).
  */
-export function useScopeCascade(initial?: Partial<ScopeSelection>) {
+export function useScopeCascade(initial?: Partial<ScopeSelection>, excludeDependencyId?: number | null) {
   const [selection, setSelection] = useState<ScopeSelection>({ ...EMPTY, ...initial });
 
   const projectsQ = useQuery({ queryKey: ["dep-scope-projects"], queryFn: getProjectOptions });
@@ -52,8 +52,8 @@ export function useScopeCascade(initial?: Partial<ScopeSelection>) {
     enabled: !!selection.towerId && !!selection.floor,
   });
   const roomsQ = useQuery({
-    queryKey: ["dep-scope-rooms", selection.flatId, selection.floor],
-    queryFn: () => getRoomOptions(selection.flatId as number, selection.floor as string),
+    queryKey: ["dep-scope-rooms", selection.flatId, selection.floor, excludeDependencyId],
+    queryFn: () => getRoomOptions(selection.flatId as number, selection.floor as string, excludeDependencyId),
     enabled: !!selection.flatId && !!selection.floor,
   });
 

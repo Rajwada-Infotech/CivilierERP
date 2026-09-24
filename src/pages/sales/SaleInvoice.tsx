@@ -796,6 +796,7 @@ function SaleInvoiceHistory({ dummyBank }: { dummyBank: BankRecord | null }) {
                 {[
                   { label: "Doc No", value: viewingInvoice.DocNo, mono: true },
                   { label: "Date", value: fmtDate(viewingInvoice.InvoiceDate) },
+                  { label: "Created By", value: viewingInvoice.CreatedByName || viewingInvoice.CreatedBy },
                   {
                     label: "Sale Order",
                     value: viewingInvoice.SaleOrderDocNo,

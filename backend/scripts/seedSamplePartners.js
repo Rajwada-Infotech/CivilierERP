@@ -65,8 +65,8 @@ async function getPartnerGroups(pool) {
       return r.recordset[0].id;
     };
 
-    const capId = await insertHead(`${code}${CAP_SUFFIX}`, groups.capital.id, `${name} (Capital Account)`);
-    const curId = await insertHead(`${code}${CUR_SUFFIX}`, groups.current.id, `${name} (Current Account)`);
+    const capId = await insertHead(`${code}${CAP_SUFFIX}`, groups.capital.id, `${name} (For Capital)`);
+    const curId = await insertHead(`${code}${CUR_SUFFIX}`, groups.current.id, `${name} (For Withdrawings)`);
     await tx.commit();
     console.log(`Seeded ${code} — ${name} (capitalHeadId=${capId}, currentHeadId=${curId})`);
   }

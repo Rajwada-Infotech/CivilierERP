@@ -9,7 +9,13 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
 
-router.use(checkPermissionForMethod("Material", "StockTransfer"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Material", "StockTransfer")(req, res, next);
+});
 
 function parseItems(raw) {
   if (Array.isArray(raw)) return raw;
@@ -204,7 +210,11 @@ router.put("/:id/submit", requirePageRight("stock-transfers", "edit"), async (re
 });
 
 // ── PUT /:id/approve — posts stock on final approval ──────────────────────────
-router.put("/:id/approve", requirePageRight("stock-transfers", "edit"), async (req, res) => {
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   const pool = getPool();
@@ -314,7 +324,7 @@ router.put("/:id/approve", requirePageRight("stock-transfers", "edit"), async (r
 // ── PUT /:id/reject ────────────────────────────────────────────────────────────
 // Nothing was ever posted to StockLedger before approval, so there is
 // nothing to reverse here.
-router.put("/:id/reject", requirePageRight("stock-transfers", "edit"), async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
   try {

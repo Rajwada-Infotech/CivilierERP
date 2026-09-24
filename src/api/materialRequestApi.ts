@@ -9,6 +9,8 @@ export interface MRLineItem {
   UOMCode: string;
   Quantity: number;
   Remarks?: string;
+  // From the selected item's own Item Master tag (M_CostCenterId).
+  CostCenterId?: string | number | null;
 }
 
 export interface MaterialRequest {

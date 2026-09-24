@@ -587,6 +587,7 @@ export default function IssueReturn() {
                     { label: "Company", value: detailRecord.CompanyName || "—" },
                     { label: "Project / Site", value: detailRecord.ProjectName || "—" },
                     { label: "Reason", value: detailRecord.Reason || "—" },
+                    { label: "Created By", value: detailRecord.CreatedByName || "—" },
                     { label: "Created", value: detailRecord.CreatedAt ? format(new Date(detailRecord.CreatedAt), "dd MMM yyyy") : "—" },
                   ].map(({ label, value, color }: any) => (
                     <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">

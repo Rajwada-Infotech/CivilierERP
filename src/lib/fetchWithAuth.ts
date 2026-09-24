@@ -42,7 +42,7 @@ const MUTATION_ACTION_TYPE: Record<string, "create" | "update" | "delete"> = {
 
 function getStoredUserForLogging(): { id?: string; name?: string; email?: string; role?: string } {
   try {
-    return JSON.parse(localStorage.getItem("user") || "{}");
+    return JSON.parse(sessionStorage.getItem("user") || "{}");
   } catch {
     return {};
   }
@@ -58,17 +58,17 @@ function logMutationActivity(method: string, url: string) {
   const user = getStoredUserForLogging();
   if (!user?.id) return;
 
-  let sessionId = localStorage.getItem("currentSessionId");
+  let sessionId = sessionStorage.getItem("currentSessionId");
   if (!sessionId) {
     sessionId =
       typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    localStorage.setItem("currentSessionId", sessionId);
-    localStorage.setItem("sessionLoginTime", String(Date.now()));
+    sessionStorage.setItem("currentSessionId", sessionId);
+    sessionStorage.setItem("sessionLoginTime", String(Date.now()));
   }
 
-  const token = localStorage.getItem("token");
+  const token = sessionStorage.getItem("token");
   fetch(apiUrl("/api/user-activity"), {
     method: "POST",
     headers: {
@@ -102,7 +102,7 @@ export async function fetchWithAuth(
   const { skipActivityLog, ...fetchOptions } = options;
 
   const token =
-    typeof window !== "undefined" ? localStorage.getItem("token") : null;
+    typeof window !== "undefined" ? sessionStorage.getItem("token") : null;
 
   // Short-circuit immediately if a redirect is already in flight.
   if (
@@ -172,8 +172,8 @@ export async function fetchWithAuth(
         // Non-JSON or empty body — fall back to the generic message.
       }
       toast.error(message);
-      localStorage.removeItem("token");
-      localStorage.removeItem("user");
+      sessionStorage.removeItem("token");
+      sessionStorage.removeItem("user");
       window.location.href = "/login";
     }
     throw new ApiError("Session expired. Please login again.", response.status);

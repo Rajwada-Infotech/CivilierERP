@@ -28,7 +28,13 @@ const {
   recomputeMRFulfillment,
 } = require("../services/materialRequestFulfillment");
 
-router.use(checkPermissionForMethod("Material", "PurchaseOrders"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Material", "PurchaseOrders")(req, res, next);
+});
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -676,6 +682,7 @@ async function getPOSelect(pool) {
     po.Remarks,
     po.Status,
     po.CreatedBy,
+    COALESCE(cu.name, po.CreatedBy) AS CreatedByName,
     po.CreatedAt,
     po.UpdatedAt,
     po.ApprovedBy,
@@ -739,6 +746,7 @@ async function getPOSelect(pool) {
   LEFT JOIN dbo.FinYear           fy ON fy.FId        = po.fy_id
   LEFT JOIN dbo.TypeOfDoc         td ON td.TypeOfDocId = po.DocTypeId
   LEFT JOIN dbo.Quotations        qt ON qt.QuotationId = po.SourceQTId
+  LEFT JOIN dbo.users             cu ON LOWER(cu.email) = LOWER(po.CreatedBy)
   ${hasCC ? "LEFT JOIN dbo.CostCenter cc ON cc.CostCenterId = po.CostCenterId" : ""}
   ${hasPT ? "LEFT JOIN dbo.VendorPaymentTerm pt ON pt.PaymentTermId = po.PaymentTermId" : ""}
 `;
@@ -1500,7 +1508,11 @@ router.put("/:id/submit", requirePageRight("purchase-orders", "edit"), async (re
   }
 });
 
-router.put("/:id/approve", requirePageRight("purchase-orders", "edit"), async (req, res) => {
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   try {
@@ -1524,7 +1536,7 @@ router.put("/:id/approve", requirePageRight("purchase-orders", "edit"), async (r
   }
 });
 
-router.put("/:id/reject", requirePageRight("purchase-orders", "edit"), async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   const id = requireValidId(req, res);
   if (!id) return;
   const { note } = req.body;

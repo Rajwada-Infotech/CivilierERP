@@ -62,7 +62,7 @@ export const isModuleId = (id: string): id is NonNullable<Module> => MODULE_IDS.
 export function rememberModuleForRoute(route: string, moduleId: string) {
   if (moduleFromPath(route) !== "keep" || !isModuleId(moduleId)) return;
   try {
-    localStorage.setItem("activeModule", moduleId);
+    sessionStorage.setItem("activeModule", moduleId);
   } catch {
     /* storage blocked — the sidebar just keeps the previous module */
   }

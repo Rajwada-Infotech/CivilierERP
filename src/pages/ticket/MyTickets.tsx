@@ -707,7 +707,7 @@ function TicketDetailView({
   const uploadFiles = async (files: File[]): Promise<number[]> => {
     if (files.length === 0) return [];
     const token =
-      localStorage.getItem("token") || sessionStorage.getItem("token") || "";
+      sessionStorage.getItem("token") || "";
     const allIds: number[] = [];
     for (const file of files) {
       const formData = new FormData();

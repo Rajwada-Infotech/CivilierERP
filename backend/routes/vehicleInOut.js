@@ -56,7 +56,13 @@ const router = express.Router();
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 
 // ── Permission guard ─────────────────────────────────────────────────────────
-router.use(checkPermissionForMethod("Material", "VehicleInOut"));
+// Approve/Reject are exempt — transition() (approvalService.js) is the real
+// authority there (role whitelist / approval-inbox edit right / named
+// workflow approver), not this blanket per-module permission gate.
+router.use((req, res, next) => {
+  if (req.path.endsWith("/approve") || req.path.endsWith("/reject")) return next();
+  return checkPermissionForMethod("Material", "VehicleInOut")(req, res, next);
+});
 
 // ── Multer — memory storage (files go to DB, not disk) ───────────────────────
 const upload = multer({
@@ -519,10 +525,12 @@ router.get("/:id", async (req, res) => {
         SELECT
           v.*,
           ec.Name AS CompanyName,
-          ep.Name AS ProjectName
+          ep.Name AS ProjectName,
+          COALESCE(cu.name, v.CreatedBy) AS CreatedByName
         FROM dbo.VehicleInOut v
         LEFT JOIN dbo.enterprise ec ON ec.id = v.CompanyID
         LEFT JOIN dbo.enterprise ep ON ep.id = v.ProjectID
+        LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(v.CreatedBy)
         WHERE v.VehicleInOutID = @ID
       `);
 
@@ -688,6 +696,8 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     items, // [{ poItemId, receivedQty }] — quantity received in this lot
   } = req.body;
 
+  if (!poId)
+    return res.status(400).json({ error: "A Purchase Order must be selected before a Vehicle In/Out entry can be created" });
   if (!vehicleNo)
     return res.status(400).json({ error: "vehicleNo is required" });
   if (!challanNo)
@@ -838,6 +848,8 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     items, // [{ poItemId, receivedQty }] — quantity received in this lot
   } = req.body;
 
+  if (!poId)
+    return res.status(400).json({ error: "A Purchase Order must be selected before a Vehicle In/Out entry can be saved" });
   if (!vehicleNo)
     return res.status(400).json({ error: "vehicleNo is required" });
   if (!challanNo)
@@ -973,7 +985,11 @@ router.put("/:id/submit", requirePageRight("vehicle-in-out", "edit"), async (req
 });
 
 // ── PUT /:id/approve ──────────────────────────────────────────────────────────
-router.put("/:id/approve", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
+// No requirePageRight gate — transition() is the real authority (role
+// whitelist / approval-inbox edit right / named workflow approver); the
+// page-right gate used to 403 a named approver before transition() ever
+// ran, same bug fixed for journal-voucher.js.
+router.put("/:id/approve", async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
@@ -1000,7 +1016,7 @@ router.put("/:id/approve", requirePageRight("vehicle-in-out", "edit"), async (re
 });
 
 // ── PUT /:id/reject ───────────────────────────────────────────────────────────
-router.put("/:id/reject", requirePageRight("vehicle-in-out", "edit"), async (req, res) => {
+router.put("/:id/reject", async (req, res) => {
   const email = userEmail(req, res);
   if (!email) return;
 
