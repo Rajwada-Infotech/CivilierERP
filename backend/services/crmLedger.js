@@ -211,6 +211,7 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
 
   const r = await pool.request().input("id", sql.Int, receiptId).query(`
     SELECT r.Id, r.ReceiptNo, r.Amount, r.ReceivedDate, r.PaymentMode, r.OnAccountPaymentId,
+           r.DepositBankId,
            b.Id AS BookingId, b.CompanyId, b.ProjectId, a.CustomerId
     FROM dbo.CrmPaymentReceipt r
     JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
@@ -229,7 +230,14 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
   if (amount <= 0) return { posted: false, reason: `Receipt ${receiptId} amount is ${amount} (<= 0)` };
 
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // Debit the real bank the money was actually deposited into when the
+  // receipt recorded one (DepositBankId is already an AccountHeadMaster.
+  // LHeadId — same convention generalLedger.js's postReceivedPaymentApproval
+  // uses for RPDepositBankId) — only fall back to the generic CRM Collections
+  // proxy for the genuinely unknown case, so this books to a real, BRS-able
+  // bank ledger whenever the data exists instead of a permanent suspense
+  // balance that can never reconcile.
+  const collectionsHeadId = row.DepositBankId || await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
 
   // Pricing is GST-inclusive — split via the same canonical getGstSplit()
   // every other CRM money event (including this receipt's own stored
@@ -277,7 +285,7 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
 
   const r = await pool.request().input("id", sql.Int, onAccountId).query(`
-    SELECT oa.Id, oa.ReceiptNo, oa.Amount, oa.ReceivedDate, oa.PaymentMode,
+    SELECT oa.Id, oa.ReceiptNo, oa.Amount, oa.ReceivedDate, oa.PaymentMode, oa.DepositBankId,
            b.Id AS BookingId, b.CompanyId, b.ProjectId, a.CustomerId, a.ApplicantName
     FROM dbo.CrmOnAccountPayment oa
     JOIN dbo.CrmBooking b ON b.Id = oa.BookingId
@@ -296,7 +304,9 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
   // per-customer audit trail CRM's own on-account/adjustment UI reads) —
   // just no longer where the GL leg itself lands.
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // Real deposit bank when known (see postCrmReceiptToGL's identical note) —
+  // only the generic CRM Collections proxy when it genuinely isn't.
+  const collectionsHeadId = row.DepositBankId || await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
   // Pooled liability head, same one a standalone (non-CRM) Received
   // Payment advance posts to (see generalLedger.js's postReceivedPaymentApproval) —
   // an on-account deposit with nothing allocated yet is a liability
@@ -523,7 +533,7 @@ async function postCrmCancellationRefundToGL(pool, cancellationId, userEmail) {
     return { posted: true, reason: "already posted (idempotent)" };
 
   const r = await pool.request().input("id", sql.Int, cancellationId).query(`
-    SELECT c.Id, c.CancellationNo, c.RefundAmount, c.RefundDate, c.RefundMode,
+    SELECT c.Id, c.CancellationNo, c.RefundAmount, c.RefundDate, c.RefundMode, c.RefundBankId,
            b.CompanyId, b.ProjectId, a.CustomerId
     FROM dbo.CrmCancellation c
     JOIN dbo.CrmBooking b ON b.Id = c.BookingId
@@ -538,7 +548,10 @@ async function postCrmCancellationRefundToGL(pool, cancellationId, userEmail) {
   if (amount <= 0) return { none: true, reason: `Cancellation ${cancellationId} refund amount is ${amount} (<= 0) — nothing to refund` };
 
   const customerHeadId = await ensureCrmCustomerLedgerHead(pool, row.CustomerId, userEmail);
-  const collectionsHeadId = await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
+  // Real bank the refund was actually paid out from when recorded (see
+  // postCrmReceiptToGL's identical note) — only the generic CRM Collections
+  // proxy when it genuinely isn't.
+  const collectionsHeadId = row.RefundBankId || await getGLHeadId(pool, CRM_COLLECTIONS_ACCOUNT);
   const docNo = row.CancellationNo || `CXLRF-${cancellationId}`;
 
   await postVoucher(pool, {

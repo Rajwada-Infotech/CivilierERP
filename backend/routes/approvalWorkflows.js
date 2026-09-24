@@ -233,10 +233,23 @@ router.get("/trail", authMiddleware, async (req, res) => {
     const pool = getPool();
     const recordId = parseInt(id, 10);
 
+    // A CRM Refund's payout voucher is a NewPayment row routed through its
+    // own single-level "CrmRefundPayment" workflow (see approvalService.js),
+    // not the multi-module "NewPayment" bundle every other Payment shares —
+    // this endpoint only receives the table name, not which workflow
+    // actually governed the approve/reject click, so it has to look the
+    // row up itself to show the chain that's actually in effect.
+    let workflowId = entry.workflowId;
+    if (module === "NewPayment") {
+      const srcCheck = await pool.request().input("id", sql.Int, recordId)
+        .query("SELECT SourceCrmRefundId FROM dbo.NewPayment WHERE PPaymentID = @id");
+      if (srcCheck.recordset[0]?.SourceCrmRefundId) workflowId = "CrmRefundPayment";
+    }
+
     // 1. Fetch workflow config (levels + type)
     const wfResult = await pool
       .request()
-      .input("WorkflowId", sql.NVarChar(100), entry.workflowId).query(`
+      .input("WorkflowId", sql.NVarChar(100), workflowId).query(`
         SELECT TOP 1 Id, Name, type, LevelsData AS LevelsJson, active
         FROM dbo.ApprovalWorkflows
         WHERE active = 1

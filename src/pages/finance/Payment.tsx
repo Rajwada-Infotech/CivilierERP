@@ -780,14 +780,30 @@ const Payment: React.FC = () => {
   // back to the full list if the filter would otherwise leave nothing to
   // pick — better an unscoped dropdown than a dead end.
   const filteredBanks = useMemo(() => {
-    if (!form.company) return banks;
-    const selected = normalizeCompanyName(form.company);
-    const matched = banks.filter((b) => {
-      const bankCompany = normalizeCompanyName(b.companyName);
-      return !bankCompany || bankCompany === selected;
-    });
-    return matched.length > 0 ? matched : banks;
-  }, [banks, form.company]);
+    let list = banks;
+    if (form.company) {
+      const selected = normalizeCompanyName(form.company);
+      const matched = banks.filter((b) => {
+        const bankCompany = normalizeCompanyName(b.companyName);
+        return !bankCompany || bankCompany === selected;
+      });
+      list = matched.length > 0 ? matched : banks;
+    }
+    // The bank already saved on this record must always stay selectable,
+    // even if it's tagged to a different company than the one currently
+    // chosen (e.g. loading an existing payment created under a different
+    // company context). Otherwise the <select> silently renders as
+    // unselected — its value matches no option — and Save then fails
+    // trying to write a NULL bank name for a bank that IS actually set,
+    // just invisible to this filtered list. Found live: a CRM refund's
+    // payment voucher (PCompany="ABC TEST COMPANY") had PBankID pointing
+    // at a bank tagged to "Civilier Construction Pvt Ltd".
+    if (form.bankId != null && !list.some((b) => String(b.id) === String(form.bankId))) {
+      const current = banks.find((b) => String(b.id) === String(form.bankId));
+      if (current) list = [current, ...list];
+    }
+    return list;
+  }, [banks, form.company, form.bankId]);
 
   const { data: enterprises = [] } = useQuery<{ id: number; label: string }[]>({
     queryKey: ["company-options-payment-filter"],
@@ -2128,7 +2144,19 @@ const Payment: React.FC = () => {
       bankId: form.bankId ?? null,
       amount: form.amount ?? 0,
       // Extended payment fields (passed through for backend processing)
-      bankName: form.bankName || null,
+      // NewPayment.PBankName is NOT NULL — `form.bankName || null` sent a
+      // hard NULL (violating that constraint) any time bankName happened
+      // to be empty, which is exactly the state a record loads into when
+      // it was created without one (e.g. a CRM refund's spawned voucher —
+      // see crmRefunds.js's finance-approve route) and the bank picker's
+      // own filteredBanks list didn't yet include the already-assigned
+      // bank to re-select it from. Re-derive fresh from whichever bank is
+      // actually selected right now so it's never out of sync with
+      // bankId, and fall back to "" (a real, valid string for this
+      // column) rather than null.
+      bankName: (form.bankId != null
+        ? banks.find((b) => String(b.id) === String(form.bankId))?.label?.split(" — ")[0]
+        : null) || form.bankName || "",
       parentDocNo: form.parentDocNo || null,
       rootExBDocNo: form.rootExBDocNo || null,
       mode: form.mode || null,
@@ -5585,16 +5613,23 @@ const Payment: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 {[
                   { label: "Payment Purpose", value: viewingRec.paymentName },
-                  { label: "Paid To", value: [viewingRec.supplierContact, viewingRec.paidTo].filter(Boolean).join(" · ") || "—" },
+                  {
+                    label: "Paid To",
+                    // supplierContact legitimately equals paidTo for a CRM
+                    // customer's auto-created ledger head (no separate
+                    // contact exists for a flat buyer — see
+                    // ensureCrmCustomerLedgerHead in crmLedger.js, which
+                    // defaults LHeadContactPerson to the customer's own
+                    // name). Only show it as a second segment when it's
+                    // actually a different value, not just repeat the name.
+                    value: [viewingRec.paidTo, viewingRec.supplierContact !== viewingRec.paidTo ? viewingRec.supplierContact : null]
+                      .filter(Boolean).join(" · ") || "—",
+                  },
                   { label: "Amount", value: formatINR(viewingRec.amount ?? 0) },
                   { label: "Date", value: viewingRec.date || "—" },
                   { label: "Mode", value: viewingRec.mode || "—" },
                   { label: "Company", value: viewingRec.company || "—" },
                   { label: "Project", value: viewingRec.project || "—" },
-                  {
-                    label: "Project Site",
-                    value: viewingRec.projectSite || "—",
-                  },
                   {
                     label: "Expense Ref",
                     value: viewingRec.expenseRef || viewingRec.jvNo || "—",

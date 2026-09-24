@@ -276,7 +276,37 @@ function buildInboxQueries(module) {
           ''                                   AS RejectionNote,
           CAST(NULL AS DATETIME2)              AS LastModified
         FROM dbo.NewPayment
-        WHERE Status = 'Pending'
+        WHERE Status = 'Pending' AND SourceCrmRefundId IS NULL
+      `);
+    }
+
+    // A CRM Refund's payout voucher is the same dbo.NewPayment row shape as
+    // any other payment, but runs its own single-level workflow ("crm-refund-
+    // payment" — see approvalService.js) instead of the multi-module Payments
+    // bundle. Split into its own query block (same table, own Module tag) so
+    // the level/role/visibility computation below resolves the workflow that
+    // actually governs it — same pattern as crm-refunds vs crm-refunds-finance.
+    if (!module || module === "crm-refund-payment") {
+      queries.push(`
+        SELECT
+          'crm-refund-payment'                 AS Module,
+          'CRM Refund Payment'                 AS ModuleLabel,
+          CAST(PPaymentID AS NVARCHAR)         AS RecordId,
+          ISNULL(DocNo, PPaymentName)          AS Reference,
+          PDate                                AS RecordDate,
+          ISNULL(Status, 'Draft')              AS Status,
+          CAST(NULL AS NVARCHAR)               AS ContractorName,
+          CAST(NULL AS NVARCHAR)               AS SupplierName,
+          PAmount                              AS Amount,
+          ${NULL_EXTRA}
+          CAST(PCreatedBy AS NVARCHAR(255))    AS CreatedBy,
+          ISNULL(CAST(PApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
+          ''                                   AS ApprovedAt,
+          ''                                   AS RejectedBy,
+          ''                                   AS RejectionNote,
+          CAST(NULL AS DATETIME2)              AS LastModified
+        FROM dbo.NewPayment
+        WHERE Status = 'Pending' AND SourceCrmRefundId IS NOT NULL
       `);
     }
 
