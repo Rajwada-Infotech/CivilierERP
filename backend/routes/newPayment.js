@@ -1093,6 +1093,18 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const wasApproved = beforeSnapshot?.Status === "Approved";
     const wasRejected = beforeSnapshot?.Status === "Rejected";
 
+    // Editing an already-Approved payment must go back through approval —
+    // this UPDATE never touched Status before, so an edited-Approved
+    // payment silently stayed Approved with no re-approval and no GL
+    // reversal. Mirrors journalVoucher.js's wasApproved handling. Two
+    // possible SourceTypes ("NewPayment" auto-post, "PaymentPosting"
+    // manual) — reverse both, only one will ever actually have rows.
+    if (wasApproved) {
+      const { reversePostingBySource } = require("../services/generalLedger");
+      await reversePostingBySource(pool, "NewPayment", id);
+      await reversePostingBySource(pool, "PaymentPosting", id);
+    }
+
     // A cancelled payment's GL posting was already reversed and the invoice
     // recomputed on that assumption (see routes/chequeCancellation.js) —
     // editing it back to life (e.g. changing PAmount) would silently
@@ -1214,6 +1226,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("TDSPercentage", sql.Decimal(5, 2), tdsSnapshotPut.tdsPercentage)
       .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshotPut.tdsAmount).query(`
         UPDATE dbo.NewPayment SET
+          ${wasApproved ? "Status               = 'Pending'," : ""}
           PPaymentName         = @PPaymentName,
           PRemarks             = @PRemarks,
           PMode                = @PMode,
@@ -1297,7 +1310,12 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     }
 
     res.json({
-      message: resubmitted ? "Payment updated and re-submitted for approval" : "Payment updated successfully",
+      message: wasApproved
+        ? "Payment updated — previous GL posting reversed, sent back for approval"
+        : resubmitted
+          ? "Payment updated and re-submitted for approval"
+          : "Payment updated successfully",
+      reopenedForApproval: wasApproved,
       resubmitted,
     });
   } catch (err) {

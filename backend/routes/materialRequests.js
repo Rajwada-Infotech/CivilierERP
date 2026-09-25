@@ -999,10 +999,12 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
         .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
         // The edit form never actually sends Status back (it only edits
         // header/item fields), so this must preserve whatever status the
-        // record already has via COALESCE rather than overwrite it — an
-        // unconditional overwrite would silently revert an Approved
-        // request to Draft on every post-approval edit.
-        .input("Status", sql.NVarChar(20), Status || null)
+        // record already has via COALESCE rather than overwrite it — EXCEPT
+        // an edit to an already-Approved request, which must go back
+        // through approval instead of silently staying Approved with the
+        // new numbers un-reviewed. Mirrors journalVoucher.js's wasApproved
+        // handling.
+        .input("Status", sql.NVarChar(20), wasApproved ? "Pending" : Status || null)
         .input("UpdatedBy", sql.NVarChar(200), user).query(`
           UPDATE dbo.MaterialRequests
           SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
@@ -1095,9 +1097,12 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     }
 
     res.json({
-      message: resubmitted
-        ? "Material request updated and re-submitted for approval"
-        : "Material request updated",
+      message: wasApproved
+        ? "Material request updated — sent back for approval"
+        : resubmitted
+          ? "Material request updated and re-submitted for approval"
+          : "Material request updated",
+      reopenedForApproval: wasApproved,
       resubmitted,
     });
   } catch (err) {
