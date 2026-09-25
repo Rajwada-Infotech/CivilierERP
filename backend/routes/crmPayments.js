@@ -714,7 +714,7 @@ class ReceiptError extends Error {
 // must already be Paid or Waived first (always true for milestone #1, the
 // only one the auto-booking caller ever targets, since it has no earlier
 // milestone to check against).
-// DepositBankId is always optional — callers pass it when known, omit when not.
+// No deposit bank from CRM — Accounts sets it on the Received Payment before approval.
 async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, actorEmail, _opts = {}) {
   const amount = parseFloat(data.Amount);
   if (!amount || amount <= 0) throw new ReceiptError("Amount must be greater than 0");
@@ -736,8 +736,10 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
   const activeErr = await requireActiveBooking(pool, targetRow.BookingId);
   if (activeErr) throw new ReceiptError(activeErr);
 
-  // DepositBankId is optional — staff may not always know which bank account
-  // received the cheque/cash at the time of entry.
+  // No deposit bank at CRM entry — the CRM user records the cheque/cash
+  // received; Accounts decides which bank it goes into, on the Pending
+  // Received Payment (receivedPayment.js PATCH /:id/deposit-bank), before
+  // approval. Any DepositBankId sent here is deliberately ignored.
 
   // Real settlement only happens via the automatic full-booking sweep, so
   // Milestone 1 can never be physically Paid until every later milestone's
@@ -801,8 +803,8 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
       RPCheckNumber: data.PaymentMode === "Cheque" ? (data.TransactionRef || null) : null,
       RPChequeDate: data.ChequeDate || null,
       RPRemarks: data.Notes || `CRM — ${targetRow.BookingNo} / ${targetRow.MilestoneName}`,
-      RPDepositBankId: data.DepositBankId != null ? data.DepositBankId : null,
-      RPDepositBankName: data.DepositBankName || null,
+      RPDepositBankId: null, // set by Accounts before approval (see above)
+      RPDepositBankName: null,
       CrmMilestoneId: milestoneId,
       CrmBookingId: targetRow.BookingId,
       CrmApplicationId: targetRow.ApplicationId,
@@ -1222,15 +1224,6 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
     // carries instead, applied to the milestone only once approved.
     let paymentSubmission = null;
     if (paidRaw != null) {
-      // Required at this staff-facing entry point specifically (not inside
-      // createReceiptForMilestone itself, which the automatic booking-
-      // creation caller also uses with no bank selection available) — a
-      // manually recorded payment with no bank chosen posts to the generic
-      // "CRM Collections A/c" proxy instead of a real, BRS-reconcilable
-      // bank ledger (crmLedger.js's postCrmReceiptToGL).
-      if (b.DepositBankId == null || b.DepositBankId === "") {
-        return res.status(400).json({ error: "Deposit Bank is required to record a payment" });
-      }
       const actorEmail = req.user?.email || req.user?.name || null;
       paymentSubmission = await createReceiptForMilestone(pool, id, {
         Amount: paidRaw,
@@ -1485,14 +1478,6 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
     const b = req.body;
     const amount = parseFloat(b.Amount);
     if (!amount || amount <= 0) return res.status(400).json({ error: "Amount must be greater than 0" });
-    // Required — an on-account deposit with no bank chosen posts to the
-    // generic "CRM Collections A/c" proxy instead of a real, BRS-
-    // reconcilable bank ledger (crmLedger.js's postCrmOnAccountToGL). This
-    // route has no automated caller (unlike createReceiptForMilestone), so
-    // there's no legitimate case for omitting it.
-    if (b.DepositBankId == null || b.DepositBankId === "") {
-      return res.status(400).json({ error: "Deposit Bank is required to record an on-account deposit" });
-    }
 
     const activeErr = await requireActiveBooking(pool, bid);
     if (activeErr) return res.status(400).json({ error: activeErr });
@@ -1540,8 +1525,10 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
         RPAmount: amount,
         RPTransactionID: b.TransactionRef || null,
         RPRemarks: b.Notes || `CRM on-account deposit — ${booking.BookingNo}`,
-        RPDepositBankId: b.DepositBankId != null ? b.DepositBankId : null,
-        RPDepositBankName: b.DepositBankName || null,
+        // No deposit bank from CRM — Accounts sets it on the Received
+        // Payment before approval (receivedPayment.js PATCH /:id/deposit-bank).
+        RPDepositBankId: null,
+        RPDepositBankName: null,
         CrmBookingId: bid,
         CrmApplicationId: booking.ApplicationId,
       }, actorEmail || String(actorId(req)));

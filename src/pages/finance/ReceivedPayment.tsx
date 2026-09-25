@@ -89,6 +89,7 @@ import { printStatusLabel } from "@/utils/printStatus";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { usePageRights } from "@/hooks/usePageRights";
+import { DepositBankAssignPanel } from "./DepositBankAssignPanel";
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
@@ -147,6 +148,9 @@ export type ReceivedPayment = {
   remarks?: string;
   status: "Draft" | "Pending" | "Approved" | "Rejected";
   createdAt: string;
+  // set when this payment came from CRM (milestone / on-account / token) —
+  // Accounts assigns its deposit bank here before approval
+  crmBookingId?: number;
 };
 
 interface CustomerOption {
@@ -184,6 +188,7 @@ function mapReceivedPaymentRow(r: ReceivedPaymentRecord): ReceivedPayment {
     remarks: r.RPRemarks ?? undefined,
     status: (r.RPStatus as ReceivedPayment["status"]) || "Draft",
     createdAt: r.RPCreatedAt,
+    crmBookingId: (r as any).CrmBookingId ?? undefined,
   };
 }
 
@@ -1316,6 +1321,9 @@ export default function ReceivedPaymentPage() {
                         </td>
                         <td className="px-4 py-3">
                           <StatusBadge status={p.status} />
+                          {p.status === "Pending" && p.crmBookingId != null && !p.depositBankId && (
+                            <span className="ml-1 inline-block text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded" title="CRM payment — Accounts must assign the deposit bank before approval">Bank pending</span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1">
@@ -1376,6 +1384,9 @@ export default function ReceivedPaymentPage() {
                           +{fmt(p.amount)}
                         </p>
                         <StatusBadge status={p.status} />
+                        {p.status === "Pending" && p.crmBookingId != null && !p.depositBankId && (
+                          <span className="ml-1 inline-block text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded" title="CRM payment — Accounts must assign the deposit bank before approval">Bank pending</span>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center justify-between">
@@ -2285,6 +2296,26 @@ export default function ReceivedPaymentPage() {
               ))}
             </div>
 
+            {/* CRM payment: Accounts assigns the deposit bank, then final approval */}
+            {viewingPayment.status === "Pending" && viewingPayment.crmBookingId != null && (
+              <DepositBankAssignPanel
+                paymentId={Number(viewingPayment.id)}
+                currentBankId={viewingPayment.depositBankId}
+                currentBankName={viewingPayment.depositBankName}
+                banks={(() => {
+                  const company = normalizeCompanyName(viewingPayment.companyName);
+                  const mine = banks.filter((b) => { const c = normalizeCompanyName(b.BCompanyName); return !c || c === company; });
+                  return (mine.length > 0 ? mine : banks).filter((b) => b.BStatus !== false) as any;
+                })()}
+                canEdit={rights.canEdit}
+                onUpdated={(bank) => {
+                  setViewingPayment((v) => v ? { ...v, depositBankId: bank.id, depositBankName: bank.name } : v);
+                  loadPayments(currentPage);
+                }}
+                onDecided={() => { setViewingPayment(null); loadPayments(currentPage); }}
+              />
+            )}
+
             {/* Remarks */}
             {viewingPayment.remarks && (
               <div className="px-5 pb-3">
@@ -2383,7 +2414,7 @@ export default function ReceivedPaymentPage() {
               {viewingPayment.status === "Pending" && (
                 <span className="inline-flex items-center gap-1.5 text-[11px] text-amber-600 font-heading font-medium">
                   <Clock size={12} className="text-amber-500 animate-pulse" />
-                  Awaiting admin approval
+                  {viewingPayment.crmBookingId != null && !viewingPayment.depositBankId ? "Awaiting deposit bank (Accounts)" : "Awaiting admin approval"}
                 </span>
               )}
               {viewingPayment.status === "Draft" && rights.canEdit && (

@@ -5,6 +5,7 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const { getNextDocNumber } = require("../services/docNumber");
+const { maintenanceEligibleExists } = require("../services/maintenanceEligibility");
 
 const LIST_SELECT = `
   SELECT
@@ -152,11 +153,13 @@ router.post("/", requirePageRight("maintenance-bills", "create"), async (req, re
   const pool = getPool();
 
   try {
+    // A maintenance bill can only be raised on a genuinely handed-over unit
+    // — see services/maintenanceEligibility.js.
     const booking = await pool
       .request()
       .input("Id", sql.Int, bookingId)
-      .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE Id = @Id AND WorkflowStage = 'Confirmed' AND IsActive = 1");
-    if (!booking.recordset.length) return res.status(404).json({ error: "Confirmed booking not found" });
+      .query(`SELECT TOP 1 b.Id FROM dbo.CrmBooking b WHERE b.Id = @Id AND b.IsActive = 1 AND ${maintenanceEligibleExists("b")}`);
+    if (!booking.recordset.length) return res.status(404).json({ error: "This customer isn't eligible for Maintenance yet — the unit hasn't been handed over" });
 
     const { items, subtotal, totalTax, grandTotal } = await resolveBillItems(pool, chargeHeadIds);
     const billNo = await getNextDocNumber(pool, "MAINTBILL", "MB");
