@@ -4,6 +4,7 @@ import { useTheme } from "@/contexts/ThemeContext";
 import { Building2, FolderKanban, CalendarDays, Users, Search, X, ChevronDown } from "lucide-react";
 import type { BookingFilters } from "../types";
 import { PARTY_TYPE_LABELS } from "../api";
+import { projectBelongsToCompany, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 
 // Typeable, scrollable combobox for the Vendor filter (suppliers,
 // contractors, brokers — grouped by category) — a plain native <select>
@@ -186,7 +187,10 @@ export function FilterBar({
     ? projectOptions.filter(
         (p) =>
           p.belongs_to === selectedCompanyId ||
-          p.company_id === selectedCompanyId,
+          p.company_id === selectedCompanyId ||
+          // Also offered under any company the project is TAGGED to (Project
+          // Master's multi-company tagging), not just its owning company.
+          projectBelongsToCompany(p as ProjectCompanyLike, selectedCompanyId),
       )
     : projectOptions;
   const projects = filteredProjectOptions.map((o) => o.label);

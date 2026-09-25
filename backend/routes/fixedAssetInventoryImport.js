@@ -183,15 +183,16 @@ router.post("/", requirePageRight("fixed-asset-inventory-import", "create"), asy
         .input("SourceId",          sql.Int, importId)
         .input("SourceItemId",      sql.NVarChar(100), itemIdVal)
         .input("GodownId",          sql.Int, godownIdVal)
+        .input("FinYear",           sql.NVarChar(20), finYearForDoc || null)
         .input("CreatedBy",         sql.NVarChar(200), email)
         .query(`
           INSERT INTO dbo.FixedAssetRecord
-            (DocDate, CompanyId, ProjectId, AssetName, AssetCategory,
+            (DocDate, CompanyId, ProjectId, FinYear, AssetName, AssetCategory,
              PurchaseDate, PurchaseInvoiceRef, PurchaseCost, Quantity,
              AssetStatus, Remarks, SourceType, SourceId, SourceItemId, GodownID, CreatedBy)
           OUTPUT INSERTED.AssetId
           VALUES
-            (@DocDate, @CompanyId, @ProjectId, @AssetName, @AssetCategory,
+            (@DocDate, @CompanyId, @ProjectId, @FinYear, @AssetName, @AssetCategory,
              @PurchaseDate, @PurchaseInvoiceRef, @PurchaseCost, @Quantity,
              @AssetStatus, @Remarks, @SourceType, @SourceId, @SourceItemId, @GodownId, @CreatedBy)
         `);

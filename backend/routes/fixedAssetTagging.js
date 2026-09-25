@@ -9,6 +9,7 @@ const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
 const { lockNextDocNumber, backPatchRecordId, resolveDocTypeId } = require("../utils/docNumberLock");
 const { generateFAItemCodes } = require("../services/faItemCodeGenerator");
+const { listUntaggedBatches } = require("../services/fixedAssetAutoAlloc");
 
 router.use(authenticateToken);
 
@@ -79,6 +80,51 @@ router.get("/eligible-items", requirePageRight("fixed-asset-tagging", "view"), a
     res.json(result.recordset);
   } catch (err) {
     console.error("[fixedAssetTagging] GET /eligible-items:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /pending-batches — received Fixed Asset stock (GRN / Inventory Import)
+// that has no tags yet, and why (e.g. its project has no ID Template) ─────────
+router.get("/pending-batches", requirePageRight("fixed-asset-tagging", "view"), async (req, res) => {
+  try {
+    res.json(await listUntaggedBatches(getPool()));
+  } catch (err) {
+    console.error("[fixedAssetTagging] GET /pending-batches:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE /pending-batches/:assetId — removes an untagged received-stock row
+// from FA Inventory (hard delete). Only for GRN batches nobody has tagged yet;
+// the GRN itself and its stock receipt are not touched. Inventory Import
+// batches are reversed from Inventory Import instead. ─────────────────────────
+router.delete("/pending-batches/:assetId", requirePageRight("fixed-asset-tagging", "delete"), async (req, res) => {
+  const assetId = toInt(req.params.assetId);
+  if (!assetId) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      const r = await tx.request().input("AssetId", sql.Int, assetId).query(`
+        SELECT AssetId, SourceType, AssetStatus,
+               (SELECT COUNT(*) FROM dbo.FixedAssetTagging t WHERE t.AssetId = fa.AssetId) AS TagCount
+        FROM dbo.FixedAssetRecord fa WITH (UPDLOCK, HOLDLOCK)
+        WHERE fa.AssetId = @AssetId AND fa.AssetCode IS NULL AND fa.Status <> 'Deleted'
+      `);
+      const b = r.recordset[0];
+      if (!b) { await tx.rollback(); return res.status(404).json({ error: "Not found" }); }
+      if (b.SourceType !== "GRN") { await tx.rollback(); return res.status(409).json({ error: "This stock came from Inventory Import — reverse it from Inventory Import instead." }); }
+      if (b.TagCount > 0 || b.AssetStatus !== "Pending") { await tx.rollback(); return res.status(409).json({ error: "This stock already has FA Item Codes — delete those tagging entries instead." }); }
+      await tx.request().input("AssetId", sql.Int, assetId).query(`DELETE FROM dbo.FixedAssetRecord WHERE AssetId = @AssetId`);
+      await tx.commit();
+    } catch (e) { await tx.rollback(); throw e; }
+    await bumpCacheVersion("fixed-assets");
+    await bumpCacheVersion("fixed-asset-tagging");
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[fixedAssetTagging] DELETE /pending-batches/:assetId:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

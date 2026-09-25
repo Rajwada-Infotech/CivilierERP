@@ -308,6 +308,7 @@ const ALL_ROUTES = [
   { path: "/api/engineering/dpr", file: "./routes/dpr" },
   { path: "/api/godowns", file: "./routes/godowns" },
   { path: "/api/stock-transfers", file: "./routes/stockTransfers" },
+  { path: "/api/stock-updates", file: "./routes/stockUpdates" },
   { path: "/api/inter-company-transfer", file: "./routes/interCompanyTransfer" },
   { path: "/api/sale-orders", file: "./routes/saleOrders" },
   { path: "/api/widget-catalog", file: "./routes/widgetCatalogAdmin" },
@@ -518,6 +519,11 @@ async function createApp() {
   // "New: X just launched" badge on the Login page — public/pre-auth for
   // the same reason as app-version above.
   app.use("/api/feature-announcement", require("./routes/featureAnnouncement"));
+  // APK Manager. Registered here, before the blanket staff auth wall, because
+  // GET /latest is called by the mobile apps on launch (possibly before login)
+  // to check for an update. Every other route in the file carries its own
+  // authenticateToken + requirePageRight, so publishing/listing stays gated.
+  app.use("/api/app-releases", require("./routes/appReleases"));
   // Customer portal manages its own auth entirely (public /login using the
   // separate CrmCustomerPortalUser table + JWT, then portalAuth for
   // everything past that) — same reason /api/users is registered here

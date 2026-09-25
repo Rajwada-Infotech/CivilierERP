@@ -134,6 +134,7 @@ const ROLE_PRESETS: Record<
       "material-issues",
       "stock-ledger",
       "stock-transfers",
+      "stock-update",
       "inventory-master",
       "item-master",
       "item-group",

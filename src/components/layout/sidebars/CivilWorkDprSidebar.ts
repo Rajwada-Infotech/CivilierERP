@@ -1,4 +1,4 @@
-import { Chart2, Hierarchy, Profile2User, TaskSquare, DocumentText } from "iconsax-react";
+import { Chart2, Hierarchy, Profile2User, TaskSquare, DocumentText, ShieldTick } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Room Composition, Room Categories and Room Master are reachable from the
@@ -26,6 +26,12 @@ export const civilWorkDprNavItems: NavItem[] = [
     icon: DocumentText,
     path: "/civilworkdpr/activity-reporting",
     pageKey: "civilworkdpr-activity-reporting",
+  },
+  {
+    label: "Quality Check",
+    icon: ShieldTick,
+    path: "/civilworkdpr/quality-check",
+    pageKey: "civilworkdpr-quality-check",
   },
   {
     label: "Dependency",
