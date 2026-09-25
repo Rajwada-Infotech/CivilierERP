@@ -1,4 +1,5 @@
 import React from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { createPortal } from "react-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -410,11 +411,12 @@ const DebitNoteMaster: React.FC = () => {
     ? companyData.map((o: any) => ({ id: o.id, label: o.label ?? o.name ?? "" })).filter((o) => o.label)
     : [];
 
-  const PROJECT_OPTIONS: { id: number; label: string; companyId: number | null }[] = Array.isArray(projectData)
+  const PROJECT_OPTIONS: { id: number; label: string; companyId: number | null; companyIds: string[] }[] = Array.isArray(projectData)
     ? projectData.map((o: any) => ({
         id: o.id,
         label: o.label ?? o.name ?? "",
         companyId: o.company_id != null ? Number(o.company_id) : null,
+        companyIds: projectCompanyIds(o),
       })).filter((o) => o.label)
     : [];
 
@@ -562,7 +564,7 @@ const DebitNoteMaster: React.FC = () => {
       optionsProvider: (_data, _currentId, form) => {
         const companyOpt = COMPANY_OPTIONS.find((c) => c.label === (form?.company as string));
         const list = companyOpt
-          ? PROJECT_OPTIONS.filter((p) => p.companyId == null || p.companyId === companyOpt.id)
+          ? PROJECT_OPTIONS.filter((p) => p.companyId == null || p.companyIds.includes(String(companyOpt.id)))
           : PROJECT_OPTIONS;
         return list.map((p) => ({ value: p.label, label: p.label }));
       },
@@ -728,7 +730,7 @@ const DebitNoteMaster: React.FC = () => {
           if (fieldName === "company") {
             const companyOpt = COMPANY_OPTIONS.find((c) => c.label === (form.company as string));
             const projectOpt = PROJECT_OPTIONS.find((p) => p.label === (form.project as string));
-            if (companyOpt && projectOpt && projectOpt.companyId != null && projectOpt.companyId !== companyOpt.id) {
+            if (companyOpt && projectOpt && projectOpt.companyId != null && !projectOpt.companyIds.includes(String(companyOpt.id))) {
               return { ...form, project: "" };
             }
           }

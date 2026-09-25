@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -1245,6 +1246,7 @@ export default function StockTransfer() {
     id: number;
     label: string;
     company_id: number | null;
+    tagged_company_ids?: string | null;
   }[] = projectsData ?? [];
 
   const companyGodowns = useMemo(() => {
@@ -1258,18 +1260,18 @@ export default function StockTransfer() {
   // The dedicated godown auto-created for the selected project (if any).
   const projectGodown = useMemo(() => {
     if (!filterProjectId) return null;
+    // A project tagged to this company but owned by another has its godown
+    // under the owning company, so fall back to matching on the project alone.
     return (
-      companyGodowns.find(
-        (g) => String(g.ProjectID ?? "") === filterProjectId,
-      ) ?? null
+      companyGodowns.find((g) => String(g.ProjectID ?? "") === filterProjectId) ??
+      allGodowns.find((g) => String(g.ProjectID ?? "") === filterProjectId) ??
+      null
     );
   }, [companyGodowns, filterProjectId]);
 
   const projectOptions = useMemo(() => {
     if (!filterCompanyId) return allProjects;
-    return allProjects.filter(
-      (p) => String(p.company_id ?? "") === filterCompanyId,
-    );
+    return allProjects.filter((p) => projectBelongsToCompany(p, filterCompanyId));
   }, [allProjects, filterCompanyId]);
 
   // Auto-fill the source godown with the project's own godown once one is selected.
@@ -1284,7 +1286,7 @@ export default function StockTransfer() {
   // pattern as the sender's own Company/Project filters above.
   const toProjectOptions = useMemo(() => {
     if (!toCompanyId) return [];
-    return allProjects.filter((p) => String(p.company_id ?? "") === toCompanyId);
+    return allProjects.filter((p) => projectBelongsToCompany(p, toCompanyId));
   }, [allProjects, toCompanyId]);
 
   const { data: fromStockData, isLoading: isLoadingStock } = useQuery({

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -114,6 +115,7 @@ interface Project {
   label?: string;
   name?: string;
   companyId?: number | null;
+  companyIds?: string[];
 }
 interface DocType {
   id: number;
@@ -1295,6 +1297,7 @@ const FormModal: React.FC<FormModalProps> = ({
     ? projects.filter(
         (p) =>
           p.companyId == null || // show projects with no company link always
+          (p.companyIds ?? []).includes(form.CompanyId) ||
           String(p.companyId) === form.CompanyId,
       )
     : projects;
@@ -2204,6 +2207,7 @@ export default function BOQ() {
               : item.belongs_to != null
                 ? Number(item.belongs_to)
                 : null,
+          companyIds: projectCompanyIds(item),
         })),
       );
 

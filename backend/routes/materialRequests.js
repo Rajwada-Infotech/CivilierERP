@@ -138,7 +138,9 @@ router.get("/projects", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT id, name, short_name, company_id
+      SELECT id, name, short_name, company_id,
+             (SELECT STRING_AGG(CAST(pc.CompanyId AS NVARCHAR(20)), ',')
+                FROM dbo.ProjectCompanies pc WHERE pc.ProjectId = enterprise.id) AS tagged_company_ids
       FROM   dbo.enterprise
       WHERE  business_type = 'P' AND (discontinue = 0 OR discontinue IS NULL)
       ORDER  BY name

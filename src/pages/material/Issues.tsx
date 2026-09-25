@@ -1,4 +1,5 @@
 import { generateUUID } from "../../utils/cryptoPolyfill";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { createPortal } from "react-dom";
@@ -370,7 +371,7 @@ export default function Issues() {
   const filteredProjects = useMemo(() => {
     if (!header.companyId) return projects as any[];
     const cid = Number(header.companyId);
-    return (projects as any[]).filter((p) => Number(p.company_id) === cid);
+    return (projects as any[]).filter((p) => projectBelongsToCompany(p, cid));
   }, [projects, header.companyId]);
 
   // Godown is only opened once a Company AND a Project are both selected,

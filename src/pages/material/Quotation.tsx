@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useSearchParams } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -167,7 +168,7 @@ export default function Quotation() {
   });
 
   const filteredProjects = (projects as any[]).filter(
-    (p) => !header.companyId || String(p.company_id ?? p.enterprise_id) === String(header.companyId) || !p.company_id,
+    (p) => !header.companyId || projectBelongsToCompany(p, header.companyId) || String(p.enterprise_id) === String(header.companyId) || !p.company_id,
   );
 
   const { data: finYears = [] } = useQuery({

@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PackagePlus, Plus, Trash2, Eye, Loader2 } from "lucide-react";
@@ -69,7 +70,7 @@ export default function StockUpdate() {
   });
 
   const companyProjects = useMemo(
-    () => (projects as any[]).filter((p) => String(p.company_id ?? p.belongs_to) === companyId),
+    () => (projects as any[]).filter((p) => projectBelongsToCompany(p, companyId)),
     [projects, companyId],
   );
   const projectGodowns = useMemo(
