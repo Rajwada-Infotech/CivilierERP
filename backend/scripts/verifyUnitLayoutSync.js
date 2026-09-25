@@ -161,6 +161,24 @@ function check(name, cond, extra) {
       s.renamed === 0 && s.created === 0 && (await activeNames(unitId)).includes("Bedroom 9"), s);
     await q("DELETE FROM dbo.RoomMaster WHERE UnitId = @u AND RoomName = 'Bedroom 9'", { u: [sql.Int, unitId] });
 
+    // A legacy room with NO category but a category's name must be adopted,
+    // not duplicated (found on dev: an old uncategorized "Bedroom" with a
+    // blueprint got a second "Bedroom" next to it).
+    const legacyUnit = await newUnit("__VERIFY_477_LEGACY__", 2, t2.label, t2.id);
+    await q(`INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, RoomCategoryId, Floor, IsActive, CreatedAt, BlueprintFileData)
+             VALUES (@p, @b, @u, 'Balcony', NULL, '2', 1, SYSDATETIME(), 'x')`,
+      { p: [sql.Int, blk.ProjectId], b: [sql.Int, blk.Id], u: [sql.Int, legacyUnit] });
+    s = await L.syncUnitRooms(tx, legacyUnit, {});
+    const legacyRooms = (await roomsOf(legacyUnit)).filter((r) => r.IsActive);
+    check("uncategorized legacy 'Balcony' adopted (categorized), no duplicate built",
+      s.categorized === 1 && legacyRooms.filter((r) => r.RoomName === "Balcony").length === 1 && legacyRooms.length === t2.roomCount, { s, n: legacyRooms.length });
+    const pooja = await q(`INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, RoomCategoryId, Floor, IsActive, CreatedAt)
+             OUTPUT INSERTED.Id VALUES (@p, @b, @u, 'Pooja Room', NULL, '2', 1, SYSDATETIME())`,
+      { p: [sql.Int, blk.ProjectId], b: [sql.Int, blk.Id], u: [sql.Int, legacyUnit] });
+    s = await L.syncUnitRooms(tx, legacyUnit, {});
+    check("custom uncategorized 'Pooja Room' left alone", !s.categorized
+      && (await q("SELECT RoomCategoryId FROM dbo.RoomMaster WHERE Id = @i", { i: [sql.Int, pooja[0].Id] }))[0].RoomCategoryId === null, s);
+
     // ── 6. Type change with work on some rooms ──────────────────────────
     console.log("\n[6] Type change 2BHK -> 1BHK; 'Kitchen 2' + 'Master Bedroom' have blueprints");
     const pre = await roomsOf(unitId);

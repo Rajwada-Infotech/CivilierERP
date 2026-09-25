@@ -235,6 +235,31 @@ async function syncUnitRooms(db, unitId, { removeUnused = false, createdBy = nul
     FROM dbo.RoomMaster r WHERE r.UnitId = @uid
   `);
   const rooms = roomsRes.recordset;
+
+  // Legacy rooms saved without a category (e.g. created before migration
+  // 466, or whose backfill found no match) are otherwise invisible to the
+  // count below — the sync would then add a SECOND "Bedroom" next to the
+  // old one. Adopt any such room whose name clearly is a category
+  // ("Bedroom", "Balcony 2" — exactly one active category matches) so it
+  // counts, keeping its Id and whatever work/blueprint is on it. Names that
+  // match nothing (e.g. "Pooja Room") stay uncategorized and untouched.
+  if (rooms.some((r) => r.RoomCategoryId == null)) {
+    let cats = cache?.get("__categories");
+    if (!cats) {
+      cats = (await db.request().query("SELECT Id, Alias FROM dbo.RoomCategoryMaster WHERE IsActive = 1")).recordset;
+      cache?.set("__categories", cats);
+    }
+    for (const r of rooms) {
+      if (r.RoomCategoryId != null) continue;
+      const matches = cats.filter((c) => autoNameIndex(r.RoomName, c.Alias) !== null);
+      if (matches.length !== 1) continue;
+      await db.request().input("id", sql.Int, r.Id).input("cat", sql.Int, matches[0].Id)
+        .query("UPDATE dbo.RoomMaster SET RoomCategoryId = @cat, UpdatedAt = SYSDATETIME() WHERE Id = @id AND RoomCategoryId IS NULL");
+      r.RoomCategoryId = matches[0].Id;
+      result.categorized = (result.categorized || 0) + 1;
+    }
+  }
+
   const floor = floorLabelOf(unit.FloorNo);
   const desired = new Map(composition.map((c) => [c.categoryId, c]));
   const categoryIds = new Set([
