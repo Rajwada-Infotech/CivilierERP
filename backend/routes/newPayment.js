@@ -744,10 +744,6 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     PImpsReference,
     PCardReference,
     PCardId,
-    // Inter-Company Stock Transfer workflow — see receivedPayment.js's
-    // identical SourceSaleInvoiceId handling for the mirror-image case on
-    // the customer/receiving side of that feature.
-    IsInterCompanyTransfer,
     // Re-issue: links this payment back to a bounced predecessor
     ReplacesPaymentId,
     // Optional bounce charge added on top of the original amount
@@ -792,36 +788,6 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       }
     }
 
-    // Inter-Company Stock Transfer payments must always be deposited to
-    // the Dummy Bank — this is a system-generated payment for a stock
-    // movement between two projects under different companies, settled
-    // without a real bank transaction. Same pattern as
-    // receivedPayment.js's SourceSaleInvoiceId handling: reject a
-    // mismatched client-supplied bank rather than silently overriding it.
-    if (IsInterCompanyTransfer) {
-      const dummyBank = await pool
-        .request()
-        .query(
-          "SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'",
-        );
-      if (!dummyBank.recordset.length) {
-        return res.status(500).json({
-          error: "Dummy Bank account not found. Please contact your administrator.",
-        });
-      }
-      const dummyBankId = dummyBank.recordset[0].LHeadId;
-      const dummyBankName = dummyBank.recordset[0].LHeadName;
-
-      if (PBankID && parseInt(PBankID, 10) !== dummyBankId) {
-        return res.status(400).json({
-          error: `Inter-company transfer payments must be deposited to the Dummy Bank (${dummyBankName}). Other deposit accounts are not allowed for this workflow.`,
-        });
-      }
-
-      // Force-set deposit bank to Dummy Bank regardless of client payload
-      req.body.PBankID = dummyBankId;
-      req.body.PBankName = dummyBankName;
-    }
 
     // Enforce: a payment can only be made against an Approved Expense Booking.
     // Skipped for Contract-linked payments — the frontend's Contract picker

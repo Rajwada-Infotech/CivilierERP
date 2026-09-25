@@ -6,19 +6,18 @@ process.env.JWT_SECRET = process.env.JWT_SECRET || "ict-validation-test-secret";
  *
  * The route (backend/routes/interCompanyTransfer.js) is a two-phase flow:
  *   POST /            validates everything and records a Draft -> Pending
- *                      request — NO documents are generated yet.
- *   PUT /:id/approve   only once a super_admin approves does the full chain
- *                      fire: Sale Order -> Sale Invoice -> Received Payment
- *                      on the sender side, Purchase Order -> GRN -> Expense
- *                      Booking -> Payment on the receiver side, all via the
- *                      internal creation functions extracted from each of
- *                      those routes this session.
+ *                      request — NO stock/GL happens yet.
+ *   PUT /:id/approve   only once a super_admin approves does stock actually
+ *                      move (StockLedger OUT at the sender's godown, IN at
+ *                      the receiver's) and the two-sided GL voucher post
+ *                      (services/interCompanyStockTransferGL.js) — no more
+ *                      commercial-paper chain (SO/SI/RP/PO/GRN/ExB/Payment)
+ *                      and no Dummy Bank involved.
  *
- * Every internal function and service dependency is mocked so these tests
- * exercise only the orchestrator's OWN logic: the same-company rejection,
- * ledger-head/godown/dummy-bank lookups, per-item pricing via
- * getLastPurchaseRate, the multi-level approve() loop for child docs, and
- * the header+items transaction.
+ * Every service dependency is mocked so these tests exercise only the
+ * orchestrator's OWN logic: the same-company rejection, godown lookups,
+ * per-item pricing via getLastPurchaseRateByCompany, the header+items
+ * transaction, and the direct stock move + GL post on approval.
  */
 
 const jwt = require("jsonwebtoken");
@@ -53,37 +52,6 @@ jest.mock("../redis", () => ({
   permissionCache: { get: jest.fn(async () => null) },
 }));
 
-// ── Mock every internal creation function this route orchestrates ──────────
-const mockCreateSaleOrder = jest.fn(async () => ({ SaleOrderID: 101, SaleOrderNo: "SO-000001" }));
-const mockCreateSaleInvoice = jest.fn(async () => ({
-  SaleInvoiceID: 201, SaleInvoiceNo: "SI-2026-00001",
-}));
-const mockCreateReceivedPayment = jest.fn(async () => ({ RPPaymentID: 301 }));
-const mockCreatePurchaseOrder = jest.fn(async () => ({
-  PurchaseOrderID: 401, PurchaseOrderNo: "PO-2026-00001",
-}));
-const mockCreateGRN = jest.fn(async () => ({ GRNID: 501, DocNo: "GRN-2026-00001" }));
-const mockCreateExpenseBooking = jest.fn(async () => ({ id: 601, docNo: "INV000001" }));
-
-jest.mock("../routes/customerSaleOrders", () => ({
-  createSaleOrderInternal: (...args) => mockCreateSaleOrder(...args),
-}));
-jest.mock("../routes/saleInvoices", () => ({
-  createSaleInvoiceInternal: (...args) => mockCreateSaleInvoice(...args),
-}));
-jest.mock("../routes/receivedPayment", () => ({
-  createReceivedPaymentInternal: (...args) => mockCreateReceivedPayment(...args),
-}));
-jest.mock("../routes/purchaseOrders", () => ({
-  createPurchaseOrderInternal: (...args) => mockCreatePurchaseOrder(...args),
-}));
-jest.mock("../routes/grns", () => ({
-  createGRNInternal: (...args) => mockCreateGRN(...args),
-}));
-jest.mock("../routes/expenseBooking", () => ({
-  createExpenseBookingInternal: (...args) => mockCreateExpenseBooking(...args),
-}));
-
 const mockTransition = jest.fn(async (module, id, targetStatus) => {
   if (targetStatus === "Approved") return { newStatus: "Approved", level: 1, totalLevels: 1 };
   return { newStatus: "Pending" };
@@ -92,13 +60,15 @@ jest.mock("../services/approvalService", () => ({
   transition: (...args) => mockTransition(...args),
 }));
 
-jest.mock("../services/generalLedger", () => ({
-  postReceivedPaymentApproval: jest.fn(async () => ({ posted: true })),
+let mockRateInfo = { rate: 600, sourceDocNo: "GRN-2026-00004", sourceDate: "2026-07-01" };
+const mockGetLastPurchaseRateByCompany = jest.fn(async () => mockRateInfo);
+jest.mock("../services/lastPurchaseRate", () => ({
+  getLastPurchaseRateByCompany: (...args) => mockGetLastPurchaseRateByCompany(...args),
 }));
 
-let mockRateInfo = { rate: 600, sourceDocNo: "GRN-2026-00004", sourceDate: "2026-07-01" };
-jest.mock("../services/lastPurchaseRate", () => ({
-  getLastPurchaseRate: jest.fn(async () => mockRateInfo),
+const mockPostToGL = jest.fn(async () => ({ posted: true }));
+jest.mock("../services/interCompanyStockTransferGL", () => ({
+  postInterCompanyStockTransferToGL: (...args) => mockPostToGL(...args),
 }));
 
 jest.mock("../utils/docNumberLock", () => ({
@@ -112,9 +82,7 @@ const SENDER_PROJECT = { ProjectId: 3, ProjectName: "Sender Project", CompanyId:
 const RECEIVER_PROJECT = { ProjectId: 7, ProjectName: "Receiver Project", CompanyId: 2, CompanyName: "Company B", CompanyGST: "27ABCDE1234F1Z6" };
 
 let projectsById;
-let ledgerAvailable;
 let godownsAvailable;
-let dummyBankAvailable;
 let txSpy;
 let storedIctRow;
 let storedIctItems;
@@ -134,20 +102,8 @@ function makeFakePool() {
           const row = projectsById[req.params.ProjectId];
           return { recordset: row ? [row] : [] };
         }
-        if (/FROM dbo\.AccountHeadMaster/i.test(text) && /LHeadCode = @Code/i.test(text)) {
-          return { recordset: ledgerAvailable ? [{ LHeadId: 999, LHeadName: "Test Ledger" }] : [] };
-        }
-        if (/FROM dbo\.AccountHeadMaster/i.test(text) && /DUMMY-BANK/i.test(text)) {
-          return { recordset: dummyBankAvailable ? [{ LHeadId: 888, LHeadName: "Dummy Bank" }] : [] };
-        }
         if (/FROM dbo\.Godowns/i.test(text)) {
           return { recordset: godownsAvailable ? [{ GodownID: 55, GodownName: "Main" }] : [] };
-        }
-        if (/FROM dbo\.TypeOfDoc/i.test(text)) {
-          return { recordset: [{ TypeOfDocId: 1 }] };
-        }
-        if (/INSERT INTO dbo\.NewPayment/i.test(text)) {
-          return { recordset: [{ PPaymentID: 701 }], rowsAffected: [1] };
         }
         if (/SELECT \* FROM dbo\.InterCompanyTransfer WHERE ICTId/i.test(text)) {
           return { recordset: storedIctRow ? [storedIctRow] : [] };
@@ -230,14 +186,13 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockRateInfo = { rate: 600, sourceDocNo: "GRN-2026-00004", sourceDate: "2026-07-01" };
   projectsById = { 3: SENDER_PROJECT, 7: RECEIVER_PROJECT };
-  ledgerAvailable = true;
   godownsAvailable = true;
-  dummyBankAvailable = true;
   senderStockAvailable = 1000;
   stockLedgerInserts = [];
   mockFakePool = makeFakePool();
   storedIctRow = {
     ICTId: 999,
+    DocNo: "ICT-2026-00001",
     SenderProjectId: 3,
     ReceiverProjectId: 7,
     TotalAmount: 3000,
@@ -282,18 +237,6 @@ describe("Inter-Company Transfer: validation", () => {
     expect(res.body.error).toMatch(/normal Stock Transfer/i);
   });
 
-  test("rejects when auto-created ledger heads are missing", async () => {
-    ledgerAvailable = false;
-    const { createApp } = require("../server");
-    const app = await createApp();
-    const res = await request(app)
-      .post("/api/inter-company-transfer")
-      .set("Authorization", `Bearer ${superAdminToken()}`)
-      .send(validPayload());
-    expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/ledger head/i);
-  });
-
   test("rejects when project godowns are missing", async () => {
     godownsAvailable = false;
     const { createApp } = require("../server");
@@ -306,19 +249,7 @@ describe("Inter-Company Transfer: validation", () => {
     expect(res.body.error).toMatch(/godown/i);
   });
 
-  test("rejects when the Dummy Bank account does not exist", async () => {
-    dummyBankAvailable = false;
-    const { createApp } = require("../server");
-    const app = await createApp();
-    const res = await request(app)
-      .post("/api/inter-company-transfer")
-      .set("Authorization", `Bearer ${superAdminToken()}`)
-      .send(validPayload());
-    expect(res.status).toBe(500);
-    expect(res.body.error).toMatch(/Dummy Bank/i);
-  });
-
-  test("rejects when an item has no last-purchase-rate on file", async () => {
+  test("rejects when an item has no last-purchase-rate on file for the sending company", async () => {
     mockRateInfo = null;
     const { createApp } = require("../server");
     const app = await createApp();
@@ -329,10 +260,22 @@ describe("Inter-Company Transfer: validation", () => {
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/last purchase rate/i);
   });
+
+  test("prices items via the COMPANY-scoped rate lookup, not project-scoped", async () => {
+    const { createApp } = require("../server");
+    const app = await createApp();
+    await request(app)
+      .post("/api/inter-company-transfer")
+      .set("Authorization", `Bearer ${superAdminToken()}`)
+      .send(validPayload());
+    expect(mockGetLastPurchaseRateByCompany).toHaveBeenCalledWith(
+      expect.anything(), SENDER_PROJECT.CompanyId, "ITEM-1",
+    );
+  });
 });
 
 describe("Inter-Company Transfer: submission (POST /) only records a Pending request", () => {
-  test("validates and records the request WITHOUT generating any documents yet", async () => {
+  test("validates and records the request WITHOUT moving stock or posting GL yet", async () => {
     const { createApp } = require("../server");
     const app = await createApp();
     const res = await request(app)
@@ -343,13 +286,8 @@ describe("Inter-Company Transfer: submission (POST /) only records a Pending req
     expect(res.status).toBe(201);
     expect(res.body.Status).toBe("Pending");
     expect(res.body.ICTId).toBe(999);
-    // The core "no manual work" spec only kicks in AFTER approval — until
-    // then, none of the downstream documents should exist yet.
-    expect(mockCreateSaleOrder).not.toHaveBeenCalled();
-    expect(mockCreateSaleInvoice).not.toHaveBeenCalled();
-    expect(mockCreatePurchaseOrder).not.toHaveBeenCalled();
-    expect(mockCreateGRN).not.toHaveBeenCalled();
-    expect(mockCreateExpenseBooking).not.toHaveBeenCalled();
+    expect(stockLedgerInserts.length).toBe(0);
+    expect(mockPostToGL).not.toHaveBeenCalled();
     // Auto-submits Draft -> Pending, same convention as journal-voucher.js.
     expect(mockTransition).toHaveBeenCalledWith(
       "inter-company-transfer", 999, "Pending", expect.any(String), expect.any(String),
@@ -357,8 +295,8 @@ describe("Inter-Company Transfer: submission (POST /) only records a Pending req
   });
 });
 
-describe("Inter-Company Transfer: approval fires the full auto-generated chain", () => {
-  test("PUT /:id/approve orchestrates every leg and returns linked document IDs", async () => {
+describe("Inter-Company Transfer: approval moves stock directly and posts the GL voucher", () => {
+  test("PUT /:id/approve writes StockLedger OUT+IN and posts the two-sided voucher", async () => {
     const { createApp } = require("../server");
     const app = await createApp();
     const res = await request(app)
@@ -367,37 +305,25 @@ describe("Inter-Company Transfer: approval fires the full auto-generated chain",
       .send({});
 
     expect(res.status).toBe(200);
-    expect(mockCreateSaleOrder).toHaveBeenCalledTimes(1);
-    expect(mockCreateSaleInvoice).toHaveBeenCalledTimes(1);
-    expect(mockCreateReceivedPayment).toHaveBeenCalledTimes(1);
-    expect(mockCreatePurchaseOrder).toHaveBeenCalledTimes(1);
-    expect(mockCreateGRN).toHaveBeenCalledTimes(1);
-    expect(mockCreateExpenseBooking).toHaveBeenCalledTimes(1);
-    expect(res.body.links).toMatchObject({
-      SaleOrderID: 101,
-      SaleInvoiceID: 201,
-      ReceivedPaymentID: 301,
-      PurchaseOrderID: 401,
-      GRNID: 501,
-    });
-  });
-
-  test("deducts the sender's godown stock via a StockLedger OUT entry", async () => {
-    const { createApp } = require("../server");
-    const app = await createApp();
-    const res = await request(app)
-      .put("/api/inter-company-transfer/999/approve")
-      .set("Authorization", `Bearer ${superAdminToken()}`)
-      .send({});
-
-    expect(res.status).toBe(200);
-    // Previously nothing ever debited the sender's stock, so it silently
-    // duplicated across both projects on every transfer — this is the fix.
-    expect(stockLedgerInserts.length).toBe(1);
+    // One OUT at the sender's godown, one IN at the receiver's — no more
+    // GRN/SO/PO/Invoice/Payment chain.
+    expect(stockLedgerInserts.length).toBe(2);
     expect(stockLedgerInserts[0].text).toMatch(/'OUT','ICT'/);
-    expect(stockLedgerInserts[0].params.ItemID).toBe("ITEM-1");
-    expect(stockLedgerInserts[0].params.Qty).toBe(5);
     expect(stockLedgerInserts[0].params.GodownID).toBe(55);
+    expect(stockLedgerInserts[1].text).toMatch(/'IN','ICT'/);
+    expect(stockLedgerInserts[1].params.GodownID).toBe(55);
+
+    expect(mockPostToGL).toHaveBeenCalledTimes(1);
+    expect(mockPostToGL).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        transferId: 999,
+        docNo: "ICT-2026-00001",
+        senderCompanyId: SENDER_PROJECT.CompanyId,
+        receiverCompanyId: RECEIVER_PROJECT.CompanyId,
+        totalAmount: 3000,
+      }),
+    );
   });
 
   test("rejects approval when the sender's godown does not have enough stock", async () => {
@@ -411,13 +337,13 @@ describe("Inter-Company Transfer: approval fires the full auto-generated chain",
 
     expect(res.status).toBe(400);
     expect(res.body.error).toMatch(/insufficient stock/i);
-    // No documents should have been created — the stock check runs before
-    // any of the chain fires.
-    expect(mockCreateSaleOrder).not.toHaveBeenCalled();
-    expect(mockCreateGRN).not.toHaveBeenCalled();
+    // No stock should have moved and no GL posted — the stock check runs
+    // before anything else.
+    expect(stockLedgerInserts.length).toBe(0);
+    expect(mockPostToGL).not.toHaveBeenCalled();
   });
 
-  test("does not run the chain when a multi-level workflow leaves the header still Pending", async () => {
+  test("does not move stock or post GL when a multi-level workflow leaves the header still Pending", async () => {
     mockTransition.mockImplementation(async (module) => {
       if (module === "inter-company-transfer") {
         return { newStatus: "Pending", level: 1, totalLevels: 2, remainingLevels: 1 };
@@ -434,30 +360,8 @@ describe("Inter-Company Transfer: approval fires the full auto-generated chain",
 
     expect(res.status).toBe(200);
     expect(res.body.message).toMatch(/approval level recorded/i);
-    expect(mockCreateSaleOrder).not.toHaveBeenCalled();
-  });
-
-  test("approve() loops until fully approved for multi-level child-document workflows", async () => {
-    let poCallCount = 0;
-    mockTransition.mockImplementation(async (module, id, targetStatus) => {
-      if (module === "purchase-orders" && targetStatus === "Approved") {
-        poCallCount++;
-        return poCallCount < 3
-          ? { newStatus: "Pending", level: poCallCount, totalLevels: 3, remainingLevels: 3 - poCallCount }
-          : { newStatus: "Approved", level: 3, totalLevels: 3 };
-      }
-      return targetStatus === "Approved" ? { newStatus: "Approved", level: 1, totalLevels: 1 } : { newStatus: "Pending" };
-    });
-
-    const { createApp } = require("../server");
-    const app = await createApp();
-    const res = await request(app)
-      .put("/api/inter-company-transfer/999/approve")
-      .set("Authorization", `Bearer ${superAdminToken()}`)
-      .send({});
-
-    expect(res.status).toBe(200);
-    expect(poCallCount).toBe(3);
+    expect(stockLedgerInserts.length).toBe(0);
+    expect(mockPostToGL).not.toHaveBeenCalled();
   });
 });
 
