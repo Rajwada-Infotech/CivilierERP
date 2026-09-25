@@ -82,8 +82,8 @@ async function getGLHeadId(pool, name) {
 // the Payment page (picking it there locks Payment Mode to Cash), not just
 // an invisible fallback — so getGLHeadId's LHeadType='GL' filter can never
 // find it. Resolved by LHeadCode instead, same sentinel-lookup convention
-// 'DUMMY-BANK' already uses (see newPayment.js's IsInterCompanyTransfer
-// handling) rather than a name match.
+// 'DUMMY-BANK' uses elsewhere (Sale Invoice Cash payments, Contract Master
+// advance allocation) rather than a name match.
 //
 // One head PER COMPANY (LHeadCode `CASH-C-<companyId>`), not the single
 // global 'CASH-IN-HAND' head migration 418 originally seeded — every

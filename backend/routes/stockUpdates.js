@@ -4,6 +4,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
 const { parseId } = require("../middleware/validateRequest");
 
@@ -145,6 +146,66 @@ router.post("/", authenticateToken, requirePageRight("stock-update", "create"), 
   } catch (err) {
     try { await tx.rollback(); } catch (_) { /* not begun or already rolled back */ }
     console.error("[stock-updates] POST error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /:id — super_admin only. Removes the StockLedger IN rows this
+// update posted, then its items, then the header, in one transaction —
+// same hard-delete-by-RefType/RefID shape GRN and Material Issue already
+// use for their own StockLedger rows. Blocked if any item's godown balance
+// would go negative, i.e. the stock this update added has since been
+// consumed elsewhere (an Issue, another transfer, ...).
+router.delete("/:id", authenticateToken, allowRoles("super_admin"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+
+  const pool = getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    const header = await pool.request().input("id", sql.Int, id).query(
+      "SELECT StockUpdateId, GodownId, DocNo FROM dbo.StockUpdate WHERE StockUpdateId = @id",
+    );
+    if (!header.recordset.length) return res.status(404).json({ error: "Not found" });
+    const { GodownId: godownId } = header.recordset[0];
+
+    const items = await pool.request().input("id", sql.Int, id).query(
+      "SELECT ItemId, Qty FROM dbo.StockUpdateItems WHERE StockUpdateId = @id",
+    );
+
+    for (const it of items.recordset) {
+      const avail = await pool.request()
+        .input("itemId", sql.NVarChar(50), it.ItemId)
+        .input("godownId", sql.Int, godownId).query(`
+          SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
+          FROM dbo.StockLedger
+          WHERE ItemID = @itemId AND GodownID = @godownId
+        `);
+      const available = Number(avail.recordset[0].Available || 0);
+      if (available < Number(it.Qty)) {
+        return res.status(409).json({
+          error: `Can't delete — item ${it.ItemId} has only ${available} left in this godown, less than the ${it.Qty} this update added. Some of it has already been used elsewhere.`,
+        });
+      }
+    }
+
+    await tx.begin();
+    await new sql.Request(tx).input("id", sql.Int, id).query(
+      "DELETE FROM dbo.StockLedger WHERE RefType = 'STKUPD' AND RefID = @id",
+    );
+    await new sql.Request(tx).input("id", sql.Int, id).query(
+      "DELETE FROM dbo.StockUpdateItems WHERE StockUpdateId = @id",
+    );
+    await new sql.Request(tx).input("id", sql.Int, id).query(
+      "DELETE FROM dbo.StockUpdate WHERE StockUpdateId = @id",
+    );
+    await tx.commit();
+
+    await bumpCacheVersion("stock-ledger").catch(() => {});
+    res.json({ message: "Stock update deleted" });
+  } catch (err) {
+    try { await tx.rollback(); } catch (_) { /* not begun or already rolled back */ }
+    console.error("[stock-updates] DELETE error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

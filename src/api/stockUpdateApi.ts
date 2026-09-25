@@ -55,3 +55,6 @@ export const createStockUpdate = (payload: StockUpdatePayload) =>
   fetchWithAuth(BASE, { method: "POST", body: JSON.stringify(payload) }).then((r) =>
     handle<{ StockUpdateId: number; DocNo: string; message: string }>(r),
   );
+
+export const deleteStockUpdate = (id: number) =>
+  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => handle<{ message: string }>(r));
