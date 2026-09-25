@@ -4,5 +4,5 @@ import { TaskList } from "@/components/TaskList";
 import { getTasks } from "@/api/followupApi";
 
 export default function TaskMasterScreen() {
-  return <TaskList queryKey="task-master-all" queryFn={getTasks} emptyLabel="No tasks" />;
+  return <TaskList queryKey="task-master-all" queryFn={getTasks} emptyLabel="No tasks" canCreate />;
 }

@@ -14,6 +14,8 @@ import EntryTypeDocReportScreen from "@/screens/followup/EntryTypeDocReportScree
 import DepartmentMasterScreen from "@/screens/setup/DepartmentMasterScreen";
 import TagMasterScreen from "@/screens/setup/TagMasterScreen";
 import CancelTemplateScreen from "@/screens/setup/CancelTemplateScreen";
+import TaskDetailScreen from "@/screens/followup/TaskDetailScreen";
+import TaskFormScreen from "@/screens/followup/TaskFormScreen";
 import { TopHeader } from "./TopHeader";
 
 export type MainStackParamList = {
@@ -27,6 +29,8 @@ export type MainStackParamList = {
   CloseTask: undefined;
   CancelledTasks: undefined;
   TaskTransfer: undefined;
+  TaskDetail: { id: number };
+  TaskForm: undefined;
   // Reports
   TaskPerformance: undefined;
   TagPerformance: undefined;
@@ -56,6 +60,9 @@ export default function MainStack() {
       <Stack.Screen name="CloseTask" component={CloseTaskScreen} options={{ title: "Close Task" }} />
       <Stack.Screen name="CancelledTasks" component={CancelledTasksScreen} options={{ title: "Cancelled Tasks" }} />
       <Stack.Screen name="TaskTransfer" component={TaskTransferScreen} options={{ title: "Task Transfer" }} />
+
+      <Stack.Screen name="TaskDetail" component={TaskDetailScreen} options={{ title: "Task" }} />
+      <Stack.Screen name="TaskForm" component={TaskFormScreen} options={{ title: "New Task" }} />
 
       <Stack.Screen name="TaskPerformance" component={TaskPerformanceScreen} options={{ title: "Task Performance" }} />
       <Stack.Screen name="TagPerformance" component={TagPerformanceScreen} options={{ title: "Tag Performance" }} />

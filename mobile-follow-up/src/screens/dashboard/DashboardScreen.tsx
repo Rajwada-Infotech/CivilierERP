@@ -40,7 +40,7 @@ function isDueToday(t: Task) {
 type Shortcut = {
   label: string;
   icon: React.ComponentType<{ size?: number; color?: string }>;
-  nav: keyof MainStackParamList;
+  nav: Exclude<keyof MainStackParamList, "TaskDetail">;
 };
 
 // Same three groups the nav menu (NavSheet) shows — Transactions / Reports /
