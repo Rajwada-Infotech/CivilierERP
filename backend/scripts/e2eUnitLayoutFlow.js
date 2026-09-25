@@ -83,6 +83,8 @@ const check = (name, cond, extra) => {
     const byLabel = Object.fromEntries(types.data.map((t) => [t.label, t]));
     check("GET /types 200", types.status === 200);
     check("2 BHK / 3 BHK pickable with summary", byLabel["2 BHK"]?.roomCount > 0 && byLabel["3 BHK"]?.summary.length > 0, types.data);
+    check("GET /types includes each type's room list (composition) matching its roomCount",
+      types.data.every((t) => Array.isArray(t.composition) && t.composition.reduce((n, c) => n + c.quantity, 0) === t.roomCount), types.data.map((t) => [t.label, t.roomCount, t.composition]));
     const t2 = byLabel["2 BHK"], t3 = byLabel["3 BHK"];
     const et = await call("POST", "/api/unit-bhk-config/types", { label: EMPTY_TYPE });
     emptyTypeId = et.data?.id;

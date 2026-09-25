@@ -41,6 +41,9 @@ router.get("/types", authMiddleware, async (req, res) => {
       label: t.label,
       roomCount: t.roomCount,
       summary: t.summary,
+      // the global room list — Flat Master's tree resolves every level's
+      // layout from it (src/lib/layoutResolve.ts)
+      composition: t.composition,
     })));
   } catch (err) {
     console.error("[unit-bhk-config] GET /types error:", err.message);
