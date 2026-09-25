@@ -1585,7 +1585,7 @@ export default function StockTransfer() {
               <div className="space-y-3">
                 {transferMode === "inter" ? (
                   <>
-                    {/* From Company | To Company */}
+                    {/* From Company | From Project */}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <FilterSelect
                         icon={Building2}
@@ -1602,22 +1602,6 @@ export default function StockTransfer() {
                         placeholder="All companies"
                       />
                       <FilterSelect
-                        icon={Building2}
-                        label="To Company"
-                        value={toCompanyId}
-                        onChange={(v) => {
-                          setToCompanyId(v);
-                          setToProjectId("");
-                          setToGodownId(null);
-                        }}
-                        options={companyOptions.filter((o) => o.value !== filterCompanyId)}
-                        placeholder="Select destination company"
-                      />
-                    </div>
-
-                    {/* From Project | Receiver Project */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <FilterSelect
                         icon={FolderKanban}
                         label="From Project"
                         value={filterProjectId}
@@ -1629,6 +1613,22 @@ export default function StockTransfer() {
                         }}
                         options={projectSelectOptions}
                         placeholder={filterCompanyId ? "All projects in company" : "All projects"}
+                      />
+                    </div>
+
+                    {/* To Company | Receiver Project */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <FilterSelect
+                        icon={Building2}
+                        label="To Company"
+                        value={toCompanyId}
+                        onChange={(v) => {
+                          setToCompanyId(v);
+                          setToProjectId("");
+                          setToGodownId(null);
+                        }}
+                        options={companyOptions.filter((o) => o.value !== filterCompanyId)}
+                        placeholder="Select destination company"
                       />
                       <FilterSelect
                         icon={FolderKanban}
