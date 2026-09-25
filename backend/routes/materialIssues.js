@@ -720,7 +720,8 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
         .input("BlockId", sql.Int, BlockId ? parseInt(BlockId, 10) : null)
         .input("FloorNo", sql.Int, FloorNo != null && FloorNo !== "" ? parseInt(FloorNo, 10) : null).query(`
           UPDATE dbo.MaterialIssues
-          SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
+          SET ${wasApproved ? "Status='Pending'," : ""}
+              CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
               Date=@Date, Reason=@Reason, Remarks=@Remarks, UpdatedAt=GETDATE(),
               GodownId=@GodownId,
               IssuedTo=@IssuedTo, CostCenter=@CostCenter, Purpose=@Purpose,
@@ -816,7 +817,12 @@ router.put("/:id", authenticateToken, requirePageRight("material-issues", "edit"
     }
 
     res.json({
-      message: resubmitted ? "Issue updated and re-submitted for approval" : "Issue updated successfully",
+      message: wasApproved
+        ? "Issue updated — sent back for approval"
+        : resubmitted
+          ? "Issue updated and re-submitted for approval"
+          : "Issue updated successfully",
+      reopenedForApproval: wasApproved,
       resubmitted,
     });
   } catch (error) {

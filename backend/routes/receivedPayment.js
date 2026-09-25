@@ -612,6 +612,20 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
     const beforeSnapshot = await snapshotRow(pool, "dbo.ReceivedPayment", "RPPaymentID", id);
     const wasApproved = beforeSnapshot?.RPStatus === "Approved";
 
+    // Editing an already-Approved payment must go back through approval —
+    // this UPDATE never touched RPStatus before, so an edited-Approved
+    // receipt silently stayed Approved with no re-approval and no GL
+    // reversal. Mirrors journalVoucher.js's wasApproved handling. Only
+    // reverses the standard (non-CRM) posting path — a CRM-linked receipt's
+    // actual GL legs live under CrmPaymentReceipt/CrmOnAccountPayment, keyed
+    // by their own id, not this one; editing still gets re-queued for
+    // approval, but re-approving a CRM-linked edit won't repost its GL
+    // (hasPosting() will still see the old, unreversed entries).
+    if (wasApproved) {
+      const { reversePostingBySource } = require("../services/generalLedger");
+      await reversePostingBySource(pool, "ReceivedPayment", id);
+    }
+
     const extraSet = `, RPCompanyId=@RPCompanyId, RPProjectId=@RPProjectId,
       RPCustomerName=@RPCustomerName, RPFinYear=@RPFinYear,
       RPDepositBankId=@RPDepositBankId, RPDepositBankName=@RPDepositBankName`;
@@ -656,6 +670,7 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
       .input("RPDepositBankName", sql.NVarChar(255), RPDepositBankName || null)
       .input("RPFinYear", sql.NVarChar(20), RPFinYear || null).query(`
         UPDATE dbo.ReceivedPayment SET
+          ${wasApproved ? "RPStatus        = 'Pending'," : ""}
           RPCompanyName   = @RPCompanyName,
           RPReceivedFrom  = @RPReceivedFrom,
           RPProjectName   = @RPProjectName,

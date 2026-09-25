@@ -734,7 +734,11 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
       .input("GrossAmount", sql.Decimal(18, 2), gross)
       .input("Deductions", sql.Decimal(18, 2), deductions)
       .input("CertifiedAmount", sql.Decimal(18, 2), certified)
-      .input("Status", sql.NVarChar(50), body.Status || "Draft")
+      // Editing an already-Approved Work Done must go back through approval
+      // — ignore whatever status the client sends. Mirrors
+      // journalVoucher.js's wasApproved handling; Work Done doesn't post to
+      // GL directly, so no reversal needed.
+      .input("Status", sql.NVarChar(50), wasApproved ? "Pending" : body.Status || "Draft")
       .input("Remarks", sql.NVarChar(sql.MAX), body.Remarks || null)
       .input("UpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.WorkDone SET
@@ -816,7 +820,12 @@ router.put("/work-done/:id", requirePageRight("engineering-work-order", "edit"),
     }
 
     res.json({
-      message: resubmitted ? "Work Done entry updated and re-submitted for approval" : "Work Done entry updated",
+      message: wasApproved
+        ? "Work Done entry updated — sent back for approval"
+        : resubmitted
+          ? "Work Done entry updated and re-submitted for approval"
+          : "Work Done entry updated",
+      reopenedForApproval: wasApproved,
       resubmitted,
     });
   } catch (err) {

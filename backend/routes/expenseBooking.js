@@ -3557,6 +3557,20 @@ router.put(
       const hasPayTermColPut = await ebHasPaymentTermId(pool);
       const hasDirectItemsColPut = await ebHasDirectItemsData(pool);
 
+      // Editing an already-Approved invoice must go back through approval —
+      // ignore whatever status the client sends and reverse whatever this
+      // invoice already posted to GL (the old amounts no longer reflect
+      // what's on it; it only re-posts once approved again with the new
+      // numbers). Two possible SourceTypes ("ExpenseBooking" auto-post,
+      // "InvoicePosting" manual) — reverse both, only one will ever
+      // actually have rows. Mirrors journalVoucher.js's wasApproved
+      // handling and grns.js's identical fix.
+      if (wasApproved) {
+        const { reversePostingBySource } = require("../services/generalLedger");
+        await reversePostingBySource(pool, "ExpenseBooking", numericId);
+        await reversePostingBySource(pool, "InvoicePosting", numericId);
+      }
+
       // Default to a direct/manual booking's own amounts + supplier link;
       // the GRN branch below overrides amounts/GST (never IGST — GRN
       // bookings are always CGST/SGST) with the live GRN totals instead.
@@ -3694,7 +3708,7 @@ router.put(
         .input("EEmiStartDate", sql.Date, EEmiStartDate || null)
         .input("EReminder", sql.Date, EReminder || null)
         .input("ERemarks", sql.NVarChar(300), ERemarks || null)
-        .input("EStatus", sql.NVarChar(50), EStatus || "Draft")
+        .input("EStatus", sql.NVarChar(50), wasApproved ? "Pending" : EStatus || "Draft")
         .input("EUpdatedAt", sql.DateTime2, new Date())
         .input("ECompanyId", sql.Int, parseInt(ECompanyId, 10))
         .input(
@@ -3871,7 +3885,12 @@ router.put(
       }
 
       res.json({
-        message: resubmitted ? "Expense updated and re-submitted for approval" : "Expense updated successfully",
+        message: wasApproved
+          ? "Expense updated — previous GL posting reversed, sent back for approval"
+          : resubmitted
+            ? "Expense updated and re-submitted for approval"
+            : "Expense updated successfully",
+        reopenedForApproval: wasApproved,
         resubmitted,
       });
     } catch (err) {
