@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import { View, Text, Pressable, Modal, Animated } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Home, Users, Receipt, ShieldCheck, Zap, Grip, X } from "lucide-react-native";
+import { Home, Users, Receipt, ShieldCheck, Zap, Grip, X, Ticket } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { navigationRef } from "./navigationRef";
@@ -21,14 +21,15 @@ import type { MainStackParamList } from "./MainStack";
 const ACCENT = "#65a30d";
 const ACCENT_SOFT = "#bef264";
 
-type NavRoute = keyof Pick<MainStackParamList, "Dashboard" | "Directory" | "Bills" | "Attendance" | "Electricity">;
+type NavRoute = keyof Pick<MainStackParamList, "Dashboard" | "Directory" | "Bills" | "ServiceRequests" | "Attendance" | "Electricity">;
 
 const NAV_ITEMS: { route: NavRoute; label: string; icon: React.ComponentType<{ size?: number; color?: string }> }[] = [
-  { route: "Dashboard", label: "Dashboard", icon: Home },
-  { route: "Directory", label: "Customer Directory", icon: Users },
-  { route: "Bills", label: "Maintenance Bills", icon: Receipt },
-  { route: "Attendance", label: "Security Attendance", icon: ShieldCheck },
-  { route: "Electricity", label: "Electricity Maintenance", icon: Zap },
+  { route: "Dashboard",        label: "Dashboard",             icon: Home        },
+  { route: "Directory",        label: "Customer Directory",    icon: Users       },
+  { route: "Bills",            label: "Maintenance Bills",     icon: Receipt     },
+  { route: "ServiceRequests",  label: "Service Requests",      icon: Ticket      },
+  { route: "Attendance",       label: "Security Attendance",   icon: ShieldCheck },
+  { route: "Electricity",      label: "Electricity Maintenance", icon: Zap       },
 ];
 
 export function SidebarMenu({ activeRoute }: { activeRoute: string }) {

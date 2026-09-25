@@ -96,11 +96,32 @@ router.get("/customers/:bookingId/charges", requirePageRight("maintenance-custom
   }
 });
 
-// Placeholder — no maintenance payment-collection flow exists yet. Kept as
-// its own endpoint so the frontend's Payment History section already has a
-// stable contract to call once collection is built.
+// GET /customers/:bookingId/payments — returns the maintenance billing history for
+// this customer. In the Maintenance module, raised bills ARE the payment demands
+// (payment is collected offline via cheque/NEFT and reconciled outside the system).
+// This endpoint powers the "Payment History" section on the Customer Profile —
+// the empty-placeholder comment and res.json([]) are now replaced with real data.
 router.get("/customers/:bookingId/payments", requirePageRight("maintenance-directory", "view"), async (req, res) => {
-  res.json([]);
+  const bookingId = parseInt(req.params.bookingId, 10);
+  if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "Invalid booking id" });
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("BookingId", sql.Int, bookingId)
+      .query(`
+        SELECT
+          b.Id, b.BillNo, b.BillDate, b.DueDate, b.PeriodFrom, b.PeriodTo,
+          b.Subtotal, b.TotalTax, b.GrandTotal, b.Status, b.CancelReason, b.Notes, b.CreatedAt
+        FROM dbo.MaintenanceBill b
+        WHERE b.BookingId = @BookingId
+        ORDER BY b.BillDate DESC, b.CreatedAt DESC
+      `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("GET PAYMENTS ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post("/customers/:bookingId/charges", requirePageRight("maintenance-customer-charges", "create"), async (req, res) => {
