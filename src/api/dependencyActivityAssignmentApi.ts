@@ -209,6 +209,18 @@ export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; c
   COMPLETED: { label: "Completed", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
 };
 
+// A rung only moves forward: once it has left Pending/Allocated (i.e. it's
+// been approved into In Progress, or gone on to any later state) it can
+// never go back to either of them, and while In Progress the only manual
+// moves are Hold or Cancelled. Mirrored server-side in
+// dependencyActivityAssignment.js's status route — keep the two in sync.
+export function allowedNextStatuses(current: AssignmentStatus): AssignmentStatus[] {
+  if (current === "PENDING" || current === "ALLOCATED") return [...ASSIGNMENT_STATUSES];
+  if (current === "IN_PROGRESS") return ["IN_PROGRESS", "HOLD", "CANCELLED"];
+  if (current === "HOLD") return ["HOLD", "IN_PROGRESS", "CANCELLED"];
+  return ASSIGNMENT_STATUSES.filter((s) => s !== "PENDING" && s !== "ALLOCATED");
+}
+
 export interface ReportedAssignment {
   assignmentId: number;
   rungId: number;

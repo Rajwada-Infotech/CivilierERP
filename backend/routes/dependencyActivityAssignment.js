@@ -125,6 +125,26 @@ router.patch(
 
   try {
     const pool = await getPool();
+
+    // Statuses only move forward — mirrors allowedNextStatuses() in the
+    // frontend's dependencyActivityAssignmentApi.ts. Once past Pending/
+    // Allocated a rung can't go back to either, and while In Progress the
+    // only manual moves are Hold or Cancelled.
+    if (hasStatus) {
+      const cur = await pool.request().input("rungId", sql.Int, rungId).query(
+        "SELECT Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId",
+      );
+      const current = cur.recordset[0]?.Status;
+      if (current && current !== status) {
+        const early = current === "PENDING" || current === "ALLOCATED";
+        if (!early && (status === "PENDING" || status === "ALLOCATED")) {
+          return res.status(400).json({ error: "An activity that has moved on can't go back to Pending or Allocated." });
+        }
+        if (current === "IN_PROGRESS" && status !== "HOLD" && status !== "CANCELLED") {
+          return res.status(400).json({ error: "An In Progress activity can only be put on Hold or Cancelled." });
+        }
+      }
+    }
     const setClauses = [];
     if (hasStatus) setClauses.push("Status = @status");
     if (hasRemarks) setClauses.push("Remarks = @remarks");

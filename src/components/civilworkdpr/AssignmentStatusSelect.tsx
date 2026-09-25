@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
-  ASSIGNMENT_STATUSES,
+  allowedNextStatuses,
   ASSIGNMENT_STATUS_META,
   updateAssignmentStatus,
   type AssignmentStatus,
@@ -31,7 +31,7 @@ export function AssignmentStatusSelect({ rungId, status }: { rungId: number; sta
       onChange={(e) => mutation.mutate(e.target.value as AssignmentStatus)}
       className={`text-[11px] font-heading font-bold uppercase tracking-wide px-2.5 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 ${meta.className}`}
     >
-      {ASSIGNMENT_STATUSES.map((s) => (
+      {allowedNextStatuses(status).map((s) => (
         <option key={s} value={s}>
           {ASSIGNMENT_STATUS_META[s].label}
         </option>
