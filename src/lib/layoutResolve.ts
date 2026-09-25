@@ -66,7 +66,7 @@ export function resolveLayout(
   overrides: LayoutOverrideRow[], global: CompositionRow[], layoutTypeId: number, p: Position, maxLevel: Level = "UNIT",
 ): Resolved {
   const o = pickOverride(overrides, layoutTypeId, p, maxLevel);
-  return { composition: o ? o.composition : global, override: o };
+  return { composition: (o ? o.composition : global) ?? [], override: o };
 }
 
 // The override a tree node EDITS. For a floor row inside an existing floor
@@ -81,10 +81,10 @@ export function inheritedLayout(
   overrides: LayoutOverrideRow[], global: CompositionRow[], layoutTypeId: number, level: Level, p: Position,
 ): Resolved {
   const above = (Object.keys(RANK) as Level[]).filter((l) => RANK[l] === RANK[level] - 1)[0];
-  if (!above) return { composition: global, override: null };
+  if (!above) return { composition: global ?? [], override: null };
   return resolveLayout(overrides, global, layoutTypeId, p, above);
 }
 
-export const roomTotal = (c: CompositionRow[]) => c.reduce((n, r) => n + r.quantity, 0);
+export const roomTotal = (c: CompositionRow[] | null | undefined) => (c ?? []).reduce((n, r) => n + r.quantity, 0);
 
-export const compositionText = (c: CompositionRow[]) => c.map((r) => `${r.quantity} ${r.alias}`).join(" · ");
+export const compositionText = (c: CompositionRow[] | null | undefined) => (c ?? []).map((r) => `${r.quantity} ${r.alias}`).join(" · ");

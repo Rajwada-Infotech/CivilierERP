@@ -61,6 +61,15 @@ describe("layoutResolve (mirror of server precedence)", () => {
     expect(inheritedLayout([U], GLOBAL, T, "UNIT", p).override).toBeNull();
   });
 
+  it("never crashes on a missing room list (e.g. layout types cached from an older API response)", () => {
+    const missing = undefined as unknown as CompositionRow[];
+    const r = resolveLayout([], missing, T, { projectId: 1 });
+    expect(r.composition).toEqual([]);
+    expect(inheritedLayout([], missing, T, "PROJECT", { projectId: 1 }).composition).toEqual([]);
+    expect(roomTotal(undefined)).toBe(0);
+    expect(roomTotal(null)).toBe(0);
+  });
+
   it("labels and totals", () => {
     expect(scopeLabel(F)).toBe("Floors 1–10");
     expect(scopeLabel({ ScopeLevel: "FLOOR", FloorFrom: 0, FloorTo: 0 })).toBe("Floor G");

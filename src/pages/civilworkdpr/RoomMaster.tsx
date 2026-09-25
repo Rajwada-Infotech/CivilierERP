@@ -794,7 +794,7 @@ const RoomMaster: React.FC = () => {
     const counts = new Map<string, number>();
     for (const u of units) if (u.bhkType) counts.set(u.bhkType, (counts.get(u.bhkType) || 0) + 1);
     return [...counts.entries()].map(([label, n]) => typeByLabel.get(label) && ({
-      layoutTypeId: typeByLabel.get(label)!.id, label, units: n, global: typeByLabel.get(label)!.composition,
+      layoutTypeId: typeByLabel.get(label)!.id, label, units: n, global: typeByLabel.get(label)!.composition ?? [],
     })).filter(Boolean).sort((a, b) => (a as NodeType).label.localeCompare((b as NodeType).label, undefined, { numeric: true })) as NodeType[];
   }, [typeByLabel]);
 
@@ -808,7 +808,7 @@ const RoomMaster: React.FC = () => {
   const expectedRooms = (g: UnitRoomGroup) => {
     const t = g.bhkType ? typeByLabel.get(g.bhkType) : undefined;
     if (!t) return null;
-    const r = resolveLayout(overrides, t.composition, t.id, {
+    const r = resolveLayout(overrides, t.composition ?? [], t.id, {
       projectId: Number(g.projectId), blockId: Number(g.blockId), floorNo: g.floorNo, unitId: Number(g.unitId),
     });
     return roomTotal(r.composition);
