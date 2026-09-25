@@ -237,6 +237,25 @@ function ItemSearchRow({
   const [search, setSearch] = useState(item.itemName || "");
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // The list is portalled to <body> and positioned from the input's rect: the
+  // items table sits in an overflow-x-auto wrapper that would otherwise clip it.
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = containerRef.current?.getBoundingClientRect();
+      if (r) setMenuPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return availableItems;
@@ -248,9 +267,11 @@ function ItemSearchRow({
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
+      const t = e.target as Node;
       if (
         containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
+        !containerRef.current.contains(t) &&
+        !menuRef.current?.contains(t)
       ) {
         setOpen(false);
       }
@@ -315,8 +336,12 @@ function ItemSearchRow({
           />
         </div>
 
-        {open && (
-          <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
+        {open && menuPos && createPortal(
+          <div
+            ref={menuRef}
+            style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: menuPos.width }}
+            className="z-[100] rounded-lg border border-border bg-popover shadow-lg overflow-hidden"
+          >
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-xs text-muted-foreground text-center">
                 {search.trim()
@@ -355,7 +380,8 @@ function ItemSearchRow({
                 ))}
               </div>
             )}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
 
