@@ -352,6 +352,42 @@ function check(name, cond, extra) {
     check("block with overrides deletes cleanly; the moved unit's override survives in its new block",
       (await q("SELECT COUNT(*) n FROM dbo.RoomLayoutOverride WHERE Id = @i", { i: [sql.Int, unitOv2] }))[0].n === 1);
 
+    // ── deactivated room category: layouts keep it (Room Category Master's promise)
+    const catBal = catByName.BALCONY;
+    const unitDc = (await q(`INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, LayoutTypeId, IsActive, CreatedAt)
+      OUTPUT INSERTED.Id AS id VALUES (@p, @b, '__V480_DC__', 7, @ut, @lt, 1, SYSDATETIME())`, {
+      p: [sql.Int, blk.ProjectId], b: [sql.Int, tb2], ut: [sql.NVarChar(50), t2.label], lt: [sql.Int, t2.id] }))[0].id;
+    await L.syncUnitRooms(tx, unitDc, {});
+    const beforeDc = (await activeNames(unitDc)).length;
+    const hadBalcony = (await roomsOf(unitDc)).some((r) => r.IsActive && r.RoomCategoryId === catBal);
+    await q("UPDATE dbo.RoomCategoryMaster SET IsActive = 0 WHERE Id = @c", { c: [sql.Int, catBal] });
+    const sDc = await L.syncUnitRooms(tx, unitDc, { removeUnused: true });
+    check("deactivated category stays in the layout: sync removes nothing",
+      sDc.deactivated === 0 && (await activeNames(unitDc)).length === beforeDc && hadBalcony === (await roomsOf(unitDc)).some((r) => r.IsActive && r.RoomCategoryId === catBal), sDc);
+    // an existing override with the (now inactive) category: editing it keeps it, preview == save
+    await q("UPDATE dbo.RoomCategoryMaster SET IsActive = 1 WHERE Id = @c", { c: [sql.Int, catBal] });
+    const sUdc = await L.validateScope(tx, { LayoutTypeId: t2.id, ScopeLevel: "UNIT", ProjectId: blk.ProjectId, BlockId: tb2, UnitId: uF1 });
+    await setItems(unitOv2, { BEDROOM: 2, KITCHEN: 1, BALCONY: 1 });
+    await L.syncUnitRooms(tx, uF1, { removeUnused: true });
+    await q("UPDATE dbo.RoomCategoryMaster SET IsActive = 0 WHERE Id = @c", { c: [sql.Int, catBal] });
+    const editItems = (await L.validateItems(tx, itemsOf({ BEDROOM: 3, KITCHEN: 1 }).filter((i) => i.roomCategoryId !== catBal))).composition;
+    const pvDc = await L.previewOverrideChange(tx, sUdc, editItems);
+    check("editing an override keeps its deactivated-category rooms (preview: only +1 bedroom, nothing removed)",
+      pvDc.roomsToAdd === 1 && pvDc.roomsToRemove === 0, pvDc);
+    await q("UPDATE dbo.RoomCategoryMaster SET IsActive = 1 WHERE Id = @c", { c: [sql.Int, catBal] });
+
+    // category renamed: generated rooms follow the new alias, same Ids; hand-named rooms untouched
+    const kitchenCat = catByName.KITCHEN;
+    const kBefore = (await roomsOf(unitDc)).filter((r) => r.RoomCategoryId === kitchenCat);
+    await q(`INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, RoomCategoryId, Floor, IsActive, CreatedAt)
+             VALUES (@p, @b, @u, 'Chef Corner', @c, '7', 1, SYSDATETIME())`, { p: [sql.Int, blk.ProjectId], b: [sql.Int, tb2], u: [sql.Int, unitDc], c: [sql.Int, kitchenCat] });
+    const renamed = await L.renameCategoryRooms(tx, kitchenCat, "Kitchen", "Pantry");
+    const kAfter = (await roomsOf(unitDc)).filter((r) => r.RoomCategoryId === kitchenCat);
+    check("renaming a category renames its generated rooms (same Ids), leaves hand-named ones",
+      renamed > 0 && kBefore.every((r) => kAfter.find((a) => a.Id === r.Id)?.RoomName.startsWith("Pantry")) && kAfter.some((r) => r.RoomName === "Chef Corner"),
+      kAfter.map((r) => r.RoomName));
+    await L.renameCategoryRooms(tx, kitchenCat, "Pantry", "Kitchen");
+
     // later sections test the global layout — switch the test overrides off
     await q("UPDATE dbo.RoomLayoutOverride SET IsActive = 0 WHERE CreatedBy = 'verify'");
 

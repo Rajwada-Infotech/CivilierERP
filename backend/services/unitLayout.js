@@ -52,7 +52,7 @@ const LAYOUT_SELECT = `
       FROM dbo.UnitRoomConfig cfg
       JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id
       JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId
-      WHERE ${CONFIG_MATCHES_LAYOUT} AND cfg.IsActive = 1 AND cat.IsActive = 1 AND rc.Quantity > 0
+      WHERE ${CONFIG_MATCHES_LAYOUT} AND cfg.IsActive = 1 AND rc.Quantity > 0
     ), 0) AS RoomCount
   FROM dbo.RoomLayoutType lt
 `;
@@ -86,7 +86,7 @@ async function listLayoutTypes(db) {
     FROM dbo.RoomLayoutType lt
     JOIN dbo.UnitRoomConfig cfg ON ${CONFIG_MATCHES_LAYOUT} AND cfg.IsActive = 1
     JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id AND rc.Quantity > 0
-    JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId AND cat.IsActive = 1
+    JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId
     WHERE lt.IsActive = 1
     ORDER BY cat.SortOrder ASC, cat.Alias ASC
   `);
@@ -113,7 +113,7 @@ async function getLayoutComposition(db, layoutTypeId) {
     FROM dbo.RoomLayoutType lt
     JOIN dbo.UnitRoomConfig cfg ON ${CONFIG_MATCHES_LAYOUT} AND cfg.IsActive = 1
     JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id AND rc.Quantity > 0
-    JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId AND cat.IsActive = 1
+    JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId
     WHERE lt.Id = @id
     ORDER BY cat.SortOrder ASC, cat.Alias ASC
   `);
@@ -158,10 +158,10 @@ async function loadOverrides(db, layoutTypeId, projectId) {
     .input("pid", sql.Int, projectId)
     .query(`
       SELECT o.Id, o.ScopeLevel, o.ProjectId, o.BlockId, o.FloorFrom, o.FloorTo, o.UnitId,
-             cat.Id AS categoryId, cat.Alias AS alias, i.Quantity AS quantity
+             cat.Id AS categoryId, cat.Alias AS alias, i.Quantity AS quantity, cat.IsActive AS categoryActive
       FROM dbo.RoomLayoutOverride o
       LEFT JOIN dbo.RoomLayoutOverrideItem i ON i.OverrideId = o.Id AND i.Quantity > 0
-      LEFT JOIN dbo.RoomCategoryMaster cat ON cat.Id = i.RoomCategoryId AND cat.IsActive = 1
+      LEFT JOIN dbo.RoomCategoryMaster cat ON cat.Id = i.RoomCategoryId
       WHERE o.LayoutTypeId = @lt AND o.ProjectId = @pid AND o.IsActive = 1
       ORDER BY o.Id, cat.SortOrder, cat.Alias
     `);
@@ -173,9 +173,20 @@ async function loadOverrides(db, layoutTypeId, projectId) {
         FloorFrom: row.FloorFrom, FloorTo: row.FloorTo, UnitId: row.UnitId, composition: [],
       });
     }
-    if (row.categoryId != null) byId.get(row.Id).composition.push({ categoryId: row.categoryId, alias: row.alias, quantity: row.quantity });
+    if (row.categoryId != null) {
+      byId.get(row.Id).composition.push({ categoryId: row.categoryId, alias: row.alias, quantity: row.quantity });
+      if (!row.categoryActive) (byId.get(row.Id).inactive ||= []).push({ categoryId: row.categoryId, alias: row.alias, quantity: row.quantity });
+    }
   }
   return [...byId.values()];
+}
+
+// Editing an EXISTING override keeps its rooms of now-deactivated categories
+// (they can't be picked any more, but a deactivated category must not
+// silently vanish from layouts that already use it).
+function withInactiveCarryOver(current, composition) {
+  const extra = (current?.inactive || []).filter((c) => !composition.some((x) => x.categoryId === c.categoryId));
+  return extra.length ? [...composition, ...extra] : composition;
 }
 
 // Which override (if any) applies to a unit — the most specific one.
@@ -633,6 +644,7 @@ async function unitsInScope(db, s) {
 async function previewOverrideChange(db, s, composition) {
   const overrides = await loadOverrides(db, s.layout.id, s.ProjectId);
   const current = overrides.find((o) => sameScope(o, s)) || null;
+  if (composition) composition = withInactiveCarryOver(current, composition);
   const overlap = composition ? findOverlap(overrides, s) : null;
   const global = await getLayoutComposition(db, s.layout.id);
   const hypothetical = overrides.filter((o) => !sameScope(o, s));
@@ -715,7 +727,9 @@ async function saveOverride(pool, s, itemsAll, actor) {
                 OUTPUT INSERTED.Id AS id VALUES (@lt, @lvl, @p, @b, @ff, @ft, @u, @by)`);
       overrideId = ins.recordset[0].id;
     }
-    for (const it of itemsAll) {
+    const kept = (current?.inactive || []).filter((c) => !itemsAll.some((i) => i.roomCategoryId === c.categoryId))
+      .map((c) => ({ roomCategoryId: c.categoryId, quantity: c.quantity }));
+    for (const it of [...itemsAll, ...kept]) {
       await tx.request().input("o", sql.Int, overrideId).input("c", sql.Int, it.roomCategoryId).input("q", sql.Int, it.quantity)
         .query("INSERT INTO dbo.RoomLayoutOverrideItem (OverrideId, RoomCategoryId, Quantity) VALUES (@o, @c, @q)");
     }
@@ -749,7 +763,7 @@ async function listProjectOverrides(db, projectId) {
            cat.Id AS categoryId, cat.Alias AS alias, i.Quantity AS quantity
     FROM dbo.RoomLayoutOverride o
     LEFT JOIN dbo.RoomLayoutOverrideItem i ON i.OverrideId = o.Id AND i.Quantity > 0
-    LEFT JOIN dbo.RoomCategoryMaster cat ON cat.Id = i.RoomCategoryId AND cat.IsActive = 1
+    LEFT JOIN dbo.RoomCategoryMaster cat ON cat.Id = i.RoomCategoryId
     WHERE o.ProjectId = @p AND o.IsActive = 1
     ORDER BY o.Id, cat.SortOrder, cat.Alias`);
   const byId = new Map();
@@ -787,7 +801,38 @@ async function moveUnitOverrides(db, unitId, projectId, blockId) {
     .query("UPDATE dbo.RoomLayoutOverride SET ProjectId = @p, BlockId = @b WHERE UnitId = @u AND (ProjectId <> @p OR BlockId <> @b)");
 }
 
+// A category's Alias changed ("Hall Room" -> "Living Room"): rename its
+// generated rooms ("Hall Room", "Hall Room 2") to the new alias, keeping the
+// number. Only names that follow the generated pattern are touched — a
+// room renamed by hand keeps its name. Room Ids never change, so DPR work /
+// blueprints stay attached. Returns how many rooms were renamed.
+async function renameCategoryRooms(db, categoryId, oldAlias, newAlias) {
+  if (!oldAlias || !newAlias || oldAlias === newAlias) return 0;
+  const rooms = (await db.request().input("c", sql.Int, categoryId)
+    .query("SELECT Id, RoomName FROM dbo.RoomMaster WHERE RoomCategoryId = @c")).recordset;
+  let n = 0;
+  for (const r of rooms) {
+    const idx = autoNameIndex(r.RoomName, oldAlias);
+    if (idx === null) continue;
+    const name = idx === 0 ? newAlias : `${newAlias} ${idx}`;
+    if (name.length > ROOM_NAME_MAX || name === r.RoomName) continue;
+    await db.request().input("id", sql.Int, r.Id).input("n", sql.NVarChar(ROOM_NAME_MAX), name)
+      .query("UPDATE dbo.RoomMaster SET RoomName = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+    n++;
+  }
+  return n;
+}
+
+// How many rooms renameCategoryRooms would rename (for the edit form).
+async function countCategoryRoomsToRename(db, categoryId, oldAlias) {
+  const rooms = (await db.request().input("c", sql.Int, categoryId)
+    .query("SELECT RoomName FROM dbo.RoomMaster WHERE RoomCategoryId = @c")).recordset;
+  return rooms.filter((r) => autoNameIndex(r.RoomName, oldAlias) !== null).length;
+}
+
 module.exports = {
+  renameCategoryRooms,
+  countCategoryRoomsToRename,
   moveUnitOverrides,
   removeOverridesFor,
   getEffectiveComposition,

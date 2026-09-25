@@ -204,6 +204,16 @@ export function InlineLayoutEditor({
         )}
       </div>
 
+      {(() => {
+        // rooms of deactivated categories this layout still has — kept, not editable here
+        const kept = current.filter((c) => !categories.some((k) => k.id === c.categoryId));
+        return kept.length > 0 ? (
+          <div className="text-muted-foreground">
+            Also keeps {kept.map((c) => `${c.quantity} ${c.alias}`).join(", ")} (deactivated room {kept.length === 1 ? "category" : "categories"} — reactivate in Room Category Master to change).
+          </div>
+        ) : null;
+      })()}
+
       <div className="text-muted-foreground">
         {own
           ? <>Custom layout for <span className="font-medium text-foreground">{scopeLabel(own)}</span>{own.ScopeLevel === "FLOOR" && own.FloorFrom !== own.FloorTo ? " (shared range)" : ""}. </>

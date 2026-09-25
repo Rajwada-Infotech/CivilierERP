@@ -5,6 +5,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
+const { renameCategoryRooms, countCategoryRoomsToRename, bumpFlatMasterCaches } = require("../services/unitLayout");
 
 const cleanStr = (v, len = 255) => {
   if (!v || String(v).trim() === "") return null;
@@ -94,7 +95,7 @@ router.post("/", authMiddleware, requirePageRight("room-category-master", "creat
 router.put("/:id", authMiddleware, requirePageRight("room-category-master", "edit"), async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
-  const { categoryName, alias, sortOrder, isActive } = req.body;
+  const { categoryName, alias, sortOrder, isActive, renameRooms } = req.body;
   const actor = req.user?.email || req.user?.name || "system";
   const cName = cleanStr(categoryName, 100)?.toUpperCase().replace(/\s+/g, "_");
   const cAlias = cleanStr(alias, 150);
@@ -104,8 +105,9 @@ router.put("/:id", authMiddleware, requirePageRight("room-category-master", "edi
   try {
     const pool = await getPool();
     const existing = await pool.request().input("id", sql.Int, id)
-      .query(`SELECT Id FROM dbo.RoomCategoryMaster WHERE Id = @id`);
+      .query(`SELECT Id, Alias FROM dbo.RoomCategoryMaster WHERE Id = @id`);
     if (!existing.recordset.length) return res.status(404).json({ error: "Category not found" });
+    const oldAlias = existing.recordset[0].Alias;
 
     const dup = await pool.request()
       .input("name", sql.NVarChar(100), cName)
@@ -114,20 +116,33 @@ router.put("/:id", authMiddleware, requirePageRight("room-category-master", "edi
     if (dup.recordset.length > 0)
       return res.status(409).json({ error: "Another category with this name already exists" });
 
-    await pool.request()
-      .input("id",        sql.Int,            id)
-      .input("name",      sql.NVarChar(100),  cName)
-      .input("alias",     sql.NVarChar(150),  cAlias)
-      .input("sortOrder", sql.Int,            parseInt(sortOrder, 10) || 0)
-      .input("isActive",  sql.Bit,            isActive !== undefined ? (isActive ? 1 : 0) : 1)
-      .input("updatedBy", sql.NVarChar(200),  actor)
-      .query(`
-        UPDATE dbo.RoomCategoryMaster SET
-          CategoryName = @name, Alias = @alias, SortOrder = @sortOrder, IsActive = @isActive,
-          UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
-        WHERE Id = @id
-      `);
-    res.json({ success: true });
+    // Category update + (optionally) renaming its existing rooms to the new
+    // alias happen in one transaction.
+    const tx = pool.transaction();
+    await tx.begin();
+    let roomsRenamed = 0;
+    try {
+      await tx.request()
+        .input("id",        sql.Int,            id)
+        .input("name",      sql.NVarChar(100),  cName)
+        .input("alias",     sql.NVarChar(150),  cAlias)
+        .input("sortOrder", sql.Int,            parseInt(sortOrder, 10) || 0)
+        .input("isActive",  sql.Bit,            isActive !== undefined ? (isActive ? 1 : 0) : 1)
+        .input("updatedBy", sql.NVarChar(200),  actor)
+        .query(`
+          UPDATE dbo.RoomCategoryMaster SET
+            CategoryName = @name, Alias = @alias, SortOrder = @sortOrder, IsActive = @isActive,
+            UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
+          WHERE Id = @id
+        `);
+      if (renameRooms && oldAlias !== cAlias) roomsRenamed = await renameCategoryRooms(tx, id, oldAlias, cAlias);
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw e;
+    }
+    if (roomsRenamed) await bumpFlatMasterCaches();
+    res.json({ success: true, roomsRenamed });
   } catch (err) {
     if (err.message?.includes("UNIQUE") || err.message?.includes("duplicate key")) {
       return res.status(409).json({ error: "Another category with this name already exists" });
@@ -163,6 +178,54 @@ router.delete("/:id", authMiddleware, requirePageRight("room-category-master", "
     res.json({ success: true });
   } catch (err) {
     console.error("[room-category-master] DELETE error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:id/rename-count — how many existing rooms follow this category's
+// current alias ("Hall Room", "Hall Room 2"), i.e. would be renamed with it.
+router.get("/:id/rename-count", authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+  try {
+    const pool = await getPool();
+    const c = await pool.request().input("id", sql.Int, id).query("SELECT Alias FROM dbo.RoomCategoryMaster WHERE Id = @id");
+    if (!c.recordset.length) return res.status(404).json({ error: "Category not found" });
+    res.json({ rooms: await countCategoryRoomsToRename(pool, id, c.recordset[0].Alias) });
+  } catch (err) {
+    console.error("[room-category-master] GET /:id/rename-count error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /:id/usage — where this category is in use, shown before it is
+// deactivated: layout types whose Unit Composition includes it, layout
+// overrides that include it, and active rooms of it in Flat Master. All of
+// these KEEP the category when it is deactivated.
+router.get("/:id/usage", authMiddleware, async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (isNaN(id)) return res.status(400).json({ error: "Invalid ID" });
+  try {
+    const pool = await getPool();
+    const r = await pool.request().input("id", sql.Int, id).query(`
+      SELECT
+        (SELECT COUNT(DISTINCT c.Id) FROM dbo.RoomComposition rc JOIN dbo.UnitRoomConfig c ON c.Id = rc.UnitRoomConfigId
+          WHERE rc.RoomCategoryId = @id AND rc.Quantity > 0 AND c.IsActive = 1) AS layouts,
+        (SELECT COUNT(*) FROM dbo.RoomMaster WHERE RoomCategoryId = @id AND IsActive = 1) AS rooms,
+        CASE WHEN OBJECT_ID('dbo.RoomLayoutOverride', 'U') IS NULL THEN 0 ELSE 1 END AS hasOverrides
+    `);
+    const usage = r.recordset[0];
+    let overrides = 0;
+    // separate statement: a batch naming a table that doesn't exist yet
+    // (before migration 480) fails to compile, even inside a CASE
+    if (usage.hasOverrides) {
+      overrides = (await pool.request().input("id", sql.Int, id).query(`
+        SELECT COUNT(DISTINCT i.OverrideId) AS n FROM dbo.RoomLayoutOverrideItem i JOIN dbo.RoomLayoutOverride o ON o.Id = i.OverrideId
+        WHERE i.RoomCategoryId = @id AND i.Quantity > 0 AND o.IsActive = 1`)).recordset[0].n;
+    }
+    res.json({ layouts: usage.layouts, overrides, rooms: usage.rooms });
+  } catch (err) {
+    console.error("[room-category-master] GET /:id/usage error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
