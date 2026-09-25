@@ -944,9 +944,8 @@ const CrmApplication: React.FC = () => {
   // the raw list when no Project is even picked yet (nothing to scope by).
   const bankOptions = form.ProjectId ? projectBanks : allBanks;
   useEffect(() => {
-    if (projectBanks.length === 1) {
-      setForm((f) => f.DepositBankId ? f : { ...f, DepositBankId: String((projectBanks[0] as any).BId) });
-    }
+    // no deposit bank auto-pick — Accounts assigns it on the Received
+    // Payment before approval (same rule for every CRM payment)
   }, [projectBanks]);
   // Project -> Block -> Unit cascade (see crmEntityCreation.js's
   // getApplicablePaymentPlans, the same source of truth the backend uses to
@@ -1444,7 +1443,7 @@ const CrmApplication: React.FC = () => {
         TokenType: form.TokenType || null,
         TokenValue: form.TokenValue || null,
         PaymentMode: form.PaymentMode || null,
-        DepositBankId: form.DepositBankId || null,
+        DepositBankId: null, // assigned by Accounts before approval
       });
       // Cheque/UTR/reference lives on CrmCustomerBankDetail, not
       // CrmApplication (see the ChequeNo/ChequeDate/TransactionRef fields

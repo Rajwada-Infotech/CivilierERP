@@ -242,10 +242,10 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
   // Debit the real bank the money was actually deposited into (DepositBankId
   // is already an AccountHeadMaster.LHeadId — same convention
   // generalLedger.js's postReceivedPaymentApproval uses for
-  // RPDepositBankId). No fallback to a generic proxy account — the caller
-  // (crmPayments.js's PUT /:id) already requires DepositBankId before a
-  // payment can even be submitted, so a real bank should always be present
-  // here; if it's somehow missing, that's a bug to surface loudly, not
+  // RPDepositBankId). No fallback to a generic proxy account — Accounts sets
+  // the bank on the Received Payment (PATCH /:id/deposit-bank) and the
+  // approve route refuses a CRM payment without one, so a real bank should
+  // always be present here; if it's somehow missing, that's a bug to surface loudly, not
   // paper over with a suspense balance that can never reconcile.
   if (!row.DepositBankId)
     return { posted: false, reason: `Receipt ${receiptId} has no DepositBankId — cannot post without a real bank` };

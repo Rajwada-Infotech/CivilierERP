@@ -322,8 +322,12 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
       RPCheckNumber: mrRow.PaymentMode === "Cheque" ? mrRow.ChequeNo : null,
       RPChequeDate: mrRow.PaymentMode === "Cheque" ? mrRow.ChequeDate : null,
       RPRemarks: mrRow.Remarks || `CRM Money Receipt ${mrRow.ReceiptNo} - ${mrRow.BookingNo}`,
-      RPDepositBankId: mrRow.DepositBankId != null ? mrRow.DepositBankId : null,
-      RPDepositBankName: mrRow.BankName || null,
+      // Same rule as every CRM payment: no deposit bank from CRM (the
+      // Application form no longer asks for one) — Accounts sets it on the
+      // Received Payment before approval (receivedPayment.js PATCH
+      // /:id/deposit-bank).
+      RPDepositBankId: null,
+      RPDepositBankName: null,
       CrmMilestoneId: null,
       CrmBookingId: mrRow.BookingId,
       CrmApplicationId: mrRow.ApplicationId,

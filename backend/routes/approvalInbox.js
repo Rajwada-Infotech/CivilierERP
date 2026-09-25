@@ -208,7 +208,17 @@ const NULL_EXTRA = `
   CAST(NULL AS NVARCHAR(255)) AS ToGodownName,
   CAST(NULL AS NVARCHAR(MAX)) AS JournalVoucherSummary,
   CAST(NULL AS INT) AS AssigneeUserId,
-  CAST(NULL AS INT) AS RungId,`;
+  CAST(NULL AS INT) AS RungId,
+  CAST(0 AS BIT) AS NeedsReview,`;
+
+// Received Payment variant: a CRM payment (CrmBookingId set) is entered in
+// CRM WITHOUT a deposit bank — Accounts fills the bank on the Received
+// Payment page first. Until then it can't be approved (receivedPayment.js
+// PUT /:id/approve refuses), so the inbox shows "Review" instead of Approve.
+const NULL_EXTRA_RECEIVED_PAYMENT = NULL_EXTRA.replace(
+  "CAST(0 AS BIT) AS NeedsReview",
+  "CAST(CASE WHEN CrmBookingId IS NOT NULL AND RPDepositBankId IS NULL THEN 1 ELSE 0 END AS BIT) AS NeedsReview",
+);
 
 // Builds the per-module SELECT list (optionally scoped to one module) shared
 // by both GET / (the full inbox) and GET /count (the badge) — a single
@@ -335,7 +345,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR)                           AS ContractorName,
           ISNULL(RPCustomerName, RPReceivedFrom)           AS SupplierName,
           RPAmount                                        AS Amount,
-          ${NULL_EXTRA}
+          ${NULL_EXTRA_RECEIVED_PAYMENT}
           CAST(RPCreatedBy AS NVARCHAR(255))              AS CreatedBy,
           ISNULL(CAST(RPApprovedBy AS NVARCHAR(255)), '') AS ApprovedBy,
           ISNULL(CAST(RPApprovedAt AS NVARCHAR), '')      AS ApprovedAt,
@@ -368,6 +378,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR(MAX))               AS JournalVoucherSummary,
           CAST(NULL AS INT)                         AS AssigneeUserId,
           CAST(NULL AS INT)                         AS RungId,
+          CAST(0 AS BIT)                         AS NeedsReview,
           CAST(ISNULL(po.PurchaseOrderNo, '') AS NVARCHAR(255)) AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -453,6 +464,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR(MAX)) AS JournalVoucherSummary,
           CAST(NULL AS INT)           AS AssigneeUserId,
           CAST(NULL AS INT)           AS RungId,
+          CAST(0 AS BIT)                         AS NeedsReview,
           CAST(ISNULL(u_created.name, CAST(eb.ECreatedBy AS NVARCHAR(255))) AS NVARCHAR(255))  AS CreatedBy,
           CAST(ISNULL(u_approved.name, '') AS NVARCHAR(255))                                    AS ApprovedBy,
           ''                       AS ApprovedAt,
@@ -682,6 +694,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR(MAX))                  AS JournalVoucherSummary,
           CAST(NULL AS INT)                            AS AssigneeUserId,
           CAST(NULL AS INT)                            AS RungId,
+          CAST(0 AS BIT)                         AS NeedsReview,
           CAST(so.CreatedBy AS NVARCHAR(255))          AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -762,6 +775,7 @@ function buildInboxQueries(module) {
           )                                    AS JournalVoucherSummary,
           CAST(NULL AS INT)                     AS AssigneeUserId,
           CAST(NULL AS INT)                     AS RungId,
+          CAST(0 AS BIT)                         AS NeedsReview,
           CAST(jv.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,
@@ -877,6 +891,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR(MAX))           AS JournalVoucherSummary,
           dae.EngineerId                        AS AssigneeUserId,
           dma.Id                                 AS RungId,
+          CAST(0 AS BIT)                         AS NeedsReview,
           CAST(daa.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
           ''                                     AS ApprovedBy,
           ''                                     AS ApprovedAt,
