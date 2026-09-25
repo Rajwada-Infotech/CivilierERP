@@ -518,6 +518,11 @@ async function createApp() {
   // "New: X just launched" badge on the Login page — public/pre-auth for
   // the same reason as app-version above.
   app.use("/api/feature-announcement", require("./routes/featureAnnouncement"));
+  // APK Manager. Registered here, before the blanket staff auth wall, because
+  // GET /latest is called by the mobile apps on launch (possibly before login)
+  // to check for an update. Every other route in the file carries its own
+  // authenticateToken + requirePageRight, so publishing/listing stays gated.
+  app.use("/api/app-releases", require("./routes/appReleases"));
   // Customer portal manages its own auth entirely (public /login using the
   // separate CrmCustomerPortalUser table + JWT, then portalAuth for
   // everything past that) — same reason /api/users is registered here
