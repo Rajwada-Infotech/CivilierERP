@@ -24,6 +24,8 @@
 // Usage:
 //   node backend/scripts/fixStuckAmendedDocs.js
 //   node backend/scripts/fixStuckAmendedDocs.js --apply
+//   node backend/scripts/fixStuckAmendedDocs.js --apply --type=grn
+//   node backend/scripts/fixStuckAmendedDocs.js --apply --type=grn,purchase-order
 
 require("../config/env").loadEnv();
 const { connectDB, getPool, sql, closeDB } = require("../db");
@@ -32,6 +34,11 @@ const { bumpCacheVersion } = require("../redis");
 
 const APPLY = process.argv.includes("--apply");
 const ACTOR = "fix-stuck-amended-docs-script";
+// Optional --type=grn,purchase-order,... to scope the run to specific
+// refDocTypes — e.g. fix GRN now, leave CRM-linked received-payment rows
+// for a separate, more careful pass later.
+const typeArg = process.argv.find((a) => a.startsWith("--type="));
+const TYPE_FILTER = typeArg ? new Set(typeArg.slice("--type=".length).split(",")) : null;
 
 // refDocType (dbo.Amendments) -> table/column shape + which GL SourceTypes
 // (if any) to reverse — mirrors each route's own wasApproved fix.
@@ -88,6 +95,7 @@ async function main() {
 
   const plan = [];
   for (const dt of DOC_TYPES) {
+    if (TYPE_FILTER && !TYPE_FILTER.has(dt.refDocType)) continue;
     const rows = await findCandidates(pool, dt);
     for (const row of rows) plan.push({ dt, ...row });
   }
