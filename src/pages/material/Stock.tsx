@@ -44,6 +44,7 @@ const REF_TYPE_META: Record<
   GRN: { label: "GRN", icon: Truck, route: "/material/grn" },
   ISS: { label: "Material Issue", icon: ArrowDownToLine, route: "/material/issues" },
   TRF: { label: "Stock Transfer", icon: ArrowRightLeft },
+  STKUPD: { label: "Stock Update", icon: Package, route: "/material/stock-update" },
   ICT: { label: "Inter-Company Transfer", icon: ArrowRightLeft },
   SO: { label: "Sale Order", icon: Package },
 };
