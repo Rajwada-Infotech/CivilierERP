@@ -39,7 +39,7 @@ export default function CustomerMaintenanceProfile() {
 
   if (customerLoading) return <div className="p-6 text-muted-foreground">Loading…</div>;
   if (customerError || !customer)
-    return <div className="p-6 text-red-500">Confirmed booking not found.</div>;
+    return <div className="p-6 text-red-500">This customer isn't eligible for Maintenance yet — the unit hasn't been handed over.</div>;
 
   return (
     <>
