@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, Fragment } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useNavigate } from "react-router-dom";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -138,6 +139,7 @@ interface Option {
   belongs_to?: string;
   company_id?: number;
   enterprise_id?: number;
+  tagged_company_ids?: string | null;
 }
 
 interface FinYearRow {
@@ -942,7 +944,7 @@ export default function TrialBalance() {
   function handleCompanyChange(id: number | null, opt: Option | null) {
     setSelCompany(opt);
     const filteredProjects = id
-      ? allProjects.filter((p) => p.company_id === id)
+      ? allProjects.filter((p) => projectBelongsToCompany(p, id))
       : selEnterprise
         ? allProjects.filter((p) =>
             allCompanies

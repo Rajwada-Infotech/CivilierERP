@@ -744,10 +744,6 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     PImpsReference,
     PCardReference,
     PCardId,
-    // Inter-Company Stock Transfer workflow — see receivedPayment.js's
-    // identical SourceSaleInvoiceId handling for the mirror-image case on
-    // the customer/receiving side of that feature.
-    IsInterCompanyTransfer,
     // Re-issue: links this payment back to a bounced predecessor
     ReplacesPaymentId,
     // Optional bounce charge added on top of the original amount
@@ -792,36 +788,6 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       }
     }
 
-    // Inter-Company Stock Transfer payments must always be deposited to
-    // the Dummy Bank — this is a system-generated payment for a stock
-    // movement between two projects under different companies, settled
-    // without a real bank transaction. Same pattern as
-    // receivedPayment.js's SourceSaleInvoiceId handling: reject a
-    // mismatched client-supplied bank rather than silently overriding it.
-    if (IsInterCompanyTransfer) {
-      const dummyBank = await pool
-        .request()
-        .query(
-          "SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'",
-        );
-      if (!dummyBank.recordset.length) {
-        return res.status(500).json({
-          error: "Dummy Bank account not found. Please contact your administrator.",
-        });
-      }
-      const dummyBankId = dummyBank.recordset[0].LHeadId;
-      const dummyBankName = dummyBank.recordset[0].LHeadName;
-
-      if (PBankID && parseInt(PBankID, 10) !== dummyBankId) {
-        return res.status(400).json({
-          error: `Inter-company transfer payments must be deposited to the Dummy Bank (${dummyBankName}). Other deposit accounts are not allowed for this workflow.`,
-        });
-      }
-
-      // Force-set deposit bank to Dummy Bank regardless of client payload
-      req.body.PBankID = dummyBankId;
-      req.body.PBankName = dummyBankName;
-    }
 
     // Enforce: a payment can only be made against an Approved Expense Booking.
     // Skipped for Contract-linked payments — the frontend's Contract picker
@@ -1127,6 +1093,18 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const wasApproved = beforeSnapshot?.Status === "Approved";
     const wasRejected = beforeSnapshot?.Status === "Rejected";
 
+    // Editing an already-Approved payment must go back through approval —
+    // this UPDATE never touched Status before, so an edited-Approved
+    // payment silently stayed Approved with no re-approval and no GL
+    // reversal. Mirrors journalVoucher.js's wasApproved handling. Two
+    // possible SourceTypes ("NewPayment" auto-post, "PaymentPosting"
+    // manual) — reverse both, only one will ever actually have rows.
+    if (wasApproved) {
+      const { reversePostingBySource } = require("../services/generalLedger");
+      await reversePostingBySource(pool, "NewPayment", id);
+      await reversePostingBySource(pool, "PaymentPosting", id);
+    }
+
     // A cancelled payment's GL posting was already reversed and the invoice
     // recomputed on that assumption (see routes/chequeCancellation.js) —
     // editing it back to life (e.g. changing PAmount) would silently
@@ -1248,6 +1226,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("TDSPercentage", sql.Decimal(5, 2), tdsSnapshotPut.tdsPercentage)
       .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshotPut.tdsAmount).query(`
         UPDATE dbo.NewPayment SET
+          ${wasApproved ? "Status               = 'Pending'," : ""}
           PPaymentName         = @PPaymentName,
           PRemarks             = @PRemarks,
           PMode                = @PMode,
@@ -1331,7 +1310,12 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     }
 
     res.json({
-      message: resubmitted ? "Payment updated and re-submitted for approval" : "Payment updated successfully",
+      message: wasApproved
+        ? "Payment updated — previous GL posting reversed, sent back for approval"
+        : resubmitted
+          ? "Payment updated and re-submitted for approval"
+          : "Payment updated successfully",
+      reopenedForApproval: wasApproved,
       resubmitted,
     });
   } catch (err) {

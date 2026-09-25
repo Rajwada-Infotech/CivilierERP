@@ -636,6 +636,7 @@ router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (re
       .input("GST", sql.NVarChar(sql.MAX), gstJson)
       .input("BoqID", sql.Int, BoqID ? parseInt(BoqID, 10) : null).query(`
         UPDATE dbo.WorkOrderHeader SET
+          ${wasApproved ? "Status='Pending'," : ""}
           CompanyId=@CompanyId, ProjectId=@ProjectId,
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
           ContractorId=@ContractorId, SupplierId=@SupplierId, TotalAmount=@TotalAmount,
@@ -685,7 +686,12 @@ router.put("/:id", requirePageRight("engineering-work-order", "edit"), async (re
     }
 
     res.json({
-      message: resubmitted ? "Work order updated and re-submitted for approval" : "Work order updated",
+      message: wasApproved
+        ? "Work order updated — sent back for approval"
+        : resubmitted
+          ? "Work order updated and re-submitted for approval"
+          : "Work order updated",
+      reopenedForApproval: wasApproved,
       resubmitted,
     });
   } catch (err) {

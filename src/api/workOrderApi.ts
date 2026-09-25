@@ -104,6 +104,7 @@ export const fetchProjects = async (): Promise<
     belongs_to?: string | number | null;
     company_id?: number | null;
     company_ids?: string | null;
+    tagged_company_ids?: string | null;
   }[]
 
 > => {
@@ -116,7 +117,7 @@ export const fetchProjects = async (): Promise<
       belongs_to?: string | number | null;
       company_id?: number | null;
       company_ids?: string | null;
-
+      tagged_company_ids?: string | null;
     }>(await res.json());
     return data.map((r) => ({
       id: r.id,
@@ -124,7 +125,7 @@ export const fetchProjects = async (): Promise<
       belongs_to: r.belongs_to ?? null,
       company_id: r.company_id ?? null,
       company_ids: r.company_ids ?? null,
-
+      tagged_company_ids: r.tagged_company_ids ?? null,
     }));
   } catch (err) {
     console.error("[workOrderApi] fetchProjects failed:", err);

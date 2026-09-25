@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
@@ -510,7 +511,7 @@ const WorkerAttendance: React.FC = () => {
   });
   const projectsForCompany = useMemo(() => {
     if (!companyId) return projects as any[];
-    return (projects as any[]).filter((p) => p.company_id === companyId);
+    return (projects as any[]).filter((p) => projectBelongsToCompany(p, companyId));
   }, [companyId, projects]);
 
   const { data: activities = [], isFetching: loadingActivities } = useQuery({

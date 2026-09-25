@@ -114,7 +114,7 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   const tableName = map.table.replace("dbo.", "");
   const recordId = parseInt(item.RecordId, 10);
   const totalLevels = workflow.Levels || workflow.LevelDefs.length;
-  const currentLevel = await resolveCurrentLevel(tableName, recordId, totalLevels, workflow.LevelDefs);
+  const currentLevel = await resolveCurrentLevel(tableName, recordId, totalLevels, workflow.LevelDefs, null, { module: item.Module });
   if (currentLevel > totalLevels) {
     // Audit history reads as "fully approved" but the aggregator only ever
     // selects Pending rows — a genuine Status/computed-level mismatch (see

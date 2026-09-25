@@ -1,4 +1,5 @@
 import { generateUUID } from "../../utils/cryptoPolyfill";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import React, { useMemo, useState, useCallback, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
@@ -235,8 +236,7 @@ export default function MaterialRequest() {
   });
 
   const filteredProjects = (projects as any[]).filter(
-    (p) =>
-      !header.companyId || String(p.company_id) === String(header.companyId),
+    (p) => !header.companyId || projectBelongsToCompany(p, header.companyId),
   );
 
   const { data: finYears = [] } = useQuery({

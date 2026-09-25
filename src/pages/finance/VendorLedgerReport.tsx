@@ -16,6 +16,7 @@
  */
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { ExportMenu } from "@/components/ExportMenu";
@@ -275,11 +276,11 @@ export function VendorLedgerReportBody() {
 
   // Selecting a Company narrows the Project list; switching Company clears a
   // Project selection that's no longer in scope.
-  const projectOptions = companyId ? allProjects.filter((p) => p.company_id === companyId) : allProjects;
+  const projectOptions = companyId ? allProjects.filter((p) => projectBelongsToCompany(p, companyId)) : allProjects;
   const handleCompanyChange = (id: number | null) => {
     setCompanyId(id);
     if (id && projectId) {
-      const stillInScope = allProjects.some((p) => p.id === projectId && p.company_id === id);
+      const stillInScope = allProjects.some((p) => p.id === projectId && projectBelongsToCompany(p, id));
       if (!stillInScope) setProjectId(null);
     }
   };

@@ -1,16 +1,19 @@
 import React, { useMemo, useState } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PackagePlus, Plus, Trash2, Eye, Loader2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useAuth } from "@/contexts/AuthContext";
 import { SearchableSelect } from "@/components/SearchableSelect";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { getCompanies, getProjects, getGodowns, getItemOptions } from "@/api/issuesApi";
 import { getUomList } from "@/api/uomApi";
 import {
   createStockUpdate,
+  deleteStockUpdate,
   getStockUpdate,
   getStockUpdates,
   type StockUpdateDetail,
@@ -33,6 +36,8 @@ function Label({ children }: { children: React.ReactNode }) {
 
 export default function StockUpdate() {
   const rights = usePageRights("stock-update");
+  const { currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === "super_admin";
   const qc = useQueryClient();
 
   const [updateDate, setUpdateDate] = useState(todayStr());
@@ -42,6 +47,7 @@ export default function StockUpdate() {
   const [remarks, setRemarks] = useState("");
   const [lines, setLines] = useState<Line[]>([newLine()]);
   const [viewId, setViewId] = useState<number | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const { data: companies = [] } = useQuery({ queryKey: ["su-companies"], queryFn: getCompanies, staleTime: 5 * 60_000 });
   const { data: projects = [] } = useQuery({ queryKey: ["su-projects"], queryFn: getProjects, staleTime: 5 * 60_000 });
@@ -64,7 +70,7 @@ export default function StockUpdate() {
   });
 
   const companyProjects = useMemo(
-    () => (projects as any[]).filter((p) => String(p.company_id ?? p.belongs_to) === companyId),
+    () => (projects as any[]).filter((p) => projectBelongsToCompany(p, companyId)),
     [projects, companyId],
   );
   const projectGodowns = useMemo(
@@ -117,6 +123,18 @@ export default function StockUpdate() {
       qc.invalidateQueries({ queryKey: ["stock-ledger"] });
     },
     onError: (e: any) => toast.error(e?.message || "Failed to save stock update"),
+  });
+
+  const removeUpdate = useMutation({
+    mutationFn: (id: number) => deleteStockUpdate(id),
+    onSuccess: () => {
+      toast.success("Stock update deleted");
+      setDeleteConfirmId(null);
+      qc.invalidateQueries({ queryKey: ["stock-updates"] });
+      qc.invalidateQueries({ queryKey: ["su-items"] });
+      qc.invalidateQueries({ queryKey: ["stock-ledger"] });
+    },
+    onError: (e: any) => toast.error(e?.message || "Failed to delete stock update"),
   });
 
   const handleSave = () => {
@@ -327,7 +345,7 @@ export default function StockUpdate() {
                   <th className="px-4 py-2 text-left">Godown</th>
                   <th className="px-4 py-2 text-right">Items</th>
                   <th className="px-4 py-2 text-left">Created By</th>
-                  <th className="w-12" />
+                  <th className="w-20" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/50">
@@ -346,9 +364,20 @@ export default function StockUpdate() {
                       <td className="px-4 py-2.5 text-right tabular-nums">{h.ItemCount}</td>
                       <td className="px-4 py-2.5 text-muted-foreground">{h.CreatedByName || h.CreatedBy || "—"}</td>
                       <td className="px-2 py-2.5 text-center">
-                        <button onClick={() => setViewId(h.StockUpdateId)} className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors" title="View">
-                          <Eye size={13} />
-                        </button>
+                        <div className="flex items-center justify-center gap-1">
+                          <button onClick={() => setViewId(h.StockUpdateId)} className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors" title="View">
+                            <Eye size={13} />
+                          </button>
+                          {isSuperAdmin && (
+                            <button
+                              onClick={() => setDeleteConfirmId(h.StockUpdateId)}
+                              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                              title="Delete (super admin only)"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -405,6 +434,35 @@ export default function StockUpdate() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteConfirmId != null} onOpenChange={(o) => !o && setDeleteConfirmId(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete this stock update?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This removes the stock it added from the godown's balance. If any of that quantity has since been used elsewhere, the delete will be blocked.
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setDeleteConfirmId(null)}
+              className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={removeUpdate.isPending}
+              onClick={() => deleteConfirmId != null && removeUpdate.mutate(deleteConfirmId)}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-destructive hover:bg-destructive/90 disabled:opacity-50 transition-colors"
+            >
+              {removeUpdate.isPending && <Loader2 size={14} className="animate-spin" />}
+              Delete
+            </button>
+          </div>
         </DialogContent>
       </Dialog>
     </>

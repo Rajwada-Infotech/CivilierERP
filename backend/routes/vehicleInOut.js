@@ -886,6 +886,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
       .input("Remarks", sql.NVarChar(1000), remarks || null)
       .input("UpdatedBy", sql.NVarChar(150), email).query(`
         UPDATE dbo.VehicleInOut SET
+          ${wasApproved ? "Status         = 'Pending'," : ""}
           DocDate        = @DocDate,
           CompanyID      = @CompanyID,
           ProjectID      = @ProjectID,
@@ -951,7 +952,12 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
       }
     }
 
-    res.json({ success: true, resubmitted });
+    res.json({
+      success: true,
+      message: wasApproved ? "Updated — sent back for approval" : undefined,
+      reopenedForApproval: wasApproved,
+      resubmitted,
+    });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }

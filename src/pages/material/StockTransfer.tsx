@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -31,9 +32,11 @@ import {
 } from "@/api/stockTransferApi";
 import {
   createInterCompanyTransfer,
+  previewInterCompanyTransfer,
   getInterCompanyTransfers,
   getInterCompanyTransfer,
   type InterCompanyTransferSummary,
+  type InterCompanyTransferPreview,
 } from "@/api/interCompanyTransferApi";
 import {
   createGRNFromTransfer,
@@ -235,6 +238,25 @@ function ItemSearchRow({
   const [search, setSearch] = useState(item.itemName || "");
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // The list is portalled to <body> and positioned from the input's rect: the
+  // items table sits in an overflow-x-auto wrapper that would otherwise clip it.
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number; width: number } | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const r = containerRef.current?.getBoundingClientRect();
+      if (r) setMenuPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    place();
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [open]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return availableItems;
@@ -246,9 +268,11 @@ function ItemSearchRow({
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
+      const t = e.target as Node;
       if (
         containerRef.current &&
-        !containerRef.current.contains(e.target as Node)
+        !containerRef.current.contains(t) &&
+        !menuRef.current?.contains(t)
       ) {
         setOpen(false);
       }
@@ -313,8 +337,12 @@ function ItemSearchRow({
           />
         </div>
 
-        {open && (
-          <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
+        {open && menuPos && createPortal(
+          <div
+            ref={menuRef}
+            style={{ position: "fixed", top: menuPos.top, left: menuPos.left, width: menuPos.width }}
+            className="z-[100] rounded-lg border border-border bg-popover shadow-lg overflow-hidden"
+          >
             {filtered.length === 0 ? (
               <div className="px-3 py-4 text-xs text-muted-foreground text-center">
                 {search.trim()
@@ -353,7 +381,8 @@ function ItemSearchRow({
                 ))}
               </div>
             )}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
 
@@ -1184,10 +1213,10 @@ export default function StockTransfer() {
     "transfer",
   );
   const [transferMode, setTransferMode] = useState<"intra" | "inter">("intra");
-  const [viaBank, setViaBank] = useState(false);
   const [filterCompanyId, setFilterCompanyId] = useState("");
   const [filterProjectId, setFilterProjectId] = useState("");
   const [toCompanyId, setToCompanyId] = useState("");
+  const [toProjectId, setToProjectId] = useState("");
   const [fromGodownId, setFromGodownId] = useState<number | null>(null);
   const [toGodownId, setToGodownId] = useState<number | null>(null);
   const [items, setItems] = useState<TItem[]>([emptyItem()]);
@@ -1217,6 +1246,7 @@ export default function StockTransfer() {
     id: number;
     label: string;
     company_id: number | null;
+    tagged_company_ids?: string | null;
   }[] = projectsData ?? [];
 
   const companyGodowns = useMemo(() => {
@@ -1230,18 +1260,18 @@ export default function StockTransfer() {
   // The dedicated godown auto-created for the selected project (if any).
   const projectGodown = useMemo(() => {
     if (!filterProjectId) return null;
+    // A project tagged to this company but owned by another has its godown
+    // under the owning company, so fall back to matching on the project alone.
     return (
-      companyGodowns.find(
-        (g) => String(g.ProjectID ?? "") === filterProjectId,
-      ) ?? null
+      companyGodowns.find((g) => String(g.ProjectID ?? "") === filterProjectId) ??
+      allGodowns.find((g) => String(g.ProjectID ?? "") === filterProjectId) ??
+      null
     );
   }, [companyGodowns, filterProjectId]);
 
   const projectOptions = useMemo(() => {
     if (!filterCompanyId) return allProjects;
-    return allProjects.filter(
-      (p) => String(p.company_id ?? "") === filterCompanyId,
-    );
+    return allProjects.filter((p) => projectBelongsToCompany(p, filterCompanyId));
   }, [allProjects, filterCompanyId]);
 
   // Auto-fill the source godown with the project's own godown once one is selected.
@@ -1251,6 +1281,13 @@ export default function StockTransfer() {
       setItems([emptyItem()]);
     }
   }, [projectGodown]);
+
+  // Receiver-side project filter (inter-company only) — same narrowing
+  // pattern as the sender's own Company/Project filters above.
+  const toProjectOptions = useMemo(() => {
+    if (!toCompanyId) return [];
+    return allProjects.filter((p) => projectBelongsToCompany(p, toCompanyId));
+  }, [allProjects, toCompanyId]);
 
   const { data: fromStockData, isLoading: isLoadingStock } = useQuery({
     queryKey: ["inventory-master", today, fromGodownId],
@@ -1288,17 +1325,18 @@ export default function StockTransfer() {
     onError: (e: Error) => setErrorMsg(e.message),
   });
 
-  // "Inter-Company" + "Route via Dummy Bank" together mean this transfer
-  // crosses a real legal/GST boundary — instead of a plain StockLedger
-  // move, generate the full commercial paper trail (Sale Order -> Sale
-  // Invoice -> Received Payment on the sending side, Purchase Order -> GRN
-  // -> Expense Booking -> Payment on the receiving side), priced at the
-  // sender's own last purchase rate. See backend/routes/interCompanyTransfer.js.
+  // "Inter-Company" mode means this transfer crosses a real legal/GST
+  // boundary — stock moves directly (godown OUT at the sender, godown IN at
+  // the receiver, same as an intra-company transfer) plus a two-sided GL
+  // voucher: the sender's books get a receivable from the receiver, the
+  // receiver's books get a payable to the sender, each valued at the
+  // sender COMPANY's own most recent purchase rate (excl. GST). See
+  // backend/routes/interCompanyTransfer.js.
   const interTransferMut = useMutation({
     mutationFn: createInterCompanyTransfer,
     onSuccess: (res) => {
       setSuccessMsg(
-        `Inter-company transfer ${res.DocNo} submitted for super_admin approval — the full document chain will be generated automatically once approved.`,
+        `Inter-company transfer ${res.DocNo} submitted for super_admin approval — stock will move and the GL voucher will post automatically once approved.`,
       );
       setErrorMsg("");
       setFromGodownId(null);
@@ -1346,7 +1384,7 @@ export default function StockTransfer() {
         remarks: it.remarks,
       }));
 
-    if (transferMode === "inter" && viaBank) {
+    if (transferMode === "inter") {
       const senderProjectId = fromGodown?.ProjectID;
       const receiverProjectId = toGodown?.ProjectID;
       if (!senderProjectId || !receiverProjectId) {
@@ -1354,7 +1392,7 @@ export default function StockTransfer() {
         if (!senderProjectId) missing.push(`source godown "${fromGodown?.GodownName ?? "unknown"}"`);
         if (!receiverProjectId) missing.push(`destination godown "${toGodown?.GodownName ?? "unknown"}"`);
         setErrorMsg(
-          `${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not linked to a Project. Assign a Project to ${missing.length > 1 ? "them" : "it"} in Godown Admin before routing this transfer via the Dummy Bank.`,
+          `${missing.join(" and ")} ${missing.length > 1 ? "are" : "is"} not linked to a Project. Assign a Project to ${missing.length > 1 ? "them" : "it"} in Godown Admin before transferring across companies.`,
         );
         return;
       }
@@ -1376,11 +1414,7 @@ export default function StockTransfer() {
       FromGodownID: fromGodownId!,
       ToGodownID: toGodownId!,
       TransferItems: validItems,
-      Remarks: [
-        remarks,
-        transferMode === "inter" ? "[Inter-Company]" : "[Intra-Company]",
-        viaBank ? "[Via Dummy Bank]" : "",
-      ].filter(Boolean).join(" "),
+      Remarks: [remarks, "[Intra-Company]"].filter(Boolean).join(" "),
     });
   };
 
@@ -1398,10 +1432,55 @@ export default function StockTransfer() {
     return allGodowns.filter((g) => String(g.EnterpriseID ?? "") === toCompanyId);
   }, [allGodowns, transferMode, toCompanyId, filterCompanyId, companyGodowns]);
 
+  // The dedicated godown auto-created for the selected receiver project (if any).
+  const toProjectGodown = useMemo(() => {
+    if (!toProjectId) return null;
+    return (
+      toCompanyGodowns.find((g) => String(g.ProjectID ?? "") === toProjectId) ?? null
+    );
+  }, [toCompanyGodowns, toProjectId]);
+
+  // Auto-fill the destination godown with the receiver project's own godown.
+  useEffect(() => {
+    if (toProjectGodown) {
+      setToGodownId(toProjectGodown.GodownID);
+    }
+  }, [toProjectGodown]);
+
   const fromGodown =
     companyGodowns.find((g) => g.GodownID === fromGodownId) || null;
   const toGodown =
     (transferMode === "intra" ? companyGodowns : toCompanyGodowns).find((g) => g.GodownID === toGodownId) || null;
+
+  // Posting preview — prices the current item lines at the sender company's
+  // most recent purchase rate so the user can see exactly what will post
+  // (which company gets debited/credited and how much) before submitting.
+  const interPreviewItems = items.filter((it) => it.itemId && parseFloat(it.qty) > 0);
+  const interPreviewKey = interPreviewItems.map((it) => `${it.itemId}:${it.qty}`).join(",");
+  const {
+    data: interPreview,
+    isFetching: interPreviewLoading,
+    error: interPreviewError,
+  } = useQuery<InterCompanyTransferPreview>({
+    queryKey: ["ict-preview", fromGodown?.ProjectID, toGodown?.ProjectID, interPreviewKey],
+    queryFn: () =>
+      previewInterCompanyTransfer({
+        SenderProjectId: fromGodown!.ProjectID!,
+        ReceiverProjectId: toGodown!.ProjectID!,
+        Items: interPreviewItems.map((it) => ({
+          itemId: it.itemId,
+          itemName: it.itemName,
+          uom: it.uom,
+          qty: parseFloat(it.qty),
+        })),
+      }),
+    enabled:
+      transferMode === "inter" &&
+      !!fromGodown?.ProjectID &&
+      !!toGodown?.ProjectID &&
+      interPreviewItems.length > 0,
+    retry: false,
+  });
 
   const companyOptions = (enterprisesData ?? []).map((e) => ({
     value: String(e.id),
@@ -1474,8 +1553,8 @@ export default function StockTransfer() {
                   onClick={() => {
                     setTransferMode("intra");
                     setToCompanyId("");
+                    setToProjectId("");
                     setToGodownId(null);
-                    setViaBank(false);
                   }}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     transferMode === "intra"
@@ -1489,7 +1568,6 @@ export default function StockTransfer() {
                   onClick={() => {
                     setTransferMode("inter");
                     setToGodownId(null);
-                    setViaBank(true);
                   }}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     transferMode === "inter"
@@ -1500,19 +1578,6 @@ export default function StockTransfer() {
                   Inter-Company
                 </button>
               </div>
-              {transferMode === "inter" && (
-                <label className="flex items-center gap-2 cursor-pointer select-none">
-                  <div
-                    onClick={() => setViaBank((v) => !v)}
-                    className={`relative w-9 h-5 rounded-full transition-colors ${viaBank ? "bg-amber-500" : "bg-muted border border-border"}`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${viaBank ? "translate-x-4" : ""}`} />
-                  </div>
-                  <span className="text-xs text-muted-foreground">
-                    Route via Dummy Bank{viaBank && <span className="ml-1 text-amber-600 font-medium">(enabled)</span>}
-                  </span>
-                </label>
-              )}
               <span className="text-xs text-muted-foreground/60 sm:ml-auto">
                 {transferMode === "intra"
                   ? "Transfer between godowns within the same company"
@@ -1546,47 +1611,99 @@ export default function StockTransfer() {
               </div>
 
               <div className="space-y-3">
-                {/* From Company */}
-                <FilterSelect
-                  icon={Building2}
-                  label={transferMode === "inter" ? "From Company" : "Company"}
-                  value={filterCompanyId}
-                  onChange={(v) => {
-                    setFilterCompanyId(v);
-                    setFilterProjectId("");
-                    setFromGodownId(null);
-                    setToGodownId(null);
-                    setItems([emptyItem()]);
-                  }}
-                  options={companyOptions}
-                  placeholder="All companies"
-                />
+                {transferMode === "inter" ? (
+                  <>
+                    {/* From Company | From Project */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <FilterSelect
+                        icon={Building2}
+                        label="From Company"
+                        value={filterCompanyId}
+                        onChange={(v) => {
+                          setFilterCompanyId(v);
+                          setFilterProjectId("");
+                          setFromGodownId(null);
+                          setToGodownId(null);
+                          setItems([emptyItem()]);
+                        }}
+                        options={companyOptions}
+                        placeholder="All companies"
+                      />
+                      <FilterSelect
+                        icon={FolderKanban}
+                        label="From Project"
+                        value={filterProjectId}
+                        onChange={(v) => {
+                          setFilterProjectId(v);
+                          setFromGodownId(null);
+                          setToGodownId(null);
+                          setItems([emptyItem()]);
+                        }}
+                        options={projectSelectOptions}
+                        placeholder={filterCompanyId ? "All projects in company" : "All projects"}
+                      />
+                    </div>
 
-                {/* Project */}
-                <FilterSelect
-                  icon={FolderKanban}
-                  label="Project"
-                  value={filterProjectId}
-                  onChange={(v) => {
-                    setFilterProjectId(v);
-                    setFromGodownId(null);
-                    setToGodownId(null);
-                    setItems([emptyItem()]);
-                  }}
-                  options={projectSelectOptions}
-                  placeholder={filterCompanyId ? "All projects in company" : "All projects"}
-                />
+                    {/* To Company | Receiver Project */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <FilterSelect
+                        icon={Building2}
+                        label="To Company"
+                        value={toCompanyId}
+                        onChange={(v) => {
+                          setToCompanyId(v);
+                          setToProjectId("");
+                          setToGodownId(null);
+                        }}
+                        options={companyOptions.filter((o) => o.value !== filterCompanyId)}
+                        placeholder="Select destination company"
+                      />
+                      <FilterSelect
+                        icon={FolderKanban}
+                        label="Receiver Project"
+                        value={toProjectId}
+                        onChange={(v) => {
+                          setToProjectId(v);
+                          setToGodownId(null);
+                        }}
+                        options={toProjectOptions.map((p) => ({ value: String(p.id), label: p.label }))}
+                        placeholder={toCompanyId ? "All projects in company" : "Select a company first"}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Company */}
+                    <FilterSelect
+                      icon={Building2}
+                      label="Company"
+                      value={filterCompanyId}
+                      onChange={(v) => {
+                        setFilterCompanyId(v);
+                        setFilterProjectId("");
+                        setFromGodownId(null);
+                        setToGodownId(null);
+                        setItems([emptyItem()]);
+                      }}
+                      options={companyOptions}
+                      placeholder="All companies"
+                    />
 
-                {/* To Company (inter-company only) */}
-                {transferMode === "inter" && (
-                  <FilterSelect
-                    icon={Building2}
-                    label="To Company"
-                    value={toCompanyId}
-                    onChange={(v) => { setToCompanyId(v); setToGodownId(null); }}
-                    options={companyOptions.filter((o) => o.value !== filterCompanyId)}
-                    placeholder="Select destination company"
-                  />
+                    {/* Project */}
+                    <FilterSelect
+                      icon={FolderKanban}
+                      label="Project"
+                      value={filterProjectId}
+                      onChange={(v) => {
+                        setFilterProjectId(v);
+                        setFromGodownId(null);
+                        setToGodownId(null);
+                        setItems([emptyItem()]);
+                      }}
+                      options={projectSelectOptions}
+                      placeholder={filterCompanyId ? "All projects in company" : "All projects"}
+                    />
+                  </>
                 )}
 
                 {/* From Godown | To Godown */}
@@ -1775,12 +1892,53 @@ export default function StockTransfer() {
                       className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none resize-none focus:ring-2 focus:ring-emerald-500/30"
                     />
                   </div>
-                  {viaBank && transferMode === "inter" && (
-                    <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 border border-amber-400/30 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
-                      <AlertCircle size={13} className="mt-0.5 shrink-0" />
-                      <span>
-                        <strong>Dummy Bank routing enabled.</strong> This transfer will be recorded as two legs: a stock-out debit to a dummy bank account at the source company, and a stock-in credit from the same dummy bank at the destination company. Ensure the dummy bank GL account is configured before executing.
-                      </span>
+                  {transferMode === "inter" && (
+                    <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-xs space-y-2">
+                      <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">
+                        Posting Preview
+                      </p>
+                      {interPreviewLoading ? (
+                        <p className="text-muted-foreground flex items-center gap-1.5">
+                          <RefreshCw size={11} className="animate-spin" /> Pricing items…
+                        </p>
+                      ) : interPreviewError ? (
+                        <p className="text-red-600 dark:text-red-400">
+                          {(interPreviewError as Error).message}
+                        </p>
+                      ) : interPreview && interPreview.items.length > 0 ? (
+                        <>
+                          <div className="space-y-1">
+                            {interPreview.items.map((it) => (
+                              <div key={it.itemId} className="flex items-center justify-between gap-3 text-[11px]">
+                                <span className="text-foreground truncate">
+                                  {it.itemName || it.itemId} — {it.qty} {it.unit}
+                                </span>
+                                <span className="text-muted-foreground shrink-0">
+                                  ₹{it.rate.toLocaleString("en-IN")}/unit (excl. GST) = ₹{it.amount.toLocaleString("en-IN")}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                          <div className="border-t border-border/60 pt-2 space-y-1">
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="text-muted-foreground">
+                                {interPreview.senderCompanyName} — Inter-Company A/c debited (receivable from {interPreview.receiverCompanyName})
+                              </span>
+                              <span className="font-semibold text-foreground">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
+                            </div>
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="text-muted-foreground">
+                                {interPreview.receiverCompanyName} — Inter-Company A/c credited (payable to {interPreview.senderCompanyName})
+                              </span>
+                              <span className="font-semibold text-foreground">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <p className="text-muted-foreground/60">
+                          Select items to price them at {fromGodown?.EnterpriseName || "the source company"}'s most recent purchase rate.
+                        </p>
+                      )}
                     </div>
                   )}
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
