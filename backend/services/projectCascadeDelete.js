@@ -270,6 +270,10 @@ async function deleteProjectCascade(pool, projectId, projectName) {
     record("JournalVoucher", await count(tx, "JournalVoucher", "JVID", jvIds));
     record("InterCompanyTransfer", await count(tx, "InterCompanyTransfer", "ICTId", ictIds));
 
+    // Flat Master layout overrides reference Unit/Block rows — remove them
+    // before those tables below.
+    record("RoomLayoutOverride", await require("./unitLayout").removeOverridesFor(tx, { projectId: pid.value }));
+
     // ── 8. Everything else keyed directly by ProjectId/project_id ──────────
     const directTables = [
       ["ActivityDependency", "ProjectId"],

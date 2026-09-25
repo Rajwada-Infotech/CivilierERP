@@ -8,7 +8,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { getBlockLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
-const { resolveLayoutType, bumpFlatMasterCaches } = require("../services/unitLayout");
+const { resolveLayoutType, bumpFlatMasterCaches, removeOverridesFor } = require("../services/unitLayout");
 
 // A Block can be tagged with 1+ Payment Plans (dbo.CrmBlockPaymentPlan,
 // many-to-many) — the middle tier of the Project -> Block -> Unit cascade
@@ -347,10 +347,18 @@ router.delete("/:id", allowRoles("admin", "super_admin", "dba"), async (req, res
       });
     }
 
-    await pool
-      .request()
-      .input("Id", sql.Int, id)
-      .query("DELETE FROM dbo.BlockMaster WHERE Id = @Id");
+    // The block's layout overrides (settings of this block) go with it, in
+    // the same transaction as the delete.
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await removeOverridesFor(tx, { blockId: id });
+      await tx.request().input("Id", sql.Int, id).query("DELETE FROM dbo.BlockMaster WHERE Id = @Id");
+      await tx.commit();
+    } catch (e) {
+      try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+      throw e;
+    }
 
     await bumpCacheVersion("block-master");
     await bumpFlatMasterCaches();

@@ -82,7 +82,7 @@ async function resolveLayoutType(db, { layoutTypeId, unitType } = {}) {
 async function listLayoutTypes(db) {
   const types = await db.request().query(`${LAYOUT_SELECT} WHERE lt.IsActive = 1 ORDER BY lt.SortOrder ASC, lt.Label ASC`);
   const comp = await db.request().query(`
-    SELECT lt.Id AS LayoutTypeId, cat.Alias, rc.Quantity
+    SELECT lt.Id AS LayoutTypeId, cat.Id AS CategoryId, cat.Alias, rc.Quantity
     FROM dbo.RoomLayoutType lt
     JOIN dbo.UnitRoomConfig cfg ON ${CONFIG_MATCHES_LAYOUT} AND cfg.IsActive = 1
     JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id AND rc.Quantity > 0
@@ -90,16 +90,20 @@ async function listLayoutTypes(db) {
     WHERE lt.IsActive = 1
     ORDER BY cat.SortOrder ASC, cat.Alias ASC
   `);
-  const summaryById = new Map();
+  const compById = new Map();
   for (const c of comp.recordset) {
-    const parts = summaryById.get(c.LayoutTypeId) || [];
-    parts.push(`${c.Quantity} ${c.Alias}`);
-    summaryById.set(c.LayoutTypeId, parts);
+    const rows = compById.get(c.LayoutTypeId) || [];
+    rows.push({ categoryId: c.CategoryId, alias: c.Alias, quantity: c.Quantity });
+    compById.set(c.LayoutTypeId, rows);
   }
-  return types.recordset.map((row) => ({
-    ...toLayout(row),
-    summary: (summaryById.get(row.Id) || []).join(" · "),
-  }));
+  return types.recordset.map((row) => {
+    const composition = compById.get(row.Id) || [];
+    return {
+      ...toLayout(row),
+      summary: composition.map((c) => `${c.quantity} ${c.alias}`).join(" · "),
+      composition,
+    };
+  });
 }
 
 // The active categories x quantities of one layout type.
@@ -114,6 +118,95 @@ async function getLayoutComposition(db, layoutTypeId) {
     ORDER BY cat.SortOrder ASC, cat.Alias ASC
   `);
   return r.recordset;
+}
+
+// ── Layout overrides (migration 480) ─────────────────────────────────────
+// A layout type's global composition can be overridden for one Project,
+// Block, floor range of a Block, or single Unit. The most specific active
+// override wins:  UNIT > FLOOR > BLOCK > PROJECT > global.
+const SCOPE_RANK = { UNIT: 4, FLOOR: 3, BLOCK: 2, PROJECT: 1 };
+const SCOPE_LABEL = { UNIT: "Unit", FLOOR: "Floor", BLOCK: "Block", PROJECT: "Project" };
+
+function floorText(n) {
+  return n === 0 ? "G" : String(n);
+}
+
+function describeScope(o) {
+  if (o.ScopeLevel === "FLOOR") {
+    return o.FloorFrom === o.FloorTo ? `Floor ${floorText(o.FloorFrom)}` : `Floors ${floorText(o.FloorFrom)}–${floorText(o.FloorTo)}`;
+  }
+  return SCOPE_LABEL[o.ScopeLevel];
+}
+
+// Every ACTIVE override of one layout type in one project, each with its
+// full room list (active categories only, quantity > 0, in category order).
+// Set once the table is seen to exist, so the check isn't repeated. Code
+// deployed before migration 480 ran must still work: no override table
+// simply means no overrides.
+let overrideTableExists = false;
+async function overrideTableReady(db) {
+  if (overrideTableExists) return true;
+  const t = await db.request().query("SELECT OBJECT_ID('dbo.RoomLayoutOverride', 'U') AS id");
+  overrideTableExists = t?.recordset?.[0]?.id != null;
+  return overrideTableExists;
+}
+
+async function loadOverrides(db, layoutTypeId, projectId) {
+  if (!(await overrideTableReady(db))) return [];
+  const r = await db.request()
+    .input("lt", sql.Int, layoutTypeId)
+    .input("pid", sql.Int, projectId)
+    .query(`
+      SELECT o.Id, o.ScopeLevel, o.ProjectId, o.BlockId, o.FloorFrom, o.FloorTo, o.UnitId,
+             cat.Id AS categoryId, cat.Alias AS alias, i.Quantity AS quantity
+      FROM dbo.RoomLayoutOverride o
+      LEFT JOIN dbo.RoomLayoutOverrideItem i ON i.OverrideId = o.Id AND i.Quantity > 0
+      LEFT JOIN dbo.RoomCategoryMaster cat ON cat.Id = i.RoomCategoryId AND cat.IsActive = 1
+      WHERE o.LayoutTypeId = @lt AND o.ProjectId = @pid AND o.IsActive = 1
+      ORDER BY o.Id, cat.SortOrder, cat.Alias
+    `);
+  const byId = new Map();
+  for (const row of r.recordset) {
+    if (!byId.has(row.Id)) {
+      byId.set(row.Id, {
+        Id: row.Id, ScopeLevel: row.ScopeLevel, ProjectId: row.ProjectId, BlockId: row.BlockId,
+        FloorFrom: row.FloorFrom, FloorTo: row.FloorTo, UnitId: row.UnitId, composition: [],
+      });
+    }
+    if (row.categoryId != null) byId.get(row.Id).composition.push({ categoryId: row.categoryId, alias: row.alias, quantity: row.quantity });
+  }
+  return [...byId.values()];
+}
+
+// Which override (if any) applies to a unit — the most specific one.
+function pickOverride(overrides, unit) {
+  let best = null;
+  for (const o of overrides) {
+    const applies =
+      (o.ScopeLevel === "PROJECT" && o.ProjectId === unit.ProjectId) ||
+      (o.ScopeLevel === "BLOCK" && o.BlockId === unit.BlockId) ||
+      (o.ScopeLevel === "FLOOR" && o.BlockId === unit.BlockId && unit.FloorNo != null && unit.FloorNo >= o.FloorFrom && unit.FloorNo <= o.FloorTo) ||
+      (o.ScopeLevel === "UNIT" && o.UnitId === unit.Id);
+    if (applies && (!best || SCOPE_RANK[o.ScopeLevel] > SCOPE_RANK[best.ScopeLevel])) best = o;
+  }
+  return best;
+}
+
+// The composition a unit actually gets: its most specific override, else
+// its layout type's global composition. `source` says where it came from.
+// `cache` (Map, optional) shares global compositions + a project's
+// overrides across a batch.
+async function getEffectiveComposition(db, unit, layout, cache = null) {
+  if (!layout) return { composition: [], source: { level: "NONE", label: "No layout type" } };
+  const gKey = `global:${layout.id}`;
+  let global = cache?.get(gKey);
+  if (!global) { global = await getLayoutComposition(db, layout.id); cache?.set(gKey, global); }
+  const oKey = `ovr:${layout.id}:${unit.ProjectId}`;
+  let overrides = cache?.get(oKey);
+  if (!overrides) { overrides = await loadOverrides(db, layout.id, unit.ProjectId); cache?.set(oKey, overrides); }
+  const o = pickOverride(overrides, unit);
+  if (o) return { composition: o.composition, source: { level: o.ScopeLevel, overrideId: o.Id, label: `${describeScope(o)} override` } };
+  return { composition: global, source: { level: "GLOBAL", label: `Unit Composition (${layout.label})` } };
 }
 
 class LayoutValidationError extends Error {
@@ -220,11 +313,16 @@ async function syncUnitRooms(db, unitId, { removeUnused = false, createdBy = nul
     const layout = unit.LayoutTypeId
       ? await resolveLayoutType(db, { layoutTypeId: unit.LayoutTypeId })
       : await resolveLayoutType(db, { unitType: unit.UnitType });
-    cached = { layout, composition: layout ? await getLayoutComposition(db, layout.id) : [] };
+    cached = { layout };
     cache?.set(layoutKey, cached);
   }
-  const { layout, composition } = cached;
+  const { layout } = cached;
   result.layout = layout;
+  // The unit's EFFECTIVE layout: its most specific Project / Block / Floor /
+  // Unit override, else the layout type's global composition.
+  const effective = await getEffectiveComposition(db, unit, layout, cache);
+  const composition = effective.composition;
+  result.source = effective.source;
   if (!composition.length && !removeUnused) {
     result.skipped = layout ? "no-composition" : "no-layout";
     return result;
@@ -441,7 +539,264 @@ async function removeUnitRoomsForDelete(db, unitId) {
   return null;
 }
 
+// ── Override editing: validate / preview / save / reset ──────────────────
+
+const MAX_ROOM_QTY = 10;
+const SCOPES = new Set(["PROJECT", "BLOCK", "FLOOR", "UNIT"]);
+
+// Normalizes + validates the scope of an override request against the DB.
+// Returns { layout, ScopeLevel, ProjectId, BlockId, FloorFrom, FloorTo, UnitId }.
+async function validateScope(db, input) {
+  const int = (v) => (v === null || v === undefined || v === "" ? null : Number.isInteger(Number(v)) ? Number(v) : NaN);
+  const ScopeLevel = String(input.ScopeLevel || "").toUpperCase();
+  if (!SCOPES.has(ScopeLevel)) throw new LayoutValidationError("ScopeLevel must be PROJECT, BLOCK, FLOOR or UNIT.");
+  const layout = await resolveLayoutType(db, { layoutTypeId: input.LayoutTypeId });
+  if (!layout) throw new LayoutValidationError("Unknown or inactive layout type.");
+  const s = { layout, ScopeLevel, ProjectId: int(input.ProjectId), BlockId: null, FloorFrom: null, FloorTo: null, UnitId: null };
+  if (!Number.isInteger(s.ProjectId)) throw new LayoutValidationError("ProjectId is required.");
+
+  if (ScopeLevel !== "PROJECT") {
+    s.BlockId = int(input.BlockId);
+    if (!Number.isInteger(s.BlockId)) throw new LayoutValidationError("BlockId is required for this scope.");
+    const b = await db.request().input("b", sql.Int, s.BlockId).input("p", sql.Int, s.ProjectId)
+      .query("SELECT Id FROM dbo.BlockMaster WHERE Id = @b AND ProjectId = @p AND IsActive = 1");
+    if (!b.recordset.length) throw new LayoutValidationError("That block doesn't belong to this project.");
+  }
+  if (ScopeLevel === "FLOOR") {
+    s.FloorFrom = int(input.FloorFrom);
+    s.FloorTo = int(input.FloorTo);
+    if (!Number.isInteger(s.FloorFrom) || !Number.isInteger(s.FloorTo)) throw new LayoutValidationError("Floor range needs a From and To floor.");
+    if (s.FloorFrom < -10 || s.FloorTo > 300) throw new LayoutValidationError("Floor range is out of bounds.");
+    if (s.FloorFrom > s.FloorTo) throw new LayoutValidationError("Floor range 'From' must not be above 'To'.");
+  }
+  if (ScopeLevel === "UNIT") {
+    s.UnitId = int(input.UnitId);
+    if (!Number.isInteger(s.UnitId)) throw new LayoutValidationError("UnitId is required for a unit override.");
+    const u = await db.request().input("u", sql.Int, s.UnitId).query("SELECT Id, ProjectId, BlockId, LayoutTypeId FROM dbo.UnitMaster WHERE Id = @u AND IsActive = 1");
+    const unit = u.recordset[0];
+    if (!unit || unit.ProjectId !== s.ProjectId || unit.BlockId !== s.BlockId) throw new LayoutValidationError("That unit doesn't belong to this project/block.");
+    if (unit.LayoutTypeId !== layout.id) throw new LayoutValidationError(`That unit isn't a ${layout.label}.`);
+  }
+  return s;
+}
+
+async function validateItems(db, items) {
+  if (!Array.isArray(items)) throw new LayoutValidationError("items must be a list of { roomCategoryId, quantity }.");
+  const cats = (await db.request().query("SELECT Id, Alias, SortOrder FROM dbo.RoomCategoryMaster WHERE IsActive = 1")).recordset;
+  const byId = new Map(cats.map((c) => [c.Id, c]));
+  const clean = new Map();
+  for (const it of items) {
+    const id = Number(it.roomCategoryId);
+    const qty = Number(it.quantity);
+    if (!byId.has(id)) throw new LayoutValidationError(`Room category ${it.roomCategoryId} doesn't exist or is inactive.`);
+    if (!Number.isInteger(qty) || qty < 0 || qty > MAX_ROOM_QTY) throw new LayoutValidationError(`Quantity must be a whole number from 0 to ${MAX_ROOM_QTY}.`);
+    clean.set(id, qty);
+  }
+  const composition = cats.filter((c) => clean.get(c.Id) > 0)
+    .sort((a, b) => a.SortOrder - b.SortOrder || a.Alias.localeCompare(b.Alias))
+    .map((c) => ({ categoryId: c.Id, alias: c.Alias, quantity: clean.get(c.Id) }));
+  if (!composition.length) throw new LayoutValidationError("An override must have at least one room.");
+  return { composition, all: cats.map((c) => ({ roomCategoryId: c.Id, quantity: clean.get(c.Id) || 0 })) };
+}
+
+function sameScope(o, s) {
+  return o.ScopeLevel === s.ScopeLevel &&
+    (s.ScopeLevel === "PROJECT" ||
+     (s.ScopeLevel === "BLOCK" && o.BlockId === s.BlockId) ||
+     (s.ScopeLevel === "FLOOR" && o.BlockId === s.BlockId && o.FloorFrom === s.FloorFrom && o.FloorTo === s.FloorTo) ||
+     (s.ScopeLevel === "UNIT" && o.UnitId === s.UnitId));
+}
+
+// A floor range may not overlap another floor-range override of the same
+// block + layout type (other than itself) — otherwise which one wins would
+// be ambiguous.
+function findOverlap(overrides, s) {
+  if (s.ScopeLevel !== "FLOOR") return null;
+  return overrides.find((o) => o.ScopeLevel === "FLOOR" && o.BlockId === s.BlockId && !sameScope(o, s)
+    && o.FloorFrom <= s.FloorTo && s.FloorFrom <= o.FloorTo) || null;
+}
+
+// Active units of this layout type inside the scope.
+async function unitsInScope(db, s) {
+  const r = db.request().input("lt", sql.Int, s.layout.id).input("p", sql.Int, s.ProjectId);
+  let where = "u.IsActive = 1 AND u.LayoutTypeId = @lt AND u.ProjectId = @p";
+  if (s.BlockId != null) { r.input("b", sql.Int, s.BlockId); where += " AND u.BlockId = @b"; }
+  if (s.ScopeLevel === "FLOOR") { r.input("ff", sql.Int, s.FloorFrom).input("ft", sql.Int, s.FloorTo); where += " AND u.FloorNo BETWEEN @ff AND @ft"; }
+  if (s.ScopeLevel === "UNIT") { r.input("u", sql.Int, s.UnitId); where += " AND u.Id = @u"; }
+  return (await r.query(`SELECT u.Id, u.ProjectId, u.BlockId, u.FloorNo, u.UnitName FROM dbo.UnitMaster u WHERE ${where}`)).recordset;
+}
+
+// What saving (items = composition) or resetting (items = null) this scope's
+// override would do to each unit's rooms — computed, nothing written. Uses
+// the same rules as syncUnitRooms(removeUnused: true): add missing rooms,
+// retire surplus rooms WITHOUT work, keep (and list) surplus rooms WITH work.
+async function previewOverrideChange(db, s, composition) {
+  const overrides = await loadOverrides(db, s.layout.id, s.ProjectId);
+  const current = overrides.find((o) => sameScope(o, s)) || null;
+  const overlap = composition ? findOverlap(overrides, s) : null;
+  const global = await getLayoutComposition(db, s.layout.id);
+  const hypothetical = overrides.filter((o) => !sameScope(o, s));
+  if (composition) hypothetical.push({ Id: 0, ...s, composition });
+
+  const units = await unitsInScope(db, s);
+  const result = {
+    scope: { level: s.ScopeLevel, label: describeScope(s), layout: s.layout.label },
+    existingOverrideId: current?.Id ?? null,
+    overlap: overlap ? { id: overlap.Id, label: describeScope(overlap) } : null,
+    unitsInScope: units.length, unitsChanged: 0, unitsShadowed: 0,
+    roomsToAdd: 0, roomsToRemove: 0, roomsKeptWithWork: [],
+  };
+  if (!units.length) return result;
+
+  const ids = units.map((u) => u.Id);
+  const rooms = (await db.request().query(`
+    SELECT r.UnitId, r.RoomCategoryId, r.RoomName, ${ROOM_HAS_WORK} AS HasWork
+    FROM dbo.RoomMaster r WHERE r.IsActive = 1 AND r.RoomCategoryId IS NOT NULL AND r.UnitId IN (${ids.join(",")})
+  `)).recordset;
+  const roomsByUnit = new Map();
+  for (const r of rooms) {
+    if (!roomsByUnit.has(r.UnitId)) roomsByUnit.set(r.UnitId, []);
+    roomsByUnit.get(r.UnitId).push(r);
+  }
+
+  for (const u of units) {
+    const target = (pickOverride(hypothetical, u) || { composition: global }).composition;
+    const before = (pickOverride(overrides, u) || { composition: global }).composition;
+    const want = new Map(target.map((c) => [c.categoryId, c.quantity]));
+    // A more specific override (e.g. a unit override inside this block)
+    // keeps the unit on its own layout — this change doesn't reach it.
+    const winner = pickOverride(hypothetical, u);
+    if (composition && winner && !sameScope(winner, s) && SCOPE_RANK[winner.ScopeLevel] > SCOPE_RANK[s.ScopeLevel]) { result.unitsShadowed++; continue; }
+    const have = roomsByUnit.get(u.Id) || [];
+    const cats = new Set([...want.keys(), ...have.map((r) => r.RoomCategoryId)]);
+    let add = 0, remove = 0; const kept = [];
+    for (const cat of cats) {
+      const q = want.get(cat) || 0;
+      const inCat = have.filter((r) => r.RoomCategoryId === cat);
+      if (inCat.length < q) add += q - inCat.length;
+      else if (inCat.length > q) {
+        let excess = inCat.length - q;
+        const clean = inCat.filter((r) => !r.HasWork).length;
+        const drop = Math.min(excess, clean);
+        remove += drop; excess -= drop;
+        inCat.filter((r) => r.HasWork).slice(0, excess).forEach((r) => kept.push(`${u.UnitName}: ${r.RoomName}`));
+      }
+    }
+    const layoutChanged = JSON.stringify(target) !== JSON.stringify(before);
+    if (add || remove || kept.length || layoutChanged) result.unitsChanged++;
+    result.roomsToAdd += add;
+    result.roomsToRemove += remove;
+    result.roomsKeptWithWork.push(...kept);
+  }
+  return result;
+}
+
+// Creates or replaces the override for this scope (one transaction).
+// Returns { overrideId, unitIds } — the caller syncs those units' rooms.
+async function saveOverride(pool, s, itemsAll, actor) {
+  const tx = pool.transaction();
+  await tx.begin();
+  try {
+    const overrides = await loadOverrides(tx, s.layout.id, s.ProjectId);
+    const overlap = findOverlap(overrides, s);
+    if (overlap) throw new LayoutValidationError(`This floor range overlaps the existing ${describeScope(overlap)} override for ${s.layout.label} — edit or reset that one first.`);
+    const current = overrides.find((o) => sameScope(o, s));
+    let overrideId = current?.Id;
+    if (overrideId) {
+      await tx.request().input("id", sql.Int, overrideId).input("by", sql.NVarChar(200), actor)
+        .query("UPDATE dbo.RoomLayoutOverride SET UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+      await tx.request().input("id", sql.Int, overrideId).query("DELETE FROM dbo.RoomLayoutOverrideItem WHERE OverrideId = @id");
+    } else {
+      const ins = await tx.request()
+        .input("lt", sql.Int, s.layout.id).input("lvl", sql.NVarChar(10), s.ScopeLevel).input("p", sql.Int, s.ProjectId)
+        .input("b", sql.Int, s.BlockId).input("ff", sql.Int, s.FloorFrom).input("ft", sql.Int, s.FloorTo).input("u", sql.Int, s.UnitId)
+        .input("by", sql.NVarChar(200), actor)
+        .query(`INSERT INTO dbo.RoomLayoutOverride (LayoutTypeId, ScopeLevel, ProjectId, BlockId, FloorFrom, FloorTo, UnitId, CreatedBy)
+                OUTPUT INSERTED.Id AS id VALUES (@lt, @lvl, @p, @b, @ff, @ft, @u, @by)`);
+      overrideId = ins.recordset[0].id;
+    }
+    for (const it of itemsAll) {
+      await tx.request().input("o", sql.Int, overrideId).input("c", sql.Int, it.roomCategoryId).input("q", sql.Int, it.quantity)
+        .query("INSERT INTO dbo.RoomLayoutOverrideItem (OverrideId, RoomCategoryId, Quantity) VALUES (@o, @c, @q)");
+    }
+    await tx.commit();
+    return { overrideId, unitIds: (await unitsInScope(pool, s)).map((u) => u.Id) };
+  } catch (e) {
+    try { await tx.rollback(); } catch (_) { /* already rolled back */ }
+    if (e && (e.number === 2601 || e.number === 2627)) {
+      throw new LayoutValidationError("Someone else just saved a layout for this same level — reload and try again.");
+    }
+    throw e;
+  }
+}
+
+// Removes (soft-deactivates) the override for this scope, so its units fall
+// back to the next level up. Returns { overrideId, unitIds } or null.
+async function resetOverride(pool, s, actor) {
+  const overrides = await loadOverrides(pool, s.layout.id, s.ProjectId);
+  const current = overrides.find((o) => sameScope(o, s));
+  if (!current) return null;
+  await pool.request().input("id", sql.Int, current.Id).input("by", sql.NVarChar(200), actor)
+    .query("UPDATE dbo.RoomLayoutOverride SET IsActive = 0, UpdatedBy = @by, UpdatedAt = SYSDATETIME() WHERE Id = @id AND IsActive = 1");
+  return { overrideId: current.Id, unitIds: (await unitsInScope(pool, s)).map((u) => u.Id) };
+}
+
+// Every active override of a project — for the tree's "Custom" badges.
+async function listProjectOverrides(db, projectId) {
+  if (!(await overrideTableReady(db))) return [];
+  const r = await db.request().input("p", sql.Int, projectId).query(`
+    SELECT o.Id, o.LayoutTypeId, o.ScopeLevel, o.ProjectId, o.BlockId, o.FloorFrom, o.FloorTo, o.UnitId,
+           cat.Id AS categoryId, cat.Alias AS alias, i.Quantity AS quantity
+    FROM dbo.RoomLayoutOverride o
+    LEFT JOIN dbo.RoomLayoutOverrideItem i ON i.OverrideId = o.Id AND i.Quantity > 0
+    LEFT JOIN dbo.RoomCategoryMaster cat ON cat.Id = i.RoomCategoryId AND cat.IsActive = 1
+    WHERE o.ProjectId = @p AND o.IsActive = 1
+    ORDER BY o.Id, cat.SortOrder, cat.Alias`);
+  const byId = new Map();
+  for (const row of r.recordset) {
+    if (!byId.has(row.Id)) {
+      byId.set(row.Id, {
+        Id: row.Id, LayoutTypeId: row.LayoutTypeId, ScopeLevel: row.ScopeLevel, ProjectId: row.ProjectId,
+        BlockId: row.BlockId, FloorFrom: row.FloorFrom, FloorTo: row.FloorTo, UnitId: row.UnitId, composition: [],
+      });
+    }
+    if (row.categoryId != null) byId.get(row.Id).composition.push({ categoryId: row.categoryId, alias: row.alias, quantity: row.quantity });
+  }
+  return [...byId.values()];
+}
+
+// Before a Unit / Block / Project is permanently deleted: its layout
+// overrides (active or reset) go with it — they are settings OF that level
+// and would otherwise block the delete through their foreign keys. Meant to
+// run inside the same transaction as the delete.
+async function removeOverridesFor(db, { unitId = null, blockId = null, projectId = null }) {
+  if (!(await overrideTableReady(db))) return 0;
+  const [col, val] = unitId != null ? ["UnitId", unitId] : blockId != null ? ["BlockId", blockId] : ["ProjectId", projectId];
+  if (val == null) return 0;
+  await db.request().input("v", sql.Int, val).query(`
+    DELETE i FROM dbo.RoomLayoutOverrideItem i JOIN dbo.RoomLayoutOverride o ON o.Id = i.OverrideId WHERE o.${col} = @v`);
+  const r = await db.request().input("v", sql.Int, val).query(`DELETE FROM dbo.RoomLayoutOverride WHERE ${col} = @v`);
+  return r.rowsAffected[0] || 0;
+}
+
+// A unit moved to another block/project keeps its own UNIT override — its
+// scope columns follow the unit (resolution loads overrides per project).
+async function moveUnitOverrides(db, unitId, projectId, blockId) {
+  if (!(await overrideTableReady(db))) return;
+  await db.request().input("u", sql.Int, unitId).input("p", sql.Int, projectId).input("b", sql.Int, blockId)
+    .query("UPDATE dbo.RoomLayoutOverride SET ProjectId = @p, BlockId = @b WHERE UnitId = @u AND (ProjectId <> @p OR BlockId <> @b)");
+}
+
 module.exports = {
+  moveUnitOverrides,
+  removeOverridesFor,
+  getEffectiveComposition,
+  validateScope,
+  validateItems,
+  previewOverrideChange,
+  saveOverride,
+  resetOverride,
+  listProjectOverrides,
   normalizeTypeKey,
   resolveLayoutType,
   listLayoutTypes,

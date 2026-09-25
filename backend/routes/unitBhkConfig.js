@@ -13,7 +13,7 @@ const {
   normalizeTypeKey,
   listLayoutTypes,
   resolveLayoutType,
-  getLayoutComposition,
+  getEffectiveComposition,
   syncRoomsForUnits,
   bumpFlatMasterCaches,
 } = require("../services/unitLayout");
@@ -292,7 +292,7 @@ router.get("/room-instances/:unitId", authMiddleware, async (req, res) => {
     const pool = await getPool();
 
     const unitRes = await pool.request().input("unitId", sql.Int, unitId).query(`
-      SELECT UnitType, LayoutTypeId FROM dbo.UnitMaster WHERE Id = @unitId
+      SELECT Id, ProjectId, BlockId, FloorNo, UnitType, LayoutTypeId FROM dbo.UnitMaster WHERE Id = @unitId
     `);
     if (!unitRes.recordset.length) return res.status(404).json({ error: "Unit not found" });
     const unit = unitRes.recordset[0];
@@ -303,7 +303,8 @@ router.get("/room-instances/:unitId", authMiddleware, async (req, res) => {
       : await resolveLayoutType(pool, { unitType: unit.UnitType });
     if (!layout) return res.json([]); // no (registered) Unit Type set on this Unit yet
 
-    const composition = await getLayoutComposition(pool, layout.id);
+    // Effective layout: a Project/Block/Floor/Unit override if one applies.
+    const composition = (await getEffectiveComposition(pool, unit, layout)).composition;
     const instances = [];
     for (const row of composition) {
       for (let i = 1; i <= row.quantity; i++) {
