@@ -420,3 +420,40 @@ export const deleteActivityPhoto = async (rungId: number, photoId: number): Prom
   const res = await fetchWithAuth(`${BASE}/${rungId}/photos/${photoId}`, { method: "DELETE" });
   return handleResponse<{ success: boolean }>(res);
 };
+
+// ── Quality Check ────────────────────────────────────────────────────────────
+export interface QcCheckInput {
+  checkpointId: number;
+  passed: boolean;
+  note?: string;
+}
+
+export interface QcHistoryEntry {
+  id: number;
+  decision: "APPROVED" | "REWORK";
+  remarks: string | null;
+  qcAt: string;
+  qcBy: string | null;
+  checks: { fieldName: string; passed: boolean; note: string | null }[];
+}
+
+export const getInProgressAssignments = async (): Promise<ReportedAssignment[]> => {
+  const res = await fetchWithAuth(`${BASE}?status=IN_PROGRESS`);
+  return handleResponse<ReportedAssignment[]>(res);
+};
+
+export const getQcHistory = async (rungId: number): Promise<QcHistoryEntry[]> => {
+  const res = await fetchWithAuth(`${BASE}/qc/${rungId}/history`);
+  return handleResponse<QcHistoryEntry[]>(res);
+};
+
+export const submitQcDecision = async (
+  rungId: number,
+  payload: { decision: "APPROVED" | "REWORK"; remarks?: string; checks: QcCheckInput[] },
+): Promise<{ success: boolean; status: AssignmentStatus }> => {
+  const res = await fetchWithAuth(`${BASE}/qc/${rungId}/decision`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
+};

@@ -158,6 +158,9 @@ const CivilWorkDprWorkDone = lazy(
 const CivilWorkDprActivityReporting = lazy(
   () => import("./pages/civilworkdpr/ActivityReporting"),
 );
+const CivilWorkDprQualityCheck = lazy(
+  () => import("./pages/civilworkdpr/QualityCheck"),
+);
 const RoomCategoryMaster = lazy(
   () => import("./pages/civilworkdpr/RoomCategoryMaster"),
 );
@@ -1179,6 +1182,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-activity-reporting">
             <CivilWorkDprActivityReporting />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/quality-check"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-quality-check">
+            <CivilWorkDprQualityCheck />
           </ProtectedRoute>
         }
       />
