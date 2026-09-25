@@ -133,6 +133,21 @@ export async function submitReceivedPaymentForApproval(
   if (!res.ok) throw new Error("Submit for approval failed");
 }
 
+// Accounts assigns the deposit bank of a Pending CRM payment (the only
+// field it changes) — required before that payment can be approved.
+export async function setReceivedPaymentDepositBank(
+  id: number,
+  bankId: number,
+): Promise<{ RPPaymentID: number; RPDepositBankId: number; RPDepositBankName: string }> {
+  const res = await fetchWithAuth(`${BASE}/${id}/deposit-bank`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ RPDepositBankId: bankId }),
+  });
+  if (!res.ok) throw await readError(res, "Failed to set the deposit bank");
+  return res.json();
+}
+
 export async function approveReceivedPayment(
   id: number,
   action: "approve" | "reject",

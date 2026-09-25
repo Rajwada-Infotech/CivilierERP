@@ -14,7 +14,6 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
-import { SelectedBankCard, findBank } from "@/components/crm/SelectedBankCard";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
@@ -288,15 +287,8 @@ const CrmPaymentMilestones: React.FC = () => {
 
   const handleRecordPayment = async () => {
     if (editingId == null) return;
-    // Required, not just offered — a payment with no deposit bank selected
-    // posts to the generic "CRM Collections A/c" proxy instead of a real,
-    // BRS-reconcilable bank ledger (see crmLedger.js's postCrmReceiptToGL).
-    // That field being merely optional was exactly why real deposit banks
-    // never got captured in practice.
-    if (payForm.AmountPaid && parseFloat(payForm.AmountPaid) > 0 && !payForm.DepositBankId) {
-      toast.error("Select a Deposit Bank before recording this payment");
-      return;
-    }
+    // No deposit bank here — CRM records the cheque/cash received; Accounts
+    // assigns the bank on the Received Payment before approving it.
     setSaving(true);
     try {
       const res = await fetchWithAuth(`${API}/${editingId}`, {
@@ -308,10 +300,6 @@ const CrmPaymentMilestones: React.FC = () => {
           PaymentMode:   payForm.PaymentMode   || undefined,
           TransactionRef:payForm.TransactionRef|| undefined,
           Remarks:       payForm.Remarks       || undefined,
-          DepositBankId: payForm.DepositBankId || undefined,
-          DepositBankName: payForm.DepositBankId
-            ? (bankOptions as any[]).find((b: any) => String(b.BId) === payForm.DepositBankId)?.BName
-            : undefined,
         }),
       });
       const data = await res.json();
@@ -376,18 +364,9 @@ const CrmPaymentMilestones: React.FC = () => {
 
   const handleDepositOnAccount = async () => {
     if (!selectedBookingId || !onAccountForm.Amount) return;
-    // Same requirement as handleRecordPayment above — an on-account deposit
-    // with no bank selected posts to the generic proxy account instead of a
-    // real one (postCrmOnAccountToGL).
-    if (!onAccountForm.DepositBankId) {
-      toast.error("Select a Deposit Bank before recording this deposit");
-      return;
-    }
+    // No deposit bank here either — Accounts assigns it before approval.
     setSaving(true);
     try {
-      const bankName = onAccountForm.DepositBankId
-        ? (bankOptions as any[]).find((b: any) => String(b.BId) === onAccountForm.DepositBankId)?.BName
-        : undefined;
       const res = await fetchWithAuth(`${API}/booking/${selectedBookingId}/on-account`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -397,8 +376,6 @@ const CrmPaymentMilestones: React.FC = () => {
           PaymentMode: onAccountForm.PaymentMode || null,
           TransactionRef: onAccountForm.TransactionRef || null,
           Notes: onAccountForm.Notes || null,
-          DepositBankId: onAccountForm.DepositBankId || undefined,
-          DepositBankName: bankName,
         }),
       });
       const data = await res.json();
@@ -1071,19 +1048,9 @@ const CrmPaymentMilestones: React.FC = () => {
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
                 <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground block mb-1">
-                    Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project` : ""} <span className="text-destructive">*</span>
-                  </label>
-                  <select required value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                    <option value="">Select company bank</option>
-                    {(bankOptions as any[]).map((b: any) => (
-                      <option key={b.BId} value={String(b.BId)}>
-                        {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
-                      </option>
-                    ))}
-                  </select>
-                  <SelectedBankCard bank={findBank(bankOptions as any[], payForm.DepositBankId)} />
+                  <p className="text-[11px] text-muted-foreground rounded border border-dashed border-border px-2 py-1.5">
+                    Deposit bank: assigned by Accounts on the Received Payment before approval.
+                  </p>
                 </div>
                 <div className="col-span-2">
                   <label className="text-xs text-muted-foreground block mb-1">Remarks</label>
@@ -1110,7 +1077,7 @@ const CrmPaymentMilestones: React.FC = () => {
               <button onClick={() => setEditingId(null)}
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleRecordPayment}
-                disabled={saving || (!!payForm.AmountPaid && parseFloat(payForm.AmountPaid) > 0 && !payForm.DepositBankId)}
+                disabled={saving}
                 className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                 {saving ? "Submitting..." : "Submit for Approval"}
               </button>
@@ -1205,19 +1172,9 @@ const CrmPaymentMilestones: React.FC = () => {
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
               </div>
               <div>
-                <label className="text-xs text-muted-foreground block mb-1">
-                  Deposited To (Company Bank){projectBanks.length > 0 ? ` — scoped to this project` : ""} <span className="text-destructive">*</span>
-                </label>
-                <select required value={onAccountForm.DepositBankId} onChange={(e) => setOnAccountForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
-                  <option value="">Select company bank</option>
-                  {(bankOptions as any[]).map((b: any) => (
-                    <option key={b.BId} value={String(b.BId)}>
-                      {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
-                    </option>
-                  ))}
-                </select>
-                <SelectedBankCard bank={findBank(bankOptions as any[], onAccountForm.DepositBankId)} />
+                <p className="text-[11px] text-muted-foreground rounded border border-dashed border-border px-2 py-1.5">
+                    Deposit bank: assigned by Accounts on the Received Payment before approval.
+                  </p>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Notes</label>
@@ -1229,7 +1186,7 @@ const CrmPaymentMilestones: React.FC = () => {
               <button onClick={() => setOnAccountDialog(false)}
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleDepositOnAccount}
-                disabled={saving || !onAccountForm.Amount || !onAccountForm.DepositBankId}
+                disabled={saving || !onAccountForm.Amount}
                 className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
                 {saving ? "Submitting..." : "Submit for Approval"}
               </button>
