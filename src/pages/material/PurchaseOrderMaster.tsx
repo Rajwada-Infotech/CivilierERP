@@ -57,6 +57,7 @@ import { type QTPOPrefill } from "@/api/quotationApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getTCRecords } from "@/api/tcMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
+import { projectCompanyIds, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
@@ -731,6 +732,9 @@ const PurchaseOrderMaster: React.FC = () => {
         name: p.label ?? "",
         belongsTo: p.belongs_to ?? null,
         companyId: p.company_id != null ? String(p.company_id) : null,
+        // Primary company plus every company the project is tagged to in
+        // Project Master (dbo.ProjectCompanies).
+        companyIds: projectCompanyIds(p as ProjectCompanyLike),
       })),
     [projectsRaw],
   );
@@ -738,13 +742,13 @@ const PurchaseOrderMaster: React.FC = () => {
   // Projects filtered by the MR filter company (for the MR filter dropdown)
   const filteredMRProjects = useMemo(() => {
     if (!mrFilterCompanyId) return allProjects;
-    return allProjects.filter((p) => p.companyId === mrFilterCompanyId);
+    return allProjects.filter((p) => p.companyIds.includes(mrFilterCompanyId));
   }, [allProjects, mrFilterCompanyId]);
 
   // Projects filtered by the form's selected company (for Order Details)
   const filteredFormProjects = useMemo(() => {
     if (!form.companyId) return allProjects;
-    return allProjects.filter((p) => p.companyId === form.companyId);
+    return allProjects.filter((p) => p.companyIds.includes(form.companyId));
   }, [allProjects, form.companyId]);
 
   const uoms = useMemo(
