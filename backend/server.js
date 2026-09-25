@@ -307,6 +307,7 @@ const ALL_ROUTES = [
   { path: "/api/engineering/dpr", file: "./routes/dpr" },
   { path: "/api/godowns", file: "./routes/godowns" },
   { path: "/api/stock-transfers", file: "./routes/stockTransfers" },
+  { path: "/api/stock-updates", file: "./routes/stockUpdates" },
   { path: "/api/inter-company-transfer", file: "./routes/interCompanyTransfer" },
   { path: "/api/sale-orders", file: "./routes/saleOrders" },
   { path: "/api/widget-catalog", file: "./routes/widgetCatalogAdmin" },

@@ -158,6 +158,9 @@ const CivilWorkDprWorkDone = lazy(
 const CivilWorkDprActivityReporting = lazy(
   () => import("./pages/civilworkdpr/ActivityReporting"),
 );
+const CivilWorkDprQualityCheck = lazy(
+  () => import("./pages/civilworkdpr/QualityCheck"),
+);
 const RoomCategoryMaster = lazy(
   () => import("./pages/civilworkdpr/RoomCategoryMaster"),
 );
@@ -295,6 +298,7 @@ const UnitOfMeasurementMaster = lazy(
 const InventoryMaster = lazy(() => import("./pages/material/InventoryMaster"));
 const Stock = lazy(() => import("./pages/material/Stock"));
 const StockTransfer = lazy(() => import("./pages/material/StockTransfer"));
+const StockUpdate = lazy(() => import("./pages/material/StockUpdate"));
 const SaleOrder = lazy(() => import("./pages/sales/SaleOrder"));
 const SalesPayment = lazy(() => import("./pages/sales/Payment"));
 const SaleInvoice = lazy(() => import("./pages/sales/SaleInvoice"));
@@ -1182,6 +1186,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/civilworkdpr/quality-check"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-quality-check">
+            <CivilWorkDprQualityCheck />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/civilworkdpr/room-category-master"
         element={
           <ProtectedRoute pageKey="room-category-master">
@@ -1617,6 +1629,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="stock-ledger">
             <Stock />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/stock-update"
+        element={
+          <ProtectedRoute pageKey="stock-update">
+            <StockUpdate />
           </ProtectedRoute>
         }
       />

@@ -10,6 +10,7 @@ import {
   Truck,
   Package,
   Trash2,
+  Pencil,
   Save,
   X,
   Search,
@@ -519,6 +520,7 @@ let onView: (grn: any) => void;
 let deleteMutation: { mutate: (id: string) => void };
 let handleDeleteGrn: (id: string) => void;
 let _canDelete = true;
+let _canEdit = true;
 
 // ─── List Columns ─────────────────────────────────────────────────────────────
 // isTransferGRN: doc number starts with "TRF-GRN" — these rows came from a
@@ -717,15 +719,24 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
       return (
         <div className="flex items-center justify-end gap-2">
           <button
-            onClick={() => onView(grn)}
+            onClick={(e) => { e.stopPropagation(); onView(grn); }}
             className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
             title="View details"
           >
             <Eye size={15} />
           </button>
+          {_canEdit && !isTransferGRN(grn) && (
+            <button
+              onClick={(e) => { e.stopPropagation(); onEdit(grn); }}
+              className="p-1 rounded text-primary hover:bg-primary/10 transition-colors"
+              title="Edit this GRN"
+            >
+              <Pencil size={15} />
+            </button>
+          )}
           {_canDelete && (
             <button
-              onClick={() => handleDeleteGrn(String(grn.GRNID))}
+              onClick={(e) => { e.stopPropagation(); handleDeleteGrn(String(grn.GRNID)); }}
               className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
               title="Delete this GRN"
             >
@@ -837,6 +848,7 @@ export default function GRN() {
   const rights = usePageRights("grn-master");
   const today = new Date().toISOString().slice(0, 10);
   _canDelete = rights.canDelete;
+  _canEdit = rights.canEdit;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -3053,6 +3065,7 @@ export default function GRN() {
                           <DataTable
                             data={group.rows}
                             columns={GRN_LIST_COLUMNS}
+                            onRowClick={(row) => onView(row.original)}
                             searchable={false}
                             paginated={false}
                             emptyMessage="No GRNs found."

@@ -23,17 +23,23 @@ const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
 router.get(
   "/",
   authMiddleware,
-  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "view"),
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "view"),
   async (req, res) => {
   const dependencyMasterId = req.query.dependencyMasterId ? parseInt(req.query.dependencyMasterId, 10) : null;
+  const statusFilter = req.query.status ? String(req.query.status).toUpperCase() : null;
   try {
     const pool = await getPool();
     const request = pool.request();
-    let where = "";
+    const conds = [];
     if (Number.isFinite(dependencyMasterId)) {
       request.input("dependencyMasterId", sql.Int, dependencyMasterId);
-      where = "WHERE dm.Id = @dependencyMasterId";
+      conds.push("dm.Id = @dependencyMasterId");
     }
+    if (statusFilter && STATUS_VALUES.has(statusFilter)) {
+      request.input("statusFilter", sql.NVarChar(20), statusFilter);
+      conds.push("daa.Status = @statusFilter");
+    }
+    const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
     const r = await request.query(`
       SELECT
         daa.Id AS assignmentId,
@@ -95,6 +101,148 @@ router.get(
   }
 });
 
+// ── Quality Check ────────────────────────────────────────────────────────────
+// QC inspects an In Progress activity, signs off its checklist and either
+// Approves it or sends it back for Rework. Goes through its own endpoint
+// (not the generic status PATCH) because In Progress may only move to Hold/
+// Cancelled by hand; QC's Approved/Rework is the one sanctioned way out.
+
+// GET /qc/:rungId/history: every past QC decision on this activity.
+router.get(
+  "/qc/:rungId/history",
+  authMiddleware,
+  requirePageRight("civilworkdpr-quality-check", "view"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    try {
+      const pool = await getPool();
+      const q = await pool.request().input("rungId", sql.Int, rungId).query(`
+        SELECT qc.Id AS id, qc.Decision AS decision, qc.Remarks AS remarks, qc.QcAt AS qcAt,
+               COALESCE(u.name, qc.QcBy) AS qcBy
+        FROM dbo.DependencyActivityQc qc
+        JOIN dbo.DependencyActivityAssignment daa ON daa.Id = qc.AssignmentId
+        LEFT JOIN dbo.users u ON LOWER(u.email) = LOWER(qc.QcBy)
+        WHERE daa.DependencyMasterActivityId = @rungId
+        ORDER BY qc.QcAt DESC, qc.Id DESC
+      `);
+      const ids = q.recordset.map((r) => r.id);
+      let checks = [];
+      if (ids.length) {
+        const c = await pool.request().query(`
+          SELECT QcId AS qcId, FieldName AS fieldName, Passed AS passed, Note AS note
+          FROM dbo.DependencyActivityQcCheck WHERE QcId IN (${ids.join(",")}) ORDER BY Id
+        `);
+        checks = c.recordset.map((r) => ({ ...r, passed: !!r.passed }));
+      }
+      res.json(q.recordset.map((r) => ({ ...r, checks: checks.filter((c) => c.qcId === r.id) })));
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /qc/:rungId/history error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// POST /qc/:rungId/decision. Body { decision: 'APPROVED'|'REWORK',
+// remarks, checks: [{ checkpointId, passed, note }] }. Approving requires
+// every checkpoint on the activity to be signed off as passed; sending back
+// for rework requires a remark, and un-ticks the checkpoints QC failed so
+// the engineer has to redo them.
+router.post(
+  "/qc/:rungId/decision",
+  authMiddleware,
+  requirePageRight("civilworkdpr-quality-check", "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    const decision = String(req.body?.decision || "").toUpperCase();
+    if (decision !== "APPROVED" && decision !== "REWORK") {
+      return res.status(400).json({ error: "decision must be APPROVED or REWORK" });
+    }
+    const remarks = String(req.body?.remarks || "").trim().slice(0, 1000);
+    const checks = Array.isArray(req.body?.checks) ? req.body.checks : [];
+    if (decision === "REWORK" && remarks.length < 3) {
+      return res.status(400).json({ error: "Add a remark explaining what needs rework." });
+    }
+    const actor = req.user?.email || req.user?.name || "system";
+
+    const pool = await getPool();
+    const tx = new sql.Transaction(pool);
+    try {
+      const a = await pool.request().input("rungId", sql.Int, rungId).query(
+        "SELECT Id, Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId",
+      );
+      if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
+      const assignmentId = a.recordset[0].Id;
+      if (a.recordset[0].Status !== "IN_PROGRESS") {
+        return res.status(400).json({ error: "Only an In Progress activity can be quality-checked." });
+      }
+
+      const cp = await pool.request().input("aid", sql.Int, assignmentId).query(
+        "SELECT Id, FieldName FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @aid ORDER BY SortOrder, Id",
+      );
+      const byId = new Map(cp.recordset.map((c) => [Number(c.Id), c]));
+      const verdict = new Map();
+      for (const c of checks) {
+        const id = Number(c.checkpointId);
+        if (byId.has(id)) verdict.set(id, { passed: !!c.passed, note: c.note ? String(c.note).slice(0, 500) : null });
+      }
+      if (decision === "APPROVED") {
+        const missing = cp.recordset.filter((c) => !verdict.get(Number(c.Id))?.passed);
+        if (missing.length) {
+          return res.status(400).json({
+            error: `Every checkpoint must pass before approval. Still open: ${missing.map((m) => m.FieldName).join(", ")}.`,
+          });
+        }
+      }
+
+      await tx.begin();
+      const ins = await new sql.Request(tx)
+        .input("aid", sql.Int, assignmentId)
+        .input("decision", sql.NVarChar(10), decision)
+        .input("remarks", sql.NVarChar(1000), remarks || null)
+        .input("by", sql.NVarChar(200), actor).query(`
+          INSERT INTO dbo.DependencyActivityQc (AssignmentId, Decision, Remarks, QcBy)
+          OUTPUT INSERTED.Id VALUES (@aid, @decision, @remarks, @by)
+        `);
+      const qcId = ins.recordset[0].Id;
+
+      for (const c of cp.recordset) {
+        const v = verdict.get(Number(c.Id));
+        if (!v) continue;
+        await new sql.Request(tx)
+          .input("qcId", sql.Int, qcId)
+          .input("cpId", sql.Int, c.Id)
+          .input("field", sql.NVarChar(200), c.FieldName)
+          .input("passed", sql.Bit, v.passed ? 1 : 0)
+          .input("note", sql.NVarChar(500), v.note).query(`
+            INSERT INTO dbo.DependencyActivityQcCheck (QcId, AssignmentCheckpointId, FieldName, Passed, Note)
+            VALUES (@qcId, @cpId, @field, @passed, @note)
+          `);
+        if (decision === "REWORK" && !v.passed) {
+          await new sql.Request(tx).input("cpId", sql.Int, c.Id)
+            .query("UPDATE dbo.DependencyActivityCheckpoint SET IsChecked = 0 WHERE Id = @cpId");
+        }
+      }
+
+      await new sql.Request(tx)
+        .input("aid", sql.Int, assignmentId)
+        .input("status", sql.NVarChar(20), decision)
+        .input("by", sql.NVarChar(200), actor).query(`
+          UPDATE dbo.DependencyActivityAssignment
+          SET Status = @status, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+          WHERE Id = @aid
+        `);
+      await tx.commit();
+      res.json({ success: true, status: decision, qcId });
+    } catch (err) {
+      try { await tx.rollback(); } catch (_) { /* not begun or already rolled back */ }
+      console.error("[dependency-activity-assignment] POST /qc/:rungId/decision error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // PATCH /:rungId/status — move a rung between report statuses, and/or
 // update its Remarks (the Activity Detail modal's Remarks textarea saves
 // on blur independently of the status dropdown, so both fields are
@@ -125,6 +273,26 @@ router.patch(
 
   try {
     const pool = await getPool();
+
+    // Statuses only move forward — mirrors allowedNextStatuses() in the
+    // frontend's dependencyActivityAssignmentApi.ts. Once past Pending/
+    // Allocated a rung can't go back to either, and while In Progress the
+    // only manual moves are Hold or Cancelled.
+    if (hasStatus) {
+      const cur = await pool.request().input("rungId", sql.Int, rungId).query(
+        "SELECT Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId",
+      );
+      const current = cur.recordset[0]?.Status;
+      if (current && current !== status) {
+        const early = current === "PENDING" || current === "ALLOCATED";
+        if (!early && (status === "PENDING" || status === "ALLOCATED")) {
+          return res.status(400).json({ error: "An activity that has moved on can't go back to Pending or Allocated." });
+        }
+        if (current === "IN_PROGRESS" && status !== "HOLD" && status !== "CANCELLED") {
+          return res.status(400).json({ error: "An In Progress activity can only be put on Hold or Cancelled." });
+        }
+      }
+    }
     const setClauses = [];
     if (hasStatus) setClauses.push("Status = @status");
     if (hasRemarks) setClauses.push("Remarks = @remarks");
@@ -976,7 +1144,7 @@ router.get("/:rungId/photos/:photoId", authMiddleware, async (req, res) => {
 
 // POST /:rungId/photos — upload one photo. multipart body: file, phase
 // ('before'|'after'), note (optional).
-router.post("/:rungId/photos", authMiddleware, requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"), upload.single("file"), async (req, res) => {
+router.post("/:rungId/photos", authMiddleware, requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "edit"), upload.single("file"), async (req, res) => {
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });

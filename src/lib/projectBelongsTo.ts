@@ -7,6 +7,10 @@ export type ProjectCompanyLike = {
   company_ids?: string | number[] | null;
   companyIds?: string | number[] | null;
   CompanyIds?: string | number[] | null;
+  // Extra companies the project is tagged to via Project Master's
+  // multi-company tagging (dbo.ProjectCompanies), comma-separated.
+  tagged_company_ids?: string | number[] | null;
+  MultiCompanyIds?: string | number[] | null;
 };
 
 const splitIds = (value: unknown): string[] => {
@@ -28,6 +32,8 @@ export function projectCompanyIds(project: ProjectCompanyLike): string[] {
     ...splitIds(project.CompanyId),
     ...splitIds(project.belongs_to),
     ...splitIds(project.belongsTo),
+    ...splitIds(project.tagged_company_ids),
+    ...splitIds(project.MultiCompanyIds),
   ];
   return Array.from(new Set(ids));
 }
