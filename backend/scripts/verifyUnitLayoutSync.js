@@ -47,6 +47,10 @@ function check(name, cond, extra) {
     const raw = fs.readFileSync(MIGRATION, "utf8");
     for (const batch of raw.split(/^\s*GO\s*$/im).map((b) => b.trim()).filter(Boolean)) await q(batch);
   };
+  const runMigration480 = async () => {
+    const raw = fs.readFileSync(path.join(__dirname, "../migrations/461-480/480-room-layout-override.sql"), "utf8");
+    for (const batch of raw.split(/^\s*GO\s*$/im).map((b) => b.trim()).filter(Boolean)) await q(batch);
+  };
 
   try {
     await q("SET LOCK_TIMEOUT 15000");
@@ -56,6 +60,9 @@ function check(name, cond, extra) {
     await runMigration();
     await runMigration();
     check("runs twice without error (idempotent)", true);
+    await runMigration480();
+    await runMigration480();
+    check("migration 480 runs twice (idempotent)", true);
     const byKey = Object.fromEntries((await q("SELECT Id, TypeKey FROM dbo.RoomLayoutType")).map((r) => [r.TypeKey, r]));
     check("2.5 BHK registered", !!byKey["2.5BHK"]);
     for (const [label, sqlText] of [
@@ -226,6 +233,164 @@ function check(name, cond, extra) {
     await q("UPDATE dbo.UnitMaster SET LayoutTypeId = @lt, UnitType = '__VERIFY EMPTY__' WHERE Id = @u", { lt: [sql.Int, tEmpty.id], u: [sql.Int, legacyId] });
     s = await L.syncUnitRooms(tx, legacyId, { removeUnused: false });
     check("layout with no composition -> skipped", s.skipped === "no-composition" && s.created === 0, s);
+    // ── 9b. Layout overrides (migration 480) ──────────────────────────────
+    console.log("\n[9b] Layout overrides: Unit > Floor range > Block > Project > global");
+    const catByName = Object.fromEntries((await q("SELECT Id, CategoryName FROM dbo.RoomCategoryMaster WHERE IsActive = 1")).map((c) => [c.CategoryName, c.Id]));
+    const allCats = Object.values(catByName);
+    const addOverride = async (lvl, { blockId = null, ff = null, ft = null, unitId = null }, comp) => {
+      const id = (await q(`INSERT INTO dbo.RoomLayoutOverride (LayoutTypeId, ScopeLevel, ProjectId, BlockId, FloorFrom, FloorTo, UnitId, CreatedBy)
+        OUTPUT INSERTED.Id AS id VALUES (@lt, @l, @p, @b, @ff, @ft, @u, 'verify')`, {
+        lt: [sql.Int, t2.id], l: [sql.NVarChar(10), lvl], p: [sql.Int, blk.ProjectId], b: [sql.Int, blockId],
+        ff: [sql.Int, ff], ft: [sql.Int, ft], u: [sql.Int, unitId],
+      }))[0].id;
+      await setItems(id, comp);
+      return id;
+    };
+    const setItems = async (id, comp) => {
+      await q("DELETE FROM dbo.RoomLayoutOverrideItem WHERE OverrideId = @o", { o: [sql.Int, id] });
+      for (const c of allCats) {
+        const name = Object.keys(catByName).find((k) => catByName[k] === c);
+        await q("INSERT INTO dbo.RoomLayoutOverrideItem (OverrideId, RoomCategoryId, Quantity) VALUES (@o, @c, @n)",
+          { o: [sql.Int, id], c: [sql.Int, c], n: [sql.Int, comp[name] || 0] });
+      }
+    };
+    const itemsOf = (comp) => allCats.map((c) => ({ roomCategoryId: c, quantity: comp[Object.keys(catByName).find((k) => catByName[k] === c)] || 0 }));
+    const unitRow = async (id) => (await q("SELECT Id, ProjectId, BlockId, FloorNo, UnitType, LayoutTypeId FROM dbo.UnitMaster WHERE Id = @u", { u: [sql.Int, id] }))[0];
+    const eff = async (id) => L.getEffectiveComposition(tx, await unitRow(id), t2);
+    const sum = (comp) => Object.values(comp).reduce((a, b) => a + b, 0);
+
+    const tb = (await q("INSERT INTO dbo.BlockMaster (ProjectId, BlockName) OUTPUT INSERTED.Id AS id VALUES (@p, '__VERIFY_480__')", { p: [sql.Int, blk.ProjectId] }))[0].id;
+    const mk = async (name, floor) => (await q(`INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, LayoutTypeId, IsActive, CreatedAt)
+      OUTPUT INSERTED.Id AS id VALUES (@p, @b, @n, @f, @ut, @lt, 1, SYSDATETIME())`, {
+      p: [sql.Int, blk.ProjectId], b: [sql.Int, tb], n: [sql.NVarChar(100), name], f: [sql.Int, floor], ut: [sql.NVarChar(50), t2.label], lt: [sql.Int, t2.id],
+    }))[0].id;
+    const uF1 = await mk("__V480_F1__", 1), uF5a = await mk("__V480_F5A__", 5), uF5b = await mk("__V480_F5B__", 5);
+    for (const u of [uF1, uF5a, uF5b]) await L.syncUnitRooms(tx, u, {});
+    check("baseline: all 3 units follow the global layout", (await eff(uF1)).source.level === "GLOBAL");
+
+    const P = { BEDROOM: 2, KITCHEN: 1, HALL_ROOM: 1, BATHROOM: 1 };
+    const Bk = { BEDROOM: 3, KITCHEN: 1, HALL_ROOM: 1, BATHROOM: 2 };
+    const F = { BEDROOM: 1, KITCHEN: 1, BATHROOM: 1 };
+    const U = { BEDROOM: 4, KITCHEN: 1 };
+    await addOverride("PROJECT", {}, P);
+    check("project override applies", (await eff(uF1)).source.level === "PROJECT");
+    const blockOv = await addOverride("BLOCK", { blockId: tb }, Bk);
+    check("block override beats project", (await eff(uF1)).source.level === "BLOCK");
+    await addOverride("FLOOR", { blockId: tb, ff: 5, ft: 5 }, F);
+    check("floor-range override beats block (floor 5), block still on floor 1",
+      (await eff(uF5a)).source.level === "FLOOR" && (await eff(uF1)).source.level === "BLOCK");
+    const unitOv = await addOverride("UNIT", { blockId: tb, unitId: uF5b }, U);
+    check("unit override beats floor range", (await eff(uF5b)).source.level === "UNIT" && (await eff(uF5a)).source.level === "FLOOR");
+
+    for (const u of [uF1, uF5a, uF5b]) await L.syncUnitRooms(tx, u, { removeUnused: true });
+    check("rooms follow the effective layout (block 9 / floor 3 / unit 5)",
+      (await activeNames(uF1)).length === sum(Bk) && (await activeNames(uF5a)).length === sum(F) && (await activeNames(uF5b)).length === sum(U),
+      [(await activeNames(uF1)).length, (await activeNames(uF5a)).length, (await activeNames(uF5b)).length]);
+
+    const sFloor = await L.validateScope(tx, { LayoutTypeId: t2.id, ScopeLevel: "FLOOR", ProjectId: blk.ProjectId, BlockId: tb, FloorFrom: 4, FloorTo: 6 });
+    const ov1 = await L.previewOverrideChange(tx, sFloor, (await L.validateItems(tx, itemsOf(F))).composition);
+    check("overlapping floor range (4-6 vs 5-5) is flagged", ov1.overlap && ov1.overlap.label === "Floor 5", ov1.overlap);
+    const sSame = await L.validateScope(tx, { LayoutTypeId: t2.id, ScopeLevel: "FLOOR", ProjectId: blk.ProjectId, BlockId: tb, FloorFrom: 5, FloorTo: 5 });
+    check("editing the same range is not an overlap", (await L.previewOverrideChange(tx, sSame, (await L.validateItems(tx, itemsOf(F))).composition)).overlap === null);
+
+    // preview must match what the sync then really does
+    const newBk = { BEDROOM: 2, KITCHEN: 1, HALL_ROOM: 1, BATHROOM: 3 };
+    const sBlock = await L.validateScope(tx, { LayoutTypeId: t2.id, ScopeLevel: "BLOCK", ProjectId: blk.ProjectId, BlockId: tb });
+    const pv = await L.previewOverrideChange(tx, sBlock, (await L.validateItems(tx, itemsOf(newBk))).composition);
+    check("preview: 3 units in scope, 2 shadowed by more specific overrides", pv.unitsInScope === 3 && pv.unitsShadowed === 2, pv);
+    await setItems(blockOv, newBk);
+    let added = 0, removed = 0;
+    for (const u of [uF1, uF5a, uF5b]) { const r = await L.syncUnitRooms(tx, u, { removeUnused: true }); added += r.created + r.reactivated; removed += r.deactivated; }
+    check("preview numbers == actual sync (added/removed)", pv.roomsToAdd === added && pv.roomsToRemove === removed, { pv, added, removed });
+
+    // removal keeps rooms with DPR work
+    const bedroom = (await roomsOf(uF1)).find((r) => r.IsActive && r.RoomCategoryId === catByName.BEDROOM);
+    await q("UPDATE dbo.RoomMaster SET BlueprintFileData = 'x' WHERE Id = @i", { i: [sql.Int, bedroom.Id] });
+    const noBed = { KITCHEN: 1, HALL_ROOM: 1 };
+    const pv2 = await L.previewOverrideChange(tx, sBlock, (await L.validateItems(tx, itemsOf(noBed))).composition);
+    check("preview lists the bedroom with work as kept", pv2.roomsKeptWithWork.some((n) => n.includes(bedroom.RoomName)), pv2.roomsKeptWithWork);
+    await setItems(blockOv, noBed);
+    const rWork = await L.syncUnitRooms(tx, uF1, { removeUnused: true });
+    check("sync keeps the bedroom with work, removes the clean one",
+      (await roomsOf(uF1)).find((r) => r.Id === bedroom.Id).IsActive && rWork.keptWithWork.length === 1 && rWork.deactivated >= 1, rWork);
+
+    // reset (soft-deactivate) falls back to the level above
+    await q("UPDATE dbo.RoomLayoutOverride SET IsActive = 0 WHERE Id = @i", { i: [sql.Int, unitOv] });
+    await L.syncUnitRooms(tx, uF5b, { removeUnused: true });
+    check("reset unit override -> unit follows the floor range again",
+      (await eff(uF5b)).source.level === "FLOOR" && (await activeNames(uF5b)).length === sum(F));
+
+    const listed = await L.listProjectOverrides(tx, blk.ProjectId);
+    const mine = listed.filter((o) => o.LayoutTypeId === t2.id && (o.BlockId === tb || o.ScopeLevel === "PROJECT"));
+    check("listProjectOverrides returns active overrides with their room lists (reset one excluded)",
+      mine.some((o) => o.ScopeLevel === "PROJECT" && o.composition.length === 4)
+      && mine.some((o) => o.ScopeLevel === "FLOOR" && o.FloorFrom === 5 && o.composition.length === 3)
+      && !mine.some((o) => o.ScopeLevel === "UNIT"), mine.map((o) => [o.ScopeLevel, o.composition.length]));
+    const typesNow = await L.listLayoutTypes(tx);
+    check("layout types list carries each type's composition", typesNow.find((t) => t.id === t2.id).composition.length > 0);
+    let bad = null;
+    try { await L.validateItems(tx, itemsOf({})); } catch (e) { bad = e; }
+    check("an override with zero rooms is rejected", bad && bad.status === 400);
+    // a unit moved to another block keeps (and carries) its own override
+    const unitOv2 = await addOverride("UNIT", { blockId: tb, unitId: uF1 }, U);
+    const tb2 = (await q("INSERT INTO dbo.BlockMaster (ProjectId, BlockName) OUTPUT INSERTED.Id AS id VALUES (@p, '__VERIFY_480_B__')", { p: [sql.Int, blk.ProjectId] }))[0].id;
+    await q("UPDATE dbo.UnitMaster SET BlockId = @b WHERE Id = @u", { b: [sql.Int, tb2], u: [sql.Int, uF1] });
+    await L.moveUnitOverrides(tx, uF1, blk.ProjectId, tb2);
+    check("moved unit keeps its own override (scope follows the unit)",
+      (await eff(uF1)).source.level === "UNIT"
+      && (await q("SELECT BlockId FROM dbo.RoomLayoutOverride WHERE Id = @i", { i: [sql.Int, unitOv2] }))[0].BlockId === tb2);
+
+    // delete paths: a unit / block with overrides (active or reset) can be deleted
+    await L.removeOverridesFor(tx, { unitId: uF5b });
+    await q("DELETE FROM dbo.RoomMaster WHERE UnitId = @u", { u: [sql.Int, uF5b] });
+    await q("DELETE FROM dbo.UnitMaster WHERE Id = @u", { u: [sql.Int, uF5b] });
+    check("unit with a (reset) override deletes cleanly after removeOverridesFor", true);
+    await L.removeOverridesFor(tx, { blockId: tb });
+    await q("DELETE FROM dbo.RoomMaster WHERE BlockId = @b", { b: [sql.Int, tb] });
+    await q("DELETE FROM dbo.UnitMaster WHERE BlockId = @b", { b: [sql.Int, tb] });
+    await q("DELETE FROM dbo.BlockMaster WHERE Id = @b", { b: [sql.Int, tb] });
+    check("block with overrides deletes cleanly; the moved unit's override survives in its new block",
+      (await q("SELECT COUNT(*) n FROM dbo.RoomLayoutOverride WHERE Id = @i", { i: [sql.Int, unitOv2] }))[0].n === 1);
+
+    // ── deactivated room category: layouts keep it (Room Category Master's promise)
+    const catBal = catByName.BALCONY;
+    const unitDc = (await q(`INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, FloorNo, UnitType, LayoutTypeId, IsActive, CreatedAt)
+      OUTPUT INSERTED.Id AS id VALUES (@p, @b, '__V480_DC__', 7, @ut, @lt, 1, SYSDATETIME())`, {
+      p: [sql.Int, blk.ProjectId], b: [sql.Int, tb2], ut: [sql.NVarChar(50), t2.label], lt: [sql.Int, t2.id] }))[0].id;
+    await L.syncUnitRooms(tx, unitDc, {});
+    const beforeDc = (await activeNames(unitDc)).length;
+    const hadBalcony = (await roomsOf(unitDc)).some((r) => r.IsActive && r.RoomCategoryId === catBal);
+    await q("UPDATE dbo.RoomCategoryMaster SET IsActive = 0 WHERE Id = @c", { c: [sql.Int, catBal] });
+    const sDc = await L.syncUnitRooms(tx, unitDc, { removeUnused: true });
+    check("deactivated category stays in the layout: sync removes nothing",
+      sDc.deactivated === 0 && (await activeNames(unitDc)).length === beforeDc && hadBalcony === (await roomsOf(unitDc)).some((r) => r.IsActive && r.RoomCategoryId === catBal), sDc);
+    // an existing override with the (now inactive) category: editing it keeps it, preview == save
+    await q("UPDATE dbo.RoomCategoryMaster SET IsActive = 1 WHERE Id = @c", { c: [sql.Int, catBal] });
+    const sUdc = await L.validateScope(tx, { LayoutTypeId: t2.id, ScopeLevel: "UNIT", ProjectId: blk.ProjectId, BlockId: tb2, UnitId: uF1 });
+    await setItems(unitOv2, { BEDROOM: 2, KITCHEN: 1, BALCONY: 1 });
+    await L.syncUnitRooms(tx, uF1, { removeUnused: true });
+    await q("UPDATE dbo.RoomCategoryMaster SET IsActive = 0 WHERE Id = @c", { c: [sql.Int, catBal] });
+    const editItems = (await L.validateItems(tx, itemsOf({ BEDROOM: 3, KITCHEN: 1 }).filter((i) => i.roomCategoryId !== catBal))).composition;
+    const pvDc = await L.previewOverrideChange(tx, sUdc, editItems);
+    check("editing an override keeps its deactivated-category rooms (preview: only +1 bedroom, nothing removed)",
+      pvDc.roomsToAdd === 1 && pvDc.roomsToRemove === 0, pvDc);
+    await q("UPDATE dbo.RoomCategoryMaster SET IsActive = 1 WHERE Id = @c", { c: [sql.Int, catBal] });
+
+    // category renamed: generated rooms follow the new alias, same Ids; hand-named rooms untouched
+    const kitchenCat = catByName.KITCHEN;
+    const kBefore = (await roomsOf(unitDc)).filter((r) => r.RoomCategoryId === kitchenCat);
+    await q(`INSERT INTO dbo.RoomMaster (ProjectId, BlockId, UnitId, RoomName, RoomCategoryId, Floor, IsActive, CreatedAt)
+             VALUES (@p, @b, @u, 'Chef Corner', @c, '7', 1, SYSDATETIME())`, { p: [sql.Int, blk.ProjectId], b: [sql.Int, tb2], u: [sql.Int, unitDc], c: [sql.Int, kitchenCat] });
+    const renamed = await L.renameCategoryRooms(tx, kitchenCat, "Kitchen", "Pantry");
+    const kAfter = (await roomsOf(unitDc)).filter((r) => r.RoomCategoryId === kitchenCat);
+    check("renaming a category renames its generated rooms (same Ids), leaves hand-named ones",
+      renamed > 0 && kBefore.every((r) => kAfter.find((a) => a.Id === r.Id)?.RoomName.startsWith("Pantry")) && kAfter.some((r) => r.RoomName === "Chef Corner"),
+      kAfter.map((r) => r.RoomName));
+    await L.renameCategoryRooms(tx, kitchenCat, "Pantry", "Kitchen");
+
+    // later sections test the global layout — switch the test overrides off
+    await q("UPDATE dbo.RoomLayoutOverride SET IsActive = 0 WHERE CreatedBy = 'verify'");
+
     const longAlias = "L".repeat(150);
     const longCat = (await q("INSERT INTO dbo.RoomCategoryMaster (CategoryName, Alias, IsActive, SortOrder) OUTPUT INSERTED.Id VALUES ('__VERIFY_LONG__', @a, 1, 999)",
       { a: [sql.NVarChar(150), longAlias] }))[0].Id;

@@ -5,6 +5,7 @@ import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getRoomsForUnit } from "@/api/roomMasterApi";
+import { floorLabel, floorDisplay } from "@/lib/floorLabel";
 import { getDependencyMasters, getDependencyMaster, type DependencyMasterListRow, type LadderActivity } from "@/api/dependencyMasterApi";
 import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/components/ActivityChainPreview";
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
@@ -245,7 +246,9 @@ export default function WorkDone() {
       (d) =>
         String(d.projectId) === form.ProjectId &&
         String(d.towerId) === form.BlockId &&
-        String(d.floor) === form.FloorNo &&
+        // Dependency Master stores the floor as a label ("G", "1", "2", …);
+        // the form holds UnitMaster.FloorNo ("0" for Ground) — compare labels.
+        String(d.floor) === floorLabel(form.FloorNo) &&
         String(d.flatId) === form.UnitId &&
         String(d.roomId) === form.RoomId,
     );
@@ -396,7 +399,7 @@ export default function WorkDone() {
                 {/* 3. Floor — depends on Tower */}
                 {form.BlockId &&
                   (form.FloorNo ? (
-                    <LocationChip icon={LayoutGrid} label="Floor" value={form.FloorNo} onClear={() => handleFloorChange("")} />
+                    <LocationChip icon={LayoutGrid} label="Floor" value={floorDisplay(form.FloorNo)} onClear={() => handleFloorChange("")} />
                   ) : (
                     <div className="w-full sm:w-36">
                       <label className={leanLabelCls}>
@@ -406,7 +409,7 @@ export default function WorkDone() {
                         <option value="">Select floor…</option>
                         {floorsForTower.map((fl) => (
                           <option key={fl} value={fl}>
-                            Floor {fl}
+                            {floorDisplay(fl)}
                           </option>
                         ))}
                       </select>

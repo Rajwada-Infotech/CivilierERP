@@ -19,6 +19,8 @@ export interface LayoutType {
   roomCount: number;
   /** e.g. "2 Bedroom · 1 Hall Room · 1 Kitchen"; empty when roomCount = 0. */
   summary: string;
+  /** The global room list (active categories, quantity > 0). */
+  composition: { categoryId: number; alias: string; quantity: number }[];
 }
 
 // Query key shared by every page that lists layout types, so saving a

@@ -3,9 +3,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   FileText, Upload, DoorOpen, Sparkles, Loader2, CheckCircle2,
-  ChevronDown, ChevronRight, Eye, Printer, Pencil, Trash2, Building2,
+  ChevronDown, ChevronRight, Eye, Printer, Pencil, Trash2, Building2, Building, FolderTree, Layers, LayoutGrid, AlertTriangle,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { getProjectOverrides } from "@/api/unitLayoutOverrideApi";
+import { getLayoutTypes, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
+import { getRoomCategoryOptions, type RoomCategory } from "@/api/roomCategoryMasterApi";
+import {
+  resolveLayout, compositionText, roomTotal,
+  type Level, type Position, type LayoutOverrideRow,
+} from "@/lib/layoutResolve";
+import { InlineLayoutEditor, type NodeType } from "./InlineLayoutEditor";
 import { usePageRights } from "@/hooks/usePageRights";
 import { safeHtml } from "@/utils/escapeHtml";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
@@ -386,6 +394,84 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
   );
 }
 
+type UnitRoomGroup = {
+  key: string;
+  unitId: string;
+  projectId: string;
+  blockId: string;
+  projectName: string;
+  blockName: string;
+  unitName: string;
+  floorNo: number | null;
+  bhkType: string | null;
+  rooms: RecordWithId[];
+};
+
+// One collapsible level of the Room Records tree (Project / Block / Floor),
+// indented by depth, with its rolled-up unit and room counts.
+function TreeRow({ depth, expanded, onToggle, icon, label, units, rooms, strong = false, custom = false, chips, onEditLayout, editing = false }: {
+  depth: number; expanded: boolean; onToggle: () => void; icon: React.ReactNode;
+  label: string; units: number; rooms: number; strong?: boolean;
+  custom?: boolean; chips?: React.ReactNode; onEditLayout?: () => void; editing?: boolean;
+}) {
+  return (
+    <div className={`flex items-center hover:bg-muted/20 transition-colors ${strong ? "bg-muted/10" : ""}`}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex-1 min-w-0 flex items-center gap-2.5 pr-2 py-2 text-left"
+        style={{ paddingLeft: 16 + depth * 20 }}
+      >
+        {expanded ? <ChevronDown size={13} className="text-muted-foreground shrink-0" /> : <ChevronRight size={13} className="text-muted-foreground shrink-0" />}
+        {icon}
+        <span className={`text-sm truncate ${strong ? "font-semibold" : "font-medium"} text-foreground`}>{label}</span>
+        {custom && <CustomBadge />}
+        {chips}
+        <span className="ml-auto flex items-center gap-1.5 shrink-0">
+          <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{units} unit{units === 1 ? "" : "s"}</span>
+          <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rooms} room{rooms === 1 ? "" : "s"}</span>
+        </span>
+      </button>
+      {onEditLayout ? <EditLayoutButton onClick={onEditLayout} active={editing} /> : <span className="w-[92px] shrink-0" />}
+    </div>
+  );
+}
+
+function CustomBadge() {
+  return (
+    <span className="text-[9px] font-semibold uppercase tracking-wide bg-violet-500/15 text-violet-600 dark:text-violet-400 px-1.5 py-0.5 rounded shrink-0"
+      title="This level has its own layout (overrides the one above)">
+      Custom
+    </span>
+  );
+}
+
+function EditLayoutButton({ onClick, active = false }: { onClick: () => void; active?: boolean }) {
+  return (
+    <button type="button" onClick={onClick} aria-expanded={active}
+      className={`mr-3 shrink-0 inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md border transition-colors ${
+        active ? "border-cyan-500 text-cyan-600 dark:text-cyan-400 bg-cyan-500/10" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+      title="View / set this level's room layout">
+      <LayoutGrid size={11} /> Layout
+    </button>
+  );
+}
+
+// "2 BHK · 6" chips: rooms per unit this level defines for each type in it.
+function LayoutChips({ items }: { items: { label: string; total: number; text: string }[] }) {
+  if (!items.length) return null;
+  return (
+    <span className="hidden md:flex items-center gap-1 min-w-0 overflow-hidden">
+      {items.map((i) => (
+        <span key={i.label} title={`${i.label}: ${i.text || "no rooms"}`}
+          className="text-[10px] text-muted-foreground border border-border px-1.5 py-0.5 rounded shrink-0">
+          {i.label} · {i.total}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 // Sentinel for a unit with no FloorNo set — real floor numbers are >= 0
 // (0 = Ground), so this can never collide with an actual value.
 const NO_FLOOR = "__none__";
@@ -598,6 +684,7 @@ const RoomMaster: React.FC = () => {
       unitId: String(item.UnitId),
       unitName: item.UnitName ?? "",
       roomName: item.RoomName ?? "",
+      roomCategoryId: item.RoomCategoryId ?? null,
       floor: item.Floor ?? "",
       isActive: Boolean(item.IsActive),
       blueprintFileName: item.BlueprintFileName ?? null,
@@ -608,27 +695,170 @@ const RoomMaster: React.FC = () => {
   // Rooms grouped by their owning Unit — collapsible, same "PO grouping its
   // GRNs" pattern GRN.tsx uses. Sorted by Project/Block/Unit so the list
   // reads in the same order the old flat table's default sort did.
+  const { data: projectList = [] } = useQuery<{ Id: number; Name: string }[]>({
+    queryKey: ["room-master-projects"],
+    queryFn: async () => {
+      const res = await fetchWithAuth(`${API}/projects`);
+      if (!res.ok) throw new Error("Failed to fetch projects");
+      return res.json().catch(() => []);
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+
   const roomGroups = React.useMemo(() => {
-    const unitTypeById = new Map(allUnits.map((u) => [String(u.Id), u.UnitType]));
-    const map = new Map<string, { key: string; projectName: string; blockName: string; unitName: string; bhkType: string | null; rooms: RecordWithId[] }>();
+    const projectName = new Map(projectList.map((p) => [String(p.Id), p.Name]));
+    const map = new Map<string, UnitRoomGroup>();
+    // Every active unit is a node — including one with no rooms yet, so a
+    // unit that is out of sync with its layout is visible (0/7), not hidden.
+    for (const u of allUnits) {
+      map.set(`u:${u.Id}`, {
+        key: `u:${u.Id}`, unitId: String(u.Id), projectId: String(u.ProjectId), blockId: String(u.BlockId),
+        projectName: projectName.get(String(u.ProjectId)) || "", blockName: u.BlockName || "", unitName: u.Name || "",
+        floorNo: u.FloorNo ?? null, bhkType: u.UnitType ?? null, rooms: [],
+      });
+    }
     for (const r of mappedData) {
-      const key = `${r.projectId}-${r.blockId}-${r.unitId}`;
+      const key = `u:${r.unitId}`;
       if (!map.has(key)) {
+        // A room whose unit is no longer active — still listed, placed by
+        // the room's own Project/Block/Floor.
+        const floorNo = r.floor === "G" ? 0 : r.floor ? Number(r.floor) : null;
         map.set(key, {
-          key,
-          projectName: (r.projectName as string) || "",
-          blockName: (r.blockName as string) || "",
-          unitName: (r.unitName as string) || "",
-          bhkType: unitTypeById.get(r.unitId as string) ?? null,
-          rooms: [],
+          key, unitId: r.unitId as string, projectId: r.projectId as string, blockId: r.blockId as string,
+          projectName: (r.projectName as string) || "", blockName: (r.blockName as string) || "", unitName: (r.unitName as string) || "",
+          floorNo: Number.isFinite(floorNo as number) ? (floorNo as number) : null, bhkType: null, rooms: [],
         });
       }
-      map.get(key)!.rooms.push(r);
+      const g = map.get(key)!;
+      if (!g.projectName && r.projectName) g.projectName = r.projectName as string;
+      g.rooms.push(r);
     }
-    return Array.from(map.values()).sort((a, b) =>
-      `${a.projectName}-${a.blockName}-${a.unitName}`.localeCompare(`${b.projectName}-${b.blockName}-${b.unitName}`),
-    );
-  }, [mappedData, allUnits]);
+    return Array.from(map.values());
+  }, [mappedData, allUnits, projectList]);
+
+  // Room Records as a tree: Project > Block > Floor > Unit > Rooms. Every
+  // level collapsible, collapsed by default; counts roll up at each level.
+  const roomTree = React.useMemo(() => {
+    const natural = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+    const projects = new Map<string, { key: string; name: string; blocks: Map<string, { key: string; name: string; floors: Map<string, { key: string; floorNo: number | null; units: UnitRoomGroup[] }> }> }>();
+    for (const g of roomGroups) {
+      if (!projects.has(g.projectId)) projects.set(g.projectId, { key: `p:${g.projectId}`, name: g.projectName || `Project #${g.projectId}`, blocks: new Map() });
+      const p = projects.get(g.projectId)!;
+      if (!p.blocks.has(g.blockId)) p.blocks.set(g.blockId, { key: `b:${g.projectId}-${g.blockId}`, name: g.blockName || "—", floors: new Map() });
+      const b = p.blocks.get(g.blockId)!;
+      const fk = g.floorNo == null ? "none" : String(g.floorNo);
+      if (!b.floors.has(fk)) b.floors.set(fk, { key: `f:${g.projectId}-${g.blockId}-${fk}`, floorNo: g.floorNo, units: [] });
+      b.floors.get(fk)!.units.push(g);
+    }
+    const count = (units: UnitRoomGroup[]) => ({ unitCount: units.length, roomCount: units.reduce((s, u) => s + u.rooms.length, 0) });
+    return Array.from(projects.values()).sort((a, b) => natural(a.name, b.name)).map((p) => {
+      const blocks = Array.from(p.blocks.values()).sort((a, b) => natural(a.name, b.name)).map((b) => {
+        const floors = Array.from(b.floors.values())
+          .sort((a, c) => (a.floorNo ?? Number.MAX_SAFE_INTEGER) - (c.floorNo ?? Number.MAX_SAFE_INTEGER))
+          .map((f) => {
+            const units = [...f.units].sort((a, c) => natural(a.unitName, c.unitName));
+            return { ...f, units, ...count(units) };
+          });
+        const all = floors.flatMap((f) => f.units);
+        return { key: b.key, blockIdNum: Number(b.key.split("-").pop()), name: b.name, floors, ...count(all) };
+      });
+      const all = blocks.flatMap((b) => b.floors.flatMap((f) => f.units));
+      return { key: p.key, name: p.name, blocks, ...count(all) };
+    });
+  }, [roomGroups]);
+
+  // Layout overrides of every project in the tree — drives the "Custom"
+  // badges. One small request per project.
+  const treeProjectIds = React.useMemo(() => roomTree.map((p) => Number(p.key.slice(2))).filter(Number.isInteger), [roomTree]);
+  const { data: overrides = [] } = useQuery<LayoutOverrideRow[]>({
+    queryKey: ["layout-overrides-project", treeProjectIds],
+    queryFn: async () => (await Promise.all(treeProjectIds.map((id) => getProjectOverrides(id)))).flat(),
+    enabled: treeProjectIds.length > 0,
+    staleTime: 30 * 1000,
+  });
+  const isCustom = {
+    project: (pid: number) => overrides.some((o) => o.ScopeLevel === "PROJECT" && o.ProjectId === pid),
+    block: (bid: number) => overrides.some((o) => o.ScopeLevel === "BLOCK" && o.BlockId === bid),
+    floor: (bid: number, floorNo: number | null) => floorNo != null && overrides.some((o) => o.ScopeLevel === "FLOOR" && o.BlockId === bid && floorNo >= (o.FloorFrom ?? 0) && floorNo <= (o.FloorTo ?? -1)),
+    unit: (uid: number) => overrides.some((o) => o.ScopeLevel === "UNIT" && o.UnitId === uid),
+  };
+
+  // Global layouts (Unit Composition) by label — a unit's UnitType is its
+  // layout type's Label (migration 477 canonicalized them).
+  const { data: layoutTypes = [] } = useQuery<LayoutType[]>({ queryKey: LAYOUT_TYPES_QUERY_KEY, queryFn: getLayoutTypes, staleTime: 60 * 1000 });
+  const typeByLabel = React.useMemo(() => new Map(layoutTypes.map((t) => [t.label, t])), [layoutTypes]);
+  const { data: roomCategories = [] } = useQuery<RoomCategory[]>({ queryKey: ["room-categories-options"], queryFn: getRoomCategoryOptions, staleTime: 5 * 60 * 1000 });
+
+  // Types present among some units, with counts — for a node's chips / editor.
+  const typesOf = React.useCallback((units: UnitRoomGroup[]): NodeType[] => {
+    const counts = new Map<string, number>();
+    for (const u of units) if (u.bhkType) counts.set(u.bhkType, (counts.get(u.bhkType) || 0) + 1);
+    return [...counts.entries()].map(([label, n]) => typeByLabel.get(label) && ({
+      layoutTypeId: typeByLabel.get(label)!.id, label, units: n, global: typeByLabel.get(label)!.composition ?? [],
+    })).filter(Boolean).sort((a, b) => (a as NodeType).label.localeCompare((b as NodeType).label, undefined, { numeric: true })) as NodeType[];
+  }, [typeByLabel]);
+
+  // What each type gets AT this level (ignoring exceptions below it).
+  const chipsFor = (types: NodeType[], pos: Position, level: Level) => types.map((t) => {
+    const r = resolveLayout(overrides, t.global, t.layoutTypeId, pos, level);
+    return { label: t.label, total: roomTotal(r.composition), text: compositionText(r.composition) };
+  });
+
+  // Rooms a unit SHOULD have (its effective layout) vs what it has.
+  const expectedRooms = (g: UnitRoomGroup) => {
+    const t = g.bhkType ? typeByLabel.get(g.bhkType) : undefined;
+    if (!t) return null;
+    const r = resolveLayout(overrides, t.composition ?? [], t.id, {
+      projectId: Number(g.projectId), blockId: Number(g.blockId), floorNo: g.floorNo, unitId: Number(g.unitId),
+    });
+    return roomTotal(r.composition);
+  };
+
+  // One inline layout editor open at a time; switching away from unsaved
+  // changes asks first.
+  const [editing, setEditing] = React.useState<{ key: string; level: Level; position: Position & { projectId: number }; types: NodeType[] } | null>(null);
+  const editingDirty = React.useRef(false);
+  const onDirtyChange = React.useCallback((d: boolean) => { editingDirty.current = d; }, []);
+  const toggleEditor = (next: { key: string; level: Level; position: Position & { projectId: number }; types: NodeType[] }) => {
+    if (editing?.key === next.key) {
+      if (editingDirty.current && !window.confirm("Discard the unsaved layout changes?")) return;
+      editingDirty.current = false;
+      setEditing(null);
+      return;
+    }
+    if (editing && editingDirty.current && !window.confirm("Discard the unsaved layout changes?")) return;
+    editingDirty.current = false;
+    setEditing(next);
+  };
+  const closeEditor = React.useCallback(() => { editingDirty.current = false; setEditing(null); }, []);
+  const editorFor = (key: string) => editing?.key === key && (
+    <InlineLayoutEditor
+      key={key}
+      level={editing.level}
+      position={editing.position}
+      types={editing.types}
+      overrides={overrides}
+      categories={roomCategories}
+      canEdit={rights.canEdit}
+      onClose={closeEditor}
+      onDirtyChange={onDirtyChange}
+    />
+  );
+
+  const allTreeKeys = React.useMemo(() => {
+    const keys: string[] = [];
+    for (const p of roomTree) {
+      keys.push(p.key);
+      for (const b of p.blocks) {
+        keys.push(b.key);
+        for (const f of b.floors) {
+          keys.push(f.key);
+          for (const u of f.units) keys.push(u.key);
+        }
+      }
+    }
+    return keys;
+  }, [roomTree]);
 
   // Collapsed by default — the same reasoning as every other "N rows under
   // one parent" list in this app (Work Allocation's dependency chains,
@@ -799,6 +1029,19 @@ const RoomMaster: React.FC = () => {
             <p className="text-sm font-heading font-semibold text-foreground">Room Records</p>
             <p className="text-[11px] text-muted-foreground">{mappedData.length} record{mappedData.length === 1 ? "" : "s"}</p>
           </div>
+          <div className="flex items-center gap-2">
+          {roomTree.length > 0 && (
+            <>
+              <button type="button" onClick={() => setExpandedUnits(new Set(allTreeKeys))}
+                className="text-[11px] font-medium px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                Expand all
+              </button>
+              <button type="button" onClick={() => setExpandedUnits(new Set())}
+                className="text-[11px] font-medium px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                Collapse all
+              </button>
+            </>
+          )}
           <ExportMenu
             data={mappedData}
             columns={exportColumns}
@@ -806,113 +1049,187 @@ const RoomMaster: React.FC = () => {
             filename="room-master"
             disabled={mappedData.length === 0}
           />
+          </div>
         </div>
 
         {roomGroups.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-muted-foreground">No rooms recorded yet.</p>
         ) : (
           <div className="divide-y divide-border">
-            {roomGroups.map((g) => {
-              const expanded = expandedUnits.has(g.key);
-              return (
-                <div key={g.key}>
-                  <button
-                    type="button"
-                    onClick={() => toggleUnit(g.key)}
-                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left hover:bg-muted/20 transition-colors"
-                  >
-                    {expanded ? (
-                      <ChevronDown size={13} className="text-muted-foreground shrink-0" />
-                    ) : (
-                      <ChevronRight size={13} className="text-muted-foreground shrink-0" />
-                    )}
-                    <Building2 size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
-                    <span className="text-sm font-medium text-foreground">{g.unitName || "—"}</span>
-                    <span className="text-xs text-muted-foreground truncate">
-                      · {g.projectName}{g.blockName ? ` — ${g.blockName}` : ""}
-                    </span>
-                    {g.bhkType && (
-                      <span className="text-[10px] font-medium text-cyan-700 dark:text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full shrink-0">
-                        {g.bhkType}
-                      </span>
-                    )}
-                    <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
-                      {g.rooms.length} room{g.rooms.length === 1 ? "" : "s"}
-                    </span>
-                  </button>
-
-                  {expanded && (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-border text-left text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide bg-muted/10">
-                            <th className="pl-12 pr-3 py-2">Room Name</th>
-                            <th className="px-3 py-2">Floor</th>
-                            <th className="px-3 py-2">Status</th>
-                            <th className="px-5 py-2 text-right">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {g.rooms.map((room) => (
-                            <tr key={room._id} className="border-b border-border last:border-0 hover:bg-muted/10">
-                              <td className="pl-12 pr-3 py-2.5 font-medium text-foreground">{room.roomName as string}</td>
-                              <td className="px-3 py-2.5 text-muted-foreground">{(room.floor as string) || "—"}</td>
-                              <td className="px-3 py-2.5">
-                                {room.isActive ? (
-                                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />Active
-                                  </span>
+            {roomTree.map((p) => (
+              <div key={p.key}>
+                {(() => {
+                  const pos = { projectId: Number(p.key.slice(2)) };
+                  const types = typesOf(p.blocks.flatMap((b) => b.floors.flatMap((f) => f.units)));
+                  return (
+                    <TreeRow depth={0} expanded={expandedUnits.has(p.key)} onToggle={() => toggleUnit(p.key)}
+                      icon={<FolderTree size={13} className="text-violet-500 shrink-0" />} label={p.name} units={p.unitCount} rooms={p.roomCount} strong
+                      custom={isCustom.project(pos.projectId)} chips={<LayoutChips items={chipsFor(types, pos, "PROJECT")} />}
+                      editing={editing?.key === p.key}
+                      onEditLayout={() => toggleEditor({ key: p.key, level: "PROJECT", position: pos, types })} />
+                  );
+                })()}
+                {editorFor(p.key)}
+                {expandedUnits.has(p.key) && p.blocks.map((b) => (
+                  <div key={b.key}>
+                    {(() => {
+                      const pos = { projectId: Number(p.key.slice(2)), blockId: b.blockIdNum };
+                      const types = typesOf(b.floors.flatMap((f) => f.units));
+                      return (
+                        <TreeRow depth={1} expanded={expandedUnits.has(b.key)} onToggle={() => toggleUnit(b.key)}
+                          icon={<Building size={13} className="text-sky-500 shrink-0" />} label={`Block ${b.name}`} units={b.unitCount} rooms={b.roomCount}
+                          custom={isCustom.block(b.blockIdNum)} chips={<LayoutChips items={chipsFor(types, pos, "BLOCK")} />}
+                          editing={editing?.key === b.key}
+                          onEditLayout={() => toggleEditor({ key: b.key, level: "BLOCK", position: pos, types })} />
+                      );
+                    })()}
+                    {editorFor(b.key)}
+                    {expandedUnits.has(b.key) && b.floors.map((f) => (
+                      <div key={f.key}>
+                        {(() => {
+                          const pos = { projectId: Number(p.key.slice(2)), blockId: b.blockIdNum, floorNo: f.floorNo };
+                          const types = typesOf(f.units);
+                          return (
+                            <TreeRow depth={2} expanded={expandedUnits.has(f.key)} onToggle={() => toggleUnit(f.key)}
+                              icon={<Layers size={13} className="text-amber-500 shrink-0" />}
+                              label={f.floorNo == null ? "No floor" : f.floorNo === 0 ? "Ground Floor" : `Floor ${f.floorNo}`}
+                              units={f.unitCount} rooms={f.roomCount}
+                              custom={isCustom.floor(b.blockIdNum, f.floorNo)}
+                              chips={f.floorNo == null ? undefined : <LayoutChips items={chipsFor(types, pos, "FLOOR")} />}
+                              editing={editing?.key === f.key}
+                              onEditLayout={f.floorNo == null ? undefined : () => toggleEditor({ key: f.key, level: "FLOOR", position: pos, types })} />
+                          );
+                        })()}
+                        {editorFor(f.key)}
+                        {expandedUnits.has(f.key) && f.units.map((g) => {
+                          const expanded = expandedUnits.has(g.key);
+                          return (
+                            <div key={g.key}>
+                              <div className="flex items-center hover:bg-muted/20 transition-colors">
+                              <button
+                                type="button"
+                                onClick={() => toggleUnit(g.key)}
+                                className="flex-1 min-w-0 flex items-center gap-2.5 pr-2 py-2 text-left"
+                                style={{ paddingLeft: 16 + 3 * 20 }}
+                              >
+                                {expanded ? (
+                                  <ChevronDown size={13} className="text-muted-foreground shrink-0" />
                                 ) : (
-                                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-border inline-block" />Inactive
+                                  <ChevronRight size={13} className="text-muted-foreground shrink-0" />
+                                )}
+                                <Building2 size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
+                                <span className="text-sm font-medium text-foreground">{g.unitName || "—"}</span>
+                                {g.bhkType && (
+                                  <span className="text-[10px] font-medium text-cyan-700 dark:text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full shrink-0">
+                                    {g.bhkType}
                                   </span>
                                 )}
-                              </td>
-                              <td className="px-5 py-2.5">
-                                <div className="flex items-center justify-end gap-1">
-                                  <button
-                                    onClick={() => setViewRoom(room)}
-                                    className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
-                                    title="View"
-                                  >
-                                    <Eye size={13} />
-                                  </button>
-                                  <button
-                                    onClick={() => printRoom(room)}
-                                    className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
-                                    title="Print"
-                                  >
-                                    <Printer size={13} />
-                                  </button>
-                                  {rights.canEdit && (
-                                    <button
-                                      onClick={() => requestEdit(room._id)}
-                                      className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                                      title="Edit"
-                                    >
-                                      <Pencil size={13} />
-                                    </button>
-                                  )}
-                                  {rights.canDelete && (
-                                    <button
-                                      onClick={() => setDeletingRoom(room)}
-                                      className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-                                      title="Delete"
-                                    >
-                                      <Trash2 size={13} />
-                                    </button>
-                                  )}
+                                {isCustom.unit(Number(g.unitId)) && <CustomBadge />}
+                                {(() => {
+                                  // layout rooms only — a custom room with no category (e.g. "Pooja Room") is
+                                  // an intentional extra the sync never touches, not a mismatch
+                                  const active = g.rooms.filter((r) => r.isActive && r.roomCategoryId != null).length;
+                                  const exp = expectedRooms(g);
+                                  return exp != null && active !== exp ? (
+                                    <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full shrink-0"
+                                      title={`Has ${active} active room(s); its layout calls for ${exp}. Run "Generate" in Generate Rooms in Bulk, or check the layout.`}>
+                                      <AlertTriangle size={10} /> {active}/{exp} rooms
+                                    </span>
+                                  ) : (
+                                    <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                                      {g.rooms.length} room{g.rooms.length === 1 ? "" : "s"}
+                                    </span>
+                                  );
+                                })()}
+                              </button>
+                              {g.bhkType && typeByLabel.get(g.bhkType) ? (
+                                <EditLayoutButton active={editing?.key === g.key} onClick={() => toggleEditor({
+                                  key: g.key, level: "UNIT",
+                                  position: { projectId: Number(g.projectId), blockId: Number(g.blockId), floorNo: g.floorNo, unitId: Number(g.unitId) },
+                                  types: typesOf([g]),
+                                })} />
+                              ) : <span className="w-[92px] shrink-0" />}
+                              </div>
+                              {editorFor(g.key)}
+
+                              {expanded && (
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-sm">
+                                    <thead>
+                                      <tr className="border-b border-border text-left text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide bg-muted/10">
+                                        <th className="pr-3 py-2" style={{ paddingLeft: 16 + 4 * 20 + 8 }}>Room Name</th>
+                                        <th className="px-3 py-2">Floor</th>
+                                        <th className="px-3 py-2">Status</th>
+                                        <th className="px-5 py-2 text-right">Actions</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {g.rooms.map((room) => (
+                                        <tr key={room._id} className="border-b border-border last:border-0 hover:bg-muted/10">
+                                          <td className="pr-3 py-2.5 font-medium text-foreground" style={{ paddingLeft: 16 + 4 * 20 + 8 }}>{room.roomName as string}</td>
+                                          <td className="px-3 py-2.5 text-muted-foreground">{(room.floor as string) || "—"}</td>
+                                          <td className="px-3 py-2.5">
+                                            {room.isActive ? (
+                                              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />Active
+                                              </span>
+                                            ) : (
+                                              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-border inline-block" />Inactive
+                                              </span>
+                                            )}
+                                          </td>
+                                          <td className="px-5 py-2.5">
+                                            <div className="flex items-center justify-end gap-1">
+                                              <button
+                                                onClick={() => setViewRoom(room)}
+                                                className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                                title="View"
+                                              >
+                                                <Eye size={13} />
+                                              </button>
+                                              <button
+                                                onClick={() => printRoom(room)}
+                                                className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                                                title="Print"
+                                              >
+                                                <Printer size={13} />
+                                              </button>
+                                              {rights.canEdit && (
+                                                <button
+                                                  onClick={() => requestEdit(room._id)}
+                                                  className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                                  title="Edit"
+                                                >
+                                                  <Pencil size={13} />
+                                                </button>
+                                              )}
+                                              {rights.canDelete && (
+                                                <button
+                                                  onClick={() => setDeletingRoom(room)}
+                                                  className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                                  title="Delete"
+                                                >
+                                                  <Trash2 size={13} />
+                                                </button>
+                                              )}
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
                                 </div>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            ))}
           </div>
         )}
       </div>
