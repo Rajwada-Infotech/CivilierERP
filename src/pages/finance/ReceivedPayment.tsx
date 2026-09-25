@@ -414,6 +414,26 @@ export default function ReceivedPaymentPage() {
   const [viewingPayment, setViewingPayment] = useState<ReceivedPayment | null>(
     null,
   );
+  // Deposit-bank options for the CRM assign panel below. Resolved server-side
+  // by /api/crm/project-banks/for-project/:id — the SAME rule every CRM payment
+  // picker uses (banks tagged to the project, else every active bank). Keeps
+  // Accounts and CRM showing an identical list instead of this page inventing
+  // its own client-side company-name match.
+  const [crmProjectBanks, setCrmProjectBanks] = useState<any[]>([]);
+  const crmPanelProjectId =
+    viewingPayment?.status === "Pending" && viewingPayment?.crmBookingId != null
+      ? viewingPayment.projectId
+      : undefined;
+  useEffect(() => {
+    if (crmPanelProjectId == null) { setCrmProjectBanks([]); return; }
+    let cancelled = false;
+    fetchWithAuth(`/api/crm/project-banks/for-project/${crmPanelProjectId}`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => { if (!cancelled) setCrmProjectBanks(Array.isArray(d) ? d : []); })
+      .catch(() => { if (!cancelled) setCrmProjectBanks([]); });
+    return () => { cancelled = true; };
+  }, [crmPanelProjectId]);
+
   const [detailTab, setDetailTab] = useState<"details" | "posting">("details");
   const [postingData, setPostingData] = useState<ReceivedPaymentPosting | null>(null);
   const [postingLoading, setPostingLoading] = useState(false);
@@ -2302,11 +2322,14 @@ export default function ReceivedPaymentPage() {
                 paymentId={Number(viewingPayment.id)}
                 currentBankId={viewingPayment.depositBankId}
                 currentBankName={viewingPayment.depositBankName}
-                banks={(() => {
-                  const company = normalizeCompanyName(viewingPayment.companyName);
-                  const mine = banks.filter((b) => { const c = normalizeCompanyName(b.BCompanyName); return !c || c === company; });
-                  return (mine.length > 0 ? mine : banks).filter((b) => b.BStatus !== false) as any;
-                })()}
+                banks={
+                  // Project-scoped list from the shared CRM endpoint. Only if the
+                  // payment carries no project at all do we fall back to this
+                  // page's own active bank list.
+                  (crmProjectBanks.length > 0
+                    ? crmProjectBanks
+                    : banks.filter((b) => b.BStatus !== false)) as any
+                }
                 canEdit={rights.canEdit}
                 onUpdated={(bank) => {
                   setViewingPayment((v) => v ? { ...v, depositBankId: bank.id, depositBankName: bank.name } : v);
