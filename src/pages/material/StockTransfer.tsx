@@ -1189,6 +1189,7 @@ export default function StockTransfer() {
   const [filterCompanyId, setFilterCompanyId] = useState("");
   const [filterProjectId, setFilterProjectId] = useState("");
   const [toCompanyId, setToCompanyId] = useState("");
+  const [toProjectId, setToProjectId] = useState("");
   const [fromGodownId, setFromGodownId] = useState<number | null>(null);
   const [toGodownId, setToGodownId] = useState<number | null>(null);
   const [items, setItems] = useState<TItem[]>([emptyItem()]);
@@ -1252,6 +1253,13 @@ export default function StockTransfer() {
       setItems([emptyItem()]);
     }
   }, [projectGodown]);
+
+  // Receiver-side project filter (inter-company only) — same narrowing
+  // pattern as the sender's own Company/Project filters above.
+  const toProjectOptions = useMemo(() => {
+    if (!toCompanyId) return [];
+    return allProjects.filter((p) => String(p.company_id ?? "") === toCompanyId);
+  }, [allProjects, toCompanyId]);
 
   const { data: fromStockData, isLoading: isLoadingStock } = useQuery({
     queryKey: ["inventory-master", today, fromGodownId],
@@ -1396,6 +1404,21 @@ export default function StockTransfer() {
     return allGodowns.filter((g) => String(g.EnterpriseID ?? "") === toCompanyId);
   }, [allGodowns, transferMode, toCompanyId, filterCompanyId, companyGodowns]);
 
+  // The dedicated godown auto-created for the selected receiver project (if any).
+  const toProjectGodown = useMemo(() => {
+    if (!toProjectId) return null;
+    return (
+      toCompanyGodowns.find((g) => String(g.ProjectID ?? "") === toProjectId) ?? null
+    );
+  }, [toCompanyGodowns, toProjectId]);
+
+  // Auto-fill the destination godown with the receiver project's own godown.
+  useEffect(() => {
+    if (toProjectGodown) {
+      setToGodownId(toProjectGodown.GodownID);
+    }
+  }, [toProjectGodown]);
+
   const fromGodown =
     companyGodowns.find((g) => g.GodownID === fromGodownId) || null;
   const toGodown =
@@ -1502,6 +1525,7 @@ export default function StockTransfer() {
                   onClick={() => {
                     setTransferMode("intra");
                     setToCompanyId("");
+                    setToProjectId("");
                     setToGodownId(null);
                   }}
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
@@ -1559,47 +1583,99 @@ export default function StockTransfer() {
               </div>
 
               <div className="space-y-3">
-                {/* From Company */}
-                <FilterSelect
-                  icon={Building2}
-                  label={transferMode === "inter" ? "From Company" : "Company"}
-                  value={filterCompanyId}
-                  onChange={(v) => {
-                    setFilterCompanyId(v);
-                    setFilterProjectId("");
-                    setFromGodownId(null);
-                    setToGodownId(null);
-                    setItems([emptyItem()]);
-                  }}
-                  options={companyOptions}
-                  placeholder="All companies"
-                />
+                {transferMode === "inter" ? (
+                  <>
+                    {/* From Company | To Company */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <FilterSelect
+                        icon={Building2}
+                        label="From Company"
+                        value={filterCompanyId}
+                        onChange={(v) => {
+                          setFilterCompanyId(v);
+                          setFilterProjectId("");
+                          setFromGodownId(null);
+                          setToGodownId(null);
+                          setItems([emptyItem()]);
+                        }}
+                        options={companyOptions}
+                        placeholder="All companies"
+                      />
+                      <FilterSelect
+                        icon={Building2}
+                        label="To Company"
+                        value={toCompanyId}
+                        onChange={(v) => {
+                          setToCompanyId(v);
+                          setToProjectId("");
+                          setToGodownId(null);
+                        }}
+                        options={companyOptions.filter((o) => o.value !== filterCompanyId)}
+                        placeholder="Select destination company"
+                      />
+                    </div>
 
-                {/* Project */}
-                <FilterSelect
-                  icon={FolderKanban}
-                  label="Project"
-                  value={filterProjectId}
-                  onChange={(v) => {
-                    setFilterProjectId(v);
-                    setFromGodownId(null);
-                    setToGodownId(null);
-                    setItems([emptyItem()]);
-                  }}
-                  options={projectSelectOptions}
-                  placeholder={filterCompanyId ? "All projects in company" : "All projects"}
-                />
+                    {/* From Project | Receiver Project */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <FilterSelect
+                        icon={FolderKanban}
+                        label="From Project"
+                        value={filterProjectId}
+                        onChange={(v) => {
+                          setFilterProjectId(v);
+                          setFromGodownId(null);
+                          setToGodownId(null);
+                          setItems([emptyItem()]);
+                        }}
+                        options={projectSelectOptions}
+                        placeholder={filterCompanyId ? "All projects in company" : "All projects"}
+                      />
+                      <FilterSelect
+                        icon={FolderKanban}
+                        label="Receiver Project"
+                        value={toProjectId}
+                        onChange={(v) => {
+                          setToProjectId(v);
+                          setToGodownId(null);
+                        }}
+                        options={toProjectOptions.map((p) => ({ value: String(p.id), label: p.label }))}
+                        placeholder={toCompanyId ? "All projects in company" : "Select a company first"}
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* Company */}
+                    <FilterSelect
+                      icon={Building2}
+                      label="Company"
+                      value={filterCompanyId}
+                      onChange={(v) => {
+                        setFilterCompanyId(v);
+                        setFilterProjectId("");
+                        setFromGodownId(null);
+                        setToGodownId(null);
+                        setItems([emptyItem()]);
+                      }}
+                      options={companyOptions}
+                      placeholder="All companies"
+                    />
 
-                {/* To Company (inter-company only) */}
-                {transferMode === "inter" && (
-                  <FilterSelect
-                    icon={Building2}
-                    label="To Company"
-                    value={toCompanyId}
-                    onChange={(v) => { setToCompanyId(v); setToGodownId(null); }}
-                    options={companyOptions.filter((o) => o.value !== filterCompanyId)}
-                    placeholder="Select destination company"
-                  />
+                    {/* Project */}
+                    <FilterSelect
+                      icon={FolderKanban}
+                      label="Project"
+                      value={filterProjectId}
+                      onChange={(v) => {
+                        setFilterProjectId(v);
+                        setFromGodownId(null);
+                        setToGodownId(null);
+                        setItems([emptyItem()]);
+                      }}
+                      options={projectSelectOptions}
+                      placeholder={filterCompanyId ? "All projects in company" : "All projects"}
+                    />
+                  </>
                 )}
 
                 {/* From Godown | To Godown */}
