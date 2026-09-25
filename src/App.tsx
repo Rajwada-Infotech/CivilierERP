@@ -340,6 +340,7 @@ const ApprovalInbox = lazy(() => import("./pages/admin/ApprovalInbox"));
 
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
+const ApkManagerPage = lazy(() => import("./pages/admin/ApkManager"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
 const AdminProfile = lazy(() => import("./pages/admin/AdminProfile"));
 const DBAProfile = lazy(() => import("./pages/dba/DBAProfile"));
@@ -2145,6 +2146,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <SignaturePage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/apk-manager"
+        element={
+          <AdminRoute>
+            <ApkManagerPage />
           </AdminRoute>
         }
       />

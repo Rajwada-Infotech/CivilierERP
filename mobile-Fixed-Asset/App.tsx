@@ -7,6 +7,7 @@ import { queryClient } from "@/services/queryClient";
 import { AuthProvider } from "@/auth/AuthContext";
 import { ToastProvider } from "@/components/Toast";
 import RootNavigator from "@/navigation/RootNavigator";
+import { UpdateGate } from "@/updater/UpdateGate";
 import { useAppFonts } from "@/theme/fonts";
 import { colors } from "@/theme/colors";
 
@@ -30,6 +31,7 @@ export default function App() {
           </ToastProvider>
         </AuthProvider>
       </QueryClientProvider>
+      <UpdateGate appKey="fixed-asset" />
       <StatusBar style="light" />
     </SafeAreaProvider>
   );
