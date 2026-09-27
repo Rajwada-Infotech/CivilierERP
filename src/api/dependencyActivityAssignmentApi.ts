@@ -225,20 +225,23 @@ export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; c
   COMPLETED: { label: "Completed", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
 };
 
-// The status dropdown is now just an In Progress <-> Hold toggle — nothing
-// else is manually chosen from here. Completed is set automatically by
+// The status dropdown is an In Progress <-> Hold toggle, plus Cancelled —
+// which is reachable from any stage, including a terminal one (Completed/
+// Approved), per explicit instruction. Completed is set automatically by
 // dragging the progress bar to 100% (see ActivityDetailModal's
 // ProgressDragBar); Approved/Rework come only from a QC decision; Rework's
 // one way out is manually re-opening it to In Progress to redo the work.
 // A single-element result means "read-only badge, no dropdown" — see
-// AssignmentStatusSelect. Mirrored server-side in
-// dependencyActivityAssignment.js's status route — keep the two in sync.
+// AssignmentStatusSelect (only Cancelled itself is truly terminal). Mirrored
+// server-side in dependencyActivityAssignment.js's status route — keep the
+// two in sync.
 export function allowedNextStatuses(current: AssignmentStatus): AssignmentStatus[] {
-  if (current === "REWORK") return ["REWORK", "IN_PROGRESS"];
+  if (current === "CANCELLED") return ["CANCELLED"];
+  if (current === "REWORK") return ["REWORK", "IN_PROGRESS", "CANCELLED"];
   if (current === "PENDING" || current === "ALLOCATED" || current === "IN_PROGRESS" || current === "HOLD") {
-    return ["IN_PROGRESS", "HOLD"];
+    return ["IN_PROGRESS", "HOLD", "CANCELLED"];
   }
-  return [current];
+  return [current, "CANCELLED"];
 }
 
 export interface ReportedAssignment {
@@ -255,6 +258,11 @@ export interface ReportedAssignment {
   remarks: string | null;
   status: AssignmentStatus;
   progressPercent: number;
+  // Latest QC decision, if this activity has ever been inspected — drives
+  // the "QC Checked" badge shown everywhere this row appears, and (once
+  // APPROVED) means it's no longer the Quality Check page's job, it's
+  // awaiting the approval workflow or already finalized.
+  qcStatus: "APPROVED" | "REWORK" | null;
   updatedAt: string;
   sequenceNo: number;
   activityId: number;
@@ -478,10 +486,46 @@ export const getQcHistory = async (rungId: number): Promise<QcHistoryEntry[]> =>
 export const submitQcDecision = async (
   rungId: number,
   payload: { decision: "APPROVED" | "REWORK"; remarks?: string; checks: QcCheckInput[] },
-): Promise<{ success: boolean; status: AssignmentStatus }> => {
+): Promise<{ success: boolean; status: AssignmentStatus; awaitingApproval: boolean }> => {
   const res = await fetchWithAuth(`${BASE}/qc/${rungId}/decision`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
-  return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
+  return handleResponse<{ success: boolean; status: AssignmentStatus; awaitingApproval: boolean }>(res);
+};
+
+// ── Approval workflow ───────────────────────────────────────────────────────
+// Enforces the ApprovalLevel[] set on this same assignment (Work
+// Allocation's mini Approval Setup, see saveRungAssignment) once QC has
+// passed a Completed activity — kept as its own small state, not the
+// module-wide Approval Setup/Approval Inbox (see ApprovalLevel's own
+// comment above).
+export interface ApprovalWorkflowLevel extends ApprovalLevel {
+  satisfied: boolean;
+  current: boolean;
+}
+export interface ApprovalWorkflowEntry {
+  levelId: string;
+  approverUserId: number;
+  approverName: string | null;
+  approvedAt: string;
+}
+export interface ApprovalWorkflowState {
+  status: AssignmentStatus;
+  levels: ApprovalWorkflowLevel[];
+  approvals: ApprovalWorkflowEntry[];
+  currentLevelIndex: number | null;
+  canApprove: boolean;
+}
+
+export const getApprovalWorkflow = async (rungId: number): Promise<ApprovalWorkflowState> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/approval`);
+  return handleResponse<ApprovalWorkflowState>(res);
+};
+
+export const approveWorkflowLevel = async (
+  rungId: number,
+): Promise<{ success: boolean; fullyApproved: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/approval/approve`, { method: "POST" });
+  return handleResponse<{ success: boolean; fullyApproved: boolean }>(res);
 };

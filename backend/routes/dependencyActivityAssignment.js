@@ -79,6 +79,12 @@ router.get(
           WHERE daq.AssignmentId = daa.Id
         ) AS qcNames,
         (
+          SELECT TOP 1 qc.Decision
+          FROM dbo.DependencyActivityQc qc
+          WHERE qc.AssignmentId = daa.Id
+          ORDER BY qc.QcAt DESC, qc.Id DESC
+        ) AS qcStatus,
+        (
           SELECT img.M_Name AS name, dammat.Quantity AS quantity, img.M_UOM AS uom
           FROM dbo.DependencyActivityMaterial dammat
           JOIN dbo.Item_Master_Group img ON img.M_Id = dammat.ItemId
@@ -180,13 +186,15 @@ router.post(
     const tx = new sql.Transaction(pool);
     try {
       const a = await pool.request().input("rungId", sql.Int, rungId).query(
-        "SELECT Id, Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId",
+        "SELECT Id, Status, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId",
       );
       if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
       const assignmentId = a.recordset[0].Id;
       if (a.recordset[0].Status !== "COMPLETED") {
         return res.status(400).json({ error: "Only a Completed activity (work dragged to 100%) can be quality-checked." });
       }
+      let approvalLevels = [];
+      try { approvalLevels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { approvalLevels = []; }
 
       const cp = await pool.request().input("aid", sql.Int, assignmentId).query(
         "SELECT Id, FieldName FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @aid ORDER BY SortOrder, Id",
@@ -240,19 +248,181 @@ router.post(
         }
       }
 
+      // Passing QC doesn't immediately finalize the activity if it has an
+      // approval setup configured (ApprovalLevelsJson, from Work
+      // Allocation's mini Approval Setup) — it stays Completed, now
+      // awaiting that named approval chain (see /:rungId/approval below),
+      // and only flips to APPROVED once every level clears. With no levels
+      // configured there's nothing to wait on, so it finalizes immediately,
+      // same as before this workflow existed.
+      const finalStatus = decision === "APPROVED" && approvalLevels.length > 0 ? "COMPLETED" : decision;
       await new sql.Request(tx)
         .input("aid", sql.Int, assignmentId)
-        .input("status", sql.NVarChar(20), decision)
+        .input("status", sql.NVarChar(20), finalStatus)
         .input("by", sql.NVarChar(200), actor).query(`
           UPDATE dbo.DependencyActivityAssignment
           SET Status = @status, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
           WHERE Id = @aid
         `);
       await tx.commit();
-      res.json({ success: true, status: decision, qcId });
+      res.json({ success: true, status: finalStatus, qcId, awaitingApproval: finalStatus === "COMPLETED" && decision === "APPROVED" });
     } catch (err) {
       try { await tx.rollback(); } catch (_) { /* not begun or already rolled back */ }
       console.error("[dependency-activity-assignment] POST /qc/:rungId/decision error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ── Approval workflow ───────────────────────────────────────────────────────
+// Enforces the per-assignment ApprovalLevelsJson config (Work Allocation's
+// mini Approval Setup) once QC has passed a Completed activity. Levels
+// clear strictly in order; a level with mode "all" needs every named
+// userId to approve it, mode "any" needs just one. super_admin can clear
+// any level regardless of who's named. Shared level-satisfaction logic
+// between the two routes below (kept inline rather than factored out — the
+// two call sites are the entire surface that needs it).
+function satisfiedLevel(level, approvals) {
+  const approvedIds = new Set(
+    approvals.filter((x) => x.levelId === level.id).map((x) => Number(x.approverUserId)),
+  );
+  if (level.mode === "any") return level.userIds.some((id) => approvedIds.has(Number(id)));
+  return level.userIds.length > 0 && level.userIds.every((id) => approvedIds.has(Number(id)));
+}
+function firstUnsatisfiedLevelIndex(levels, approvals) {
+  for (let i = 0; i < levels.length; i++) {
+    if (!satisfiedLevel(levels[i], approvals)) return i;
+  }
+  return null;
+}
+
+// GET /:rungId/approval — the workflow's current state: each level, who's
+// cleared it so far, which level is next, and whether the viewer can act
+// on it right now.
+router.get(
+  "/:rungId/approval",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "view"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    try {
+      const pool = await getPool();
+      const a = await pool.request().input("rungId", sql.Int, rungId).query(
+        "SELECT Id, Status, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId",
+      );
+      if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
+      const assignmentId = a.recordset[0].Id;
+      const status = a.recordset[0].Status;
+      let levels = [];
+      try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
+
+      const approvalsRes = await pool.request().input("aid", sql.Int, assignmentId).query(`
+        SELECT da.LevelId AS levelId, da.ApproverUserId AS approverUserId, u.name AS approverName, da.ApprovedAt AS approvedAt
+        FROM dbo.DependencyActivityApproval da
+        LEFT JOIN dbo.users u ON u.id = da.ApproverUserId
+        WHERE da.AssignmentId = @aid
+        ORDER BY da.ApprovedAt ASC
+      `);
+      const approvals = approvalsRes.recordset;
+      const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
+      const currentLevel = currentLevelIndex != null ? levels[currentLevelIndex] : null;
+
+      const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+      const isSuperAdmin = req.user?.role === "super_admin";
+      const alreadyActed = currentLevel
+        ? approvals.some((x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId))
+        : false;
+      const canApprove =
+        status === "COMPLETED" &&
+        currentLevel != null &&
+        !alreadyActed &&
+        (isSuperAdmin || currentLevel.userIds.map(Number).includes(Number(viewerUserId)));
+
+      res.json({
+        status,
+        levels: levels.map((l, i) => ({ ...l, satisfied: satisfiedLevel(l, approvals), current: i === currentLevelIndex })),
+        approvals,
+        currentLevelIndex,
+        canApprove,
+      });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /:rungId/approval error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// POST /:rungId/approval/approve — the viewer clears whichever level is
+// next in line. Once the last level clears, the activity finally becomes
+// APPROVED (it stayed Completed up to this point — see the QC decision
+// route above).
+router.post(
+  "/:rungId/approval/approve",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+    if (!viewerUserId) return res.status(401).json({ error: "Not authenticated" });
+
+    try {
+      const pool = await getPool();
+      const a = await pool.request().input("rungId", sql.Int, rungId).query(
+        "SELECT Id, Status, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId",
+      );
+      if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
+      const assignmentId = a.recordset[0].Id;
+      if (a.recordset[0].Status !== "COMPLETED") {
+        return res.status(400).json({ error: "Only a Completed, QC-passed activity is awaiting approval." });
+      }
+      let levels = [];
+      try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
+      if (!levels.length) return res.status(400).json({ error: "No approval setup is configured for this activity." });
+
+      const approvalsRes = await pool.request().input("aid", sql.Int, assignmentId).query(
+        "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
+      );
+      const approvals = approvalsRes.recordset;
+      const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
+      if (currentLevelIndex == null) {
+        return res.status(400).json({ error: "This activity has already cleared every approval level." });
+      }
+      const currentLevel = levels[currentLevelIndex];
+      if (!isSuperAdmin && !currentLevel.userIds.map(Number).includes(Number(viewerUserId))) {
+        return res.status(403).json({ error: "You're not named as an approver for this step." });
+      }
+      const already = approvals.some((x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId));
+      if (already) return res.status(400).json({ error: "You've already approved this step." });
+
+      await pool.request()
+        .input("aid", sql.Int, assignmentId)
+        .input("levelId", sql.NVarChar(50), currentLevel.id)
+        .input("levelIndex", sql.Int, currentLevelIndex)
+        .input("userId", sql.Int, viewerUserId)
+        .query(`
+          INSERT INTO dbo.DependencyActivityApproval (AssignmentId, LevelId, LevelIndex, ApproverUserId)
+          VALUES (@aid, @levelId, @levelIndex, @userId)
+        `);
+
+      // Levels clear strictly in order, so this level is only "the last
+      // missing one" if it was also the last level overall.
+      const fullyApproved = currentLevelIndex === levels.length - 1;
+      if (fullyApproved) {
+        await pool.request()
+          .input("aid", sql.Int, assignmentId)
+          .input("by", sql.NVarChar(200), req.user?.email || req.user?.name || "system")
+          .query(`
+            UPDATE dbo.DependencyActivityAssignment
+            SET Status = 'APPROVED', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+            WHERE Id = @aid
+          `);
+      }
+      res.json({ success: true, fullyApproved });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] POST /:rungId/approval/approve error:", err.message);
       res.status(500).json({ error: err.message });
     }
   },
@@ -311,7 +481,12 @@ router.patch(
       );
       const current = cur.recordset[0]?.Status;
       if (current && current !== status) {
-        if (status === "COMPLETED") {
+        if (current === "CANCELLED") {
+          return res.status(400).json({ error: "A Cancelled activity can't be changed." });
+        } else if (status === "CANCELLED") {
+          // Allowed from any stage, per explicit instruction — Cancel is
+          // the one manual move with no forward-only restriction.
+        } else if (status === "COMPLETED") {
           if (!(hasProgress && progressPercent === 100)) {
             return res.status(400).json({ error: "Completed is set automatically when work reaches 100%." });
           }

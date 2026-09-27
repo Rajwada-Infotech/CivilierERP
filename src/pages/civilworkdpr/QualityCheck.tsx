@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { ShieldCheck, Search, UserRound, CalendarDays, Package, Camera, Loader2, CheckCircle2, RotateCcw, MapPin, AlertTriangle } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { QcBadge } from "@/components/civilworkdpr/QcBadge";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -283,11 +284,18 @@ export default function QualityCheck() {
   const [search, setSearch] = useState("");
   const [inspecting, setInspecting] = useState<ReportedAssignment | null>(null);
 
-  const { data: rows = [], isLoading } = useQuery({
+  const { data: allRows = [], isLoading } = useQuery({
     queryKey: ["qc-queue"],
     queryFn: getCompletedAssignments,
     enabled: rights.canView,
   });
+
+  // A Completed activity that already has a passing QC decision has moved
+  // on to the approval workflow (or, with no approval setup configured,
+  // straight to Approved) — it's not this queue's job any more, even
+  // though its own Status is still literally Completed until that
+  // workflow finishes. See getCompletedAssignments' own comment.
+  const rows = useMemo(() => allRows.filter((r) => r.qcStatus !== "APPROVED"), [allRows]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -345,7 +353,10 @@ export default function QualityCheck() {
                   filtered.map((r) => (
                     <tr key={r.rungId} className="hover:bg-muted/20">
                       <td className="px-4 py-3">
-                        <p className="font-medium text-foreground">{r.sequenceNo}. {r.activityName}</p>
+                        <p className="font-medium text-foreground flex items-center gap-1.5">
+                          {r.sequenceNo}. {r.activityName}
+                          <QcBadge qcStatus={r.qcStatus} />
+                        </p>
                         <p className="text-[11px] text-muted-foreground">{r.alias}</p>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground max-w-[260px]">
