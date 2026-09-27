@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
@@ -237,7 +238,7 @@ export default function Contract() {
   const projects = useMemo(() => {
     if (!form.companyId) return [];
     return ensureArray<{ id: number; label: string; belongs_to: string | null; company_id: number | null }>(allProjects)
-      .filter((e) => e.company_id === Number(form.companyId));
+      .filter((e) => projectBelongsToCompany(e as any, form.companyId));
   }, [allProjects, form.companyId]);
 
   const tcRecords = useMemo(() => {

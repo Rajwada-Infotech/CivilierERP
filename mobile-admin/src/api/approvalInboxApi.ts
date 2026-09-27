@@ -27,6 +27,9 @@ export interface InboxItem {
   SourceTransferDocNo: string | null;
   FromGodownName: string | null;
   ToGodownName: string | null;
+  // CRM payment still waiting for Accounts to assign the deposit bank on the
+  // web Received Payment page — Approve is refused by the server until then.
+  NeedsReview?: boolean | number | null;
   // Set by the backend's visibility filter (approvalInbox.js) only when the
   // viewer is named somewhere on this record's workflow but NOT on the
   // level it's currently sitting at — e.g. a Level-1 approver looking at a

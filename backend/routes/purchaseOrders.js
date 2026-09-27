@@ -1098,6 +1098,11 @@ router.put(
       const beforeSnapshot = wasApproved
         ? await snapshotRow(pool, "dbo.PurchaseOrders", "PurchaseOrderID", id)
         : null;
+      // Editing an already-Approved PO must go back through approval —
+      // ignore whatever status the client sent. Mirrors journalVoucher.js's
+      // wasApproved handling and grns.js's identical fix (PO itself doesn't
+      // post to GL directly, so no reversal needed here — only GRN does).
+      const effectiveStatus = wasApproved ? "Pending" : Status || "Draft";
       const uomMap = await buildUomMap(pool);
       const fyId = await resolveFyId(pool, finYear);
       const { hasCC, hasVID, hasVIN, hasPT } = await getPOCols(pool);
@@ -1132,7 +1137,7 @@ router.put(
         .input("GstType", sql.NVarChar(20), gstType)
         .input("GstRate", sql.Decimal(5, 2), gstRate)
         .input("PaymentTerms", sql.NVarChar(sql.MAX), PaymentTerms || null)
-        .input("Status", sql.NVarChar(50), Status || "Draft")
+        .input("Status", sql.NVarChar(50), effectiveStatus)
         .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
         .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
         .input("DocNo", sql.NVarChar(100), DocNo || null)
@@ -1232,9 +1237,12 @@ router.put(
       }
 
       res.json({
-        message: resubmitted
-          ? "Purchase order updated and re-submitted for approval"
-          : "Purchase order updated successfully",
+        message: wasApproved
+          ? "Purchase order updated — sent back for approval"
+          : resubmitted
+            ? "Purchase order updated and re-submitted for approval"
+            : "Purchase order updated successfully",
+        reopenedForApproval: wasApproved,
         resubmitted,
       });
     } catch (err) {

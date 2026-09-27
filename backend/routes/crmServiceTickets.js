@@ -64,6 +64,12 @@ router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res
       req0.input("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR b.BookingNo LIKE @search OR t.TicketNo LIKE @search OR t.Subject LIKE @search)");
     }
+    // handedOverOnly=true — used by the Maintenance module's "Service Requests" view
+    // to scope tickets to genuinely post-handover (after-sales) customers only.
+    // Same eligibility rule as services/maintenanceEligibility.js.
+    if (req.query.handedOverOnly === "true") {
+      conds.push("EXISTS (SELECT 1 FROM dbo.CrmHandover ho WHERE ho.BookingId = b.Id AND ho.Status = 'Completed')");
+    }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     const SELECT_WITH_BLOCK = `${TICKET_SELECT} LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId`;
     const ORDER = `ORDER BY
@@ -87,6 +93,9 @@ router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res
       .input("ct2", sql.NVarChar(50), category || null)
       .input("search2", sql.NVarChar(200), search ? `%${search}%` : null);
     if (!isAdmin) countReq.input("actorId2", sql.Int, actorId(req));
+    const handedOverOnlyClause = req.query.handedOverOnly === "true"
+      ? "AND EXISTS (SELECT 1 FROM dbo.CrmHandover ho WHERE ho.BookingId = b.Id AND ho.Status = 'Completed')"
+      : "";
     const [result, countResult] = await Promise.all([
       req0.query(`${SELECT_WITH_BLOCK} ${where} ${ORDER} OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`),
       countReq.query(`
@@ -103,6 +112,7 @@ router.get("/", requirePageRight("crm-service-tickets", "view"), async (req, res
           AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
           AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
           AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR b.BookingNo LIKE @search2 OR t.TicketNo LIKE @search2 OR t.Subject LIKE @search2))
+          ${handedOverOnlyClause}
       `),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });

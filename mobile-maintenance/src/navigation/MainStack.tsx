@@ -9,11 +9,12 @@ import BillViewScreen from "@/screens/bills/BillViewScreen";
 import BillFormScreen from "@/screens/bills/BillFormScreen";
 import AttendanceScreen from "@/screens/attendance/AttendanceScreen";
 import ElectricityScreen from "@/screens/electricity/ElectricityScreen";
+import ServiceRequestsScreen from "@/screens/tickets/ServiceRequestsScreen";
 import { TopHeader } from "./TopHeader";
 
-// Every module screen this app has: Dashboard (overview), the four
-// Maintenance sections (Directory/Bills/Attendance/Electricity — reached
-// via SidebarMenu, see navigation/SidebarMenu.tsx), plus Profile/
+// Every module screen this app has: Dashboard (overview), the five
+// Maintenance sections (Directory/Bills/ServiceRequests/Attendance/Electricity
+// — reached via SidebarMenu, see navigation/SidebarMenu.tsx), plus Profile/
 // Notifications from the header. Add a new module screen here, then list
 // it in SidebarMenu's NAV_ITEMS — see README.md "Adding a screen".
 export type MainStackParamList = {
@@ -23,6 +24,7 @@ export type MainStackParamList = {
   Bills: undefined;
   BillView: { billId: number };
   BillForm: { billId?: number };
+  ServiceRequests: undefined;
   Attendance: undefined;
   Electricity: undefined;
   Profile: undefined;
@@ -40,6 +42,7 @@ export default function MainStack() {
       <Stack.Screen name="Bills" component={BillsScreen} options={{ title: "Maintenance Bills" }} />
       <Stack.Screen name="BillView" component={BillViewScreen} options={{ title: "Bill" }} />
       <Stack.Screen name="BillForm" component={BillFormScreen} options={({ route }) => ({ title: route.params?.billId ? "Edit Bill" : "Create Bill" })} />
+      <Stack.Screen name="ServiceRequests" component={ServiceRequestsScreen} options={{ title: "Service Requests" }} />
       <Stack.Screen name="Attendance" component={AttendanceScreen} options={{ title: "Security Attendance" }} />
       <Stack.Screen name="Electricity" component={ElectricityScreen} options={{ title: "Electricity Maintenance" }} />
       <Stack.Screen name="Profile" component={ProfileScreen} options={{ title: "Profile" }} />

@@ -241,6 +241,18 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
     const tx = pool.transaction();
     await tx.begin();
     try {
+      // Editing an already-Approved return must go back through approval —
+      // its stock IN (RefType='IRN') was already credited back on approval,
+      // gated by PostedToStock; un-post it here and reset the flag so
+      // /:id/approve re-credits it with the edited quantities once it's
+      // approved again, instead of the old amounts silently standing.
+      if (wasApproved) {
+        await tx.request().input("id", sql.Int, id)
+          .query("DELETE FROM dbo.StockLedger WHERE RefType='IRN' AND RefID=@id");
+        await tx.request().input("id", sql.Int, id)
+          .query("UPDATE dbo.MaterialIssueReturn SET PostedToStock = 0 WHERE ReturnId=@id");
+      }
+
       await tx.request()
         .input("id", sql.Int, id)
         .input("ReturnDate", sql.Date, ReturnDate)
@@ -252,6 +264,7 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
         .input("Remarks", sql.NVarChar(1000), Remarks || null)
         .query(`
           UPDATE dbo.MaterialIssueReturn SET
+            ${wasApproved ? "Status='Pending'," : ""}
             ReturnDate=@ReturnDate, IssueId=@IssueId, CompanyId=@CompanyId,
             ProjectId=@ProjectId, GodownId=@GodownId, Reason=@Reason,
             Remarks=@Remarks, UpdatedAt=SYSDATETIME()
@@ -324,9 +337,12 @@ router.put("/:id", requirePageRight("material-issue-return", "edit"), async (req
       }
 
       res.json({
-        message: resubmitted
-          ? "Issue return updated and re-submitted for approval"
-          : "Issue return updated",
+        message: wasApproved
+          ? "Issue return updated — stock credit reversed, sent back for approval"
+          : resubmitted
+            ? "Issue return updated and re-submitted for approval"
+            : "Issue return updated",
+        reopenedForApproval: wasApproved,
         resubmitted,
       });
     } catch (innerErr) {

@@ -74,4 +74,72 @@ async function getLastPurchaseRate(pool, projectId, itemId) {
   return null;
 }
 
-module.exports = { getLastPurchaseRate };
+// Company-scoped variant — checks the item's most recent purchase rate
+// across EVERY project owned by the given company, not just one specific
+// project. Used by Inter-Company Stock Transfer, which values a transfer at
+// "what the sending COMPANY paid" (its cost basis as a whole), not just
+// what its one sending project happened to pay — a company with several
+// projects may have bought the same item more recently under a sibling
+// project's PO/GRN.
+async function getLastPurchaseRateByCompany(pool, companyId, itemId) {
+  const grnResult = await pool
+    .request()
+    .input("CompanyId", sql.Int, companyId)
+    .input("ItemId", sql.NVarChar(100), String(itemId)).query(`
+      SELECT TOP 1
+        item.rate AS Rate,
+        grn.DocNo AS SourceDocNo,
+        grn.GRNDate AS SourceDate
+      FROM dbo.GoodsReceiptNotes grn
+      JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
+      JOIN dbo.enterprise proj ON proj.id = po.ProjectId AND proj.business_type = 'P'
+      CROSS APPLY OPENJSON(grn.GRNItems)
+        WITH (
+          itemId NVARCHAR(100) '$.itemId',
+          rate DECIMAL(18, 4) '$.rate'
+        ) item
+      WHERE proj.company_id = @CompanyId
+        AND item.itemId = @ItemId
+        AND item.rate > 0
+      ORDER BY grn.GRNDate DESC, grn.GRNID DESC
+    `);
+
+  const grnRow = grnResult.recordset[0];
+  if (grnRow) {
+    return {
+      rate: Number(grnRow.Rate),
+      sourceDocNo: grnRow.SourceDocNo,
+      sourceDate: grnRow.SourceDate,
+    };
+  }
+
+  const poResult = await pool
+    .request()
+    .input("CompanyId", sql.Int, companyId)
+    .input("ItemId", sql.NVarChar(100), String(itemId)).query(`
+      SELECT TOP 1
+        poi.Rate AS Rate,
+        po.DocNo AS SourceDocNo,
+        po.PODate AS SourceDate
+      FROM dbo.PurchaseOrderItems poi
+      JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = poi.PurchaseOrderID
+      JOIN dbo.enterprise proj ON proj.id = po.ProjectId AND proj.business_type = 'P'
+      WHERE proj.company_id = @CompanyId
+        AND poi.ItemId = @ItemId
+        AND poi.Rate > 0
+      ORDER BY poi.CreatedAt DESC, poi.PurchaseOrderID DESC
+    `);
+
+  const poRow = poResult.recordset[0];
+  if (poRow) {
+    return {
+      rate: Number(poRow.Rate),
+      sourceDocNo: poRow.SourceDocNo,
+      sourceDate: poRow.SourceDate,
+    };
+  }
+
+  return null;
+}
+
+module.exports = { getLastPurchaseRate, getLastPurchaseRateByCompany };

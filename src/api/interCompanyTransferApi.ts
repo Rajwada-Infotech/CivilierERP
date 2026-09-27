@@ -40,6 +40,41 @@ export interface InterCompanyTransferResult {
   message: string;
 }
 
+export interface InterCompanyTransferPreviewItem {
+  itemId: string;
+  itemName: string | null;
+  qty: number;
+  unit: string;
+  rate: number;
+  amount: number;
+  sourceDocNo: string | null;
+}
+
+export interface InterCompanyTransferPreview {
+  items: InterCompanyTransferPreviewItem[];
+  totalAmount: number;
+  senderCompanyId?: number;
+  senderCompanyName?: string;
+  receiverCompanyId?: number;
+  receiverCompanyName?: string;
+}
+
+// Prices items at the sending company's most recent purchase rate (excl.
+// GST) without creating anything — powers the Posting preview shown before
+// submit. Throws if any item has no purchase history to price from.
+export const previewInterCompanyTransfer = async (payload: {
+  SenderProjectId: number;
+  ReceiverProjectId: number;
+  Items: InterCompanyTransferItemPayload[];
+}): Promise<InterCompanyTransferPreview> => {
+  const res = await fetchWithAuth(`${BASE}/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<InterCompanyTransferPreview>(res);
+};
+
 export const createInterCompanyTransfer = async (
   payload: InterCompanyTransferPayload,
 ): Promise<InterCompanyTransferResult> => {

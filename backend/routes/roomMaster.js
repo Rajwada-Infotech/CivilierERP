@@ -7,7 +7,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
-const { resolveLayoutType, getLayoutComposition, syncUnitRooms, syncRoomsForUnits, inferRoomCategoryId, bumpFlatMasterCaches, ROOM_NAME_MAX } = require("../services/unitLayout");
+const { resolveLayoutType, getLayoutComposition, getEffectiveComposition, syncUnitRooms, syncRoomsForUnits, inferRoomCategoryId, bumpFlatMasterCaches, ROOM_NAME_MAX } = require("../services/unitLayout");
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
@@ -172,24 +172,29 @@ router.get("/floor-units/:floorId", async (req, res) => {
 
     const result = await request.query(`
       SELECT
-        u.Id, u.UnitName, u.FloorNo, u.UnitType,
-        (SELECT COUNT(*) FROM dbo.RoomMaster r WHERE r.UnitId = u.Id AND r.IsActive = 1) AS GeneratedRoomCount,
-        (
-          SELECT SUM(rc.Quantity)
-          FROM dbo.RoomLayoutType lt
-          JOIN dbo.UnitRoomConfig cfg
-            ON (cfg.LayoutTypeId = lt.Id OR (cfg.LayoutTypeId IS NULL AND cfg.BhkType = lt.TypeKey))
-          JOIN dbo.RoomComposition rc ON rc.UnitRoomConfigId = cfg.Id
-          JOIN dbo.RoomCategoryMaster cat ON cat.Id = rc.RoomCategoryId
-          WHERE (lt.Id = u.LayoutTypeId
-                 OR (u.LayoutTypeId IS NULL AND lt.TypeKey = REPLACE(UPPER(ISNULL(u.UnitType, '')), ' ', '')))
-            AND cfg.IsActive = 1 AND cat.IsActive = 1 AND rc.Quantity > 0
-        ) AS TemplateRoomCount
+        u.Id, u.ProjectId, u.BlockId, u.UnitName, u.FloorNo, u.UnitType, u.LayoutTypeId,
+        (SELECT COUNT(*) FROM dbo.RoomMaster r WHERE r.UnitId = u.Id AND r.IsActive = 1) AS GeneratedRoomCount
       FROM dbo.UnitMaster u
       WHERE u.BlockId = @bid AND ${floorFilter} AND u.IsActive = 1
       ORDER BY u.UnitName
     `);
-    res.json({ units: result.recordset });
+    // TemplateRoomCount = the unit's EFFECTIVE layout (override if one
+    // applies, else global) — computed via the shared resolver so the badge
+    // can never disagree with what the sync builds.
+    const cache = new Map();
+    const units = [];
+    for (const u of result.recordset) {
+      const layout = u.LayoutTypeId
+        ? await resolveLayoutType(pool, { layoutTypeId: u.LayoutTypeId })
+        : await resolveLayoutType(pool, { unitType: u.UnitType });
+      const eff = await getEffectiveComposition(pool, u, layout, cache);
+      units.push({
+        Id: u.Id, UnitName: u.UnitName, FloorNo: u.FloorNo, UnitType: u.UnitType,
+        GeneratedRoomCount: u.GeneratedRoomCount,
+        TemplateRoomCount: eff.composition.reduce((n, c) => n + c.quantity, 0) || null,
+      });
+    }
+    res.json({ units });
   } catch (err) {
     console.error("[room-master] GET /floor-units/:floorId error:", err.message);
     res.status(500).json({ error: err.message });
@@ -216,15 +221,17 @@ router.get("/unit-rooms/:unitId", async (req, res) => {
     const layout = unit.LayoutTypeId
       ? await resolveLayoutType(pool, { layoutTypeId: unit.LayoutTypeId })
       : await resolveLayoutType(pool, { unitType: unit.UnitType });
-    const composition = layout ? await getLayoutComposition(pool, layout.id) : [];
-    const template = { recordset: composition.map((c) => ({ quantity: c.quantity, alias: c.alias })) };
+    // The unit's EFFECTIVE layout — a Project/Block/Floor/Unit override if
+    // one applies, else the layout type's global composition.
+    const effective = await getEffectiveComposition(pool, unit, layout);
+    const template = { recordset: effective.composition.map((c) => ({ quantity: c.quantity, alias: c.alias })) };
 
     const existing = await pool.request().input("UnitId", sql.Int, unitId).query(`
       SELECT Id, RoomName, Floor, IsActive, BlueprintFileName
       FROM dbo.RoomMaster WHERE UnitId = @UnitId ORDER BY RoomName
     `);
 
-    res.json({ unit, template: template.recordset, existing: existing.recordset });
+    res.json({ unit, template: template.recordset, templateSource: effective.source, existing: existing.recordset });
   } catch (err) {
     console.error("[room-master] GET /unit-rooms/:unitId error:", err.message);
     res.status(500).json({ error: err.message });

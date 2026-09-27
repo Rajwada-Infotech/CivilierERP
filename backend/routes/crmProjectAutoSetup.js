@@ -11,7 +11,7 @@ const { bumpCacheVersion } = require("../redis");
 const { isValidShortCode, ensureProjectShortCode } = require("../services/projectShortCode");
 const { getBlockLockReason, getFloorLockReason, getBlockHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
-const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, bumpFlatMasterCaches } = require("../services/unitLayout");
+const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, bumpFlatMasterCaches, removeOverridesFor } = require("../services/unitLayout");
 
 // Mirrors unitMaster.js's syncUnitPaymentPlanTags — deactivate all, then
 // upsert each valid plan ID back in. Called after generating each unit so
@@ -609,6 +609,7 @@ router.delete("/blocks/:id", requirePageRight("crm-auto-project-setup", "delete"
     const tx = pool.transaction();
     await tx.begin();
     try {
+      await removeOverridesFor(tx, { blockId: id });
       await tx.request().input("id", sql.Int, id).query("DELETE FROM dbo.BlockMaster WHERE Id = @id");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmProjectAutoSetupFloor WHERE BlockId = @bid");
       await tx.commit();

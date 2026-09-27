@@ -312,6 +312,11 @@ export function ApprovalInboxDetailModal({
                   <XCircle size={15} color={colors.destructive} />
                   <Text style={{ color: colors.destructive, fontSize: 13, fontFamily: fonts.heading.semibold }}>Reject</Text>
                 </Pressable>
+                {item.NeedsReview ? (
+                <View className="flex-1 items-center justify-center py-2 px-2 rounded-xl" style={{ borderWidth: 1, borderColor: "#f59e0b66", backgroundColor: "#f59e0b14" }}>
+                  <Text style={{ color: "#b45309", fontSize: 11, fontFamily: fonts.heading.semibold, textAlign: "center" }}>Waiting for Accounts to set the deposit bank (web)</Text>
+                </View>
+                ) : (
                 <Pressable
                   onPress={() => doAction("approve")}
                   disabled={acting !== null}
@@ -321,6 +326,7 @@ export function ApprovalInboxDetailModal({
                   {acting === "approve" ? <ActivityIndicator size="small" color="#fff" /> : <CheckCircle2 size={15} color="#fff" />}
                   <Text style={{ color: "#fff", fontSize: 13, fontFamily: fonts.heading.semibold }}>Approve</Text>
                 </Pressable>
+                )}
               </View>
             )}
           </View>

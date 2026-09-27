@@ -22,6 +22,11 @@ router.use(requireAuth);
 
 const PARTY_LABEL = { S: "Supplier", C: "Contractor", A: "Customer" };
 
+// Older CRM rows stored the raw account-head code ('A') in PartyType instead
+// of the label every other writer uses — show them as their label without
+// touching stored data.
+const PARTY_TYPE_SQL = `CASE oa.PartyType WHEN 'A' THEN 'Customer' WHEN 'S' THEN 'Supplier' WHEN 'C' THEN 'Contractor' ELSE oa.PartyType END`;
+
 // Informational only — an On Account Adjustment is a pure internal transfer
 // (Dr the party's own head / Cr the pooled On Account head, see
 // postOnAccountAdjustment in generalLedger.js); no bank/cheque is ever
@@ -702,7 +707,7 @@ router.get("/report", requireAnyPageRight(["on-account-report", "reports"], "vie
       countRequest.input("PartyId", sql.Int, v);
     }
     if (partyType) {
-      conditions.push("oa.PartyType = @PartyType");
+      conditions.push(`${PARTY_TYPE_SQL} = @PartyType`);
       request.input("PartyType", sql.NVarChar(20), partyType);
       countRequest.input("PartyType", sql.NVarChar(20), partyType);
     }
@@ -725,7 +730,7 @@ router.get("/report", requireAnyPageRight(["on-account-report", "reports"], "vie
     const data = await request.query(`
       SELECT
         oa.OAId, oa.PartyId,
-        ahm.LHeadName AS PartyName, ahm.LHeadType AS PartyTypeCode, oa.PartyType,
+        ahm.LHeadName AS PartyName, ahm.LHeadType AS PartyTypeCode, ${PARTY_TYPE_SQL} AS PartyType,
         oa.TxnDate, oa.TxnType,
         oa.Amount,
         CASE WHEN oa.TxnType='CREDIT' THEN oa.Amount ELSE 0 END AS OnAccountCreated,
@@ -761,13 +766,13 @@ router.get("/party-summary", requirePageRight("on-account-adjustment", "view"), 
     const pool = getPool();
     const r = await pool.request().query(`
       SELECT
-        oa.PartyId, ahm.LHeadName AS PartyName, oa.PartyType,
+        oa.PartyId, ahm.LHeadName AS PartyName, ${PARTY_TYPE_SQL} AS PartyType,
         SUM(CASE WHEN oa.TxnType='CREDIT' THEN oa.Amount ELSE 0 END) AS TotalCredit,
         SUM(CASE WHEN oa.TxnType='DEBIT'  THEN oa.Amount ELSE 0 END) AS TotalDebit,
         SUM(CASE WHEN oa.TxnType='CREDIT' THEN oa.Amount ELSE -oa.Amount END) AS Balance
       FROM dbo.OnAccountLedger oa
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = oa.PartyId
-      GROUP BY oa.PartyId, ahm.LHeadName, oa.PartyType
+      GROUP BY oa.PartyId, ahm.LHeadName, ${PARTY_TYPE_SQL}
       HAVING SUM(CASE WHEN oa.TxnType='CREDIT' THEN oa.Amount ELSE -oa.Amount END) > 0
       ORDER BY Balance DESC
     `);

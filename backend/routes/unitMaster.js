@@ -9,7 +9,7 @@ router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, mes
 const { getPool, sql } = require("../db");
 const { getUnitLockReason, getUnitHardDeleteBlockers } = require("../services/crmHierarchyLocks");
 const { getApplicablePaymentPlans } = require("../services/crmEntityCreation");
-const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, removeUnitRoomsForDelete, bumpFlatMasterCaches } = require("../services/unitLayout");
+const { resolveUnitTypeInput, LayoutValidationError, syncUnitRooms, removeUnitRoomsForDelete, removeOverridesFor, moveUnitOverrides, bumpFlatMasterCaches } = require("../services/unitLayout");
 
 // Compact, client-facing view of a syncUnitRooms() result.
 function summarizeRoomSync(r) {
@@ -506,6 +506,7 @@ router.put("/:id", requirePageRight("followup-unit-master", "edit"), async (req,
           UPDATE dbo.RoomMaster SET ProjectId = @ProjectId, BlockId = @BlockId, Floor = @Floor
           WHERE UnitId = @Id AND (ProjectId <> @ProjectId OR BlockId <> @BlockId OR ISNULL(Floor, '') <> ISNULL(@Floor, ''))
         `);
+      await moveUnitOverrides(tx, parseInt(id), parseInt(ProjectId), parseInt(BlockId));
       // Type changed: add the new layout's rooms, soft-deactivate rooms it
       // doesn't have — only those with no DPR work (kept ones are reported).
       if (typeChanged) {
@@ -595,6 +596,8 @@ router.delete("/:id", requirePageRight("followup-unit-master", "delete"), async 
         await tx.rollback();
         return res.status(409).json({ error: `Unit "${UnitName}" ${roomBlocker}.` });
       }
+      // its own layout overrides (settings of this unit) go with it
+      await removeOverridesFor(tx, { unitId: id });
       await tx.request().input("Id", sql.Int, id).query("DELETE FROM dbo.UnitMaster WHERE Id = @Id");
       await tx.commit();
     } catch (e) {

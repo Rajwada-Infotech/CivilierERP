@@ -209,6 +209,18 @@ export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; c
   COMPLETED: { label: "Completed", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
 };
 
+// A rung only moves forward: once it has left Pending/Allocated (i.e. it's
+// been approved into In Progress, or gone on to any later state) it can
+// never go back to either of them, and while In Progress the only manual
+// moves are Hold or Cancelled. Mirrored server-side in
+// dependencyActivityAssignment.js's status route — keep the two in sync.
+export function allowedNextStatuses(current: AssignmentStatus): AssignmentStatus[] {
+  if (current === "PENDING" || current === "ALLOCATED") return [...ASSIGNMENT_STATUSES];
+  if (current === "IN_PROGRESS") return ["IN_PROGRESS", "HOLD", "CANCELLED"];
+  if (current === "HOLD") return ["HOLD", "IN_PROGRESS", "CANCELLED"];
+  return ASSIGNMENT_STATUSES.filter((s) => s !== "PENDING" && s !== "ALLOCATED");
+}
+
 export interface ReportedAssignment {
   assignmentId: number;
   rungId: number;
@@ -407,4 +419,41 @@ export const uploadActivityPhoto = async (
 export const deleteActivityPhoto = async (rungId: number, photoId: number): Promise<{ success: boolean }> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/photos/${photoId}`, { method: "DELETE" });
   return handleResponse<{ success: boolean }>(res);
+};
+
+// ── Quality Check ────────────────────────────────────────────────────────────
+export interface QcCheckInput {
+  checkpointId: number;
+  passed: boolean;
+  note?: string;
+}
+
+export interface QcHistoryEntry {
+  id: number;
+  decision: "APPROVED" | "REWORK";
+  remarks: string | null;
+  qcAt: string;
+  qcBy: string | null;
+  checks: { fieldName: string; passed: boolean; note: string | null }[];
+}
+
+export const getInProgressAssignments = async (): Promise<ReportedAssignment[]> => {
+  const res = await fetchWithAuth(`${BASE}?status=IN_PROGRESS`);
+  return handleResponse<ReportedAssignment[]>(res);
+};
+
+export const getQcHistory = async (rungId: number): Promise<QcHistoryEntry[]> => {
+  const res = await fetchWithAuth(`${BASE}/qc/${rungId}/history`);
+  return handleResponse<QcHistoryEntry[]>(res);
+};
+
+export const submitQcDecision = async (
+  rungId: number,
+  payload: { decision: "APPROVED" | "REWORK"; remarks?: string; checks: QcCheckInput[] },
+): Promise<{ success: boolean; status: AssignmentStatus }> => {
+  const res = await fetchWithAuth(`${BASE}/qc/${rungId}/decision`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
 };

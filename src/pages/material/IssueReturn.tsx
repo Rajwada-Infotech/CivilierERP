@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useMemo, useRef } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -154,7 +155,7 @@ export default function IssueReturn() {
   });
 
   const filteredProjects = useMemo(
-    () => form.CompanyId ? (projects as any[]).filter((p: any) => Number(p.company_id) === Number(form.CompanyId)) : projects,
+    () => form.CompanyId ? (projects as any[]).filter((p: any) => projectBelongsToCompany(p, form.CompanyId)) : projects,
     [projects, form.CompanyId]
   );
 

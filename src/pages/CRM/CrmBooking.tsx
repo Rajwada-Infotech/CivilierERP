@@ -350,7 +350,7 @@ const CrmBooking: React.FC = () => {
   const bankOptions = selectedUnitProjectId ? projectBanks : allBanks;
   React.useEffect(() => {
     if (projectBanks.length === 1) {
-      setForm((f) => f.DepositBankId ? f : { ...f, DepositBankId: String(projectBanks[0].BId) });
+      // (no deposit bank auto-pick — Accounts assigns it before approval)
     }
   }, [projectBanks]);
 
@@ -472,9 +472,6 @@ const CrmBooking: React.FC = () => {
     // payment is actually receipted, not at booking creation.
     setSaving(true);
     try {
-      const bankName = form.DepositBankId
-        ? (bankOptions as any[]).find((b: any) => String(b.BId) === form.DepositBankId)?.BName
-        : undefined;
       const res = await fetchWithAuth(API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -492,8 +489,9 @@ const CrmBooking: React.FC = () => {
           BrokerId:      form.BrokerId || null,
           BrokerageRatePercent: form.BrokerageRatePercent || null,
           BrokeragePaymentPlan: form.BrokerId ? (form.BrokeragePaymentPlan || "OneTime") : "OneTime",
-          DepositBankId: form.DepositBankId || null,
-          DepositBankName: bankName || null,
+          // no deposit bank from CRM — Accounts assigns it before approval
+          DepositBankId: null,
+          DepositBankName: null,
         }),
       });
       const data = await res.json();
@@ -1008,22 +1006,8 @@ const CrmBooking: React.FC = () => {
                     )}
                   </div>
                   <div>
-                    <label className={labelCls}>
-                      Deposited To
-                    </label>
-                    <Select value={form.DepositBankId || undefined} onValueChange={(v) => setForm((f) => ({ ...f, DepositBankId: v }))}>
-                      <SelectTrigger className={inputCls}>
-                        <SelectValue placeholder="— Select bank —" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(bankOptions as any[]).map((b: any) => (
-                          <SelectItem key={b.BId} value={String(b.BId)}>
-                            {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <SelectedBankCard bank={findBank(bankOptions as any[], form.DepositBankId)} />
+                    <label className={labelCls}>Deposited To</label>
+                    <p className="text-[11px] text-muted-foreground pt-2">Assigned by Accounts on the Received Payment before approval.</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-2.5">
@@ -1071,7 +1055,7 @@ const CrmBooking: React.FC = () => {
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">
               Cancel
             </button>
-            <button onClick={handleSave} disabled={saving || (bankOptions.length > 0 && !form.DepositBankId)}
+            <button onClick={handleSave} disabled={saving}
               className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
               {saving ? "Creating..." : "Create Booking"}
             </button>

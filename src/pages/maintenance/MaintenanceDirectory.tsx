@@ -25,7 +25,7 @@ export default function MaintenanceDirectory() {
       <Breadcrumbs items={["Dashboard", "Maintenance", "Customer Directory"]} />
       <MaintenanceShell
         title="Customer Directory"
-        subtitle="Confirmed bookings — select a customer to view their maintenance profile"
+        subtitle="Handed-over units only — select a customer to view their maintenance profile"
         icon={Users}
         action={
           <div className="relative">
@@ -45,14 +45,14 @@ export default function MaintenanceDirectory() {
         {!isLoading && !error && rows.length === 0 && (
           <div className="rounded-xl border border-dashed border-border py-10 flex flex-col items-center gap-2 text-center px-6">
             <Users size={20} className="text-muted-foreground" />
-            <p className="text-sm font-medium text-foreground">No confirmed customers found</p>
+            <p className="text-sm font-medium text-foreground">No maintenance customers found</p>
             <p className="text-xs text-muted-foreground max-w-sm">
-              Customers appear here once their CRM booking status is Confirmed.
+              A customer appears here only once their unit has actually been handed over (CRM Handover marked Completed) — a Confirmed booking alone isn't enough.
             </p>
           </div>
         )}
 
-        {/* Telephone-directory style list — one row per confirmed customer/unit */}
+        {/* Telephone-directory style list — one row per handed-over customer/unit */}
         <div className="divide-y divide-border rounded-xl border border-border overflow-hidden bg-card/40">
           {rows.map((c) => (
             <button
@@ -92,9 +92,9 @@ export default function MaintenanceDirectory() {
 
               <div className="text-right shrink-0 hidden sm:block">
                 <p className="text-[11px] font-mono text-muted-foreground">{c.BookingNo}</p>
-                {c.BookingDate && (
+                {c.HandoverDate && (
                   <p className="text-[11px] text-muted-foreground">
-                    {new Date(c.BookingDate).toLocaleDateString("en-IN")}
+                    Handed over {new Date(c.HandoverDate).toLocaleDateString("en-IN")}
                   </p>
                 )}
               </div>

@@ -497,10 +497,30 @@ async function isLevelSatisfied(tableName, recordId, level, levelDef, executor =
  * instead of completing on the first approval, the way getApprovedLevelCount
  * alone would.
  */
-async function resolveCurrentLevel(tableName, recordId, totalLevels, levelDefs, executor = null) {
+async function resolveCurrentLevel(tableName, recordId, totalLevels, levelDefs, executor = null, opts = {}) {
   for (let level = 1; level <= totalLevels; level++) {
     const satisfied = await isLevelSatisfied(tableName, recordId, level, levelDefs[level - 1], executor);
     if (!satisfied) return level;
+  }
+  // Every level reads as approved. For a record that is still Pending this
+  // means it was amended after approval: the edit routes flip Status back to
+  // Pending directly (no transition()), so no Level=0 'Pending' cycle marker
+  // was written and the OLD cycle's approvals still count. Start a fresh cycle
+  // now so the amended document restarts at level 1 and can actually be
+  // approved or rejected, in every module, instead of erroring "already
+  // completed every approval level". Only when the caller says which module.
+  if (opts.module && totalLevels > 0) {
+    let status = null;
+    try {
+      status = await getRecordStatus(opts.module, recordId, executor);
+    } catch (_) { /* unknown module / row: leave as-is */ }
+    if (status === "Pending") {
+      await writeAuditLog(
+        tableName, recordId, 0, opts.role || null, opts.email || null,
+        "Pending", "Amended after approval — sent back for approval", executor, opts.userId ?? null,
+      );
+      return 1;
+    }
   }
   return totalLevels + 1;
 }
@@ -680,7 +700,7 @@ async function transition(
       const workflow = await getWorkflow(module);
       if (workflow?.LevelDefs?.length) {
         const totalLevels = workflow.Levels || workflow.LevelDefs.length;
-        const currentLevel = await resolveCurrentLevel(tableName, id, totalLevels, workflow.LevelDefs);
+        const currentLevel = await resolveCurrentLevel(tableName, id, totalLevels, workflow.LevelDefs, null, { module, role: userRole, email: userEmail, userId });
         const levelDef = workflow.LevelDefs[currentLevel - 1];
         const hasUsers = Array.isArray(levelDef?.userIds) && levelDef.userIds.length > 0;
         workflowUserAllowed = hasUsers && levelDef.userIds.includes(userId);
@@ -734,7 +754,7 @@ async function transition(
       const workflow = await getWorkflow(module);
       const totalLevels = workflow?.Levels ?? 1;
       const levelDefs = workflow?.LevelDefs ?? [];
-      const rejectedAtLevel = await resolveCurrentLevel(tableName, id, totalLevels, levelDefs, tx);
+      const rejectedAtLevel = await resolveCurrentLevel(tableName, id, totalLevels, levelDefs, tx, { module, role: userRole, email: userEmail, userId });
       await setRecordStatus(module, id, "Rejected", tx);
       await writeAuditLog(
         tableName,
@@ -759,7 +779,7 @@ async function transition(
       // across multiple approvals until every assigned person has acted —
       // unlike the old approvedSoFar+1, which advanced past a level the
       // instant any single approval landed on it.
-      const nextLevel = await resolveCurrentLevel(tableName, id, totalLevels, levelDefs, tx);
+      const nextLevel = await resolveCurrentLevel(tableName, id, totalLevels, levelDefs, tx, { module, role: userRole, email: userEmail, userId });
       if (nextLevel > totalLevels) {
         throw new Error("This record has already completed every approval level.");
       }

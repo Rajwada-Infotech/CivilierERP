@@ -1611,7 +1611,14 @@ export default function GRN() {
         ? formData.directEntryReason
         : null,
       grnItems: formData.items,
-      status: "Draft",
+      // On create this is always "Draft". On edit, send the record's own
+      // current status (loaded into formData.status when it was fetched) —
+      // NOT a hardcoded "Draft", which used to silently downgrade an
+      // already-Approved GRN instead of sending it back for re-approval.
+      // The backend is authoritative here regardless (an Approved record
+      // always gets forced to Pending server-side), but the payload should
+      // reflect intent rather than lie about it.
+      status: editingId ? formData.status || "Draft" : "Draft",
       remarks: formData.remarks,
       supplierName: formData.supplierName,
       poNumber: formData.poNumber,

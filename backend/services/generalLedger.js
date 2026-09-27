@@ -82,8 +82,8 @@ async function getGLHeadId(pool, name) {
 // the Payment page (picking it there locks Payment Mode to Cash), not just
 // an invisible fallback — so getGLHeadId's LHeadType='GL' filter can never
 // find it. Resolved by LHeadCode instead, same sentinel-lookup convention
-// 'DUMMY-BANK' already uses (see newPayment.js's IsInterCompanyTransfer
-// handling) rather than a name match.
+// 'DUMMY-BANK' uses elsewhere (Sale Invoice Cash payments, Contract Master
+// advance allocation) rather than a name match.
 //
 // One head PER COMPANY (LHeadCode `CASH-C-<companyId>`), not the single
 // global 'CASH-IN-HAND' head migration 418 originally seeded — every
@@ -795,7 +795,7 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
     .input("PPaymentID", sql.Int, paymentId)
     .query(`
       SELECT PPaymentID, PAmount, PDate, PBankID, PMode, PExpenseRef, DocNo,
-             PCompany, PProject, ContractId, PPartyId, PPaymentName,
+             PCompany, PProject, ContractId, PPartyId, PPaymentName, JVLineId,
              ISNULL(TDSAmount, 0) AS TDSAmount
       FROM dbo.NewPayment
       WHERE PPaymentID = @PPaymentID
@@ -891,8 +891,10 @@ async function postPaymentApproval(pool, paymentId, userEmail) {
   // split too would post a SECOND TDS Payable credit for the same amount,
   // double-counting the liability. Only a standalone/contract payment
   // (no linked invoice, TDS never deducted anywhere else yet) should
-  // actually split TDS out of its own posting.
-  const tdsAmount = payment.PExpenseRef ? 0 : Number(payment.TDSAmount) || 0;
+  // actually split TDS out of its own posting. A payment settling a
+  // Journal Voucher line (JVLineId) is the same case: TDS, if any, was
+  // already withheld as its own liability leg when the JV was posted.
+  const tdsAmount = (payment.PExpenseRef || payment.JVLineId) ? 0 : Number(payment.TDSAmount) || 0;
   if (tdsAmount > amount) {
     return { posted: false, reason: `Payment ${paymentId}: TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — data issue, re-save the payment.` };
   }

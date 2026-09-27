@@ -503,6 +503,14 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.BOQ", "BoqID", id)
       : null;
+    // Editing an already-Approved BOQ must go back through approval —
+    // ignore whatever status the client sent (the form submits the
+    // record's own current status, i.e. "Approved", which used to just
+    // stay Approved with no re-approval since the resubmit check below
+    // only fires for Draft/Rejected). Mirrors journalVoucher.js's
+    // wasApproved handling. BOQ doesn't post to GL directly, so no
+    // reversal needed.
+    const effectiveStatus = wasApproved ? "Pending" : Status || "Draft";
     const uomMap = await buildUomMap(pool);
     transaction = pool.transaction();
     await transaction.begin();
@@ -516,7 +524,7 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
       .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
       .input("Description", sql.NVarChar(sql.MAX), Description || null)
       .input("TotalAmount", sql.Decimal(18, 2), totalAmount)
-      .input("Status", sql.NVarChar(50), Status || "Draft")
+      .input("Status", sql.NVarChar(50), effectiveStatus)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
       .input("DocNo", sql.NVarChar(100), DocNo || null)
@@ -587,7 +595,12 @@ router.put("/:id", requirePageRight("boq", "edit"), async (req, res) => {
     }
 
     res.json({
-      message: resubmitted ? "BOQ updated and re-submitted for approval" : "BOQ updated successfully",
+      message: wasApproved
+        ? "BOQ updated — sent back for approval"
+        : resubmitted
+          ? "BOQ updated and re-submitted for approval"
+          : "BOQ updated successfully",
+      reopenedForApproval: wasApproved,
       resubmitted,
     });
   } catch (err) {

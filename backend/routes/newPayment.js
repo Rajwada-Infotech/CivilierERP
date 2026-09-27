@@ -744,10 +744,6 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     PImpsReference,
     PCardReference,
     PCardId,
-    // Inter-Company Stock Transfer workflow — see receivedPayment.js's
-    // identical SourceSaleInvoiceId handling for the mirror-image case on
-    // the customer/receiving side of that feature.
-    IsInterCompanyTransfer,
     // Re-issue: links this payment back to a bounced predecessor
     ReplacesPaymentId,
     // Optional bounce charge added on top of the original amount
@@ -792,36 +788,6 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       }
     }
 
-    // Inter-Company Stock Transfer payments must always be deposited to
-    // the Dummy Bank — this is a system-generated payment for a stock
-    // movement between two projects under different companies, settled
-    // without a real bank transaction. Same pattern as
-    // receivedPayment.js's SourceSaleInvoiceId handling: reject a
-    // mismatched client-supplied bank rather than silently overriding it.
-    if (IsInterCompanyTransfer) {
-      const dummyBank = await pool
-        .request()
-        .query(
-          "SELECT TOP 1 LHeadId, LHeadName FROM dbo.AccountHeadMaster WHERE LHeadCode = 'DUMMY-BANK' AND Status = 'Approved'",
-        );
-      if (!dummyBank.recordset.length) {
-        return res.status(500).json({
-          error: "Dummy Bank account not found. Please contact your administrator.",
-        });
-      }
-      const dummyBankId = dummyBank.recordset[0].LHeadId;
-      const dummyBankName = dummyBank.recordset[0].LHeadName;
-
-      if (PBankID && parseInt(PBankID, 10) !== dummyBankId) {
-        return res.status(400).json({
-          error: `Inter-company transfer payments must be deposited to the Dummy Bank (${dummyBankName}). Other deposit accounts are not allowed for this workflow.`,
-        });
-      }
-
-      // Force-set deposit bank to Dummy Bank regardless of client payload
-      req.body.PBankID = dummyBankId;
-      req.body.PBankName = dummyBankName;
-    }
 
     // Enforce: a payment can only be made against an Approved Expense Booking.
     // Skipped for Contract-linked payments — the frontend's Contract picker
@@ -868,13 +834,24 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // resolveInvoiceLinkedTds/resolveTds both throw a 400 (via .status) when
     // TDS is due but nothing was selected — caught below like every other
     // validation error in this handler.
+    //
+    // A payment settling a Journal Voucher's credit line (JVLineId) is a
+    // third case, same as invoice-linked: TDS (if any) was already withheld
+    // as its own liability leg when the JV itself was posted — the party's
+    // JV credit line is already net of TDS. Re-running the fresh-TDS
+    // threshold check here resolved to the same party head and demanded a
+    // TDS be selected all over again, which would then double-deduct TDS in
+    // this payment's own GL split on top of what the JV already withheld.
     const isInvoiceLinkedForTds = !!PExpenseRef && !ContractId;
+    const isJvLinkedForTds = !!JVLineId;
     const companyIdForTds = await resolvePaymentCompanyId(pool, PCompany);
     const finYearIdForTds = await resolveFinYearId(pool, PDate);
     let tdsSnapshot;
     try {
       const { resolveInvoiceLinkedTds, resolveTds } = require("../services/tds");
-      if (isInvoiceLinkedForTds) {
+      if (isJvLinkedForTds) {
+        tdsSnapshot = { eligible: false, thresholdMet: false, tdsId: null, tdsAmount: 0, tdsNature: null, tdsName: null, tdsPercentage: null };
+      } else if (isInvoiceLinkedForTds) {
         tdsSnapshot = await resolveInvoiceLinkedTds(pool, sql, {
           expenseRef: PExpenseRef,
           companyId: companyIdForTds,
@@ -1127,6 +1104,18 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     const wasApproved = beforeSnapshot?.Status === "Approved";
     const wasRejected = beforeSnapshot?.Status === "Rejected";
 
+    // Editing an already-Approved payment must go back through approval —
+    // this UPDATE never touched Status before, so an edited-Approved
+    // payment silently stayed Approved with no re-approval and no GL
+    // reversal. Mirrors journalVoucher.js's wasApproved handling. Two
+    // possible SourceTypes ("NewPayment" auto-post, "PaymentPosting"
+    // manual) — reverse both, only one will ever actually have rows.
+    if (wasApproved) {
+      const { reversePostingBySource } = require("../services/generalLedger");
+      await reversePostingBySource(pool, "NewPayment", id);
+      await reversePostingBySource(pool, "PaymentPosting", id);
+    }
+
     // A cancelled payment's GL posting was already reversed and the invoice
     // recomputed on that assumption (see routes/chequeCancellation.js) —
     // editing it back to life (e.g. changing PAmount) would silently
@@ -1248,6 +1237,7 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
       .input("TDSPercentage", sql.Decimal(5, 2), tdsSnapshotPut.tdsPercentage)
       .input("TDSAmount", sql.Decimal(18, 2), tdsSnapshotPut.tdsAmount).query(`
         UPDATE dbo.NewPayment SET
+          ${wasApproved ? "Status               = 'Pending'," : ""}
           PPaymentName         = @PPaymentName,
           PRemarks             = @PRemarks,
           PMode                = @PMode,
@@ -1331,7 +1321,12 @@ router.put("/:id", requirePageRight("new-payment", "edit"), validateBody(payment
     }
 
     res.json({
-      message: resubmitted ? "Payment updated and re-submitted for approval" : "Payment updated successfully",
+      message: wasApproved
+        ? "Payment updated — previous GL posting reversed, sent back for approval"
+        : resubmitted
+          ? "Payment updated and re-submitted for approval"
+          : "Payment updated successfully",
+      reopenedForApproval: wasApproved,
       resubmitted,
     });
   } catch (err) {
@@ -2457,7 +2452,7 @@ router.get("/:id/posting", async (req, res) => {
     // Payment row + bank ledger
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PDate, np.PAmount, np.PMode, np.PExpenseRef,
-             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.JVLineId,
              np.TDSId, np.TDSNature, np.TDSName, np.TDSPercentage, np.TDSAmount,
              bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
              np.Status
@@ -2518,8 +2513,10 @@ router.get("/:id/posting", async (req, res) => {
     // invoice-linked payment, pmt.TDSAmount is only an inherited display
     // snapshot (see resolveInvoiceLinkedTds in services/tds.js) — TDS was
     // already withheld as its own liability leg when the INVOICE was
-    // posted, so this payment's own GL split must not re-deduct it.
-    const tdsAmount = pmt.PExpenseRef ? 0 : Number(pmt.TDSAmount) || 0;
+    // posted, so this payment's own GL split must not re-deduct it. Same
+    // for a payment settling a Journal Voucher line (JVLineId) — TDS (if
+    // any) was already withheld when the JV itself was posted.
+    const tdsAmount = (pmt.PExpenseRef || pmt.JVLineId) ? 0 : Number(pmt.TDSAmount) || 0;
 
     // Cash-mode payments never carry a PBankID (Payment.tsx disables the
     // Bank field for Cash) — the seeded Cash in Hand bank (migration 418)
@@ -2618,7 +2615,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
-             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.JVLineId,
              ISNULL(np.TDSAmount, 0) AS TDSAmount,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
       FROM dbo.NewPayment np
@@ -2654,8 +2651,9 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // already withheld as its own liability leg when the INVOICE was
     // posted, so this route's own GL split must not re-deduct it here too.
     // This route previously skipped that guard, so a manual "Post to GL" on
-    // an invoice-linked payment double-withheld the TDS amount.
-    const tdsAmount = pmt.PExpenseRef ? 0 : parseFloat(pmt.TDSAmount) || 0;
+    // an invoice-linked payment double-withheld the TDS amount. Same for a
+    // payment settling a Journal Voucher line (JVLineId).
+    const tdsAmount = (pmt.PExpenseRef || pmt.JVLineId) ? 0 : parseFloat(pmt.TDSAmount) || 0;
     if (tdsAmount > amount) {
       return res.status(422).json({ error: `TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — re-save the payment before posting.` });
     }

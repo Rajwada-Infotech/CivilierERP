@@ -12,16 +12,28 @@ const { cache, localVersionCache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { checkPermissionForMethod } = require("../middleware/routePermission");
 const { postReceivedPaymentApproval } = require("../services/generalLedger");
-const { recordGLPosting } = require("../services/approvalService");
+const { recordGLPosting, hasApprovalInboxEditRight } = require("../services/approvalService");
 const { areEarlierMilestonesCoveredByOnAccount } = require("../services/crmOnAccountCoverage");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
-const allowRoles = require("../middleware/role");
 
 // Only these roles may approve/reject — mirrors APPROVER_ROLES in the shared
 // approval engine (services/approvalService.js). Without this, any user with
 // ReceivedPayments "edit" permission could approve a receipt and post it to
 // the ledger, because checkPermissionForMethod only checks CanEdit for a PUT.
 const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
+
+// Approve/Reject gate — kept DYNAMIC, same rule as the shared approval engine
+// (approvalService.transition) and the ApprovalActions buttons: the default
+// approver roles above, OR anyone granted "edit" on the "approval-inbox" page
+// through Menu Rights (role-level or per-user). Rights assigned in Menu Rights
+// therefore take effect here with no code change.
+async function allowApprover(req, res, next) {
+  const role = String(req.user?.role || "").trim().toLowerCase();
+  if (APPROVER_ROLES.includes(role)) return next();
+  const userId = Number(req.user?.userId ?? req.user?.id) || null;
+  if (await hasApprovalInboxEditRight(userId)) return next();
+  return res.status(403).json({ error: "You don't have approval rights for Received Payments" });
+}
 
 router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 
@@ -96,7 +108,7 @@ router.get("/", cache("received-payment", 300), async (req, res) => {
           RPRejectedBy, RPRejectedAt, RPRejectionNote,
           RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
           RPCustomerName, RPDepositBankId, RPDepositBankName,
-          SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
+          SourceSaleInvoiceId, SourceSaleInvoiceDocNo, CrmBookingId,
           COUNT(*) OVER() AS _total,
           SUM(RPAmount) OVER() AS _totalAmount,
           SUM(CASE WHEN RPStatus = 'Approved' THEN 1 ELSE 0 END) OVER() AS _approvedCount,
@@ -151,7 +163,7 @@ router.get("/:id", async (req, res) => {
           RPRejectedBy, RPRejectedAt, RPRejectionNote,
           RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
           RPCustomerName, RPDepositBankId, RPDepositBankName,
-          SourceSaleInvoiceId, SourceSaleInvoiceDocNo,
+          SourceSaleInvoiceId, SourceSaleInvoiceDocNo, CrmBookingId,
           COALESCE(cu.name, RPCreatedBy) AS CreatedByName
         FROM dbo.ReceivedPayment
         LEFT JOIN dbo.users cu ON LOWER(cu.email) = LOWER(RPCreatedBy)
@@ -612,6 +624,20 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
     const beforeSnapshot = await snapshotRow(pool, "dbo.ReceivedPayment", "RPPaymentID", id);
     const wasApproved = beforeSnapshot?.RPStatus === "Approved";
 
+    // Editing an already-Approved payment must go back through approval —
+    // this UPDATE never touched RPStatus before, so an edited-Approved
+    // receipt silently stayed Approved with no re-approval and no GL
+    // reversal. Mirrors journalVoucher.js's wasApproved handling. Only
+    // reverses the standard (non-CRM) posting path — a CRM-linked receipt's
+    // actual GL legs live under CrmPaymentReceipt/CrmOnAccountPayment, keyed
+    // by their own id, not this one; editing still gets re-queued for
+    // approval, but re-approving a CRM-linked edit won't repost its GL
+    // (hasPosting() will still see the old, unreversed entries).
+    if (wasApproved) {
+      const { reversePostingBySource } = require("../services/generalLedger");
+      await reversePostingBySource(pool, "ReceivedPayment", id);
+    }
+
     const extraSet = `, RPCompanyId=@RPCompanyId, RPProjectId=@RPProjectId,
       RPCustomerName=@RPCustomerName, RPFinYear=@RPFinYear,
       RPDepositBankId=@RPDepositBankId, RPDepositBankName=@RPDepositBankName`;
@@ -656,6 +682,7 @@ router.put("/:id", requirePageRight("received-payment", "edit"), async (req, res
       .input("RPDepositBankName", sql.NVarChar(255), RPDepositBankName || null)
       .input("RPFinYear", sql.NVarChar(20), RPFinYear || null).query(`
         UPDATE dbo.ReceivedPayment SET
+          ${wasApproved ? "RPStatus        = 'Pending'," : ""}
           RPCompanyName   = @RPCompanyName,
           RPReceivedFrom  = @RPReceivedFrom,
           RPProjectName   = @RPProjectName,
@@ -830,8 +857,59 @@ router.patch("/:id/submit", requirePageRight("received-payment", "edit"), async 
   }
 });
 
+// ── PATCH /:id/deposit-bank (Accounts) ───────────────────────────────────────
+// CRM payments are entered in CRM WITHOUT a deposit bank (the CRM user
+// receives the cheque but doesn't decide where it is banked). Accounts sets
+// the bank here, on the Pending Received Payment, before it can be approved
+// (PUT /:id/approve refuses a CRM payment with no bank). Deliberately a
+// narrow action: it changes ONLY the deposit bank — amount, mode and cheque
+// details came from CRM and stay as entered.
+router.patch("/:id/deposit-bank", requirePageRight("received-payment", "edit"), async (req, res) => {
+  const pid = parseInt(req.params.id, 10);
+  const bankId = parseInt(req.body?.RPDepositBankId, 10);
+  if (!Number.isInteger(pid) || pid <= 0) return res.status(400).json({ error: "Invalid id" });
+  if (!Number.isInteger(bankId) || bankId <= 0) return res.status(400).json({ error: "Select a deposit bank" });
+  const by = req.user?.name || req.user?.email || null;
+  try {
+    const pool = getPool();
+    const bank = await pool.request().input("b", sql.Int, bankId).query(`
+      SELECT LHeadId, LHeadName FROM dbo.AccountHeadMaster
+      WHERE LHeadId = @b AND LHeadType = 'B' AND ISNULL(LHeadStatus, 1) = 1
+    `);
+    if (!bank.recordset.length) return res.status(400).json({ error: "That account is not an active bank account" });
+
+    const r = await pool.request()
+      .input("id", sql.Int, pid)
+      .input("bid", sql.Int, bankId)
+      .input("bname", sql.NVarChar(255), bank.recordset[0].LHeadName)
+      .input("by", sql.NVarChar(150), by)
+      .query(`
+        UPDATE dbo.ReceivedPayment
+        SET RPDepositBankId = @bid, RPDepositBankName = @bname, RPUpdatedBy = @by, RPUpdatedAt = GETDATE()
+        OUTPUT INSERTED.RPPaymentID, INSERTED.RPDocNo, INSERTED.RPDepositBankId, INSERTED.RPDepositBankName
+        WHERE RPPaymentID = @id AND RPStatus = 'Pending' AND CrmBookingId IS NOT NULL
+      `);
+    if (!r.recordset.length) {
+      const cur = await pool.request().input("id", sql.Int, pid)
+        .query("SELECT RPStatus, CrmBookingId FROM dbo.ReceivedPayment WHERE RPPaymentID = @id");
+      if (!cur.recordset.length) return res.status(404).json({ error: "Received payment not found" });
+      if (cur.recordset[0].CrmBookingId == null) return res.status(400).json({ error: "Only CRM payments get their deposit bank set here" });
+      return res.status(400).json({ error: `The deposit bank can only be set while the payment is Pending (it is ${cur.recordset[0].RPStatus})` });
+    }
+    try {
+      const { logAudit } = require("../utils/auditLog");
+      await logAudit({ module: "ReceivedPayment", recordId: pid, recordNo: r.recordset[0].RPDocNo, action: `Deposit bank set: ${bank.recordset[0].LHeadName}`, changedBy: req.user?.userId ?? null });
+    } catch (auditErr) { console.error("[received-payment] deposit-bank audit log failed:", auditErr.message); }
+    await invalidateReceivedPaymentWorkflowCaches();
+    res.json({ success: true, ...r.recordset[0] });
+  } catch (err) {
+    console.error("PATCH /received-payment/:id/deposit-bank error:", err);
+    res.status(500).json({ error: "Failed to set the deposit bank" });
+  }
+});
+
 // ── PUT /:id/approve (approver roles only — called from Approval Inbox) ──────
-router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
+router.put("/:id/approve", allowApprover, async (req, res) => {
   const pid = parseInt(req.params.id, 10);
   if (!Number.isFinite(pid))
     return res.status(400).json({ error: "Invalid id" });
@@ -995,7 +1073,7 @@ router.put("/:id/approve", allowRoles(...APPROVER_ROLES), async (req, res) => {
 });
 
 // ── PUT /:id/reject (approver roles only — called from Approval Inbox) ───────
-router.put("/:id/reject", allowRoles(...APPROVER_ROLES), async (req, res) => {
+router.put("/:id/reject", allowApprover, async (req, res) => {
   const pid = parseInt(req.params.id, 10);
   if (!Number.isFinite(pid))
     return res.status(400).json({ error: "Invalid id" });

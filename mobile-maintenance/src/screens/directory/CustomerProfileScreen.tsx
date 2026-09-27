@@ -7,10 +7,12 @@ import { View, Text, ScrollView, ActivityIndicator } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useQuery } from "@tanstack/react-query";
 import type { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { Phone, Mail, Home, Building2, History, Wallet } from "lucide-react-native";
+import { Phone, Mail, Home, Building2, History, Wallet, ListChecks, Receipt, Ticket } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
-import { getMaintenanceCustomer, getMaintenancePayments } from "@/api/maintenanceApi";
+import { getMaintenanceCustomer, getMaintenanceCharges } from "@/api/maintenanceApi";
+import { getMaintenanceBills } from "@/api/maintenanceBillApi";
+import { getTicketsForBooking } from "@/api/serviceTicketApi";
 import type { MainStackParamList } from "@/navigation/MainStack";
 
 const DIR_VIOLET = "#a78bfa";
@@ -44,11 +46,28 @@ export default function CustomerProfileScreen({ route }: Props) {
     queryFn: () => getMaintenanceCustomer(bookingId),
   });
 
-  const { data: payments } = useQuery({
-    queryKey: ["maint-payments", bookingId],
-    queryFn: () => getMaintenancePayments(bookingId),
+  const { data: charges } = useQuery({
+    queryKey: ["maint-charges", bookingId],
+    queryFn: () => getMaintenanceCharges(bookingId),
   });
-  const paymentRows = Array.isArray(payments) ? payments : [];
+  const { data: bills } = useQuery({
+    queryKey: ["maint-bills-customer", bookingId],
+    queryFn: () => getMaintenanceBills({ bookingId }),
+  });
+  const { data: tickets } = useQuery({
+    queryKey: ["maint-tickets-booking", bookingId],
+    queryFn: () => getTicketsForBooking(bookingId),
+  });
+
+  const chargeRows = Array.isArray(charges) ? charges : [];
+  const billRows   = Array.isArray(bills)   ? bills   : [];
+  const ticketRows = Array.isArray(tickets) ? tickets : [];
+  const activeBills = billRows.filter((b) => b.Status === "Active");
+  const totalBilled = activeBills.reduce((s, b) => s + (Number(b.GrandTotal) || 0), 0);
+  const openTickets = ticketRows.filter((t) => !["Closed", "Resolved"].includes(t.Status));
+
+  const INR = (n: number | null | undefined) =>
+    `\u20B9${(Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   if (isLoading) {
     return (
@@ -105,49 +124,86 @@ export default function CustomerProfileScreen({ route }: Props) {
       </LinearGradient>
 
       {/* ── Info tiles ── */}
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 24 }}>
-        <InfoTile icon={Phone} label="Contact" value={customer.ContactNumber || "—"} />
-        <InfoTile icon={Mail} label="Email" value={customer.Email || "—"} />
-        <InfoTile icon={Home} label="Unit" value={unit} />
-        <InfoTile icon={Building2} label="Project" value={customer.ProjectName || "—"} />
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 16 }}>
+        <InfoTile icon={Phone}     label="Contact" value={customer.ContactNumber || "\u2014"} />
+        <InfoTile icon={Mail}      label="Email"   value={customer.Email || "\u2014"} />
+        <InfoTile icon={Home}      label="Unit"    value={unit} />
+        <InfoTile icon={Building2} label="Project" value={customer.ProjectName || "\u2014"} />
       </View>
 
-      {/* ── Payment history ── */}
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 12 }}>
-        <History size={13} color={DIR_VIOLET} />
+      {/* ── Quick stats ── */}
+      <View style={{ flexDirection: "row", gap: 8, marginBottom: 20 }}>
+        {[
+          { label: "Charges", value: String(chargeRows.length),         icon: ListChecks, color: "#65a30d" },
+          { label: "Billed",  value: INR(totalBilled),                  icon: Wallet,     color: "#f59e0b" },
+          { label: "Tickets", value: `${openTickets.length} open`,      icon: Ticket,     color: DIR_VIOLET },
+        ].map((s) => (
+          <View key={s.label} style={{ flex: 1, backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: `${s.color}30`, padding: 11 }}>
+            <s.icon size={13} color={s.color} />
+            <Text style={{ color: colors.foreground, fontSize: 13, fontFamily: fonts.heading.bold, marginTop: 6 }}>{s.value}</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.5, marginTop: 2 }}>{s.label}</Text>
+          </View>
+        ))}
+      </View>
+
+      {/* ── Bills ── */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
+        <Receipt size={13} color="#f59e0b" />
         <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4 }}>
-          Payment History
+          Bills
         </Text>
       </View>
-
-      {paymentRows.length === 0 ? (
-        <View
-          style={{
-            alignItems: "center",
-            gap: 8,
-            paddingVertical: 36,
-            paddingHorizontal: 24,
-            borderRadius: 16,
-            borderWidth: 1,
-            borderStyle: "dashed",
-            borderColor: colors.border,
-          }}
-        >
-          <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${DIR_VIOLET}14`, alignItems: "center", justifyContent: "center", marginBottom: 4 }}>
-            <Wallet size={18} color={DIR_VIOLET} />
-          </View>
-          <Text style={{ color: colors.foreground, fontSize: 12.5, fontFamily: fonts.body.semibold, textAlign: "center" }}>
-            No maintenance payments recorded yet.
-          </Text>
-          <Text style={{ color: colors.mutedForeground, fontSize: 10.5, fontFamily: fonts.body.regular, textAlign: "center", maxWidth: 260, lineHeight: 15 }}>
-            Payment collection for maintenance charges isn't wired up yet — this section is ready for it.
-          </Text>
+      {billRows.length === 0 ? (
+        <View style={{ alignItems: "center", paddingVertical: 28, borderRadius: 14, borderWidth: 1, borderColor: colors.border, marginBottom: 20 }}>
+          <Receipt size={18} color={colors.mutedForeground} />
+          <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>No bills raised yet.</Text>
         </View>
       ) : (
-        <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular }}>
-          {paymentRows.length} payment(s) on file.
+        <View style={{ borderRadius: 14, borderWidth: 1, borderColor: colors.border, overflow: "hidden", marginBottom: 20 }}>
+          {billRows.map((b, i) => (
+            <View key={b.Id} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 13, paddingVertical: 10, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: colors.border }}>
+              <View>
+                <Text style={{ fontSize: 11.5, fontFamily: fonts.body.medium, color: colors.foreground }}>{b.BillNo}</Text>
+                <Text style={{ fontSize: 10, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{b.BillDate ? new Date(b.BillDate).toLocaleDateString("en-IN") : ""}</Text>
+              </View>
+              <View style={{ alignItems: "flex-end" }}>
+                <Text style={{ fontSize: 12, fontFamily: fonts.heading.semibold, color: colors.foreground }}>{INR(b.GrandTotal)}</Text>
+                <Text style={{ fontSize: 10, fontFamily: fonts.body.regular, color: b.Status === "Active" ? "#059669" : "#ef4444" }}>{b.Status}</Text>
+              </View>
+            </View>
+          ))}
+        </View>
+      )}
+
+      {/* ── Service Ticket summary ── */}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 10 }}>
+        <Ticket size={13} color={DIR_VIOLET} />
+        <Text style={{ color: colors.foreground, fontSize: 11.5, fontFamily: fonts.heading.semibold, textTransform: "uppercase", letterSpacing: 0.4 }}>
+          Service Tickets
         </Text>
+      </View>
+      {ticketRows.length === 0 ? (
+        <View style={{ alignItems: "center", paddingVertical: 28, borderRadius: 14, borderWidth: 1, borderColor: colors.border }}>
+          <Ticket size={18} color={colors.mutedForeground} />
+          <Text style={{ color: colors.mutedForeground, fontSize: 12, fontFamily: fonts.body.regular, marginTop: 8 }}>No service tickets yet.</Text>
+        </View>
+      ) : (
+        <View style={{ borderRadius: 14, borderWidth: 1, borderColor: `${DIR_VIOLET}30`, overflow: "hidden" }}>
+          {ticketRows.map((t, i) => (
+            <View key={t.Id} style={{ paddingHorizontal: 13, paddingVertical: 10, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: colors.border }}>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 3 }}>
+                <Text style={{ fontSize: 10, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{t.TicketNo}</Text>
+                <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, backgroundColor: `${DIR_VIOLET}18` }}>
+                  <Text style={{ fontSize: 10, fontFamily: fonts.heading.semibold, color: DIR_VIOLET }}>{t.Status}</Text>
+                </View>
+                <Text style={{ fontSize: 10, fontFamily: fonts.body.regular, color: colors.mutedForeground }}>{t.Category}</Text>
+              </View>
+              <Text numberOfLines={1} style={{ fontSize: 12.5, fontFamily: fonts.body.medium, color: colors.foreground }}>{t.Subject}</Text>
+            </View>
+          ))}
+        </View>
       )}
     </ScrollView>
   );
 }
+

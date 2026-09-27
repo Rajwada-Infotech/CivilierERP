@@ -459,12 +459,8 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     queryFn: () => fetchScopedPaymentPlans(booking),
     enabled: tab === "Payment Plan" && planEditOpen && !!booking,
   });
-  useEffect(() => {
-    if (tab === "Payment & Invoice" && projectBanks.length === 1 && !payForm.DepositBankId) {
-      setPayForm((f) => ({ ...f, DepositBankId: String(projectBanks[0].BId) }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, projectBanks]);
+  // (No deposit-bank auto-pick here — Accounts assigns the bank on the
+  // Received Payment before approval.)
   // The Payment Mode was already captured on the Application's own Payment
   // Details step (booking.PaymentMode is copied from it at Booking
   // creation) — pre-fill this form with it instead of always defaulting to
@@ -1089,9 +1085,6 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
     if (!payForm.Amount || parseFloat(payForm.Amount) <= 0) { toast.error("Enter a valid amount"); return; }
     setPaySaving(true);
     try {
-      const bankName = payForm.DepositBankId
-        ? (bankOptions as any[]).find((b: any) => String(b.BId) === payForm.DepositBankId)?.BName
-        : undefined;
       const res = await fetchWithAuth(`/api/crm/money-receipts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1102,7 +1095,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
           ReceivedDate: payForm.ReceivedDate,
           TransactionRef: payForm.TransactionRef,
           ChequeDate: payForm.ChequeDate,
-          DepositBankName: bankName,
+          // no deposit bank from CRM — Accounts assigns it before approval
         }),
       });
       const resData = await res.json().catch(() => ({}));
@@ -2056,22 +2049,13 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                         <input placeholder="Transaction Ref / UTR" value={payForm.TransactionRef} onChange={(e) => setPayForm((f) => ({ ...f, TransactionRef: e.target.value }))}
                           className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                       ) : null}
-                      <select value={payForm.DepositBankId} onChange={(e) => setPayForm((f) => ({ ...f, DepositBankId: e.target.value }))}
-                        className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background">
-                        <option value="">— Select deposit bank —{bankOptions.length > 0 ? " *" : ""}</option>
-                        {(bankOptions as any[]).map((b: any) => (
-                          <option key={b.BId} value={String(b.BId)}>
-                            {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
-                          </option>
-                        ))}
-                      </select>
                       {payForm.PaymentMode === "Cheque" && (
                         <input type="date" value={payForm.ChequeDate} onChange={(e) => setPayForm((f) => ({ ...f, ChequeDate: e.target.value }))}
                           className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                       )}
                     </div>
-                    <SelectedBankCard bank={findBank(bankOptions as any[], payForm.DepositBankId)} />
-                    <button onClick={handleRecordPayment} disabled={paySaving || (bankOptions.length > 0 && !payForm.DepositBankId)}
+                    <p className="text-[11px] text-muted-foreground">Deposit bank: assigned by Accounts on the Received Payment before approval.</p>
+                    <button onClick={handleRecordPayment} disabled={paySaving}
                       className="w-full py-2 text-sm font-medium text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 rounded-lg hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40">
                       {paySaving ? "Submitting..." : `Submit for Approval`}
                     </button>

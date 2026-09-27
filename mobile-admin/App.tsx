@@ -6,6 +6,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { queryClient } from "@/services/queryClient";
 import { AuthProvider } from "@/auth/AuthContext";
 import RootNavigator from "@/navigation/RootNavigator";
+import { UpdateGate } from "@/updater/UpdateGate";
 import { useAppFonts } from "@/theme/fonts";
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
           <RootNavigator />
         </AuthProvider>
       </QueryClientProvider>
+      <UpdateGate appKey="admin" />
       <StatusBar style="light" />
     </SafeAreaProvider>
   );

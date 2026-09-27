@@ -145,6 +145,7 @@ const CustomerMaintenanceProfile = lazy(() => import("./pages/maintenance/Custom
 const MaintenanceBills = lazy(() => import("./pages/maintenance/MaintenanceBills"));
 const SecurityAttendance = lazy(() => import("./pages/maintenance/SecurityAttendance"));
 const ElectricityMaintenance = lazy(() => import("./pages/maintenance/ElectricityMaintenance"));
+const MaintenanceServiceRequests = lazy(() => import("./pages/maintenance/MaintenanceServiceRequests"));
 const MeterReadingMaster = lazy(() => import("./pages/masters/MeterReadingMaster"));
 const ElectricityProviderMaster = lazy(() => import("./pages/masters/ElectricityProviderMaster"));
 const ElectricityTariffMaster = lazy(() => import("./pages/masters/ElectricityTariffMaster"));
@@ -157,6 +158,9 @@ const CivilWorkDprWorkDone = lazy(
 );
 const CivilWorkDprActivityReporting = lazy(
   () => import("./pages/civilworkdpr/ActivityReporting"),
+);
+const CivilWorkDprQualityCheck = lazy(
+  () => import("./pages/civilworkdpr/QualityCheck"),
 );
 const RoomCategoryMaster = lazy(
   () => import("./pages/civilworkdpr/RoomCategoryMaster"),
@@ -295,6 +299,7 @@ const UnitOfMeasurementMaster = lazy(
 const InventoryMaster = lazy(() => import("./pages/material/InventoryMaster"));
 const Stock = lazy(() => import("./pages/material/Stock"));
 const StockTransfer = lazy(() => import("./pages/material/StockTransfer"));
+const StockUpdate = lazy(() => import("./pages/material/StockUpdate"));
 const SaleOrder = lazy(() => import("./pages/sales/SaleOrder"));
 const SalesPayment = lazy(() => import("./pages/sales/Payment"));
 const SaleInvoice = lazy(() => import("./pages/sales/SaleInvoice"));
@@ -336,6 +341,7 @@ const ApprovalInbox = lazy(() => import("./pages/admin/ApprovalInbox"));
 
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
+const ApkManagerPage = lazy(() => import("./pages/admin/ApkManager"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
 const AdminProfile = lazy(() => import("./pages/admin/AdminProfile"));
 const DBAProfile = lazy(() => import("./pages/dba/DBAProfile"));
@@ -1126,6 +1132,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/maintenance/service-requests"
+        element={
+          <ProtectedRoute pageKey="crm-service-tickets">
+            <MaintenanceServiceRequests />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/masters/meter-reading"
         element={
           <ProtectedRoute pageKey="meter-reading-master">
@@ -1178,6 +1192,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="civilworkdpr-activity-reporting">
             <CivilWorkDprActivityReporting />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/civilworkdpr/quality-check"
+        element={
+          <ProtectedRoute pageKey="civilworkdpr-quality-check">
+            <CivilWorkDprQualityCheck />
           </ProtectedRoute>
         }
       />
@@ -1617,6 +1639,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute pageKey="stock-ledger">
             <Stock />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/stock-update"
+        element={
+          <ProtectedRoute pageKey="stock-update">
+            <StockUpdate />
           </ProtectedRoute>
         }
       />
@@ -2125,6 +2155,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <SignaturePage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/apk-manager"
+        element={
+          <AdminRoute>
+            <ApkManagerPage />
           </AdminRoute>
         }
       />

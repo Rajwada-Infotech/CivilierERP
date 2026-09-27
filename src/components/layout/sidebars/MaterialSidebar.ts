@@ -1,4 +1,4 @@
-import { Chart2, Receipt21, ClipboardText, ArrowSwapHorizontal, Repeat, TrendUp, Archive, Edit2 } from "iconsax-react";
+import { Chart2, Receipt21, ClipboardText, ArrowSwapHorizontal, Repeat, TrendUp, Archive, Edit2, BoxAdd } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const materialNavItems: NavItem[] = [
@@ -19,6 +19,7 @@ export const materialNavItems: NavItem[] = [
   { label: "Short Close",    icon: Archive,       path: "/material/short-close",    pageKey: "short-close" },
   { label: "L1 Chart",       icon: TrendUp,       path: "/material/l1-chart",       pageKey: "l1-chart" },
   { label: "Stock",          icon: ArrowSwapHorizontal, path: "/material/stock",          pageKey: "stock-ledger" },
+  { label: "Stock Update",   icon: BoxAdd,        path: "/material/stock-update",   pageKey: "stock-update" },
   { label: "Transfer",       icon: Repeat,        path: "/material/stock-transfer", pageKey: "stock-transfers" },
   { label: "Debit Note",     icon: ClipboardText,  path: "/material/debit-note",     pageKey: "debit-note" },
   { label: "Amendment",      icon: Edit2,          path: "/material/amendment",      pageKey: "material-amendment" },

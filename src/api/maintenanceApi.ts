@@ -15,6 +15,7 @@ export interface MaintenanceDirectoryRow {
   BlockName: string | null;
   ProjectName: string | null;
   CompanyName: string | null;
+  HandoverDate: string | null;
 }
 
 export interface MaintenanceCustomerCharge {

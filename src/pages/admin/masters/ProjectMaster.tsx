@@ -2,6 +2,7 @@
 import React, { useMemo, useState, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { invalidateProjectCompanyQueries } from "@/lib/invalidateProjectQueries";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { AdminShell } from "@/components/admin/AdminShell";
 import {
@@ -865,8 +866,7 @@ export default function ProjectMaster() {
           : "Project created successfully",
       );
       if (result?.warning) toast.warning(result.warning);
-      qc.invalidateQueries({ queryKey: ["project-master"] });
-      qc.invalidateQueries({ queryKey: ["enterprises"] });
+      invalidateProjectCompanyQueries(qc);
       resetForm();
     },
     onError: (e: any) =>
@@ -879,8 +879,7 @@ export default function ProjectMaster() {
     mutationFn: deleteProject,
     onSuccess: () => {
       toast.success("Project deleted successfully");
-      qc.invalidateQueries({ queryKey: ["project-master"] });
-      qc.invalidateQueries({ queryKey: ["enterprises"] });
+      invalidateProjectCompanyQueries(qc);
       setDeleteConfirm(null);
     },
     onError: (e: any) =>
@@ -898,8 +897,7 @@ export default function ProjectMaster() {
           ? `Project and its transactions deleted (${tableCount} table${tableCount > 1 ? "s" : ""} affected).`
           : "Project deleted — it had no linked transactions.",
       );
-      qc.invalidateQueries({ queryKey: ["project-master"] });
-      qc.invalidateQueries({ queryKey: ["enterprises"] });
+      invalidateProjectCompanyQueries(qc);
       setCascadeTarget(null);
       setCascadeConfirmText("");
     },

@@ -1390,6 +1390,15 @@ router.put(
     const grnId = parseId(req.params.id);
     if (!grnId) return res.status(400).json({ error: "Invalid id" });
 
+    // An edit to an already-Approved GRN must go back through approval —
+    // ignore whatever status the client sent (the New/Edit form always
+    // submits "Draft", which used to silently downgrade an approved GRN
+    // instead of re-queuing it: invisible to Approval Inbox, WHERE
+    // Status='Pending', and to the invoice picker, which only offers
+    // Status='Approved' GRNs). Mirrors journalVoucher.js's wasApproved
+    // handling.
+    const effectiveStatus = wasApproved ? "Pending" : status || "Draft";
+
     // Reject future dates
     const todayStr = new Date().toISOString().slice(0, 10);
     if (grnDate && grnDate > todayStr) {
@@ -1438,7 +1447,7 @@ router.put(
           sql.NVarChar(sql.MAX),
           JSON.stringify(grnItems || []),
         )
-        .input("Status", sql.NVarChar(50), status || "Draft")
+        .input("Status", sql.NVarChar(50), effectiveStatus)
         .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
         .input("DocTypeId", sql.Int, docTypeId ? parseInt(docTypeId, 10) : null)
         .input("DocNo", sql.NVarChar(100), docNo || null)
@@ -1463,6 +1472,17 @@ router.put(
         return res.status(404).json({ error: "GRN not found" });
       }
 
+      // Reverse whatever this GRN already posted to GL — the old amounts no
+      // longer reflect what's on the GRN, and it only re-posts once it's
+      // approved again with the new numbers. Two possible SourceTypes: "GRN"
+      // (auto-posted on approval) and "GRNPosting" (the manual "Post to GL"
+      // action) — reverse both, only one will ever actually have rows.
+      if (wasApproved) {
+        const { reversePostingBySource } = require("../services/generalLedger");
+        await reversePostingBySource(transaction, "GRN", grnId);
+        await reversePostingBySource(transaction, "GRNPosting", grnId);
+      }
+
       // Stock only ever reflects an Approved GRN's items (see
       // postGRNApproval in services/generalLedger.js, which is what
       // normally credits StockLedger). Editing a Draft/Pending GRN has
@@ -1472,7 +1492,7 @@ router.put(
       // hook on a fresh Draft/Pending -> Approved transition, not on a
       // same-status edit — this is the one path that has to redo it
       // directly rather than going through that hook.
-      const resultingStatus = status || "Draft";
+      const resultingStatus = effectiveStatus;
       await transaction
         .request()
         .input("RefID", sql.Int, grnId)
@@ -1554,7 +1574,12 @@ router.put(
       }
 
       res.json({
-        message: resubmitted ? "GRN updated and re-submitted for approval" : "GRN updated successfully",
+        message: wasApproved
+          ? "GRN updated — previous GL posting and stock reversed, sent back for approval"
+          : resubmitted
+            ? "GRN updated and re-submitted for approval"
+            : "GRN updated successfully",
+        reopenedForApproval: wasApproved,
         resubmitted,
       });
     } catch (err) {

@@ -1,4 +1,5 @@
 import React, { useState, useCallback, useEffect } from "react";
+import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { usePageRights } from "@/hooks/usePageRights";
 import { toast } from "sonner";
@@ -441,7 +442,7 @@ function WorkDoneForm({
                     ? projects.filter(
                         (p) =>
                           !p.company_id ||
-                          p.company_id === parseInt(form.companyId),
+                          projectBelongsToCompany(p as any, form.companyId),
                       )
                     : projects
                   ).map((o) => (

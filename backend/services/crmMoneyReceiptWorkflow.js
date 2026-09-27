@@ -283,9 +283,11 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
              mr.ChequeDate, mr.BankName, mr.TransactionRef, mr.ReceivedDate, mr.Remarks,
              mr.Status, mr.ReceivedPaymentId,
              b.BookingNo, b.ProjectName, b.ProjectId, b.CompanyId, b.ApplicationId, b.WorkflowStage,
+             e.name AS CompanyName,
              a.ApplicantName, a.DepositBankId
       FROM dbo.CrmMoneyReceipt mr WITH (UPDLOCK, HOLDLOCK)
       JOIN dbo.CrmBooking b ON b.Id = mr.BookingId
+      LEFT JOIN dbo.enterprise e ON e.id = b.CompanyId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
       WHERE mr.Id = @id
     `);
@@ -314,6 +316,7 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
       RPProjectName: mrRow.ProjectName,
       RPProjectId: mrRow.ProjectId,
       RPCompanyId: mrRow.CompanyId,
+      RPCompanyName: mrRow.CompanyName || null,
       RPDocDate: mrRow.ReceivedDate || null,
       RPMode: mrRow.PaymentMode || null,
       RPAmount: Number(mrRow.Amount),
@@ -322,8 +325,12 @@ async function approveMoneyReceipt(pool, receiptId, actorUserId, actorEmail) {
       RPCheckNumber: mrRow.PaymentMode === "Cheque" ? mrRow.ChequeNo : null,
       RPChequeDate: mrRow.PaymentMode === "Cheque" ? mrRow.ChequeDate : null,
       RPRemarks: mrRow.Remarks || `CRM Money Receipt ${mrRow.ReceiptNo} - ${mrRow.BookingNo}`,
-      RPDepositBankId: mrRow.DepositBankId != null ? mrRow.DepositBankId : null,
-      RPDepositBankName: mrRow.BankName || null,
+      // Same rule as every CRM payment: no deposit bank from CRM (the
+      // Application form no longer asks for one) — Accounts sets it on the
+      // Received Payment before approval (receivedPayment.js PATCH
+      // /:id/deposit-bank).
+      RPDepositBankId: null,
+      RPDepositBankName: null,
       CrmMilestoneId: null,
       CrmBookingId: mrRow.BookingId,
       CrmApplicationId: mrRow.ApplicationId,

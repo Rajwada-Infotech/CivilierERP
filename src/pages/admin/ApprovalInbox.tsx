@@ -70,6 +70,9 @@ export interface InboxItem {
   RejectedBy: string | null;
   RejectionNote: string | null;
   LastModified: string | null;
+  // received-payment only: a CRM payment still waiting for Accounts to set
+  // its deposit bank — can't be approved yet, so the row shows "Review".
+  NeedsReview?: boolean | number | null;
   // expense-booking only — null for all other modules
   GrnTotalAmount: number | null;
   GrnBasicAmount: number | null;
@@ -492,6 +495,10 @@ const MODULE_ORDER: Record<string, number> = Object.fromEntries(
 );
 const moduleOrderOf = (mod: string): number => MODULE_ORDER[mod] ?? Number.MAX_SAFE_INTEGER;
 
+// A CRM Received Payment Accounts hasn't assigned a deposit bank to yet.
+export const needsBankReview = (item: Pick<InboxItem, "Module" | "Status" | "NeedsReview">) =>
+  item.Module === "received-payment" && item.Status === "Pending" && !!item.NeedsReview;
+
 // Modules whose one-click Approve is either guaranteed to fail without a
 // review step first (crm-bookings' Data Review checklist gate) or whose
 // approved amount is only ever editable before approval (crm-brokerage) —
@@ -511,6 +518,7 @@ const REVIEW_INSTEAD_LABEL: Record<string, string> = {
 // `searchParams.get("view")` effect in each page). Modules not listed here
 // have no such modal yet, so we fall back to a bare navigate.
 const VIEW_PARAM_MODULES = new Set([
+  "received-payment",
   "purchase-orders",
   "goods-receipt",
   "expense-booking",
@@ -873,8 +881,13 @@ const InboxRow: React.FC<{
           // wrong figure. All three swap the Approve button for a direct
           // hand-off to their own review screen instead. Reject is untouched
           // for all of them — no checklist/review gate applies to rejecting.
+          // CRM payments reach Finance with no deposit bank — Accounts sets
+          // it on the Received Payment page first (the approve route refuses
+          // without one), so "Review" opens that payment instead of Approve.
           reviewInstead={
-            REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
+            needsBankReview(item) && cfg?.navPath
+              ? { label: "Review — set bank", onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
+              : REVIEW_INSTEAD_LABEL[item.Module] && cfg?.navPath
               ? { label: REVIEW_INSTEAD_LABEL[item.Module], onClick: () => navigate(openInModulePath(item, cfg.navPath)) }
               : undefined
           }
@@ -900,7 +913,7 @@ const InboxRow: React.FC<{
           (Approved/Rejected/Cancelled), reviewInstead isn't rendered above,
           so the arrow comes back as the only way to open the record from
           this row. */}
-      {cfg?.navPath && !(REVIEW_INSTEAD_LABEL[item.Module] && item.Status === "Pending") && (
+      {cfg?.navPath && !((REVIEW_INSTEAD_LABEL[item.Module] || needsBankReview(item)) && item.Status === "Pending") && (
         <button
           onClick={() => navigate(openInModulePath(item, cfg.navPath))}
           className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"

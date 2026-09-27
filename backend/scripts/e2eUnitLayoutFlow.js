@@ -57,6 +57,7 @@ const check = (name, cond, extra) => {
   app.use("/api/unit-master", require(path.join(BACKEND, "routes/unitMaster")));
   app.use("/api/room-master", require(path.join(BACKEND, "routes/roomMaster")));
   app.use("/api/unit-bhk-config", require(path.join(BACKEND, "routes/unitBhkConfig")));
+  app.use("/api/unit-layout-overrides", require(path.join(BACKEND, "routes/unitLayoutOverride")));
   const server = await new Promise((resolve) => { const s = app.listen(0, () => resolve(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, url, body) => {
@@ -82,6 +83,8 @@ const check = (name, cond, extra) => {
     const byLabel = Object.fromEntries(types.data.map((t) => [t.label, t]));
     check("GET /types 200", types.status === 200);
     check("2 BHK / 3 BHK pickable with summary", byLabel["2 BHK"]?.roomCount > 0 && byLabel["3 BHK"]?.summary.length > 0, types.data);
+    check("GET /types includes each type's room list (composition) matching its roomCount",
+      types.data.every((t) => Array.isArray(t.composition) && t.composition.reduce((n, c) => n + c.quantity, 0) === t.roomCount), types.data.map((t) => [t.label, t.roomCount, t.composition]));
     const t2 = byLabel["2 BHK"], t3 = byLabel["3 BHK"];
     const et = await call("POST", "/api/unit-bhk-config/types", { label: EMPTY_TYPE });
     emptyTypeId = et.data?.id;
@@ -263,6 +266,69 @@ const check = (name, cond, extra) => {
     check("delete succeeds once clean; rooms removed with it", r.status === 200 && (await roomsOf(u3.Id)).length === 0, r.data);
     const afterDel = await call("GET", `/api/room-master/units?projectId=${PROJECT_ID}`);
     check("Flat Master /units drops the deleted unit immediately", !afterDel.data.some((u) => u.Id === u3.Id));
+
+    // ── K. Layout overrides (Flat Master tree "Layout" editor) ─────────
+    console.log("\n[K] Layout overrides over HTTP");
+    const catRows = await q("SELECT Id, CategoryName FROM dbo.RoomCategoryMaster WHERE IsActive = 1");
+    const items = (m) => catRows.map((c) => ({ roomCategoryId: c.Id, quantity: m[c.CategoryName] || 0 }));
+    const sumOf = (m) => Object.values(m).reduce((a, b) => a + b, 0);
+    const u3s = await q("SELECT Id, FloorNo FROM dbo.UnitMaster WHERE BlockId = @b AND IsActive = 1 AND LayoutTypeId = @lt ORDER BY FloorNo, Id",
+      { b: [sql.Int, blockId], lt: [sql.Int, t3.id] });
+    check("block has 3 BHK units to test with", u3s.length >= 2, u3s);
+    // layout rooms only — a hand-added custom room with no category (e.g.
+    // [G]'s "Pooja Room") is never touched by the sync, by design
+    const activeCount = async (id) => (await roomsOf(id)).filter((x) => x.IsActive && x.RoomCategoryId != null).length;
+    const customLeft = async (id) => (await roomsOf(id)).filter((x) => x.IsActive && x.RoomCategoryId == null).map((x) => x.RoomName);
+    const scopeB = { ScopeLevel: "BLOCK", ProjectId: PROJECT_ID, BlockId: blockId, LayoutTypeId: t3.id };
+    const BK = { BEDROOM: 3, KITCHEN: 1, HALL_ROOM: 1, BATHROOM: 3 };
+    let pv = await call("POST", "/api/unit-layout-overrides/preview", { ...scopeB, items: items(BK) });
+    check("preview (block, 3 BHK) — all 3 BHK units in scope", pv.status === 200 && pv.data.unitsInScope === u3s.length && !pv.data.overlap, pv.data);
+    r = await call("PUT", "/api/unit-layout-overrides", { ...scopeB, items: items(BK) });
+    check("save block override: rooms added/removed exactly as previewed", r.status === 200 && r.data.roomsAdded === pv.data.roomsToAdd && r.data.roomsRemoved === pv.data.roomsToRemove && r.data.failed === 0, { pv: pv.data, r: r.data });
+    check("every 3 BHK unit now has the block layout's room count", (await Promise.all(u3s.map((u) => activeCount(u.Id)))).every((n) => n === sumOf(BK)),
+      await Promise.all(u3s.map(async (u) => ({ id: u.Id, layoutRooms: await activeCount(u.Id), custom: await customLeft(u.Id) }))));
+    check("custom 'Pooja Room' still there after the layout change", (await customLeft(units[0].Id)).includes("Pooja Room"));
+
+    const f = u3s[0].FloorNo;
+    const scopeF = { ScopeLevel: "FLOOR", ProjectId: PROJECT_ID, BlockId: blockId, FloorFrom: f, FloorTo: f, LayoutTypeId: t3.id };
+    const FL = { BEDROOM: 1, KITCHEN: 1 };
+    r = await call("PUT", "/api/unit-layout-overrides", { ...scopeF, items: items(FL) });
+    check(`floor ${f} override saved`, r.status === 200, r.data);
+    const onF = u3s.filter((u) => u.FloorNo === f);
+    check("units on that floor follow the floor layout, others keep the block layout",
+      (await Promise.all(onF.map((u) => activeCount(u.Id)))).every((n) => n === sumOf(FL))
+      && (await Promise.all(u3s.filter((u) => u.FloorNo !== f).map((u) => activeCount(u.Id)))).every((n) => n === sumOf(BK)));
+    pv = await call("POST", "/api/unit-layout-overrides/preview", { ...scopeF, FloorFrom: f, FloorTo: f + 1, items: items(FL) });
+    check("overlapping range is flagged in preview", pv.status === 200 && pv.data.overlap && pv.data.overlap.label === `Floor ${f === 0 ? "G" : f}`, pv.data);
+    r = await call("PUT", "/api/unit-layout-overrides", { ...scopeF, FloorFrom: f, FloorTo: f + 1, items: items(FL) });
+    check("overlapping range is refused on save (400)", r.status === 400 && /overlaps/.test(r.data?.error), r.data);
+
+    const target = u3s[u3s.length - 1];
+    const scopeU = { ScopeLevel: "UNIT", ProjectId: PROJECT_ID, BlockId: blockId, UnitId: target.Id, LayoutTypeId: t3.id };
+    const UN = { BEDROOM: 2, KITCHEN: 1, HALL_ROOM: 1 };
+    r = await call("PUT", "/api/unit-layout-overrides", { ...scopeU, items: items(UN) });
+    check("unit override saved; unit follows it", r.status === 200 && (await activeCount(target.Id)) === sumOf(UN), r.data);
+    const ur2 = await call("GET", `/api/room-master/unit-rooms/${target.Id}`);
+    check("Room Configuration box shows the unit override", ur2.data.templateSource?.level === "UNIT" && ur2.data.template.reduce((a, x) => a + x.quantity, 0) === sumOf(UN), ur2.data.templateSource);
+    const inst2 = await call("GET", `/api/unit-bhk-config/room-instances/${target.Id}`);
+    check("Work Reporting rooms follow the unit override, all mapped to real rooms", inst2.data.length === sumOf(UN) && inst2.data.every((i) => i.roomMasterId), inst2.data.length);
+    const listed = await call("GET", `/api/unit-layout-overrides/project/${PROJECT_ID}`);
+    const mine = (listed.data || []).filter((o) => o.BlockId === blockId);
+    check("project override list returns block + floor + unit overrides with room lists",
+      listed.status === 200 && ["BLOCK", "FLOOR", "UNIT"].every((l) => mine.some((o) => o.ScopeLevel === l && o.composition.length > 0)), mine.map((o) => o.ScopeLevel));
+    const flr = await q("SELECT Id FROM dbo.CrmProjectAutoSetupFloor WHERE BlockId = @b AND FloorNo = @f", { b: [sql.Int, blockId], f: [sql.Int, target.FloorNo] });
+    const fu2 = await call("GET", `/api/room-master/floor-units/${flr[0].Id}`);
+    check("floor badge uses the effective layout (unit override)", fu2.data.units.find((u) => u.Id === target.Id)?.TemplateRoomCount === sumOf(UN));
+
+    r = await call("POST", "/api/unit-layout-overrides/reset", scopeU);
+    const backTo = target.FloorNo === f ? sumOf(FL) : sumOf(BK);
+    check("reset unit override -> back to the inherited layout", r.status === 200 && (await activeCount(target.Id)) === backTo, { r: r.data, n: await activeCount(target.Id), backTo });
+    r = await call("POST", "/api/unit-layout-overrides/reset", scopeU);
+    check("resetting again -> 404 (nothing to reset)", r.status === 404);
+    r = await call("PUT", "/api/unit-layout-overrides", { ...scopeB, items: items({}) });
+    check("empty layout refused (400)", r.status === 400);
+    r = await call("PUT", "/api/unit-layout-overrides", { ...scopeU, LayoutTypeId: t2.id, items: items(UN) });
+    check("unit override with the wrong type refused (400)", r.status === 400 && /isn't a 2 BHK/.test(r.data?.error), r.data);
   } catch (e) {
     failures++;
     console.error("\nERROR:", e.stack || e.message);
@@ -281,7 +347,10 @@ const check = (name, cond, extra) => {
         const fls = await q("SELECT Id FROM dbo.CrmProjectAutoSetupFloor WHERE BlockId = @b AND IsActive = 1", { b: [sql.Int, blockId] });
         const del = await call("DELETE", `/api/crm/project-auto-setup/blocks/${blockId}`);
         console.log(`   block delete via API: ${del.status} ${JSON.stringify(del.data)}`);
+        check("block (which had overrides) deletes through the real API", del.status === 200, del.data);
         // Safety net (only rows belonging to the test block)
+        await q("DELETE i FROM dbo.RoomLayoutOverrideItem i JOIN dbo.RoomLayoutOverride o ON o.Id = i.OverrideId WHERE o.BlockId = @b", { b: [sql.Int, blockId] });
+        await q("DELETE FROM dbo.RoomLayoutOverride WHERE BlockId = @b", { b: [sql.Int, blockId] });
         await q("DELETE FROM dbo.RoomMaster WHERE BlockId = @b", { b: [sql.Int, blockId] });
         await q("DELETE FROM dbo.CrmUnitPaymentPlan WHERE UnitId IN (SELECT Id FROM dbo.UnitMaster WHERE BlockId = @b)", { b: [sql.Int, blockId] });
         await q("DELETE FROM dbo.UnitMaster WHERE BlockId = @b", { b: [sql.Int, blockId] });
@@ -302,9 +371,10 @@ const check = (name, cond, extra) => {
         SELECT (SELECT COUNT(*) FROM dbo.BlockMaster WHERE BlockName = @n AND ProjectId = @p) AS blocks,
                (SELECT COUNT(*) FROM dbo.RoomLayoutType WHERE Label IN (@t, @e)) AS types,
                (SELECT COUNT(*) FROM dbo.UnitMaster WHERE BlockId = @b) AS units,
-               (SELECT COUNT(*) FROM dbo.RoomMaster WHERE BlockId = @b) AS rooms`,
+               (SELECT COUNT(*) FROM dbo.RoomMaster WHERE BlockId = @b) AS rooms,
+               (SELECT COUNT(*) FROM dbo.RoomLayoutOverride WHERE BlockId = @b) AS overrides`,
       { n: [sql.NVarChar(100), BLOCK_NAME], p: [sql.Int, PROJECT_ID], t: [sql.NVarChar(50), TEMP_TYPE], e: [sql.NVarChar(50), EMPTY_TYPE], b: [sql.Int, blockId || -1] });
-      check("cleanup: no test data left behind", residue[0].blocks === 0 && residue[0].types === 0 && residue[0].units === 0 && residue[0].rooms === 0, residue[0]);
+      check("cleanup: no test data left behind", residue[0].blocks === 0 && residue[0].types === 0 && residue[0].units === 0 && residue[0].rooms === 0 && residue[0].overrides === 0, residue[0]);
     } catch (e) {
       failures++;
       console.error("CLEANUP ERROR:", e.message);

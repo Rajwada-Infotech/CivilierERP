@@ -30,6 +30,7 @@ import {
   MR_APPROVER_ROLES,
   RESTRICTED_MODULES,
   openInModulePath,
+  needsBankReview,
   fmtDate,
   fmtAmount,
   getEffectiveAmount,
@@ -835,6 +836,11 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               : undefined
             }
             restricted={RESTRICTED_MODULES.has(item.Module)}
+            // CRM payment without a deposit bank yet: Accounts sets it on the
+            // Received Payment page first — Approve here would be refused.
+            reviewInstead={needsBankReview(item) && cfg?.navPath
+              ? { label: "Review — set bank", onClick: () => { onClose(); navigate(openInModulePath(item, cfg.navPath)); } }
+              : undefined}
             className="[&_button]:h-10 [&_button]:px-5 [&_button]:text-sm [&_button]:font-semibold [&_button]:rounded-xl"
             onSuccess={(action) => {
               if (action === "approve" || action === "reject") {

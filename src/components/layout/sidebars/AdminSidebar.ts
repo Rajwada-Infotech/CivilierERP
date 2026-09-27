@@ -1,4 +1,4 @@
-import { Chart2, Profile2User, Shield, TickCircle, ShieldTick, Message2, Building, TrendUp, DocumentText, Ticket, Cpu, Layer } from "iconsax-react";
+import { Chart2, Profile2User, Shield, TickCircle, ShieldTick, Message2, Building, TrendUp, DocumentText, Ticket, Cpu, Layer, Mobile } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
@@ -83,4 +83,5 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   { label: "Integrations", icon: Cpu, path: "/admin/api-integration" },
   { label: "Live Metrics", icon: TrendUp, path: "/admin/metrics" },
   { label: "Signature", icon: DocumentText, path: "/admin/signature" },
+  { label: "APK Manager", icon: Mobile, path: "/admin/apk-manager" },
 ];

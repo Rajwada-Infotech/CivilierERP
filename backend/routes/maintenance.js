@@ -4,12 +4,19 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { maintenanceEligibleJoin, maintenanceEligibleExists } = require("../services/maintenanceEligibility");
 
-// Confirmed CrmBooking rows ARE the Maintenance customer directory — no
-// separate customer table exists for this module. Contact info comes from
+// Fully handed-over CrmBooking rows ARE the Maintenance customer directory —
+// no separate customer table exists for this module. Contact info comes from
 // CrmApplication (b.ApplicationId), same join crmBookings.js's BOOKING_SELECT
 // uses. Kept deliberately smaller than BOOKING_SELECT since the directory
 // only needs telephone-directory fields, not the full CRM workflow state.
+//
+// "Real customer" for Maintenance = genuinely after-sales, i.e. the unit has
+// been handed over (dbo.CrmHandover.Status = 'Completed') — NOT merely
+// WorkflowStage = 'Confirmed', which only means the sale itself was
+// approved and can be reached long before agreement registration, sale
+// deed, NOC, or handover. See services/maintenanceEligibility.js.
 const DIRECTORY_SELECT = `
   SELECT
     b.Id, b.BookingNo, b.BookingDate, b.TotalValue, b.Status,
@@ -17,9 +24,11 @@ const DIRECTORY_SELECT = `
     COALESCE(um.UnitName, b.UnitNo)    AS UnitNo,
     COALESCE(blk.BlockName, b.BlockName) AS BlockName,
     COALESCE(proj.name, b.ProjectName) AS ProjectName,
-    comp.name AS CompanyName
+    comp.name AS CompanyName,
+    ho.ActualHandoverDate AS HandoverDate
   FROM dbo.CrmBooking b
   JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+  ${maintenanceEligibleJoin("b")}
   LEFT JOIN dbo.UnitMaster um    ON um.Id  = b.UnitId
   LEFT JOIN dbo.BlockMaster blk  ON blk.Id = um.BlockId
   LEFT JOIN dbo.enterprise  proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
@@ -31,7 +40,7 @@ router.get("/directory", requirePageRight("maintenance-directory", "view"), asyn
     const pool = getPool();
     const search = (req.query.search || "").trim();
     const req0 = pool.request();
-    let where = "b.WorkflowStage = 'Confirmed' AND b.IsActive = 1";
+    let where = "b.IsActive = 1";
     if (search) {
       req0.input("search", sql.NVarChar, `%${search}%`);
       where += ` AND (
@@ -55,8 +64,8 @@ router.get("/customers/:bookingId", requirePageRight("maintenance-directory", "v
     const result = await pool
       .request()
       .input("Id", sql.Int, bookingId)
-      .query(`${DIRECTORY_SELECT} WHERE b.Id = @Id AND b.WorkflowStage = 'Confirmed' AND b.IsActive = 1`);
-    if (!result.recordset.length) return res.status(404).json({ error: "Confirmed booking not found" });
+      .query(`${DIRECTORY_SELECT} WHERE b.Id = @Id AND b.IsActive = 1`);
+    if (!result.recordset.length) return res.status(404).json({ error: "This customer isn't eligible for Maintenance yet — the unit hasn't been handed over" });
     res.json(result.recordset[0]);
   } catch (err) {
     console.error("GET CUSTOMER ERROR:", err.message);
@@ -87,11 +96,32 @@ router.get("/customers/:bookingId/charges", requirePageRight("maintenance-custom
   }
 });
 
-// Placeholder — no maintenance payment-collection flow exists yet. Kept as
-// its own endpoint so the frontend's Payment History section already has a
-// stable contract to call once collection is built.
+// GET /customers/:bookingId/payments — returns the maintenance billing history for
+// this customer. In the Maintenance module, raised bills ARE the payment demands
+// (payment is collected offline via cheque/NEFT and reconciled outside the system).
+// This endpoint powers the "Payment History" section on the Customer Profile —
+// the empty-placeholder comment and res.json([]) are now replaced with real data.
 router.get("/customers/:bookingId/payments", requirePageRight("maintenance-directory", "view"), async (req, res) => {
-  res.json([]);
+  const bookingId = parseInt(req.params.bookingId, 10);
+  if (!Number.isFinite(bookingId)) return res.status(400).json({ error: "Invalid booking id" });
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("BookingId", sql.Int, bookingId)
+      .query(`
+        SELECT
+          b.Id, b.BillNo, b.BillDate, b.DueDate, b.PeriodFrom, b.PeriodTo,
+          b.Subtotal, b.TotalTax, b.GrandTotal, b.Status, b.CancelReason, b.Notes, b.CreatedAt
+        FROM dbo.MaintenanceBill b
+        WHERE b.BookingId = @BookingId
+        ORDER BY b.BillDate DESC, b.CreatedAt DESC
+      `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("GET PAYMENTS ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post("/customers/:bookingId/charges", requirePageRight("maintenance-customer-charges", "create"), async (req, res) => {
@@ -110,8 +140,8 @@ router.post("/customers/:bookingId/charges", requirePageRight("maintenance-custo
     const booking = await pool
       .request()
       .input("Id", sql.Int, bookingId)
-      .query("SELECT TOP 1 Id FROM dbo.CrmBooking WHERE Id = @Id AND WorkflowStage = 'Confirmed' AND IsActive = 1");
-    if (!booking.recordset.length) return res.status(404).json({ error: "Confirmed booking not found" });
+      .query(`SELECT TOP 1 b.Id FROM dbo.CrmBooking b WHERE b.Id = @Id AND b.IsActive = 1 AND ${maintenanceEligibleExists("b")}`);
+    if (!booking.recordset.length) return res.status(404).json({ error: "This customer isn't eligible for Maintenance yet — the unit hasn't been handed over" });
 
     const chargeHead = await pool
       .request()

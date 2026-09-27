@@ -154,6 +154,20 @@ async function companyHasTransactionsAgainstProject(pool, projectId, companyId) 
   return (r.recordset[0]?.cnt || 0) > 0;
 }
 
+// Company tagging changes which projects every Company -> Project dropdown
+// offers. The early bump in each save path runs BEFORE the tag sync, so any
+// list fetched in that window re-cached the pre-tag data for its full TTL
+// (which is why a freshly tagged project "sometimes" didn't show up under
+// its new company). Call this AFTER the tag sync so the very next read
+// rebuilds from the final state.
+async function bumpProjectListCaches() {
+  await Promise.all([
+    bumpCacheVersion("enterprises"),
+    bumpCacheVersion("project-master"),
+    bumpCacheVersion("godowns"),
+  ]).catch(() => {});
+}
+
 // ── Sync a project's tagged additional companies ───────────────────────────────
 // The primary company_id stays untouched — this only replaces the
 // ProjectCompanies rows and the multi_company_enabled flag. Disabling the
@@ -477,6 +491,7 @@ router.post("/", adminOnly, async (req, res) => {
         multiCompanyErr.message,
       );
     }
+    await bumpProjectListCaches();
 
     res.json({ success: true });
   } catch (err) {
@@ -605,6 +620,7 @@ router.put("/:id", adminOnly, async (req, res) => {
         multiCompanyErr.message,
       );
     }
+    await bumpProjectListCaches();
 
     res.json({
       success: true,

@@ -1141,6 +1141,14 @@ export default function MaterialExpenseBooking() {
       costCenter: "",
       materialCategory: "",
       workDoneRef: undefined,
+      // Must also clear the record's own persisted source link, not just
+      // selectedDoc (a picker-UI state) — effectiveSourceKind/effectiveSourceId
+      // fall back to these on save whenever selectedDoc is null, specifically
+      // so a GRN/PO/WORK_DONE edit that never re-opens the picker still keeps
+      // its link. Leaving them stale here would silently resurrect the just-
+      // cleared document's link on save.
+      eSourceType: null,
+      eSourceId: null,
     }));
   };
 
@@ -1272,6 +1280,29 @@ export default function MaterialExpenseBooking() {
     }
   };
 
+  // The record's own source-document kind, falling back to selectedDoc while
+  // a document is actively being picked. On edit-load, openEditForm only
+  // reconstructs selectedDoc for TOD bookings — a GRN/PO/WORK_DONE-linked
+  // booking leaves it null, so every check below that read selectedDoc?.kind
+  // directly silently misclassified it as "direct" the instant it had its
+  // own resolved supplierLHeadId (which every linked booking does), wrongly
+  // demanding an Expense Head Allocation, showing the EMI section, and
+  // skipping the GRN billing-terms breakdown on a plain edit-and-save.
+  const effectiveSourceKind: SourceKind | null =
+    selectedDoc?.kind ?? ((form as any).eSourceType as SourceKind | null) ?? null;
+  // Same fallback for the linked document's own id, so a save on a
+  // GRN/PO/WORK_DONE booking that was never re-picked in this edit session
+  // sends the record's existing ESourceId back instead of null.
+  const effectiveSourceId: number | null =
+    selectedDoc?.sourceId ?? ((form as any).eSourceId as number | null) ?? null;
+  // Locks the Payable Party field to the resolved supplier for a
+  // GRN/PO/WORK_DONE/WO_PO booking even when selectedDoc itself is null —
+  // otherwise this booking's already-resolved supplier looked editable via
+  // PayablePartyCombobox instead of the intended read-only
+  // "Auto-filled from linked order" field.
+  const effectiveVendorLabel: string | undefined =
+    selectedDoc?.vendorLabel ??
+    (effectiveSourceKind && effectiveSourceKind !== "TOD" ? form.supplier || undefined : undefined);
 
   const handleSave = async () => {
     if (saveInFlight.current) return;
@@ -1297,7 +1328,7 @@ export default function MaterialExpenseBooking() {
       return;
     }
     if (
-      selectedDoc?.kind !== "GRN" &&
+      effectiveSourceKind !== "GRN" &&
       (!form.basicAmount || form.basicAmount <= 0)
     ) {
       toast.error("Basic amount is required and must be greater than 0.");
@@ -1306,7 +1337,7 @@ export default function MaterialExpenseBooking() {
     // For GRN bookings: use the shared computeGrnBd() which handles active billing
     // terms split by pre/post-GST, producing correct net with real GST amounts.
     const bd =
-      selectedDoc?.kind === "GRN"
+      effectiveSourceKind === "GRN"
         ? computeGrnBd(form.basicAmount, form.billingTerms, gstBreakdown)
         : computeBreakdown(
             form.basicAmount,
@@ -1378,9 +1409,16 @@ export default function MaterialExpenseBooking() {
       // never sets selectedDoc (see the Select's onValueChange above, which
       // deliberately leaves it alone) — still a direct/"Other Expenses"
       // booking as far as the backend's own ESourceType='TOD' convention
-      // goes (see openEditForm's reverse mapping on load).
-      ESourceType: selectedDoc?.kind ?? (isDirectPartyMode ? "TOD" : null),
-      ESourceId: selectedDoc?.sourceId ?? null,
+      // goes (see openEditForm's reverse mapping on load). effectiveSourceKind/
+      // effectiveSourceId fall back to the record's own already-loaded
+      // ESourceType/ESourceId when selectedDoc is null (every GRN/PO/
+      // WORK_DONE edit, since openEditForm only reconstructs selectedDoc for
+      // TOD) — without this, saving such a booking without re-picking its
+      // document silently sent ESourceType/ESourceId as null, detaching it
+      // from its GRN/PO/Work Done link. clearDoc() nulls both on the form so
+      // intentionally detaching a document still falls through correctly.
+      ESourceType: effectiveSourceKind ?? (isDirectPartyMode ? "TOD" : null),
+      ESourceId: effectiveSourceId,
       // Present only when multiple GRNs (same PO) were combined into this
       // one invoice — see ExpenseBooking/invoiceLinking.ts.
       ...(selectedDoc?.linkedGrnIds && selectedDoc.linkedGrnIds.length > 1
@@ -1438,10 +1476,10 @@ export default function MaterialExpenseBooking() {
     }
   };
 
-  const isGRN = selectedDoc?.kind === "GRN";
+  const isGRN = effectiveSourceKind === "GRN";
 
   const bd =
-    selectedDoc?.kind === "GRN"
+    effectiveSourceKind === "GRN"
       ? computeGrnBd(form.basicAmount, form.billingTerms, gstBreakdown)
       : computeBreakdown(
           form.basicAmount,
@@ -1496,27 +1534,27 @@ export default function MaterialExpenseBooking() {
     statusCounts["Pending"] ??
     records.filter((r) => r.status === "Pending").length;
   const emiCount = records.filter((r) => r.emi?.enabled).length;
-  const vendorLabel = selectedDoc?.vendorLabel
-    ? selectedDoc.kind === "WORK_DONE"
+  const vendorLabel = effectiveVendorLabel
+    ? effectiveSourceKind === "WORK_DONE"
       ? "Contractor"
       : "Supplier / Vendor"
     : "Payable To";
   const isPOorWO =
-    selectedDoc?.kind === "PO" ||
-    selectedDoc?.kind === "WORK_DONE" ||
-    selectedDoc?.kind === "WO_PO";
+    effectiveSourceKind === "PO" ||
+    effectiveSourceKind === "WORK_DONE" ||
+    effectiveSourceKind === "WO_PO";
   /** True when the booking is a direct / Other-Expenses (TOD) entry with no linked source doc. */
   const isDirect = !isGRN && !isPOorWO;
   // True once a direct booking actually has a party picked — whether that
   // came from a formal "Other Expenses" template pick first (selectedDoc
   // already {kind:"TOD"}) or straight from the Payable Party field with no
   // document selected at all (selectedDoc still null). Gates TDS, the
-  // Direct Items table, and Expense Head Allocation — using selectedDoc's
-  // kind alone here would leave all three permanently hidden for a party
-  // picked without ever going through the template list, since nothing else
-  // sets selectedDoc to "TOD" for that flow.
+  // Direct Items table, and Expense Head Allocation. Uses effectiveSourceKind
+  // (not selectedDoc directly) so a GRN/PO/WORK_DONE booking loaded via
+  // openEditForm — which leaves selectedDoc null — is never misclassified as
+  // direct just because it already has a resolved supplierLHeadId.
   const isDirectPartyMode =
-    isDirect && (selectedDoc?.kind === "TOD" || (!selectedDoc && !!form.supplierLHeadId));
+    isDirect && (effectiveSourceKind === "TOD" || (!effectiveSourceKind && !!form.supplierLHeadId));
 
   // Re-preview the booking reference when Year is changed on an EXISTING
   // direct/TOD booking. The create-time effect below (keyed on selectedTod)
@@ -1911,7 +1949,7 @@ export default function MaterialExpenseBooking() {
                         <User size={11} className="shrink-0" />
                         {vendorLabel}
                       </p>
-                      {selectedDoc?.vendorLabel ? (
+                      {effectiveVendorLabel ? (
                         <div className="relative">
                           <User size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground shrink-0" />
                           <Input
@@ -1941,7 +1979,7 @@ export default function MaterialExpenseBooking() {
                             // before any document. isDirectPartyMode below
                             // covers this case for TDS/Direct Items/Expense
                             // Head Allocation without touching this state.
-                            if (name && (selectedDoc?.kind === "TOD" || !selectedDoc)) {
+                            if (name && (effectiveSourceKind === "TOD" || !effectiveSourceKind)) {
                               set("bookingName", `Payment for ${name}`);
                             }
                             if (!name) return;
@@ -1960,9 +1998,9 @@ export default function MaterialExpenseBooking() {
                           }}
                         />
                       )}
-                      {selectedDoc?.vendorLabel && (
+                      {effectiveVendorLabel && (
                         <p className="text-[10px] text-muted-foreground">
-                          {`Auto-filled from ${selectedDoc.kind === "PO" ? "Purchase Order (supplier)" : selectedDoc.kind === "GRN" ? "GRN (supplier)" : "Work Done (contractor)"}`}
+                          {`Auto-filled from ${effectiveSourceKind === "PO" ? "Purchase Order (supplier)" : effectiveSourceKind === "GRN" ? "GRN (supplier)" : "Work Done (contractor)"}`}
                         </p>
                       )}
                     </div>
@@ -2544,7 +2582,7 @@ export default function MaterialExpenseBooking() {
                   form.bookingReference.trim() &&
                   form.bookingDate &&
                   form.companyId &&
-                  (selectedDoc?.kind === "GRN" ||
+                  (effectiveSourceKind === "GRN" ||
                     (form.basicAmount && form.basicAmount > 0))
                 );
                 const ebIsDirty = !!(

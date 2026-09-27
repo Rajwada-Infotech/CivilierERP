@@ -11,7 +11,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  getRoomCategories, createRoomCategory, updateRoomCategory, deleteRoomCategory,
+  getRoomCategories, createRoomCategory, updateRoomCategory, deleteRoomCategory, getRoomCategoryUsage, getRoomCategoryRenameCount,
   type RoomCategory,
 } from "@/api/roomCategoryMasterApi";
 
@@ -46,6 +46,22 @@ export default function RoomCategoryMaster() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ["room-categories"] });
 
+  // Renaming the Alias can rename the category's existing rooms too.
+  const [renameRooms, setRenameRooms] = useState(true);
+  const aliasChanged = !!editing && form.alias.trim() !== "" && form.alias.trim() !== editing.alias;
+  const { data: renameCount } = useQuery({
+    queryKey: ["room-category-rename-count", editing?.id],
+    queryFn: () => getRoomCategoryRenameCount(editing!.id),
+    enabled: aliasChanged,
+  });
+
+  // Usage of the category being deactivated, for the confirm dialog.
+  const { data: deletingUsage, isLoading: loadingUsage } = useQuery({
+    queryKey: ["room-category-usage", deleting?.id],
+    queryFn: () => getRoomCategoryUsage(deleting!.id),
+    enabled: !!deleting,
+  });
+
   const handleSave = async () => {
     if (!form.categoryName.trim()) { toast.error("Category Name is required"); return; }
     if (!form.alias.trim()) { toast.error("Alias is required"); return; }
@@ -58,8 +74,8 @@ export default function RoomCategoryMaster() {
         isActive: form.isActive,
       };
       if (editing) {
-        await updateRoomCategory(editing.id, payload);
-        toast.success("Category updated");
+        const r = await updateRoomCategory(editing.id, { ...payload, renameRooms: aliasChanged && renameRooms });
+        toast.success(r.roomsRenamed ? `Category updated — ${r.roomsRenamed} room(s) renamed` : "Category updated");
       } else {
         await createRoomCategory(payload);
         toast.success("Category created");
@@ -207,6 +223,12 @@ export default function RoomCategoryMaster() {
                 value={form.alias}
                 onChange={(e) => setForm((p) => ({ ...p, alias: e.target.value }))}
               />
+              {aliasChanged && (renameCount?.rooms ?? 0) > 0 && (
+                <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <input type="checkbox" checked={renameRooms} onChange={(e) => setRenameRooms(e.target.checked)} />
+                  Also rename {renameCount!.rooms} existing room(s) from "{editing!.alias}" to "{form.alias.trim()}" (Flat Master history stays attached)
+                </label>
+              )}
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
@@ -277,7 +299,12 @@ export default function RoomCategoryMaster() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground pt-1">
-            Deactivate <strong>{deleting?.alias}</strong>? Existing room compositions that already use it stay exactly as they are — this only hides it from new selections.
+            Deactivate <strong>{deleting?.alias}</strong>? It is only hidden from new selections — layouts, layout overrides and rooms that already use it keep it exactly as they are.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            {loadingUsage ? "Checking where it is used…" : deletingUsage
+              ? `In use: ${deletingUsage.layouts} layout(s), ${deletingUsage.overrides} layout override(s), ${deletingUsage.rooms} room(s).`
+              : null}
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button onClick={() => setDeleting(null)} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">

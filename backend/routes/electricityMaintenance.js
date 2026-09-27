@@ -10,6 +10,7 @@ const {
   calculateElectricityCharge,
   resolveHandoverStatus,
 } = require("../services/electricityTariff");
+const { maintenanceEligibleExists } = require("../services/maintenanceEligibility");
 
 const METER_PAGE = "meter-reading-master";
 const PROVIDER_PAGE = "electricity-provider-master";
@@ -372,6 +373,17 @@ router.post("/meters", requirePageRight(METER_PAGE, "create"), async (req, res) 
   if (!b.providerId) return res.status(400).json({ error: "Electricity Provider is required" });
   try {
     const pool = getPool();
+    // The Directory/meter-picker UI already only offers handed-over
+    // bookings, but this route accepted ANY bookingId with no server-side
+    // check at all — closing that gap here so a direct API call can't
+    // create a meter for a unit that isn't a real (post-handover)
+    // Maintenance customer. See services/maintenanceEligibility.js.
+    const eligible = await pool.request().input("Id", sql.Int, b.bookingId)
+      .query(`SELECT TOP 1 b.Id FROM dbo.CrmBooking b WHERE b.Id = @Id AND b.IsActive = 1 AND ${maintenanceEligibleExists("b")}`);
+    if (!eligible.recordset.length) {
+      return res.status(404).json({ error: "This customer isn't eligible for Maintenance yet — the unit hasn't been handed over" });
+    }
+
     const dup = await pool.request().input("mn", sql.NVarChar, b.meterNumber.trim()).query(`SELECT Id FROM dbo.MeterReadingMaster WHERE MeterNumber = @mn`);
     if (dup.recordset.length) return res.status(409).json({ error: "A meter with this Meter Number already exists" });
 
