@@ -52,6 +52,7 @@ router.get(
         daa.Description AS description,
         daa.Remarks AS remarks,
         daa.Status AS status,
+        daa.ProgressPercent AS progressPercent,
         daa.UpdatedAt AS updatedAt,
         dma.SequenceNo AS sequenceNo,
         dma.ActivityId AS activityId, am.activity_name AS activityName,
@@ -251,10 +252,13 @@ router.post(
 
 // PATCH /:rungId/status — move a rung between report statuses, and/or
 // update its Remarks (the Activity Detail modal's Remarks textarea saves
-// on blur independently of the status dropdown, so both fields are
-// optional here — at least one must be present). No order/workflow is
-// enforced between statuses (any -> any) — that's a policy call left for
-// later, not something the schema or this endpoint dictates.
+// on blur independently of the status dropdown) and/or its ProgressPercent
+// (the modal's draggable progress bar, saved on drag-release) — all three
+// are independent, so at least one must be present but none are required
+// together. No order/workflow is enforced between statuses (any -> any)
+// — that's a policy call left for later, not something the schema or this
+// endpoint dictates. Progress is likewise free-standing — it doesn't drive
+// or get driven by Status.
 router.patch(
   "/:rungId/status",
   authMiddleware,
@@ -265,8 +269,9 @@ router.patch(
 
   const hasStatus = req.body?.status !== undefined;
   const hasRemarks = req.body?.remarks !== undefined;
-  if (!hasStatus && !hasRemarks) {
-    return res.status(400).json({ error: "status or remarks is required" });
+  const hasProgress = req.body?.progressPercent !== undefined;
+  if (!hasStatus && !hasRemarks && !hasProgress) {
+    return res.status(400).json({ error: "status, remarks or progressPercent is required" });
   }
 
   const status = hasStatus ? String(req.body.status).toUpperCase() : null;
@@ -274,6 +279,10 @@ router.patch(
     return res.status(400).json({ error: `status must be one of: ${[...STATUS_VALUES].join(", ")}` });
   }
   const remarks = hasRemarks ? String(req.body.remarks || "").slice(0, 1000) : null;
+  const progressPercent = hasProgress ? parseInt(req.body.progressPercent, 10) : null;
+  if (hasProgress && (!Number.isFinite(progressPercent) || progressPercent < 0 || progressPercent > 100)) {
+    return res.status(400).json({ error: "progressPercent must be an integer between 0 and 100" });
+  }
 
   const actor = req.user?.email || req.user?.name || "system";
 
@@ -302,11 +311,13 @@ router.patch(
     const setClauses = [];
     if (hasStatus) setClauses.push("Status = @status");
     if (hasRemarks) setClauses.push("Remarks = @remarks");
+    if (hasProgress) setClauses.push("ProgressPercent = @progressPercent");
     const request = pool.request()
       .input("rungId", sql.Int, rungId)
       .input("updatedBy", sql.NVarChar(200), actor);
     if (hasStatus) request.input("status", sql.NVarChar(20), status);
     if (hasRemarks) request.input("remarks", sql.NVarChar(1000), remarks);
+    if (hasProgress) request.input("progressPercent", sql.Int, progressPercent);
 
     const result = await request.query(`
       UPDATE dbo.DependencyActivityAssignment
@@ -316,7 +327,7 @@ router.patch(
     if (!result.rowsAffected[0]) {
       return res.status(404).json({ error: "No assignment found for this rung" });
     }
-    res.json({ success: true, status, remarks });
+    res.json({ success: true, status, remarks, progressPercent });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
     res.status(500).json({ error: err.message });

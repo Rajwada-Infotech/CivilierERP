@@ -250,6 +250,7 @@ export interface ReportedAssignment {
   description: string | null;
   remarks: string | null;
   status: AssignmentStatus;
+  progressPercent: number;
   updatedAt: string;
   sequenceNo: number;
   activityId: number;
@@ -300,19 +301,20 @@ export const updateAssignmentStatus = async (
   return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
 };
 
-// Status and Remarks share one PATCH endpoint but are independent — the
-// Activity Detail modal's status dropdown and its Remarks textarea (saved
-// on blur) each call this with only the field that actually changed.
+// Status, Remarks and ProgressPercent share one PATCH endpoint but are
+// independent — the Activity Detail modal's status dropdown, its Remarks
+// textarea (saved on blur), and its draggable progress bar (saved on
+// drag-release) each call this with only the field that actually changed.
 export const updateAssignmentDetail = async (
   rungId: number,
-  patch: { status?: AssignmentStatus; remarks?: string },
-): Promise<{ success: boolean; status: AssignmentStatus | null; remarks: string | null }> => {
+  patch: { status?: AssignmentStatus; remarks?: string; progressPercent?: number },
+): Promise<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/status`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  return handleResponse<{ success: boolean; status: AssignmentStatus | null; remarks: string | null }>(res);
+  return handleResponse<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }>(res);
 };
 
 // ── Blueprint Annotation Workflow ───────────────────────────────────────────

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
+import { GlassCard } from "@/components/dashboard/GlassShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   ASSIGNMENT_STATUSES,
@@ -11,9 +12,42 @@ import {
   type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
-import { ClipboardList, UserRound, CalendarDays, Package, Loader2, ChevronDown, ChevronRight, GitBranch, Camera } from "lucide-react";
+import {
+  ClipboardList,
+  UserRound,
+  CalendarDays,
+  Package,
+  Loader2,
+  ChevronDown,
+  ChevronRight,
+  GitBranch,
+  Camera,
+  Clock,
+  Activity,
+  PauseCircle,
+  XCircle,
+  ShieldCheck,
+  RotateCcw,
+  CheckCircle2,
+  type LucideIcon,
+} from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
 import ActivityDetailModal from "./ActivityDetailModal";
+
+// Purely presentational — icon + accent color per status, same colors as
+// ASSIGNMENT_STATUS_META's Tailwind classes just as hex for GlassCard's
+// inline styling. "ALL" isn't in that enum so it gets its own entry.
+const STATUS_TILE_META: Record<AssignmentStatus | "ALL", { icon: LucideIcon; accentColor: string }> = {
+  ALL: { icon: ClipboardList, accentColor: "#06b6d4" },
+  PENDING: { icon: Clock, accentColor: "#64748b" },
+  ALLOCATED: { icon: GitBranch, accentColor: "#6366f1" },
+  IN_PROGRESS: { icon: Activity, accentColor: "#3b82f6" },
+  HOLD: { icon: PauseCircle, accentColor: "#f59e0b" },
+  CANCELLED: { icon: XCircle, accentColor: "#ef4444" },
+  APPROVED: { icon: ShieldCheck, accentColor: "#14b8a6" },
+  REWORK: { icon: RotateCcw, accentColor: "#d946ef" },
+  COMPLETED: { icon: CheckCircle2, accentColor: "#10b981" },
+};
 
 const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "All" },
@@ -62,6 +96,14 @@ export default function ActivityReporting() {
     () => (statusFilter === "ALL" ? rows : rows.filter((r) => r.status === statusFilter)),
     [rows, statusFilter],
   );
+
+  // Counts always reflect the full unfiltered set — a tile shows how many
+  // rows WOULD be in view if selected, not the current selection's count.
+  const statusCounts = useMemo(() => {
+    const counts = { ALL: rows.length } as Record<AssignmentStatus | "ALL", number>;
+    for (const s of ASSIGNMENT_STATUSES) counts[s] = rows.filter((r) => r.status === s).length;
+    return counts;
+  }, [rows]);
 
   // Group by dependency chain — every activity raised against the same
   // chain now shows together instead of scattered across the flat list,
@@ -120,39 +162,40 @@ export default function ActivityReporting() {
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-border bg-muted/30">
               <span className="text-sm font-heading font-semibold text-foreground">Assigned Activities</span>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {groupedRows.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={toggleAllGroups}
-                    className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors mr-1"
-                  >
-                    {allGroupsExpanded ? (
-                      <>
-                        <ChevronRight size={12} /> Collapse all
-                      </>
-                    ) : (
-                      <>
-                        <ChevronDown size={12} /> Expand all
-                      </>
-                    )}
-                  </button>
-                )}
-                {FILTER_OPTIONS.map((opt) => (
-                  <button
+              {groupedRows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleAllGroups}
+                  className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors"
+                >
+                  {allGroupsExpanded ? (
+                    <>
+                      <ChevronRight size={12} /> Collapse all
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={12} /> Expand all
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2.5 px-5 py-4 border-b border-border bg-muted/10">
+              {FILTER_OPTIONS.map((opt) => {
+                const meta = STATUS_TILE_META[opt.value];
+                return (
+                  <GlassCard
                     key={opt.value}
-                    type="button"
+                    label={opt.label}
+                    value={statusCounts[opt.value] ?? 0}
+                    icon={meta.icon}
+                    accentColor={meta.accentColor}
+                    active={statusFilter === opt.value}
                     onClick={() => setStatusFilter(opt.value)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-heading font-medium transition-colors ${
-                      statusFilter === opt.value
-                        ? "bg-cyan-500 text-white"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+                  />
+                );
+              })}
             </div>
 
             {isLoading ? (
