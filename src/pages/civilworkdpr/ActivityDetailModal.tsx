@@ -46,6 +46,7 @@ import {
   type ActivityPhotoMeta,
   type ReportedAssignment,
   type AssignmentCheckpoint,
+  type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 import {
@@ -903,10 +904,14 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
 
 // ── Progress bar ─────────────────────────────────────────────────────────
 // Docked below the tabbed content, inside the modal — a draggable
-// percent-done bar, independent of Status (see migration 483's own
-// comment: nothing here derives one from the other). Saved on
-// drag-release/click only, not per pixel of movement, same "commit at the
-// end" shape as everything else in this modal that patches the server.
+// percent-done bar. Saved on drag-release/click only, not per pixel of
+// movement, same "commit at the end" shape as everything else in this
+// modal that patches the server. The one place it DOES touch Status:
+// dragging all the way to 100% bundles status: "COMPLETED" into the same
+// request (the backend requires exactly this pairing — see
+// dependencyActivityAssignment.js's PATCH /:rungId/status), which is what
+// sends the activity to Quality Check. Dragging back below 100% undoes
+// that, reverting to In Progress.
 function ProgressDragBar({ row }: { row: ReportedAssignment }) {
   const queryClient = useQueryClient();
   const trackRef = useRef<HTMLDivElement>(null);
@@ -919,9 +924,13 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
   }, [row.rungId, row.progressPercent]);
 
   const mutation = useMutation({
-    mutationFn: (next: number) => updateAssignmentDetail(row.rungId, { progressPercent: next }),
-    onSuccess: () => {
+    mutationFn: (patch: { progressPercent: number; status?: AssignmentStatus }) =>
+      updateAssignmentDetail(row.rungId, patch),
+    onSuccess: (_res, patch) => {
       queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      queryClient.invalidateQueries({ queryKey: ["qc-queue"] });
+      if (patch.status === "COMPLETED") toast.success("Activity completed — sent to Quality Check.");
     },
     onError: (err: any) => {
       toast.error(err?.message || "Failed to save progress.");
@@ -935,6 +944,14 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
     const rect = el.getBoundingClientRect();
     const ratio = (clientX - rect.left) / rect.width;
     return Math.max(0, Math.min(100, Math.round(ratio * 100)));
+  };
+
+  const commit = (next: number) => {
+    if (next === (row.progressPercent ?? 0)) return;
+    const patch: { progressPercent: number; status?: AssignmentStatus } = { progressPercent: next };
+    if (next === 100 && row.status !== "COMPLETED") patch.status = "COMPLETED";
+    else if (next < 100 && row.status === "COMPLETED") patch.status = "IN_PROGRESS";
+    mutation.mutate(patch);
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -951,7 +968,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
     setDragging(false);
     const next = percentFromClientX(e.clientX);
     setPercent(next);
-    if (next !== (row.progressPercent ?? 0)) mutation.mutate(next);
+    commit(next);
   };
 
   return (

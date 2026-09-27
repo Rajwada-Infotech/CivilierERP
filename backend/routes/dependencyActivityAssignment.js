@@ -109,10 +109,11 @@ router.get(
 });
 
 // ── Quality Check ────────────────────────────────────────────────────────────
-// QC inspects an In Progress activity, signs off its checklist and either
-// Approves it or sends it back for Rework. Goes through its own endpoint
-// (not the generic status PATCH) because In Progress may only move to Hold/
-// Cancelled by hand; QC's Approved/Rework is the one sanctioned way out.
+// QC inspects a Completed activity (work dragged to 100% in Reporting),
+// signs off its checklist and either Approves it or sends it back for
+// Rework. Goes through its own endpoint (not the generic status PATCH)
+// because Completed can't otherwise move anywhere by hand; QC's
+// Approved/Rework is the one sanctioned way out.
 
 // GET /qc/:rungId/history: every past QC decision on this activity.
 router.get(
@@ -181,8 +182,8 @@ router.post(
       );
       if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
       const assignmentId = a.recordset[0].Id;
-      if (a.recordset[0].Status !== "IN_PROGRESS") {
-        return res.status(400).json({ error: "Only an In Progress activity can be quality-checked." });
+      if (a.recordset[0].Status !== "COMPLETED") {
+        return res.status(400).json({ error: "Only a Completed activity (work dragged to 100%) can be quality-checked." });
       }
 
       const cp = await pool.request().input("aid", sql.Int, assignmentId).query(
@@ -255,10 +256,17 @@ router.post(
 // on blur independently of the status dropdown) and/or its ProgressPercent
 // (the modal's draggable progress bar, saved on drag-release) — all three
 // are independent, so at least one must be present but none are required
-// together. No order/workflow is enforced between statuses (any -> any)
-// — that's a policy call left for later, not something the schema or this
-// endpoint dictates. Progress is likewise free-standing — it doesn't drive
-// or get driven by Status.
+// together.
+//
+// Manual status moves are just In Progress <-> Hold (mirrors
+// allowedNextStatuses() in the frontend's dependencyActivityAssignmentApi.ts
+// — keep the two in sync). Completed is reachable only bundled with
+// progressPercent === 100 in this same request (the drag bar sends both
+// together) — never chosen on its own. Rework's one way out is manually
+// re-opening to In Progress; Completed can likewise be dragged back below
+// 100%, which reverts it to In Progress. Approved/Cancelled are no longer
+// settable here at all — Approved/Rework come only from the QC decision
+// route above.
 router.patch(
   "/:rungId/status",
   authMiddleware,
@@ -289,22 +297,28 @@ router.patch(
   try {
     const pool = await getPool();
 
-    // Statuses only move forward — mirrors allowedNextStatuses() in the
-    // frontend's dependencyActivityAssignmentApi.ts. Once past Pending/
-    // Allocated a rung can't go back to either, and while In Progress the
-    // only manual moves are Hold or Cancelled.
+    const MANUAL_STATUSES = new Set(["IN_PROGRESS", "HOLD"]);
     if (hasStatus) {
       const cur = await pool.request().input("rungId", sql.Int, rungId).query(
         "SELECT Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId",
       );
       const current = cur.recordset[0]?.Status;
       if (current && current !== status) {
-        const early = current === "PENDING" || current === "ALLOCATED";
-        if (!early && (status === "PENDING" || status === "ALLOCATED")) {
-          return res.status(400).json({ error: "An activity that has moved on can't go back to Pending or Allocated." });
-        }
-        if (current === "IN_PROGRESS" && status !== "HOLD" && status !== "CANCELLED") {
-          return res.status(400).json({ error: "An In Progress activity can only be put on Hold or Cancelled." });
+        if (status === "COMPLETED") {
+          if (!(hasProgress && progressPercent === 100)) {
+            return res.status(400).json({ error: "Completed is set automatically when work reaches 100%." });
+          }
+          if (!MANUAL_STATUSES.has(current)) {
+            return res.status(400).json({ error: "Only an In Progress or Hold activity can be completed." });
+          }
+        } else if (current === "REWORK" && status === "IN_PROGRESS") {
+          // Allowed — manually re-opening a reworked activity to redo it.
+        } else if (current === "COMPLETED" && status === "IN_PROGRESS") {
+          // Allowed — the progress bar dragged back below 100%, undoing the auto-complete.
+        } else if (!MANUAL_STATUSES.has(status)) {
+          return res.status(400).json({ error: "Status can only be manually set to In Progress or Hold." });
+        } else if (!MANUAL_STATUSES.has(current) && current !== "PENDING" && current !== "ALLOCATED") {
+          return res.status(400).json({ error: "This activity's status can no longer be changed manually." });
         }
       }
     }

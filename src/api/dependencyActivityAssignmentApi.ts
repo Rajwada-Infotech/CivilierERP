@@ -225,16 +225,20 @@ export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; c
   COMPLETED: { label: "Completed", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
 };
 
-// A rung only moves forward: once it has left Pending/Allocated (i.e. it's
-// been approved into In Progress, or gone on to any later state) it can
-// never go back to either of them, and while In Progress the only manual
-// moves are Hold or Cancelled. Mirrored server-side in
+// The status dropdown is now just an In Progress <-> Hold toggle — nothing
+// else is manually chosen from here. Completed is set automatically by
+// dragging the progress bar to 100% (see ActivityDetailModal's
+// ProgressDragBar); Approved/Rework come only from a QC decision; Rework's
+// one way out is manually re-opening it to In Progress to redo the work.
+// A single-element result means "read-only badge, no dropdown" — see
+// AssignmentStatusSelect. Mirrored server-side in
 // dependencyActivityAssignment.js's status route — keep the two in sync.
 export function allowedNextStatuses(current: AssignmentStatus): AssignmentStatus[] {
-  if (current === "PENDING" || current === "ALLOCATED") return [...ASSIGNMENT_STATUSES];
-  if (current === "IN_PROGRESS") return ["IN_PROGRESS", "HOLD", "CANCELLED"];
-  if (current === "HOLD") return ["HOLD", "IN_PROGRESS", "CANCELLED"];
-  return ASSIGNMENT_STATUSES.filter((s) => s !== "PENDING" && s !== "ALLOCATED");
+  if (current === "REWORK") return ["REWORK", "IN_PROGRESS"];
+  if (current === "PENDING" || current === "ALLOCATED" || current === "IN_PROGRESS" || current === "HOLD") {
+    return ["IN_PROGRESS", "HOLD"];
+  }
+  return [current];
 }
 
 export interface ReportedAssignment {
@@ -456,8 +460,11 @@ export interface QcHistoryEntry {
   checks: { fieldName: string; passed: boolean; note: string | null }[];
 }
 
-export const getInProgressAssignments = async (): Promise<ReportedAssignment[]> => {
-  const res = await fetchWithAuth(`${BASE}?status=IN_PROGRESS`);
+// Quality Check now inspects COMPLETED activities (work dragged to 100%),
+// not IN_PROGRESS ones — an activity only reaches QC once it's actually
+// done, not while it's still being worked on.
+export const getCompletedAssignments = async (): Promise<ReportedAssignment[]> => {
+  const res = await fetchWithAuth(`${BASE}?status=COMPLETED`);
   return handleResponse<ReportedAssignment[]>(res);
 };
 
