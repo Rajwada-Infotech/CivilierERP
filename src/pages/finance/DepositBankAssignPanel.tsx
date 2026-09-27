@@ -4,7 +4,35 @@ import { ArrowRight, Landmark, Loader2, Save } from "lucide-react";
 import { Link } from "react-router-dom";
 import { setReceivedPaymentDepositBank } from "@/api/receivedPaymentApi";
 
-export interface DepositBankOption { BId: number; BName: string | null; BBranch?: string | null; BAccountLast4?: string | null }
+export interface DepositBankOption {
+  BId: number;
+  BName: string | null;
+  BBranch?: string | null;
+  BAccountLast4?: string | null;
+  BIfscCode?: string | null;
+  /** Full account number — only the finance bank list carries it; the
+   *  project-banks endpoint deliberately returns BAccountLast4 instead. */
+  BAccountNumber?: string | null;
+}
+
+// Two company accounts can share the exact same brand name ("Axis Bank"
+// twice, for two different branches) — a name-only option made them
+// genuinely indistinguishable, which is what caused a real production
+// mix-up. Show every identifying detail the caller actually has, masking
+// the account number down to its last 4 either way.
+export function bankOptionLabel(b: DepositBankOption): string {
+  const last4 =
+    b.BAccountLast4 ||
+    (b.BAccountNumber && b.BAccountNumber.length >= 4 ? b.BAccountNumber.slice(-4) : null);
+  return [
+    b.BName || "Unnamed account",
+    b.BBranch || null,
+    last4 ? `A/C ••${last4}` : null,
+    b.BIfscCode || null,
+  ]
+    .filter(Boolean)
+    .join("  ·  ");
+}
 
 // Accounts' step for a CRM payment: CRM records the cheque/cash WITHOUT a
 // deposit bank; here, on the Pending Received Payment, Accounts assigns the
@@ -55,7 +83,7 @@ export function DepositBankAssignPanel({
             <option value="">Select deposit bank…</option>
             {banks.map((b) => (
               <option key={b.BId} value={String(b.BId)}>
-                {b.BName}{b.BBranch ? ` — ${b.BBranch}` : ""}{b.BAccountLast4 ? ` (••${b.BAccountLast4})` : ""}
+                {bankOptionLabel(b)}
               </option>
             ))}
           </select>

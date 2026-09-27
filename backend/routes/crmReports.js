@@ -115,13 +115,36 @@ router.get("/receipt-register", requirePageRight("crm-payments", "view"), async 
     const conds = [...dr.clauses, ...cpb.clauses];
     const req0 = pool.request();
     dr.bind(req0); cpb.bind(req0);
+    // A CrmPaymentReceipt row is written by the SETTLEMENT sweep, not when the
+    // money actually arrived (Payment -> On Account -> Demand -> Invoice ->
+    // Adjustment -> Settlement). So its own PaymentMode/TransactionRef describe
+    // the settlement, not the payment: a live check found PaymentMode =
+    // 'OnAccount' on 100% of rows and TransactionRef NULL on 100% of them —
+    // two columns that looked like data but never carried any.
+    //
+    // The real money-in details live one hop back on CrmOnAccountPayment, and
+    // the customer's own bank one further hop on the ReceivedPayment that
+    // created it. Both are LEFT JOINs and both fall back to the receipt's own
+    // values, so a receipt created by some other path still reports whatever
+    // it does hold rather than dropping to NULL.
     const result = await req0.query(`
       SELECT r.ReceiptNo, b.BookingNo, COALESCE(bn.ProjectName, b.ProjectName) AS ProjectName, a.ApplicantName, m.MilestoneName,
-        r.Amount, CAST(r.ReceivedDate AS DATE) AS ReceivedDate, r.PaymentMode, r.TransactionRef
+        r.Amount, CAST(r.ReceivedDate AS DATE) AS ReceivedDate,
+        COALESCE(oa.PaymentMode, r.PaymentMode)       AS PaymentMode,
+        -- For a cheque the cheque number IS the reference, and it is stored in
+        -- its own column rather than TransactionRef (see crmPayments.js, which
+        -- routes a Cheque's ref into RPCheckNumber and leaves RPTransactionID
+        -- null). Without this fallback the register showed no reference at all
+        -- for cheque receipts, which are the bulk of them.
+        COALESCE(oa.TransactionRef, r.TransactionRef, rp.RPTransactionId, rp.RPCheckNumber) AS TransactionRef,
+        rp.RPBankName                                 AS CustomerBank,
+        COALESCE(oa.DepositBankName, r.DepositBankName) AS DepositBank
       FROM dbo.CrmPaymentReceipt r
       JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId
       JOIN dbo.CrmBooking b ON b.Id = m.BookingId
       JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      LEFT JOIN dbo.CrmOnAccountPayment oa ON oa.Id = r.OnAccountPaymentId
+      LEFT JOIN dbo.ReceivedPayment rp ON rp.RPPaymentID = COALESCE(oa.SourceReceivedPaymentId, r.SourceReceivedPaymentId)
       LEFT JOIN dbo.vw_CrmBookingDisplay bn ON bn.BookingId = b.Id
       LEFT JOIN dbo.UnitMaster um ON um.Id = b.UnitId
       ${conds.length ? "WHERE " + conds.join(" AND ") : ""}

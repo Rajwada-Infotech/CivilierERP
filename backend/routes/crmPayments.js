@@ -697,6 +697,15 @@ class ReceiptError extends Error {
   }
 }
 
+// A customer bank only exists for money that actually moved through one.
+// Cash never does, and "Other" is unknown — both store NULL regardless of
+// what the client sent, the same way RPCheckNumber is already nulled for
+// non-Cheque modes below. The UI hides the field for these modes; this is
+// the server-side half of that rule so a direct API call can't bypass it.
+const MODES_WITH_BANK = ["Cheque", "NEFT", "RTGS", "UPI", "Home Loan"];
+const bankNameForMode = (mode, bankName) =>
+  MODES_WITH_BANK.includes(mode) ? (bankName || null) : null;
+
 // Shared by POST /:id/receipts below AND by createCrmBookingRecord
 // (crmEntityCreation.js), which calls this the moment a Booking auto-creates
 // if the originating Application already captured a token payment (cheque/
@@ -799,6 +808,11 @@ async function createReceiptForMilestone(pool, milestoneId, data, actorUserId, a
       RPDocDate: docDate,
       RPMode: data.PaymentMode || null,
       RPAmount: amount,
+      // Customer's own bank (the account the money came FROM), captured at
+      // CRM entry the same way Received Payment's own form captures it.
+      // Distinct from RPDepositBankId, which is OUR account and stays for
+      // Accounts to assign before approval.
+      RPBankName: bankNameForMode(data.PaymentMode, data.BankName),
       RPTransactionID: data.TransactionRef || null,
       RPCheckNumber: data.PaymentMode === "Cheque" ? (data.TransactionRef || null) : null,
       RPChequeDate: data.ChequeDate || null,
@@ -1229,6 +1243,7 @@ router.put("/:id", requirePageRight("crm-payments", "edit"), async (req, res) =>
         Amount: paidRaw,
         ReceivedDate: b.PaidDate || null,
         PaymentMode: b.PaymentMode || null,
+        BankName: b.BankName || null,
         TransactionRef: b.TransactionRef || null,
         DepositBankId: b.DepositBankId != null ? b.DepositBankId : null,
         DepositBankName: b.DepositBankName || null,
@@ -1523,6 +1538,7 @@ router.post("/booking/:bookingId/on-account", requirePageRight("crm-payments", "
         RPDocDate: oaDocDate,
         RPMode: b.PaymentMode || null,
         RPAmount: amount,
+        RPBankName: bankNameForMode(b.PaymentMode, b.BankName),
         RPTransactionID: b.TransactionRef || null,
         RPRemarks: b.Notes || `CRM on-account deposit — ${booking.BookingNo}`,
         // No deposit bank from CRM — Accounts sets it on the Received
