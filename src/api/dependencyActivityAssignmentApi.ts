@@ -111,12 +111,27 @@ export const fetchCheckpointUpdatePhoto = async (id: number): Promise<string> =>
   return URL.createObjectURL(await res.blob());
 };
 
+// A per-assignment approval level — same shape as Approval Setup's own
+// ApprovalLevel (src/pages/admin/ApprovalSetup.tsx), just scoped to this one
+// activity assignment instead of a module-wide workflow. "all" levels are
+// sequential steps (each must approve in turn); a level with mode "any"
+// lets any ONE of its userIds approve to clear that step — the "one by one
+// then either" case is a run of "all" levels ending in one "any" level.
+export interface ApprovalLevel {
+  id: string;
+  label: string;
+  userIds: number[];
+  mode: "all" | "any";
+}
+
 export interface RungAssignmentDetail {
   rungId: number;
   activityId: number;
   candidateItems: CandidateItem[];
   assignment: {
     engineerIds: number[];
+    qcUserIds: number[];
+    approvalLevels: ApprovalLevel[];
     startDate: string | null;
     days: number | null;
     endDate: string | null;
@@ -133,6 +148,8 @@ export interface RungAssignmentDetail {
 
 export interface RungAssignmentPayload {
   engineerIds: number[];
+  qcUserIds: number[];
+  approvalLevels: ApprovalLevel[];
   startDate: string | null;
   days: number | null;
   endDate: string | null;
@@ -196,10 +213,9 @@ export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 // bearing on the order rows can move through.
 export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; className: string }> = {
   PENDING: { label: "Pending", className: "bg-slate-500/10 text-slate-600 dark:text-slate-400" },
-  // Set automatically the moment an engineer is assigned (POST /:rungId) —
-  // waiting on that engineer's own confirmation in the Approval Inbox, not
-  // something anyone picks from this dropdown by hand. Moves to IN_PROGRESS
-  // by itself once every assigned engineer has confirmed.
+  // No longer set automatically — assigning an engineer now moves straight
+  // to IN_PROGRESS. Kept in the enum/badge map for old records and manual
+  // overrides only.
   ALLOCATED: { label: "Allocated", className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
   IN_PROGRESS: { label: "In Progress", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
   HOLD: { label: "Hold", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
@@ -209,22 +225,27 @@ export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; c
   COMPLETED: { label: "Completed", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
 };
 
-// A rung only moves forward: once it has left Pending/Allocated (i.e. it's
-// been approved into In Progress, or gone on to any later state) it can
-// never go back to either of them, and while In Progress the only manual
-// moves are Hold or Cancelled. Mirrored server-side in
+// The status dropdown is now just an In Progress <-> Hold toggle — nothing
+// else is manually chosen from here. Completed is set automatically by
+// dragging the progress bar to 100% (see ActivityDetailModal's
+// ProgressDragBar); Approved/Rework come only from a QC decision; Rework's
+// one way out is manually re-opening it to In Progress to redo the work.
+// A single-element result means "read-only badge, no dropdown" — see
+// AssignmentStatusSelect. Mirrored server-side in
 // dependencyActivityAssignment.js's status route — keep the two in sync.
 export function allowedNextStatuses(current: AssignmentStatus): AssignmentStatus[] {
-  if (current === "PENDING" || current === "ALLOCATED") return [...ASSIGNMENT_STATUSES];
-  if (current === "IN_PROGRESS") return ["IN_PROGRESS", "HOLD", "CANCELLED"];
-  if (current === "HOLD") return ["HOLD", "IN_PROGRESS", "CANCELLED"];
-  return ASSIGNMENT_STATUSES.filter((s) => s !== "PENDING" && s !== "ALLOCATED");
+  if (current === "REWORK") return ["REWORK", "IN_PROGRESS"];
+  if (current === "PENDING" || current === "ALLOCATED" || current === "IN_PROGRESS" || current === "HOLD") {
+    return ["IN_PROGRESS", "HOLD"];
+  }
+  return [current];
 }
 
 export interface ReportedAssignment {
   assignmentId: number;
   rungId: number;
   engineerNames: string | null;
+  qcNames: string | null;
   startDate: string | null;
   days: number | null;
   endDate: string | null;
@@ -233,6 +254,7 @@ export interface ReportedAssignment {
   description: string | null;
   remarks: string | null;
   status: AssignmentStatus;
+  progressPercent: number;
   updatedAt: string;
   sequenceNo: number;
   activityId: number;
@@ -283,19 +305,20 @@ export const updateAssignmentStatus = async (
   return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
 };
 
-// Status and Remarks share one PATCH endpoint but are independent — the
-// Activity Detail modal's status dropdown and its Remarks textarea (saved
-// on blur) each call this with only the field that actually changed.
+// Status, Remarks and ProgressPercent share one PATCH endpoint but are
+// independent — the Activity Detail modal's status dropdown, its Remarks
+// textarea (saved on blur), and its draggable progress bar (saved on
+// drag-release) each call this with only the field that actually changed.
 export const updateAssignmentDetail = async (
   rungId: number,
-  patch: { status?: AssignmentStatus; remarks?: string },
-): Promise<{ success: boolean; status: AssignmentStatus | null; remarks: string | null }> => {
+  patch: { status?: AssignmentStatus; remarks?: string; progressPercent?: number },
+): Promise<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/status`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  return handleResponse<{ success: boolean; status: AssignmentStatus | null; remarks: string | null }>(res);
+  return handleResponse<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }>(res);
 };
 
 // ── Blueprint Annotation Workflow ───────────────────────────────────────────
@@ -437,8 +460,11 @@ export interface QcHistoryEntry {
   checks: { fieldName: string; passed: boolean; note: string | null }[];
 }
 
-export const getInProgressAssignments = async (): Promise<ReportedAssignment[]> => {
-  const res = await fetchWithAuth(`${BASE}?status=IN_PROGRESS`);
+// Quality Check now inspects COMPLETED activities (work dragged to 100%),
+// not IN_PROGRESS ones — an activity only reaches QC once it's actually
+// done, not while it's still being worked on.
+export const getCompletedAssignments = async (): Promise<ReportedAssignment[]> => {
+  const res = await fetchWithAuth(`${BASE}?status=COMPLETED`);
   return handleResponse<ReportedAssignment[]>(res);
 };
 

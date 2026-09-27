@@ -29,6 +29,7 @@ import {
   ListChecks,
   Check,
   Timer,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -45,6 +46,7 @@ import {
   type ActivityPhotoMeta,
   type ReportedAssignment,
   type AssignmentCheckpoint,
+  type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 import {
@@ -726,6 +728,8 @@ function CheckpointsTab({ rungId }: { rungId: number }) {
       const a = detail.assignment;
       await saveRungAssignment(rungId, {
         engineerIds: a.engineerIds,
+        qcUserIds: a.qcUserIds,
+        approvalLevels: a.approvalLevels,
         startDate: a.startDate,
         days: a.days,
         endDate: a.endDate,
@@ -898,6 +902,106 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
   );
 }
 
+// ── Progress bar ─────────────────────────────────────────────────────────
+// Docked below the tabbed content, inside the modal — a draggable
+// percent-done bar. Saved on drag-release/click only, not per pixel of
+// movement, same "commit at the end" shape as everything else in this
+// modal that patches the server. The one place it DOES touch Status:
+// dragging all the way to 100% bundles status: "COMPLETED" into the same
+// request (the backend requires exactly this pairing — see
+// dependencyActivityAssignment.js's PATCH /:rungId/status), which is what
+// sends the activity to Quality Check. Dragging back below 100% undoes
+// that, reverting to In Progress.
+function ProgressDragBar({ row }: { row: ReportedAssignment }) {
+  const queryClient = useQueryClient();
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [percent, setPercent] = useState(row.progressPercent ?? 0);
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    if (!dragging) setPercent(row.progressPercent ?? 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.rungId, row.progressPercent]);
+
+  const mutation = useMutation({
+    mutationFn: (patch: { progressPercent: number; status?: AssignmentStatus }) =>
+      updateAssignmentDetail(row.rungId, patch),
+    onSuccess: (_res, patch) => {
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      queryClient.invalidateQueries({ queryKey: ["qc-queue"] });
+      if (patch.status === "COMPLETED") toast.success("Activity completed — sent to Quality Check.");
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Failed to save progress.");
+      setPercent(row.progressPercent ?? 0);
+    },
+  });
+
+  const percentFromClientX = (clientX: number): number => {
+    const el = trackRef.current;
+    if (!el) return percent;
+    const rect = el.getBoundingClientRect();
+    const ratio = (clientX - rect.left) / rect.width;
+    return Math.max(0, Math.min(100, Math.round(ratio * 100)));
+  };
+
+  const commit = (next: number) => {
+    if (next === (row.progressPercent ?? 0)) return;
+    const patch: { progressPercent: number; status?: AssignmentStatus } = { progressPercent: next };
+    if (next === 100 && row.status !== "COMPLETED") patch.status = "COMPLETED";
+    else if (next < 100 && row.status === "COMPLETED") patch.status = "IN_PROGRESS";
+    mutation.mutate(patch);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
+    setPercent(percentFromClientX(e.clientX));
+  };
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging) return;
+    setPercent(percentFromClientX(e.clientX));
+  };
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging) return;
+    setDragging(false);
+    const next = percentFromClientX(e.clientX);
+    setPercent(next);
+    commit(next);
+  };
+
+  return (
+    <div className="px-4 py-3 border-t border-border shrink-0 bg-muted/10">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+          <TrendingUp size={11} /> Work Done
+        </span>
+        <span className="text-xs font-heading font-bold text-foreground tabular-nums flex items-center gap-1">
+          {mutation.isPending && <Loader2 size={10} className="animate-spin text-muted-foreground" />}
+          {percent}%
+        </span>
+      </div>
+      <div
+        ref={trackRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        className="relative h-3 rounded-full bg-muted cursor-pointer touch-none select-none"
+      >
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500"
+          style={{ width: `${percent}%`, transition: dragging ? "none" : "width 150ms ease-out" }}
+        />
+        <div
+          className="absolute top-1/2 w-4 h-4 rounded-full bg-white border-2 border-cyan-500 shadow-md -translate-y-1/2 -translate-x-1/2"
+          style={{ left: `${percent}%`, transition: dragging ? "none" : "left 150ms ease-out" }}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ── Modal shell ──────────────────────────────────────────────────────────
 
 const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
@@ -985,6 +1089,8 @@ export default function ActivityDetailModal({
               {tab === "attendance" && <AttendanceTab rungId={row.rungId} />}
               {tab === "checkpoints" && <CheckpointsTab rungId={row.rungId} />}
             </div>
+
+            <ProgressDragBar row={row} />
           </div>
         </CivilWorkDprShell>
       </div>

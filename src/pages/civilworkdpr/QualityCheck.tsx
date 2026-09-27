@@ -7,7 +7,7 @@ import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
-  getInProgressAssignments,
+  getCompletedAssignments,
   getRungAssignment,
   getQcHistory,
   getActivityPhotos,
@@ -251,7 +251,7 @@ export default function QualityCheck() {
 
   const { data: rows = [], isLoading } = useQuery({
     queryKey: ["qc-queue"],
-    queryFn: getInProgressAssignments,
+    queryFn: getCompletedAssignments,
     enabled: rights.canView,
   });
 
@@ -268,12 +268,12 @@ export default function QualityCheck() {
       <Breadcrumbs items={["Dashboard", "Civil Work DPR", "Quality Check"]} />
       <CivilWorkDprShell
         title="Quality Check"
-        subtitle="Every activity that is In Progress, ready for inspection"
+        subtitle="Every activity dragged to 100% complete, ready for inspection"
         icon={ShieldCheck}
       >
         <div className="rounded-2xl border border-border bg-card/70 backdrop-blur-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-border/60 flex flex-wrap items-center gap-3">
-            <h3 className="text-sm font-heading font-semibold text-foreground">In Progress Activities</h3>
+            <h3 className="text-sm font-heading font-semibold text-foreground">Completed Activities</h3>
             <span className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rows.length}</span>
             <div className="relative ml-auto w-full sm:w-72">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -304,7 +304,7 @@ export default function QualityCheck() {
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
-                      {rows.length === 0 ? "No activities are In Progress right now." : "No activities match your search."}
+                      {rows.length === 0 ? "No activities are Completed right now." : "No activities match your search."}
                     </td>
                   </tr>
                 ) : (

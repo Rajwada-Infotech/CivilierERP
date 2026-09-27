@@ -52,6 +52,7 @@ router.get(
         daa.Description AS description,
         daa.Remarks AS remarks,
         daa.Status AS status,
+        daa.ProgressPercent AS progressPercent,
         daa.UpdatedAt AS updatedAt,
         dma.SequenceNo AS sequenceNo,
         dma.ActivityId AS activityId, am.activity_name AS activityName,
@@ -71,6 +72,12 @@ router.get(
           JOIN dbo.users u ON u.id = dae.EngineerId
           WHERE dae.AssignmentId = daa.Id
         ) AS engineerNames,
+        (
+          SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+          FROM dbo.DependencyActivityQcAssignee daq
+          JOIN dbo.users u ON u.id = daq.QcUserId
+          WHERE daq.AssignmentId = daa.Id
+        ) AS qcNames,
         (
           SELECT img.M_Name AS name, dammat.Quantity AS quantity, img.M_UOM AS uom
           FROM dbo.DependencyActivityMaterial dammat
@@ -102,10 +109,11 @@ router.get(
 });
 
 // ── Quality Check ────────────────────────────────────────────────────────────
-// QC inspects an In Progress activity, signs off its checklist and either
-// Approves it or sends it back for Rework. Goes through its own endpoint
-// (not the generic status PATCH) because In Progress may only move to Hold/
-// Cancelled by hand; QC's Approved/Rework is the one sanctioned way out.
+// QC inspects a Completed activity (work dragged to 100% in Reporting),
+// signs off its checklist and either Approves it or sends it back for
+// Rework. Goes through its own endpoint (not the generic status PATCH)
+// because Completed can't otherwise move anywhere by hand; QC's
+// Approved/Rework is the one sanctioned way out.
 
 // GET /qc/:rungId/history: every past QC decision on this activity.
 router.get(
@@ -174,8 +182,8 @@ router.post(
       );
       if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
       const assignmentId = a.recordset[0].Id;
-      if (a.recordset[0].Status !== "IN_PROGRESS") {
-        return res.status(400).json({ error: "Only an In Progress activity can be quality-checked." });
+      if (a.recordset[0].Status !== "COMPLETED") {
+        return res.status(400).json({ error: "Only a Completed activity (work dragged to 100%) can be quality-checked." });
       }
 
       const cp = await pool.request().input("aid", sql.Int, assignmentId).query(
@@ -245,10 +253,20 @@ router.post(
 
 // PATCH /:rungId/status — move a rung between report statuses, and/or
 // update its Remarks (the Activity Detail modal's Remarks textarea saves
-// on blur independently of the status dropdown, so both fields are
-// optional here — at least one must be present). No order/workflow is
-// enforced between statuses (any -> any) — that's a policy call left for
-// later, not something the schema or this endpoint dictates.
+// on blur independently of the status dropdown) and/or its ProgressPercent
+// (the modal's draggable progress bar, saved on drag-release) — all three
+// are independent, so at least one must be present but none are required
+// together.
+//
+// Manual status moves are just In Progress <-> Hold (mirrors
+// allowedNextStatuses() in the frontend's dependencyActivityAssignmentApi.ts
+// — keep the two in sync). Completed is reachable only bundled with
+// progressPercent === 100 in this same request (the drag bar sends both
+// together) — never chosen on its own. Rework's one way out is manually
+// re-opening to In Progress; Completed can likewise be dragged back below
+// 100%, which reverts it to In Progress. Approved/Cancelled are no longer
+// settable here at all — Approved/Rework come only from the QC decision
+// route above.
 router.patch(
   "/:rungId/status",
   authMiddleware,
@@ -259,8 +277,9 @@ router.patch(
 
   const hasStatus = req.body?.status !== undefined;
   const hasRemarks = req.body?.remarks !== undefined;
-  if (!hasStatus && !hasRemarks) {
-    return res.status(400).json({ error: "status or remarks is required" });
+  const hasProgress = req.body?.progressPercent !== undefined;
+  if (!hasStatus && !hasRemarks && !hasProgress) {
+    return res.status(400).json({ error: "status, remarks or progressPercent is required" });
   }
 
   const status = hasStatus ? String(req.body.status).toUpperCase() : null;
@@ -268,39 +287,51 @@ router.patch(
     return res.status(400).json({ error: `status must be one of: ${[...STATUS_VALUES].join(", ")}` });
   }
   const remarks = hasRemarks ? String(req.body.remarks || "").slice(0, 1000) : null;
+  const progressPercent = hasProgress ? parseInt(req.body.progressPercent, 10) : null;
+  if (hasProgress && (!Number.isFinite(progressPercent) || progressPercent < 0 || progressPercent > 100)) {
+    return res.status(400).json({ error: "progressPercent must be an integer between 0 and 100" });
+  }
 
   const actor = req.user?.email || req.user?.name || "system";
 
   try {
     const pool = await getPool();
 
-    // Statuses only move forward — mirrors allowedNextStatuses() in the
-    // frontend's dependencyActivityAssignmentApi.ts. Once past Pending/
-    // Allocated a rung can't go back to either, and while In Progress the
-    // only manual moves are Hold or Cancelled.
+    const MANUAL_STATUSES = new Set(["IN_PROGRESS", "HOLD"]);
     if (hasStatus) {
       const cur = await pool.request().input("rungId", sql.Int, rungId).query(
         "SELECT Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId",
       );
       const current = cur.recordset[0]?.Status;
       if (current && current !== status) {
-        const early = current === "PENDING" || current === "ALLOCATED";
-        if (!early && (status === "PENDING" || status === "ALLOCATED")) {
-          return res.status(400).json({ error: "An activity that has moved on can't go back to Pending or Allocated." });
-        }
-        if (current === "IN_PROGRESS" && status !== "HOLD" && status !== "CANCELLED") {
-          return res.status(400).json({ error: "An In Progress activity can only be put on Hold or Cancelled." });
+        if (status === "COMPLETED") {
+          if (!(hasProgress && progressPercent === 100)) {
+            return res.status(400).json({ error: "Completed is set automatically when work reaches 100%." });
+          }
+          if (!MANUAL_STATUSES.has(current)) {
+            return res.status(400).json({ error: "Only an In Progress or Hold activity can be completed." });
+          }
+        } else if (current === "REWORK" && status === "IN_PROGRESS") {
+          // Allowed — manually re-opening a reworked activity to redo it.
+        } else if (current === "COMPLETED" && status === "IN_PROGRESS") {
+          // Allowed — the progress bar dragged back below 100%, undoing the auto-complete.
+        } else if (!MANUAL_STATUSES.has(status)) {
+          return res.status(400).json({ error: "Status can only be manually set to In Progress or Hold." });
+        } else if (!MANUAL_STATUSES.has(current) && current !== "PENDING" && current !== "ALLOCATED") {
+          return res.status(400).json({ error: "This activity's status can no longer be changed manually." });
         }
       }
     }
     const setClauses = [];
     if (hasStatus) setClauses.push("Status = @status");
     if (hasRemarks) setClauses.push("Remarks = @remarks");
+    if (hasProgress) setClauses.push("ProgressPercent = @progressPercent");
     const request = pool.request()
       .input("rungId", sql.Int, rungId)
       .input("updatedBy", sql.NVarChar(200), actor);
     if (hasStatus) request.input("status", sql.NVarChar(20), status);
     if (hasRemarks) request.input("remarks", sql.NVarChar(1000), remarks);
+    if (hasProgress) request.input("progressPercent", sql.Int, progressPercent);
 
     const result = await request.query(`
       UPDATE dbo.DependencyActivityAssignment
@@ -310,70 +341,22 @@ router.patch(
     if (!result.rowsAffected[0]) {
       return res.status(404).json({ error: "No assignment found for this rung" });
     }
-    res.json({ success: true, status, remarks });
+    res.json({ success: true, status, remarks, progressPercent });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT /engineer-approval/:id/confirm — one assigned engineer confirming
-// their own task. :id is dbo.DependencyActivityEngineer.Id (one row per
-// engineer per assignment), not the assignment or rung id — each engineer
-// on a multi-engineer rung confirms independently. Deliberately NOT gated
-// through requirePageRight/transition() (approvalService.js) — this isn't a
-// document a manager approves by role or Approval Setup level, it's one
-// specific person confirming a task literally assigned to them, so the only
-// check that makes sense is "is the caller that exact person". Once every
-// engineer on the assignment has confirmed, the parent Status moves
-// ALLOCATED -> IN_PROGRESS automatically.
-router.put("/engineer-approval/:id/confirm", authMiddleware, async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
-  const userId = req.user?.userId ?? req.user?.id ?? null;
-  if (userId == null) return res.status(401).json({ error: "Invalid token - missing user id" });
-
-  try {
-    const pool = await getPool();
-    const row = (await pool.request().input("id", sql.Int, id).query(`
-      SELECT dae.Id, dae.AssignmentId, dae.EngineerId, dae.Approved
-      FROM dbo.DependencyActivityEngineer dae
-      WHERE dae.Id = @id
-    `)).recordset[0];
-    if (!row) return res.status(404).json({ error: "Assignment not found" });
-    if (Number(row.EngineerId) !== Number(userId)) {
-      return res.status(403).json({ error: "This activity isn't assigned to you." });
-    }
-
-    if (!row.Approved) {
-      await pool.request()
-        .input("id", sql.Int, id)
-        .query(`UPDATE dbo.DependencyActivityEngineer SET Approved = 1, ApprovedAt = SYSDATETIME() WHERE Id = @id`);
-    }
-
-    const counts = (await pool.request().input("assignmentId", sql.Int, row.AssignmentId).query(`
-      SELECT COUNT(*) AS total, SUM(CASE WHEN Approved = 1 THEN 1 ELSE 0 END) AS approved
-      FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @assignmentId
-    `)).recordset[0];
-    const allApproved = Number(counts.total) > 0 && Number(counts.approved) === Number(counts.total);
-
-    let newStatus = null;
-    if (allApproved) {
-      const updated = await pool.request().input("assignmentId", sql.Int, row.AssignmentId).query(`
-        UPDATE dbo.DependencyActivityAssignment
-        SET Status = 'IN_PROGRESS'
-        OUTPUT INSERTED.Status
-        WHERE Id = @assignmentId AND Status = 'ALLOCATED'
-      `);
-      newStatus = updated.recordset[0]?.Status ?? null;
-    }
-
-    res.json({ success: true, allApproved, newStatus });
-  } catch (err) {
-    console.error("[dependency-activity-assignment] PUT /engineer-approval/:id/confirm error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+// NOTE: this used to be PUT /engineer-approval/:id/confirm — each assigned
+// engineer individually confirming their own task, surfaced as an Approval
+// Inbox entry per engineer, gating ALLOCATED -> IN_PROGRESS. Removed:
+// assigning engineers now starts work immediately (see the auto status
+// transition in POST /:rungId above), and approval of the finished work is
+// instead scoped per-assignment via ApprovalLevelsJson (set in that same
+// route) — enforced wherever the actual approve action lives (Work
+// Reporting), not here. dbo.DependencyActivityEngineer's Approved/ApprovedAt
+// columns are left in place but no longer written to by anything.
 
 // GET /engineers — active users, for the "Engineer Assign" picker on Work
 // Reporting's per-rung assignment popup. Deliberately NOT gated behind
@@ -458,14 +441,16 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         Id AS assignmentId, StartDate AS startDate, Days AS days, EndDate AS endDate,
         LabourSource AS labourSource, MaterialSource AS materialSource,
         LabourContractorId AS labourContractorId, MaterialContractorId AS materialContractorId,
-        Description AS description, Remarks AS remarks
+        Description AS description, Remarks AS remarks, ApprovalLevelsJson AS approvalLevelsJson
       FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId
     `);
     const assignment = assignRes.recordset[0] || null;
 
     let materials = [];
     let engineerIds = [];
+    let qcUserIds = [];
     let checkpoints = [];
+    let approvalLevels = [];
     if (assignment) {
       const matRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
         SELECT ItemId AS itemId, Quantity AS quantity
@@ -477,6 +462,17 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         SELECT EngineerId AS engineerId FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @assignmentId
       `);
       engineerIds = engRes.recordset.map((r) => r.engineerId);
+
+      const qcRes = await pool.request().input("assignmentId", sql.Int, assignment.assignmentId).query(`
+        SELECT QcUserId AS qcUserId FROM dbo.DependencyActivityQcAssignee WHERE AssignmentId = @assignmentId
+      `);
+      qcUserIds = qcRes.recordset.map((r) => r.qcUserId);
+
+      try {
+        approvalLevels = assignment.approvalLevelsJson ? JSON.parse(assignment.approvalLevelsJson) : [];
+      } catch {
+        approvalLevels = [];
+      }
 
       // Auto-seed this assignment's checklist from the activity's configured
       // template (Activity Master, dbo.ActivityCheckpointTemplate, migration
@@ -529,6 +525,8 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
       assignment: assignment
         ? {
             engineerIds,
+            qcUserIds,
+            approvalLevels,
             startDate: assignment.startDate,
             days: assignment.days,
             endDate: assignment.endDate,
@@ -559,17 +557,38 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
 
   const {
-    engineerIds, startDate, days, endDate, labourSource, materialSource,
+    engineerIds, qcUserIds, approvalLevels, startDate, days, endDate, labourSource, materialSource,
     labourContractorId, materialContractorId, description, remarks, materials, checkpoints,
   } = req.body;
 
   if (engineerIds != null && !Array.isArray(engineerIds)) {
     return res.status(400).json({ error: "engineerIds must be an array" });
   }
+  if (qcUserIds != null && !Array.isArray(qcUserIds)) {
+    return res.status(400).json({ error: "qcUserIds must be an array" });
+  }
   if (!Array.isArray(materials)) return res.status(400).json({ error: "materials must be an array" });
   if (checkpoints != null && !Array.isArray(checkpoints)) {
     return res.status(400).json({ error: "checkpoints must be an array" });
   }
+  // Each level: { id, label, userIds: number[], mode: "all" | "any" }. Kept
+  // loose (not schema-validated field by field) — same trust level the
+  // client-supplied checkpoints/materials arrays already get on this route.
+  // Always sent by the modal (defaults to []), same as materials/checkpoints
+  // — not a "send undefined to preserve" field.
+  if (approvalLevels != null && !Array.isArray(approvalLevels)) {
+    return res.status(400).json({ error: "approvalLevels must be an array" });
+  }
+  const approvalLevelsJson = JSON.stringify(
+    (approvalLevels || [])
+      .map((lvl, i) => ({
+        id: lvl?.id || `level-${i + 1}`,
+        label: String(lvl?.label || `Level ${i + 1}`).slice(0, 200),
+        userIds: Array.isArray(lvl?.userIds) ? lvl.userIds.map((v) => parseInt(v, 10)).filter(Number.isFinite) : [],
+        mode: lvl?.mode === "any" ? "any" : "all",
+      }))
+      .filter((lvl) => lvl.userIds.length > 0),
+  );
 
   // A checkpoint with a MinWaitDays snapshot can't honestly be checked off
   // until that many days have passed since the activity's own start date
@@ -624,7 +643,8 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         .input("labourContractorId", sql.Int, Number.isFinite(labourContractorId) ? labourContractorId : null)
         .input("materialContractorId", sql.Int, Number.isFinite(materialContractorId) ? materialContractorId : null)
         .input("description", sql.NVarChar(500), description || null)
-        .input("remarks", sql.NVarChar(1000), remarks || null);
+        .input("remarks", sql.NVarChar(1000), remarks || null)
+        .input("approvalLevelsJson", sql.NVarChar(sql.MAX), approvalLevelsJson);
 
     let assignmentId;
     if (existing.recordset.length) {
@@ -637,7 +657,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
           SET StartDate = @startDate, Days = @days, EndDate = @endDate,
               LabourSource = @labourSource, MaterialSource = @materialSource,
               LabourContractorId = @labourContractorId, MaterialContractorId = @materialContractorId,
-              Description = @description, Remarks = @remarks,
+              Description = @description, Remarks = @remarks, ApprovalLevelsJson = @approvalLevelsJson,
               UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
           WHERE Id = @id
         `);
@@ -648,10 +668,10 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         .query(`
           INSERT INTO dbo.DependencyActivityAssignment
             (DependencyMasterActivityId, StartDate, Days, EndDate, LabourSource, MaterialSource,
-             LabourContractorId, MaterialContractorId, Description, Remarks, CreatedBy)
+             LabourContractorId, MaterialContractorId, Description, Remarks, ApprovalLevelsJson, CreatedBy)
           OUTPUT INSERTED.Id AS id
           VALUES (@rungId, @startDate, @days, @endDate, @labourSource, @materialSource,
-                  @labourContractorId, @materialContractorId, @description, @remarks, @createdBy)
+                  @labourContractorId, @materialContractorId, @description, @remarks, @approvalLevelsJson, @createdBy)
         `);
       assignmentId = inserted.recordset[0].id;
     }
@@ -702,18 +722,41 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
         `);
     }
 
+    // QC assignees — who will perform the quality check on this activity.
+    // Simple delete-then-reinsert (unlike engineers above): there's no
+    // per-QC "confirmed" flag to preserve, just a plain list.
+    const keptQcUserIds = new Set(
+      (qcUserIds || []).map((v) => parseInt(v, 10)).filter(Number.isFinite),
+    );
+    await pool.request().input("assignmentId", sql.Int, assignmentId)
+      .query(`DELETE FROM dbo.DependencyActivityQcAssignee WHERE AssignmentId = @assignmentId`);
+    for (const qcUserId of keptQcUserIds) {
+      await pool.request()
+        .input("assignmentId", sql.Int, assignmentId)
+        .input("qcUserId", sql.Int, qcUserId)
+        .query(`
+          INSERT INTO dbo.DependencyActivityQcAssignee (AssignmentId, QcUserId)
+          VALUES (@assignmentId, @qcUserId)
+        `);
+    }
+
     // Auto status transition, driven purely by whether anyone's assigned:
-    // PENDING (nobody assigned) <-> ALLOCATED (assigned, awaiting each
-    // engineer's own confirmation — see PATCH /engineer-approval/:id/confirm
-    // below, which moves ALLOCATED -> IN_PROGRESS once everyone's confirmed).
-    // Only touches these two statuses — once work is actually IN_PROGRESS or
-    // further along, adding/removing an engineer here never regresses it.
+    // PENDING (nobody assigned) -> IN_PROGRESS (assigned). Used to detour
+    // through an ALLOCATED "awaiting each engineer's own confirmation" step
+    // (PUT /engineer-approval/:id/confirm), surfaced as an Approval Inbox
+    // entry per engineer — removed in favour of the ApprovalLevelsJson
+    // config above: assigning engineers now starts the work immediately,
+    // and who gets to APPROVE the finished work is whoever this assignment
+    // names (plus super_admin), enforced where that approval action itself
+    // lives (Work Reporting), not here. Only touches PENDING/IN_PROGRESS —
+    // once work has moved further along (Hold/Approved/Rework/Completed),
+    // adding/removing an engineer here never regresses it.
     const currentStatusRow = (await pool.request().input("id", sql.Int, assignmentId)
       .query(`SELECT Status FROM dbo.DependencyActivityAssignment WHERE Id = @id`)).recordset[0];
     const currentStatus = currentStatusRow?.Status;
     let nextStatus = null;
-    if (keptEngineerIds.size > 0 && currentStatus === "PENDING") nextStatus = "ALLOCATED";
-    else if (keptEngineerIds.size === 0 && currentStatus === "ALLOCATED") nextStatus = "PENDING";
+    if (keptEngineerIds.size > 0 && currentStatus === "PENDING") nextStatus = "IN_PROGRESS";
+    else if (keptEngineerIds.size === 0 && currentStatus === "IN_PROGRESS") nextStatus = "PENDING";
     if (nextStatus) {
       await pool.request().input("id", sql.Int, assignmentId).input("status", sql.NVarChar(20), nextStatus)
         .query(`UPDATE dbo.DependencyActivityAssignment SET Status = @status WHERE Id = @id`);
