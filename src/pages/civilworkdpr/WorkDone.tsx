@@ -557,6 +557,11 @@ export default function WorkDone() {
                                     rungs.map((rung) => {
                                       const assignment = rung.rungId != null ? allAssignmentByRungId.get(rung.rungId) : undefined;
                                       const done = assignment?.status === "COMPLETED";
+                                      // Every rung gets a real stub assignment row (Status='PENDING') the
+                                      // moment it's created (see dependencyMaster.js) — a never-allocated
+                                      // rung genuinely IS pending, matching Reporting's own Pending count.
+                                      // The "PENDING" fallback below only covers a rung from before that
+                                      // stub-row backfill (migration 487) that somehow still has none.
                                       const meta = ASSIGNMENT_STATUS_META[assignment?.status ?? "PENDING"];
                                       return (
                                         <button
