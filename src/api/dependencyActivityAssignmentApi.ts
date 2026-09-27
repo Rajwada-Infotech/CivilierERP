@@ -445,9 +445,11 @@ export const deleteActivityPhoto = async (rungId: number, photoId: number): Prom
 };
 
 // ── Quality Check ────────────────────────────────────────────────────────────
+export type QcRating = "POOR" | "GOOD" | "EXCELLENT";
+
 export interface QcCheckInput {
   checkpointId: number;
-  passed: boolean;
+  rating: QcRating;
   note?: string;
 }
 
@@ -457,7 +459,7 @@ export interface QcHistoryEntry {
   remarks: string | null;
   qcAt: string;
   qcBy: string | null;
-  checks: { fieldName: string; passed: boolean; note: string | null }[];
+  checks: { fieldName: string; passed: boolean; rating: QcRating | null; note: string | null }[];
 }
 
 // Quality Check now inspects COMPLETED activities (work dragged to 100%),

@@ -138,7 +138,7 @@ router.get(
       let checks = [];
       if (ids.length) {
         const c = await pool.request().query(`
-          SELECT QcId AS qcId, FieldName AS fieldName, Passed AS passed, Note AS note
+          SELECT QcId AS qcId, FieldName AS fieldName, Passed AS passed, Rating AS rating, Note AS note
           FROM dbo.DependencyActivityQcCheck WHERE QcId IN (${ids.join(",")}) ORDER BY Id
         `);
         checks = c.recordset.map((r) => ({ ...r, passed: !!r.passed }));
@@ -151,11 +151,13 @@ router.get(
   },
 );
 
-// POST /qc/:rungId/decision. Body { decision: 'APPROVED'|'REWORK',
-// remarks, checks: [{ checkpointId, passed, note }] }. Approving requires
-// every checkpoint on the activity to be signed off as passed; sending back
-// for rework requires a remark, and un-ticks the checkpoints QC failed so
-// the engineer has to redo them.
+// POST /qc/:rungId/decision. Body { decision: 'APPROVED'|'REWORK', remarks,
+// checks: [{ checkpointId, rating: 'POOR'|'GOOD'|'EXCELLENT', note }] }.
+// Each checkpoint is rated rather than a plain pass/fail toggle — Poor
+// always fails it, Good/Excellent always pass it (derived server-side, not
+// trusted from the client). Approving requires every checkpoint rated Good
+// or Excellent; sending back for rework requires a remark, and un-ticks
+// whichever checkpoints came back Poor so the engineer has to redo them.
 router.post(
   "/qc/:rungId/decision",
   authMiddleware,
@@ -190,18 +192,22 @@ router.post(
         "SELECT Id, FieldName FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @aid ORDER BY SortOrder, Id",
       );
       const byId = new Map(cp.recordset.map((c) => [Number(c.Id), c]));
+      const RATINGS = new Set(["POOR", "GOOD", "EXCELLENT"]);
       const verdict = new Map();
       for (const c of checks) {
         const id = Number(c.checkpointId);
-        if (byId.has(id)) verdict.set(id, { passed: !!c.passed, note: c.note ? String(c.note).slice(0, 500) : null });
+        if (!byId.has(id)) continue;
+        const rating = RATINGS.has(String(c.rating || "").toUpperCase()) ? String(c.rating).toUpperCase() : null;
+        // Passed is derived from the rating, not trusted from the client —
+        // Poor always fails a checkpoint, Good/Excellent always pass it.
+        const passed = rating ? rating !== "POOR" : !!c.passed;
+        verdict.set(id, { rating, passed, note: c.note ? String(c.note).slice(0, 500) : null });
       }
-      if (decision === "APPROVED") {
-        const missing = cp.recordset.filter((c) => !verdict.get(Number(c.Id))?.passed);
-        if (missing.length) {
-          return res.status(400).json({
-            error: `Every checkpoint must pass before approval. Still open: ${missing.map((m) => m.FieldName).join(", ")}.`,
-          });
-        }
+      const missing = cp.recordset.filter((c) => !verdict.get(Number(c.Id))?.passed);
+      if (decision === "APPROVED" && missing.length) {
+        return res.status(400).json({
+          error: `Every checkpoint must be rated Good or Excellent before approval. Still open: ${missing.map((m) => m.FieldName).join(", ")}.`,
+        });
       }
 
       await tx.begin();
@@ -223,9 +229,10 @@ router.post(
           .input("cpId", sql.Int, c.Id)
           .input("field", sql.NVarChar(200), c.FieldName)
           .input("passed", sql.Bit, v.passed ? 1 : 0)
+          .input("rating", sql.NVarChar(10), v.rating)
           .input("note", sql.NVarChar(500), v.note).query(`
-            INSERT INTO dbo.DependencyActivityQcCheck (QcId, AssignmentCheckpointId, FieldName, Passed, Note)
-            VALUES (@qcId, @cpId, @field, @passed, @note)
+            INSERT INTO dbo.DependencyActivityQcCheck (QcId, AssignmentCheckpointId, FieldName, Passed, Rating, Note)
+            VALUES (@qcId, @cpId, @field, @passed, @rating, @note)
           `);
         if (decision === "REWORK" && !v.passed) {
           await new sql.Request(tx).input("cpId", sql.Int, c.Id)
@@ -748,14 +755,18 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
     // config above: assigning engineers now starts the work immediately,
     // and who gets to APPROVE the finished work is whoever this assignment
     // names (plus super_admin), enforced where that approval action itself
-    // lives (Work Reporting), not here. Only touches PENDING/IN_PROGRESS —
-    // once work has moved further along (Hold/Approved/Rework/Completed),
-    // adding/removing an engineer here never regresses it.
+    // lives (Work Reporting), not here. Only touches PENDING/ALLOCATED/
+    // IN_PROGRESS — once work has moved further along (Hold/Approved/
+    // Rework/Completed), adding/removing an engineer here never regresses
+    // it. ALLOCATED counts as an equivalent starting point to PENDING here
+    // — it's the old pre-confirmation status this replaced, and rows saved
+    // under the old flow are still sitting at ALLOCATED (see migration 485
+    // for the one-time data backfill this mirrors going forward).
     const currentStatusRow = (await pool.request().input("id", sql.Int, assignmentId)
       .query(`SELECT Status FROM dbo.DependencyActivityAssignment WHERE Id = @id`)).recordset[0];
     const currentStatus = currentStatusRow?.Status;
     let nextStatus = null;
-    if (keptEngineerIds.size > 0 && currentStatus === "PENDING") nextStatus = "IN_PROGRESS";
+    if (keptEngineerIds.size > 0 && (currentStatus === "PENDING" || currentStatus === "ALLOCATED")) nextStatus = "IN_PROGRESS";
     else if (keptEngineerIds.size === 0 && currentStatus === "IN_PROGRESS") nextStatus = "PENDING";
     if (nextStatus) {
       await pool.request().input("id", sql.Int, assignmentId).input("status", sql.NVarChar(20), nextStatus)
