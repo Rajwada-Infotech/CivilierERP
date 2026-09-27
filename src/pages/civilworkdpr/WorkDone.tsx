@@ -11,7 +11,7 @@ import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/component
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
 import { getReportedAssignments, ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
-import { QcBadge } from "@/components/civilworkdpr/QcBadge";
+import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import {
   Hammer,
   Layers,
@@ -584,6 +584,7 @@ export default function WorkDone() {
                                             {meta.label}
                                           </span>
                                           <QcBadge qcStatus={assignment?.qcStatus} />
+                                          <AttemptBadge attemptNo={assignment?.attemptNo} />
                                         </button>
                                       );
                                     })
@@ -711,6 +712,7 @@ export default function WorkDone() {
                                     <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
                                       {rung.sequenceNo}. {rung.activityName}
                                       <QcBadge qcStatus={assignment?.qcStatus} />
+                                      <AttemptBadge attemptNo={assignment?.attemptNo} />
                                     </span>
                                   </td>
                                   {assignment ? (

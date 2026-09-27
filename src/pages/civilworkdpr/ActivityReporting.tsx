@@ -12,7 +12,7 @@ import {
   type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
-import { QcBadge } from "@/components/civilworkdpr/QcBadge";
+import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import {
   ClipboardList,
   UserRound,
@@ -269,6 +269,7 @@ export default function ActivityReporting() {
                                   <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
                                     {row.sequenceNo}. {row.activityName}
                                     <QcBadge qcStatus={row.qcStatus} />
+                                    <AttemptBadge attemptNo={row.attemptNo} />
                                   </span>
                                 </td>
                                 <td className="px-3 py-3">

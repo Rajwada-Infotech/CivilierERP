@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { ShieldCheck, Search, UserRound, CalendarDays, Package, Camera, Loader2, CheckCircle2, RotateCcw, MapPin, AlertTriangle } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
-import { QcBadge } from "@/components/civilworkdpr/QcBadge";
+import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -91,7 +91,7 @@ function InspectDialog({
         })),
       }),
     onSuccess: () => {
-      toast.success(decision === "APPROVED" ? "Activity approved." : "Sent back for rework.");
+      toast.success(decision === "APPROVED" ? "Activity approved." : "Sent back for rework as a new attempt.");
       qc.invalidateQueries({ queryKey: ["qc-queue"] });
       qc.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
       qc.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
@@ -356,6 +356,7 @@ export default function QualityCheck() {
                         <p className="font-medium text-foreground flex items-center gap-1.5">
                           {r.sequenceNo}. {r.activityName}
                           <QcBadge qcStatus={r.qcStatus} />
+                          <AttemptBadge attemptNo={r.attemptNo} />
                         </p>
                         <p className="text-[11px] text-muted-foreground">{r.alias}</p>
                       </td>
