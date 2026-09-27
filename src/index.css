@@ -667,28 +667,37 @@
 /* ── CRM dialog theme ──────────────────────────────────────────────────────
    The shared <DialogContent accent="crm"> gets the `.crm-dialog` class (see
    src/components/ui/dialog.tsx). Everything below is a descendant selector so
-   every CRM dialog picks up the dark + orange look — near-black surface,
-   #ff920f accent, thin borders — WITHOUT rewriting each dialog's markup.
-   Palette from the CRM design spec. ──────────────────────────────────────── */
+   every CRM dialog picks up the orange accent WITHOUT rewriting each dialog's
+   markup.
+
+   These rules used to hardcode a near-black surface (#0c0c10) and white text,
+   which made every CRM dialog render dark even when the app was on the Light
+   theme — the dialog looked like it belonged to a different product. This app
+   ships SIX themes (dark, light, midnight, root, glass, bw; see the
+   [data-theme] blocks above), so the surface, border and text now come from
+   the same tokens every other dialog uses and follow whichever theme is
+   active. Only the #ff920f accent — top rule, focus ring, checkbox tint — is
+   a fixed brand colour, because that is what actually identifies a CRM
+   dialog. It reads on light and dark grounds alike. ───────────────────────── */
 .crm-dialog {
     background:
-        linear-gradient(135deg, rgba(255, 146, 15, 0.035), transparent 35%),
-        #0c0c10;
-    border-color: #24242c;
+        linear-gradient(135deg, rgba(255, 146, 15, 0.05), transparent 35%),
+        hsl(var(--card));
+    border-color: hsl(var(--border));
     border-top: 3px solid #ff920f;
     box-shadow:
-        0 28px 80px rgba(0, 0, 0, 0.7),
-        0 0 0 1px rgba(255, 255, 255, 0.015);
+        0 24px 64px -12px rgb(0 0 0 / 0.28),
+        0 0 0 1px hsl(var(--border) / 0.4);
 }
 
 /* Form fields — restyled in place */
 .crm-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 .crm-dialog select,
 .crm-dialog textarea {
-    background: #0b0b0f;
-    border-color: #292932;
+    background: hsl(var(--background));
+    border-color: hsl(var(--input));
     border-radius: 6px;
-    color: #f7f7f8;
+    color: hsl(var(--foreground));
     transition:
         border-color 0.2s ease,
         box-shadow 0.2s ease,
@@ -697,29 +706,45 @@
 .crm-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):hover,
 .crm-dialog select:hover,
 .crm-dialog textarea:hover {
-    border-color: #40404a;
+    border-color: hsl(var(--muted-foreground) / 0.5);
 }
 .crm-dialog input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
 .crm-dialog select:focus,
 .crm-dialog textarea:focus {
-    background: #101014;
+    background: hsl(var(--background));
     border-color: #ff920f;
-    box-shadow: 0 0 0 3px rgba(255, 146, 15, 0.12);
+    box-shadow: 0 0 0 3px rgba(255, 146, 15, 0.18);
     outline: none;
 }
 .crm-dialog input::placeholder,
 .crm-dialog textarea::placeholder {
-    color: #5c5c66;
+    color: hsl(var(--muted-foreground));
 }
 .crm-dialog select option {
-    background: #0c0c10;
-    color: #f7f7f8;
+    background: hsl(var(--popover));
+    color: hsl(var(--popover-foreground));
 }
+/* Native date/number spinners and the calendar glyph follow the active
+   theme instead of being forced dark — on the Light and B/W themes a dark
+   colour-scheme rendered the picker icon nearly invisible against the white
+   field. Nothing declares color-scheme globally, so it is stated explicitly
+   here rather than inherited. Dark themes are the default; the two light
+   ones opt out below. */
 .crm-dialog input[type="date"],
 .crm-dialog input[type="number"],
 .crm-dialog input[type="datetime-local"],
 .crm-dialog input[type="time"] {
     color-scheme: dark;
+}
+[data-theme="light"] .crm-dialog input[type="date"],
+[data-theme="light"] .crm-dialog input[type="number"],
+[data-theme="light"] .crm-dialog input[type="datetime-local"],
+[data-theme="light"] .crm-dialog input[type="time"],
+[data-theme="bw"] .crm-dialog input[type="date"],
+[data-theme="bw"] .crm-dialog input[type="number"],
+[data-theme="bw"] .crm-dialog input[type="datetime-local"],
+[data-theme="bw"] .crm-dialog input[type="time"] {
+    color-scheme: light;
 }
 
 /* Checkboxes / radios pick up the orange accent */
