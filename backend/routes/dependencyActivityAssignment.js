@@ -14,6 +14,80 @@ const PHOTO_PHASES = new Set(["before", "after"]);
 const STATUS_VALUES = new Set(["PENDING", "ALLOCATED", "IN_PROGRESS", "HOLD", "CANCELLED", "APPROVED", "REWORK", "COMPLETED"]);
 const SOURCE_VALUES = new Set(["CONTRACTOR", "DEVELOPER"]);
 
+// Rework forks a brand-new assignment attempt instead of mutating the
+// rejected one in place (see migration 488's own comment) — the redo goes
+// through the exact same Work Allocation -> Reporting -> QC -> Approval
+// pipeline as a fresh activity, while the rejected attempt is kept,
+// untouched, as history. Called from inside an already-open transaction
+// by both the QC decision route (QC's own REWORK decision) and POST
+// /:rungId/approval/reject (an approver rejecting a Completed, QC-passed
+// activity instead of clearing it).
+async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, source, actor) {
+  const old = (await new sql.Request(tx).input("id", sql.Int, oldAssignmentId).query(`
+    SELECT AttemptNo, LabourSource, MaterialSource, LabourContractorId, MaterialContractorId,
+           Description, ApprovalLevelsJson
+    FROM dbo.DependencyActivityAssignment WHERE Id = @id
+  `)).recordset[0];
+
+  // Freeze the rejected attempt as history — no longer the current one,
+  // and marked with why/how it was sent back.
+  await new sql.Request(tx)
+    .input("id", sql.Int, oldAssignmentId)
+    .input("reason", sql.NVarChar(1000), reason || null)
+    .input("source", sql.NVarChar(20), source)
+    .input("by", sql.NVarChar(200), actor)
+    .query(`
+      UPDATE dbo.DependencyActivityAssignment
+      SET IsCurrent = 0, ReworkReason = @reason, ReworkSource = @source, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+      WHERE Id = @id
+    `);
+
+  // The new attempt starts the whole Work Allocation cycle over — PENDING,
+  // no progress, no dates — but keeps whatever describes the WORK itself
+  // (labour/material source, description, the approval setup) so Work
+  // Allocation opens pre-filled rather than blank.
+  const ins = await new sql.Request(tx)
+    .input("rungId", sql.Int, rungId)
+    .input("attemptNo", sql.Int, (old?.AttemptNo || 1) + 1)
+    .input("reworkFrom", sql.Int, oldAssignmentId)
+    .input("labourSource", sql.NVarChar(20), old?.LabourSource || null)
+    .input("materialSource", sql.NVarChar(20), old?.MaterialSource || null)
+    .input("labourContractorId", sql.Int, old?.LabourContractorId ?? null)
+    .input("materialContractorId", sql.Int, old?.MaterialContractorId ?? null)
+    .input("description", sql.NVarChar(500), old?.Description || null)
+    .input("approvalLevelsJson", sql.NVarChar(sql.MAX), old?.ApprovalLevelsJson || "[]")
+    .input("by", sql.NVarChar(200), actor)
+    .query(`
+      INSERT INTO dbo.DependencyActivityAssignment
+        (DependencyMasterActivityId, Status, AttemptNo, ReworkFromAssignmentId,
+         LabourSource, MaterialSource, LabourContractorId, MaterialContractorId,
+         Description, ApprovalLevelsJson, CreatedBy)
+      OUTPUT INSERTED.Id AS id
+      VALUES (@rungId, 'PENDING', @attemptNo, @reworkFrom,
+              @labourSource, @materialSource, @labourContractorId, @materialContractorId,
+              @description, @approvalLevelsJson, @by)
+    `);
+  const newAssignmentId = ins.recordset[0].id;
+
+  // Carry forward materials, engineers and QC assignees — the redo is the
+  // same scope of work, same people responsible, just a fresh attempt at
+  // it. Work Allocation opens pre-filled and can still be changed there.
+  await new sql.Request(tx).input("old", sql.Int, oldAssignmentId).input("new", sql.Int, newAssignmentId).query(`
+    INSERT INTO dbo.DependencyActivityMaterial (AssignmentId, ItemId, Quantity)
+    SELECT @new, ItemId, Quantity FROM dbo.DependencyActivityMaterial WHERE AssignmentId = @old
+  `);
+  await new sql.Request(tx).input("old", sql.Int, oldAssignmentId).input("new", sql.Int, newAssignmentId).query(`
+    INSERT INTO dbo.DependencyActivityEngineer (AssignmentId, EngineerId)
+    SELECT @new, EngineerId FROM dbo.DependencyActivityEngineer WHERE AssignmentId = @old
+  `);
+  await new sql.Request(tx).input("old", sql.Int, oldAssignmentId).input("new", sql.Int, newAssignmentId).query(`
+    INSERT INTO dbo.DependencyActivityQcAssignee (AssignmentId, QcUserId)
+    SELECT @new, QcUserId FROM dbo.DependencyActivityQcAssignee WHERE AssignmentId = @old
+  `);
+
+  return newAssignmentId;
+}
+
 // GET / — every rung that has been assigned an engineer/material at least
 // once. Two callers share this: the Activity Reporting page (full list,
 // across every chain) and Work Reporting's own "Link Dependency" card,
@@ -30,7 +104,10 @@ router.get(
   try {
     const pool = await getPool();
     const request = pool.request();
-    const conds = [];
+    // Always the current attempt — a reworked rung can have older,
+    // superseded assignment rows sitting alongside it (see migration 488),
+    // and every list/tile/queue in the app should only ever see the live one.
+    const conds = ["daa.IsCurrent = 1"];
     if (Number.isFinite(dependencyMasterId)) {
       request.input("dependencyMasterId", sql.Int, dependencyMasterId);
       conds.push("dm.Id = @dependencyMasterId");
@@ -53,6 +130,10 @@ router.get(
         daa.Remarks AS remarks,
         daa.Status AS status,
         daa.ProgressPercent AS progressPercent,
+        daa.AttemptNo AS attemptNo,
+        daa.ReworkFromAssignmentId AS reworkFromAssignmentId,
+        daa.ReworkReason AS reworkReason,
+        daa.ReworkSource AS reworkSource,
         daa.UpdatedAt AS updatedAt,
         dma.SequenceNo AS sequenceNo,
         dma.ActivityId AS activityId, am.activity_name AS activityName,
@@ -78,6 +159,12 @@ router.get(
           JOIN dbo.users u ON u.id = daq.QcUserId
           WHERE daq.AssignmentId = daa.Id
         ) AS qcNames,
+        (
+          SELECT TOP 1 qc.Decision
+          FROM dbo.DependencyActivityQc qc
+          WHERE qc.AssignmentId = daa.Id
+          ORDER BY qc.QcAt DESC, qc.Id DESC
+        ) AS qcStatus,
         (
           SELECT img.M_Name AS name, dammat.Quantity AS quantity, img.M_UOM AS uom
           FROM dbo.DependencyActivityMaterial dammat
@@ -138,7 +225,7 @@ router.get(
       let checks = [];
       if (ids.length) {
         const c = await pool.request().query(`
-          SELECT QcId AS qcId, FieldName AS fieldName, Passed AS passed, Note AS note
+          SELECT QcId AS qcId, FieldName AS fieldName, Passed AS passed, Rating AS rating, Note AS note
           FROM dbo.DependencyActivityQcCheck WHERE QcId IN (${ids.join(",")}) ORDER BY Id
         `);
         checks = c.recordset.map((r) => ({ ...r, passed: !!r.passed }));
@@ -151,11 +238,13 @@ router.get(
   },
 );
 
-// POST /qc/:rungId/decision. Body { decision: 'APPROVED'|'REWORK',
-// remarks, checks: [{ checkpointId, passed, note }] }. Approving requires
-// every checkpoint on the activity to be signed off as passed; sending back
-// for rework requires a remark, and un-ticks the checkpoints QC failed so
-// the engineer has to redo them.
+// POST /qc/:rungId/decision. Body { decision: 'APPROVED'|'REWORK', remarks,
+// checks: [{ checkpointId, rating: 'POOR'|'GOOD'|'EXCELLENT', note }] }.
+// Each checkpoint is rated rather than a plain pass/fail toggle — Poor
+// always fails it, Good/Excellent always pass it (derived server-side, not
+// trusted from the client). Approving requires every checkpoint rated Good
+// or Excellent; sending back for rework requires a remark, and un-ticks
+// whichever checkpoints came back Poor so the engineer has to redo them.
 router.post(
   "/qc/:rungId/decision",
   authMiddleware,
@@ -178,30 +267,36 @@ router.post(
     const tx = new sql.Transaction(pool);
     try {
       const a = await pool.request().input("rungId", sql.Int, rungId).query(
-        "SELECT Id, Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId",
+        "SELECT Id, Status, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
       );
       if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
       const assignmentId = a.recordset[0].Id;
       if (a.recordset[0].Status !== "COMPLETED") {
         return res.status(400).json({ error: "Only a Completed activity (work dragged to 100%) can be quality-checked." });
       }
+      let approvalLevels = [];
+      try { approvalLevels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { approvalLevels = []; }
 
       const cp = await pool.request().input("aid", sql.Int, assignmentId).query(
         "SELECT Id, FieldName FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @aid ORDER BY SortOrder, Id",
       );
       const byId = new Map(cp.recordset.map((c) => [Number(c.Id), c]));
+      const RATINGS = new Set(["POOR", "GOOD", "EXCELLENT"]);
       const verdict = new Map();
       for (const c of checks) {
         const id = Number(c.checkpointId);
-        if (byId.has(id)) verdict.set(id, { passed: !!c.passed, note: c.note ? String(c.note).slice(0, 500) : null });
+        if (!byId.has(id)) continue;
+        const rating = RATINGS.has(String(c.rating || "").toUpperCase()) ? String(c.rating).toUpperCase() : null;
+        // Passed is derived from the rating, not trusted from the client —
+        // Poor always fails a checkpoint, Good/Excellent always pass it.
+        const passed = rating ? rating !== "POOR" : !!c.passed;
+        verdict.set(id, { rating, passed, note: c.note ? String(c.note).slice(0, 500) : null });
       }
-      if (decision === "APPROVED") {
-        const missing = cp.recordset.filter((c) => !verdict.get(Number(c.Id))?.passed);
-        if (missing.length) {
-          return res.status(400).json({
-            error: `Every checkpoint must pass before approval. Still open: ${missing.map((m) => m.FieldName).join(", ")}.`,
-          });
-        }
+      const missing = cp.recordset.filter((c) => !verdict.get(Number(c.Id))?.passed);
+      if (decision === "APPROVED" && missing.length) {
+        return res.status(400).json({
+          error: `Every checkpoint must be rated Good or Excellent before approval. Still open: ${missing.map((m) => m.FieldName).join(", ")}.`,
+        });
       }
 
       await tx.begin();
@@ -223,9 +318,10 @@ router.post(
           .input("cpId", sql.Int, c.Id)
           .input("field", sql.NVarChar(200), c.FieldName)
           .input("passed", sql.Bit, v.passed ? 1 : 0)
+          .input("rating", sql.NVarChar(10), v.rating)
           .input("note", sql.NVarChar(500), v.note).query(`
-            INSERT INTO dbo.DependencyActivityQcCheck (QcId, AssignmentCheckpointId, FieldName, Passed, Note)
-            VALUES (@qcId, @cpId, @field, @passed, @note)
+            INSERT INTO dbo.DependencyActivityQcCheck (QcId, AssignmentCheckpointId, FieldName, Passed, Rating, Note)
+            VALUES (@qcId, @cpId, @field, @passed, @rating, @note)
           `);
         if (decision === "REWORK" && !v.passed) {
           await new sql.Request(tx).input("cpId", sql.Int, c.Id)
@@ -233,19 +329,332 @@ router.post(
         }
       }
 
+      // Passing QC doesn't immediately finalize the activity if it has an
+      // approval setup configured (ApprovalLevelsJson, from Work
+      // Allocation's mini Approval Setup) — it stays Completed, now
+      // awaiting that named approval chain (see /:rungId/approval below),
+      // and only flips to APPROVED once every level clears. With no levels
+      // configured there's nothing to wait on, so it finalizes immediately,
+      // same as before this workflow existed.
+      const finalStatus = decision === "APPROVED" && approvalLevels.length > 0 ? "COMPLETED" : decision;
       await new sql.Request(tx)
         .input("aid", sql.Int, assignmentId)
-        .input("status", sql.NVarChar(20), decision)
+        .input("status", sql.NVarChar(20), finalStatus)
         .input("by", sql.NVarChar(200), actor).query(`
           UPDATE dbo.DependencyActivityAssignment
           SET Status = @status, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
           WHERE Id = @aid
         `);
+
+      // A Rework decision forks a brand-new attempt right away — the
+      // redo goes through Work Allocation again from a fresh PENDING
+      // state, while this rejected attempt is kept as history (see
+      // forkAssignmentForRework's own comment and migration 488).
+      let reworkAssignmentId = null;
+      if (finalStatus === "REWORK") {
+        reworkAssignmentId = await forkAssignmentForRework(tx, assignmentId, rungId, remarks, "QC", actor);
+      }
+
       await tx.commit();
-      res.json({ success: true, status: decision, qcId });
+      res.json({
+        success: true,
+        status: finalStatus,
+        qcId,
+        awaitingApproval: finalStatus === "COMPLETED" && decision === "APPROVED",
+        reworkAssignmentId,
+      });
     } catch (err) {
       try { await tx.rollback(); } catch (_) { /* not begun or already rolled back */ }
       console.error("[dependency-activity-assignment] POST /qc/:rungId/decision error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ── Approval workflow ───────────────────────────────────────────────────────
+// Enforces the per-assignment ApprovalLevelsJson config (Work Allocation's
+// mini Approval Setup) once QC has passed a Completed activity. Levels
+// clear strictly in order; a level with mode "all" needs every named
+// userId to approve it, mode "any" needs just one. super_admin can clear
+// any level regardless of who's named. Shared level-satisfaction logic
+// between the two routes below (kept inline rather than factored out — the
+// two call sites are the entire surface that needs it).
+function satisfiedLevel(level, approvals) {
+  const approvedIds = new Set(
+    approvals.filter((x) => x.levelId === level.id).map((x) => Number(x.approverUserId)),
+  );
+  if (level.mode === "any") return level.userIds.some((id) => approvedIds.has(Number(id)));
+  return level.userIds.length > 0 && level.userIds.every((id) => approvedIds.has(Number(id)));
+}
+function firstUnsatisfiedLevelIndex(levels, approvals) {
+  for (let i = 0; i < levels.length; i++) {
+    if (!satisfiedLevel(levels[i], approvals)) return i;
+  }
+  return null;
+}
+
+// GET /:rungId/approval — the workflow's current state: each level, who's
+// cleared it so far, which level is next, and whether the viewer can act
+// on it right now.
+router.get(
+  "/:rungId/approval",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "view"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    try {
+      const pool = await getPool();
+      const a = await pool.request().input("rungId", sql.Int, rungId).query(
+        "SELECT Id, Status, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+      );
+      if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
+      const assignmentId = a.recordset[0].Id;
+      const status = a.recordset[0].Status;
+      let levels = [];
+      try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
+
+      const approvalsRes = await pool.request().input("aid", sql.Int, assignmentId).query(`
+        SELECT da.LevelId AS levelId, da.ApproverUserId AS approverUserId, u.name AS approverName, da.ApprovedAt AS approvedAt
+        FROM dbo.DependencyActivityApproval da
+        LEFT JOIN dbo.users u ON u.id = da.ApproverUserId
+        WHERE da.AssignmentId = @aid
+        ORDER BY da.ApprovedAt ASC
+      `);
+      const approvals = approvalsRes.recordset;
+      const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
+      const currentLevel = currentLevelIndex != null ? levels[currentLevelIndex] : null;
+
+      const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+      const isSuperAdmin = req.user?.role === "super_admin";
+      const alreadyActed = currentLevel
+        ? approvals.some((x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId))
+        : false;
+      const canApprove =
+        status === "COMPLETED" &&
+        currentLevel != null &&
+        !alreadyActed &&
+        (isSuperAdmin || currentLevel.userIds.map(Number).includes(Number(viewerUserId)));
+
+      res.json({
+        status,
+        levels: levels.map((l, i) => ({ ...l, satisfied: satisfiedLevel(l, approvals), current: i === currentLevelIndex })),
+        approvals,
+        currentLevelIndex,
+        canApprove,
+      });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /:rungId/approval error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// POST /:rungId/approval/approve — the viewer clears whichever level is
+// next in line. Once the last level clears, the activity finally becomes
+// APPROVED (it stayed Completed up to this point — see the QC decision
+// route above).
+router.post(
+  "/:rungId/approval/approve",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+    if (!viewerUserId) return res.status(401).json({ error: "Not authenticated" });
+
+    try {
+      const pool = await getPool();
+      const a = await pool.request().input("rungId", sql.Int, rungId).query(
+        "SELECT Id, Status, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+      );
+      if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
+      const assignmentId = a.recordset[0].Id;
+      if (a.recordset[0].Status !== "COMPLETED") {
+        return res.status(400).json({ error: "Only a Completed, QC-passed activity is awaiting approval." });
+      }
+      let levels = [];
+      try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
+      if (!levels.length) return res.status(400).json({ error: "No approval setup is configured for this activity." });
+
+      const approvalsRes = await pool.request().input("aid", sql.Int, assignmentId).query(
+        "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
+      );
+      const approvals = approvalsRes.recordset;
+      const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
+      if (currentLevelIndex == null) {
+        return res.status(400).json({ error: "This activity has already cleared every approval level." });
+      }
+      const currentLevel = levels[currentLevelIndex];
+      if (!isSuperAdmin && !currentLevel.userIds.map(Number).includes(Number(viewerUserId))) {
+        return res.status(403).json({ error: "You're not named as an approver for this step." });
+      }
+      const already = approvals.some((x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId));
+      if (already) return res.status(400).json({ error: "You've already approved this step." });
+
+      await pool.request()
+        .input("aid", sql.Int, assignmentId)
+        .input("levelId", sql.NVarChar(50), currentLevel.id)
+        .input("levelIndex", sql.Int, currentLevelIndex)
+        .input("userId", sql.Int, viewerUserId)
+        .query(`
+          INSERT INTO dbo.DependencyActivityApproval (AssignmentId, LevelId, LevelIndex, ApproverUserId)
+          VALUES (@aid, @levelId, @levelIndex, @userId)
+        `);
+
+      // Levels clear strictly in order, so this level is only "the last
+      // missing one" if it was also the last level overall.
+      const fullyApproved = currentLevelIndex === levels.length - 1;
+      if (fullyApproved) {
+        await pool.request()
+          .input("aid", sql.Int, assignmentId)
+          .input("by", sql.NVarChar(200), req.user?.email || req.user?.name || "system")
+          .query(`
+            UPDATE dbo.DependencyActivityAssignment
+            SET Status = 'APPROVED', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+            WHERE Id = @aid
+          `);
+      }
+      res.json({ success: true, fullyApproved });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] POST /:rungId/approval/approve error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// POST /:rungId/approval/reject — the other way a Completed, QC-passed
+// activity gets sent back: an approver at the current level declines it
+// instead of clearing it. Requires a remark (same rule as QC's own REWORK
+// decision) and forks a brand-new attempt exactly like that route does —
+// this rejected one is kept as history, the redo starts over from
+// PENDING in Work Allocation.
+router.post(
+  "/:rungId/approval/reject",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+    if (!viewerUserId) return res.status(401).json({ error: "Not authenticated" });
+    const remarks = String(req.body?.remarks || "").trim().slice(0, 1000);
+    if (remarks.length < 3) {
+      return res.status(400).json({ error: "Add a remark explaining what needs rework." });
+    }
+
+    const pool = await getPool();
+    const tx = new sql.Transaction(pool);
+    try {
+      const a = await pool.request().input("rungId", sql.Int, rungId).query(
+        "SELECT Id, Status, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+      );
+      if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
+      const assignmentId = a.recordset[0].Id;
+      if (a.recordset[0].Status !== "COMPLETED") {
+        return res.status(400).json({ error: "Only a Completed, QC-passed activity is awaiting approval." });
+      }
+      let levels = [];
+      try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
+      if (!levels.length) return res.status(400).json({ error: "No approval setup is configured for this activity." });
+
+      const approvalsRes = await pool.request().input("aid", sql.Int, assignmentId).query(
+        "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
+      );
+      const approvals = approvalsRes.recordset;
+      const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
+      if (currentLevelIndex == null) {
+        return res.status(400).json({ error: "This activity has already cleared every approval level." });
+      }
+      const currentLevel = levels[currentLevelIndex];
+      if (!isSuperAdmin && !currentLevel.userIds.map(Number).includes(Number(viewerUserId))) {
+        return res.status(403).json({ error: "You're not named as an approver for this step." });
+      }
+
+      const actor = req.user?.email || req.user?.name || "system";
+      await tx.begin();
+      // Status goes straight to REWORK — unlike QC's own decision, there's
+      // no per-checkpoint verdict to record here, just the one remark
+      // explaining the rejection.
+      await new sql.Request(tx)
+        .input("aid", sql.Int, assignmentId)
+        .input("by", sql.NVarChar(200), actor)
+        .query(`
+          UPDATE dbo.DependencyActivityAssignment
+          SET Status = 'REWORK', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+          WHERE Id = @aid
+        `);
+      const reworkAssignmentId = await forkAssignmentForRework(tx, assignmentId, rungId, remarks, "APPROVAL", actor);
+      await tx.commit();
+      res.json({ success: true, reworkAssignmentId });
+    } catch (err) {
+      try { await tx.rollback(); } catch (_) { /* not begun or already rolled back */ }
+      console.error("[dependency-activity-assignment] POST /:rungId/approval/reject error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// GET /approvals/pending-count — how many Completed, QC-passed activities
+// are sitting at a level the viewer can act on right now (named on that
+// level, or super_admin). Polled by the sidebar for the Reporting nav
+// item's badge — same "poll a small count endpoint" shape as the Approval
+// Inbox badge (approvalInbox.js's own /count), just scoped to this
+// separate per-assignment workflow instead of the module-wide one.
+router.get(
+  "/approvals/pending-count",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "view"),
+  async (req, res) => {
+    const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+    if (!viewerUserId) return res.json({ count: 0 });
+    try {
+      const pool = await getPool();
+      const candidates = await pool.request().query(`
+        SELECT daa.Id AS assignmentId, daa.ApprovalLevelsJson AS approvalLevelsJson
+        FROM dbo.DependencyActivityAssignment daa
+        WHERE daa.Status = 'COMPLETED'
+          AND daa.IsCurrent = 1
+          AND daa.ApprovalLevelsJson IS NOT NULL AND daa.ApprovalLevelsJson <> '[]'
+          AND (
+            SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc
+            WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC
+          ) = 'APPROVED'
+      `);
+      if (!candidates.recordset.length) return res.json({ count: 0 });
+
+      const ids = candidates.recordset.map((c) => c.assignmentId);
+      const approvalsRes = await pool.request().query(`
+        SELECT AssignmentId AS assignmentId, LevelId AS levelId, ApproverUserId AS approverUserId
+        FROM dbo.DependencyActivityApproval WHERE AssignmentId IN (${ids.join(",")})
+      `);
+      const approvalsByAssignment = new Map();
+      for (const a of approvalsRes.recordset) {
+        if (!approvalsByAssignment.has(a.assignmentId)) approvalsByAssignment.set(a.assignmentId, []);
+        approvalsByAssignment.get(a.assignmentId).push(a);
+      }
+
+      let count = 0;
+      for (const c of candidates.recordset) {
+        let levels = [];
+        try { levels = JSON.parse(c.approvalLevelsJson || "[]"); } catch { levels = []; }
+        const approvals = approvalsByAssignment.get(c.assignmentId) || [];
+        const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
+        if (currentLevelIndex == null) continue;
+        const currentLevel = levels[currentLevelIndex];
+        const alreadyActed = approvals.some(
+          (x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId),
+        );
+        if (alreadyActed) continue;
+        if (isSuperAdmin || currentLevel.userIds.map(Number).includes(Number(viewerUserId))) count++;
+      }
+      res.json({ count });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /approvals/pending-count error:", err.message);
       res.status(500).json({ error: err.message });
     }
   },
@@ -300,11 +709,16 @@ router.patch(
     const MANUAL_STATUSES = new Set(["IN_PROGRESS", "HOLD"]);
     if (hasStatus) {
       const cur = await pool.request().input("rungId", sql.Int, rungId).query(
-        "SELECT Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId",
+        "SELECT Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
       );
       const current = cur.recordset[0]?.Status;
       if (current && current !== status) {
-        if (status === "COMPLETED") {
+        if (current === "CANCELLED") {
+          return res.status(400).json({ error: "A Cancelled activity can't be changed." });
+        } else if (status === "CANCELLED") {
+          // Allowed from any stage, per explicit instruction — Cancel is
+          // the one manual move with no forward-only restriction.
+        } else if (status === "COMPLETED") {
           if (!(hasProgress && progressPercent === 100)) {
             return res.status(400).json({ error: "Completed is set automatically when work reaches 100%." });
           }
@@ -336,7 +750,7 @@ router.patch(
     const result = await request.query(`
       UPDATE dbo.DependencyActivityAssignment
       SET ${setClauses.join(", ")}, UpdatedBy = @updatedBy, UpdatedAt = SYSDATETIME()
-      WHERE DependencyMasterActivityId = @rungId
+      WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1
     `);
     if (!result.rowsAffected[0]) {
       return res.status(404).json({ error: "No assignment found for this rung" });
@@ -347,6 +761,46 @@ router.patch(
     res.status(500).json({ error: err.message });
   }
 });
+
+// GET /:rungId/attempts — every assignment attempt ever made against this
+// rung, oldest first, each with engineer/QC names and whatever
+// ReworkReason/ReworkSource explains why it was superseded (see migration
+// 488). The "keep the history of the reworked task" view — surfaced as a
+// small history list in the Activity Detail modal once a rung has more
+// than one attempt.
+router.get(
+  "/:rungId/attempts",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "view"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    try {
+      const pool = await getPool();
+      const r = await pool.request().input("rungId", sql.Int, rungId).query(`
+        SELECT
+          daa.Id AS assignmentId, daa.AttemptNo AS attemptNo, daa.IsCurrent AS isCurrent,
+          daa.Status AS status, daa.StartDate AS startDate, daa.EndDate AS endDate,
+          daa.ReworkFromAssignmentId AS reworkFromAssignmentId,
+          daa.ReworkReason AS reworkReason, daa.ReworkSource AS reworkSource,
+          daa.CreatedAt AS createdAt, daa.UpdatedAt AS updatedAt,
+          (
+            SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+            FROM dbo.DependencyActivityEngineer dae
+            JOIN dbo.users u ON u.id = dae.EngineerId
+            WHERE dae.AssignmentId = daa.Id
+          ) AS engineerNames
+        FROM dbo.DependencyActivityAssignment daa
+        WHERE daa.DependencyMasterActivityId = @rungId
+        ORDER BY daa.AttemptNo ASC, daa.Id ASC
+      `);
+      res.json(r.recordset.map((row) => ({ ...row, isCurrent: !!row.isCurrent })));
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /:rungId/attempts error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // NOTE: this used to be PUT /engineer-approval/:id/confirm — each assigned
 // engineer individually confirming their own task, surfaced as an Approval
@@ -442,7 +896,7 @@ router.get("/:rungId", authMiddleware, async (req, res) => {
         LabourSource AS labourSource, MaterialSource AS materialSource,
         LabourContractorId AS labourContractorId, MaterialContractorId AS materialContractorId,
         Description AS description, Remarks AS remarks, ApprovalLevelsJson AS approvalLevelsJson
-      FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId
+      FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1
     `);
     const assignment = assignRes.recordset[0] || null;
 
@@ -631,7 +1085,7 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
     if (!rungCheck.recordset.length) return res.status(404).json({ error: "Activity rung not found" });
 
     const existing = await pool.request().input("rungId", sql.Int, rungId)
-      .query(`SELECT Id FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId`);
+      .query(`SELECT Id FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1`);
 
     const fieldInputs = (request) =>
       request
@@ -748,14 +1202,18 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
     // config above: assigning engineers now starts the work immediately,
     // and who gets to APPROVE the finished work is whoever this assignment
     // names (plus super_admin), enforced where that approval action itself
-    // lives (Work Reporting), not here. Only touches PENDING/IN_PROGRESS —
-    // once work has moved further along (Hold/Approved/Rework/Completed),
-    // adding/removing an engineer here never regresses it.
+    // lives (Work Reporting), not here. Only touches PENDING/ALLOCATED/
+    // IN_PROGRESS — once work has moved further along (Hold/Approved/
+    // Rework/Completed), adding/removing an engineer here never regresses
+    // it. ALLOCATED counts as an equivalent starting point to PENDING here
+    // — it's the old pre-confirmation status this replaced, and rows saved
+    // under the old flow are still sitting at ALLOCATED (see migration 485
+    // for the one-time data backfill this mirrors going forward).
     const currentStatusRow = (await pool.request().input("id", sql.Int, assignmentId)
       .query(`SELECT Status FROM dbo.DependencyActivityAssignment WHERE Id = @id`)).recordset[0];
     const currentStatus = currentStatusRow?.Status;
     let nextStatus = null;
-    if (keptEngineerIds.size > 0 && currentStatus === "PENDING") nextStatus = "IN_PROGRESS";
+    if (keptEngineerIds.size > 0 && (currentStatus === "PENDING" || currentStatus === "ALLOCATED")) nextStatus = "IN_PROGRESS";
     else if (keptEngineerIds.size === 0 && currentStatus === "IN_PROGRESS") nextStatus = "PENDING";
     if (nextStatus) {
       await pool.request().input("id", sql.Int, assignmentId).input("status", sql.NVarChar(20), nextStatus)

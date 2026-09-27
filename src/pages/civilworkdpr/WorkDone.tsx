@@ -11,6 +11,7 @@ import { ActivityChainPreview } from "@/pages/masters/DependencyMaster/component
 import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
 import { getReportedAssignments, ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
+import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import {
   Hammer,
   Layers,
@@ -556,6 +557,11 @@ export default function WorkDone() {
                                     rungs.map((rung) => {
                                       const assignment = rung.rungId != null ? allAssignmentByRungId.get(rung.rungId) : undefined;
                                       const done = assignment?.status === "COMPLETED";
+                                      // Every rung gets a real stub assignment row (Status='PENDING') the
+                                      // moment it's created (see dependencyMaster.js) — a never-allocated
+                                      // rung genuinely IS pending, matching Reporting's own Pending count.
+                                      // The "PENDING" fallback below only covers a rung from before that
+                                      // stub-row backfill (migration 487) that somehow still has none.
                                       const meta = ASSIGNMENT_STATUS_META[assignment?.status ?? "PENDING"];
                                       return (
                                         <button
@@ -577,6 +583,8 @@ export default function WorkDone() {
                                           >
                                             {meta.label}
                                           </span>
+                                          <QcBadge qcStatus={assignment?.qcStatus} />
+                                          <AttemptBadge attemptNo={assignment?.attemptNo} />
                                         </button>
                                       );
                                     })
@@ -701,8 +709,10 @@ export default function WorkDone() {
                                   className="border-b border-border last:border-0 hover:bg-muted/20"
                                 >
                                   <td className="px-3.5 py-3">
-                                    <span className="text-xs font-medium text-foreground">
+                                    <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
                                       {rung.sequenceNo}. {rung.activityName}
+                                      <QcBadge qcStatus={assignment?.qcStatus} />
+                                      <AttemptBadge attemptNo={assignment?.attemptNo} />
                                     </span>
                                   </td>
                                   {assignment ? (

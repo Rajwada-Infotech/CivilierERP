@@ -225,20 +225,23 @@ export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; c
   COMPLETED: { label: "Completed", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
 };
 
-// The status dropdown is now just an In Progress <-> Hold toggle — nothing
-// else is manually chosen from here. Completed is set automatically by
+// The status dropdown is an In Progress <-> Hold toggle, plus Cancelled —
+// which is reachable from any stage, including a terminal one (Completed/
+// Approved), per explicit instruction. Completed is set automatically by
 // dragging the progress bar to 100% (see ActivityDetailModal's
 // ProgressDragBar); Approved/Rework come only from a QC decision; Rework's
 // one way out is manually re-opening it to In Progress to redo the work.
 // A single-element result means "read-only badge, no dropdown" — see
-// AssignmentStatusSelect. Mirrored server-side in
-// dependencyActivityAssignment.js's status route — keep the two in sync.
+// AssignmentStatusSelect (only Cancelled itself is truly terminal). Mirrored
+// server-side in dependencyActivityAssignment.js's status route — keep the
+// two in sync.
 export function allowedNextStatuses(current: AssignmentStatus): AssignmentStatus[] {
-  if (current === "REWORK") return ["REWORK", "IN_PROGRESS"];
+  if (current === "CANCELLED") return ["CANCELLED"];
+  if (current === "REWORK") return ["REWORK", "IN_PROGRESS", "CANCELLED"];
   if (current === "PENDING" || current === "ALLOCATED" || current === "IN_PROGRESS" || current === "HOLD") {
-    return ["IN_PROGRESS", "HOLD"];
+    return ["IN_PROGRESS", "HOLD", "CANCELLED"];
   }
-  return [current];
+  return [current, "CANCELLED"];
 }
 
 export interface ReportedAssignment {
@@ -255,6 +258,19 @@ export interface ReportedAssignment {
   remarks: string | null;
   status: AssignmentStatus;
   progressPercent: number;
+  // Latest QC decision, if this activity has ever been inspected — drives
+  // the "QC Checked" badge shown everywhere this row appears, and (once
+  // APPROVED) means it's no longer the Quality Check page's job, it's
+  // awaiting the approval workflow or already finalized.
+  qcStatus: "APPROVED" | "REWORK" | null;
+  // Rework forks a brand-new attempt rather than mutating the rejected one
+  // in place (see migration 488) — attemptNo counts which attempt this is,
+  // and reworkFromAssignmentId/reworkReason/reworkSource describe why the
+  // attempt before this one exists at all (both null on a first attempt).
+  attemptNo: number;
+  reworkFromAssignmentId: number | null;
+  reworkReason: string | null;
+  reworkSource: "QC" | "APPROVAL" | null;
   updatedAt: string;
   sequenceNo: number;
   activityId: number;
@@ -445,9 +461,11 @@ export const deleteActivityPhoto = async (rungId: number, photoId: number): Prom
 };
 
 // ── Quality Check ────────────────────────────────────────────────────────────
+export type QcRating = "POOR" | "GOOD" | "EXCELLENT";
+
 export interface QcCheckInput {
   checkpointId: number;
-  passed: boolean;
+  rating: QcRating;
   note?: string;
 }
 
@@ -457,7 +475,7 @@ export interface QcHistoryEntry {
   remarks: string | null;
   qcAt: string;
   qcBy: string | null;
-  checks: { fieldName: string; passed: boolean; note: string | null }[];
+  checks: { fieldName: string; passed: boolean; rating: QcRating | null; note: string | null }[];
 }
 
 // Quality Check now inspects COMPLETED activities (work dragged to 100%),
@@ -473,13 +491,104 @@ export const getQcHistory = async (rungId: number): Promise<QcHistoryEntry[]> =>
   return handleResponse<QcHistoryEntry[]>(res);
 };
 
+export interface QcDecisionResult {
+  success: boolean;
+  status: AssignmentStatus;
+  awaitingApproval: boolean;
+  // Set when decision is REWORK — the id of the brand-new attempt this
+  // decision forked (see forkAssignmentForRework's own comment).
+  reworkAssignmentId: number | null;
+}
 export const submitQcDecision = async (
   rungId: number,
   payload: { decision: "APPROVED" | "REWORK"; remarks?: string; checks: QcCheckInput[] },
-): Promise<{ success: boolean; status: AssignmentStatus }> => {
+): Promise<QcDecisionResult> => {
   const res = await fetchWithAuth(`${BASE}/qc/${rungId}/decision`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
-  return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
+  return handleResponse<QcDecisionResult>(res);
+};
+
+// ── Approval workflow ───────────────────────────────────────────────────────
+// Enforces the ApprovalLevel[] set on this same assignment (Work
+// Allocation's mini Approval Setup, see saveRungAssignment) once QC has
+// passed a Completed activity — kept as its own small state, not the
+// module-wide Approval Setup/Approval Inbox (see ApprovalLevel's own
+// comment above).
+export interface ApprovalWorkflowLevel extends ApprovalLevel {
+  satisfied: boolean;
+  current: boolean;
+}
+export interface ApprovalWorkflowEntry {
+  levelId: string;
+  approverUserId: number;
+  approverName: string | null;
+  approvedAt: string;
+}
+export interface ApprovalWorkflowState {
+  status: AssignmentStatus;
+  levels: ApprovalWorkflowLevel[];
+  approvals: ApprovalWorkflowEntry[];
+  currentLevelIndex: number | null;
+  canApprove: boolean;
+}
+
+export const getApprovalWorkflow = async (rungId: number): Promise<ApprovalWorkflowState> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/approval`);
+  return handleResponse<ApprovalWorkflowState>(res);
+};
+
+export const approveWorkflowLevel = async (
+  rungId: number,
+): Promise<{ success: boolean; fullyApproved: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/approval/approve`, { method: "POST" });
+  return handleResponse<{ success: boolean; fullyApproved: boolean }>(res);
+};
+
+// The other way a Completed, QC-passed activity gets sent back — an
+// approver at the current level rejects it instead of clearing it.
+// Requires a remark, and forks a brand-new attempt exactly like QC's own
+// REWORK decision does (see forkAssignmentForRework's own comment).
+export const rejectWorkflowLevel = async (
+  rungId: number,
+  remarks: string,
+): Promise<{ success: boolean; reworkAssignmentId: number }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/approval/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ remarks }),
+  });
+  return handleResponse<{ success: boolean; reworkAssignmentId: number }>(res);
+};
+
+// ── Rework history ───────────────────────────────────────────────────────
+// Every assignment attempt ever made against a rung — the "keep the
+// history of the reworked task" view (migration 488's own comment).
+export interface AssignmentAttempt {
+  assignmentId: number;
+  attemptNo: number;
+  isCurrent: boolean;
+  status: AssignmentStatus;
+  startDate: string | null;
+  endDate: string | null;
+  reworkFromAssignmentId: number | null;
+  reworkReason: string | null;
+  reworkSource: "QC" | "APPROVAL" | null;
+  createdAt: string;
+  updatedAt: string | null;
+  engineerNames: string | null;
+}
+export const getAssignmentAttempts = async (rungId: number): Promise<AssignmentAttempt[]> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/attempts`);
+  return handleResponse<AssignmentAttempt[]>(res);
+};
+
+// How many Completed, QC-passed activities are sitting at a level the
+// current viewer can act on right now — powers the sidebar's Reporting
+// badge (see AppSidebar.tsx's useCivilWorkDprApprovalCount).
+export const getPendingApprovalCount = async (): Promise<number> => {
+  const res = await fetchWithAuth(`${BASE}/approvals/pending-count`);
+  const data = await handleResponse<{ count: number }>(res);
+  return data.count ?? 0;
 };

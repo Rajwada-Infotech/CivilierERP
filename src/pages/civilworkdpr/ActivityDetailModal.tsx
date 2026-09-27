@@ -30,6 +30,9 @@ import {
   Check,
   Timer,
   TrendingUp,
+  ShieldCheck,
+  Award,
+  History,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -42,6 +45,11 @@ import {
   updateAssignmentDetail,
   getRungAssignment,
   saveRungAssignment,
+  getApprovalWorkflow,
+  approveWorkflowLevel,
+  rejectWorkflowLevel,
+  getAssignmentAttempts,
+  ASSIGNMENT_STATUS_META,
   type PhotoPhase,
   type ActivityPhotoMeta,
   type ReportedAssignment,
@@ -58,10 +66,11 @@ import {
 import { AddWorkerDialog, inputCls, STATUS_LABEL, STATUS_CLS, todayIso } from "@/pages/civilworkdpr/WorkerAttendance";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
+import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 import { useCameraCapture } from "@/hooks/useCameraCapture";
 
-type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints";
+type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "approval" | "history";
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00`);
@@ -1002,6 +1011,264 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
   );
 }
 
+// ── Approval tab ─────────────────────────────────────────────────────────
+// Only reachable once QC has passed this activity — enforces the
+// ApprovalLevelsJson config set in Work Allocation's mini Approval Setup
+// (see RungAssignmentModal's ApprovalLevelsEditor). Levels clear strictly
+// in order; a "one of them" final level needs just one of its named
+// people. Nothing here duplicates the module-wide Approval Setup/Approval
+// Inbox — this is a separate, per-assignment workflow.
+function ApprovalTab({ rungId, onClose }: { rungId: number; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectRemarks, setRejectRemarks] = useState("");
+  const { data, isLoading } = useQuery({
+    queryKey: ["activity-approval", rungId],
+    queryFn: () => getApprovalWorkflow(rungId),
+  });
+
+  const invalidateAfterAction = () => {
+    queryClient.invalidateQueries({ queryKey: ["activity-approval", rungId] });
+    queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+    queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+    queryClient.invalidateQueries({ queryKey: ["qc-queue"] });
+    // Lets the sidebar's badge re-poll immediately instead of waiting up
+    // to 60s — see AppSidebar.tsx's useCivilWorkDprApprovalCount.
+    window.dispatchEvent(new Event("civilworkdpr-approval-action"));
+  };
+
+  const approve = useMutation({
+    mutationFn: () => approveWorkflowLevel(rungId),
+    onSuccess: (res) => {
+      toast.success(res.fullyApproved ? "Fully approved." : "Approved — waiting on the next level.");
+      invalidateAfterAction();
+    },
+    onError: (err: any) => toast.error(err?.message || "Failed to record approval."),
+  });
+
+  // The other way a Completed, QC-passed activity gets sent back — this
+  // level rejects it instead of clearing it. Forks a brand-new attempt
+  // (see forkAssignmentForRework's own comment) exactly like QC's own
+  // Rework decision does — this activity's own row is now history, so the
+  // modal closes rather than showing a now-stale Approval tab.
+  const reject = useMutation({
+    mutationFn: () => rejectWorkflowLevel(rungId, rejectRemarks),
+    onSuccess: () => {
+      toast.success("Rejected — sent back for rework as a new attempt.");
+      invalidateAfterAction();
+      onClose();
+    },
+    onError: (err: any) => toast.error(err?.message || "Failed to reject."),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10 text-muted-foreground gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading approval status…
+      </div>
+    );
+  }
+  if (!data || data.levels.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground italic text-center py-10">
+        No approval setup was configured for this activity in Work Allocation — it was approved directly.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {data.status === "APPROVED" && (
+        <div className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-xs font-medium bg-emerald-500/10 text-emerald-700 dark:text-emerald-400">
+          <Award size={14} className="shrink-0" /> Every level has cleared — this activity is fully Approved.
+        </div>
+      )}
+      <div className="space-y-0">
+        {data.levels.map((level, i) => (
+          <div key={level.id} className="flex items-start gap-3">
+            <div className="flex flex-col items-center shrink-0">
+              <div
+                className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                  level.satisfied
+                    ? "bg-emerald-500 border-emerald-500 text-white"
+                    : level.current
+                      ? "bg-background border-cyan-500 text-transparent"
+                      : "bg-background border-border text-transparent"
+                }`}
+              >
+                {level.satisfied && <Check size={11} strokeWidth={3} />}
+              </div>
+              {i < data.levels.length - 1 && (
+                <div className={`w-0.5 flex-1 min-h-[18px] ${level.satisfied ? "bg-emerald-500/40" : "bg-border"}`} />
+              )}
+            </div>
+            <div className="flex-1 min-w-0 pb-3 pt-0.5">
+              <span className="text-sm flex items-center gap-1.5 flex-wrap text-foreground">
+                {level.label}
+                {level.mode === "any" && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                    Any one
+                  </span>
+                )}
+                {level.current && !level.satisfied && (
+                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                    Awaiting this step
+                  </span>
+                )}
+              </span>
+              <div className="flex flex-col gap-0.5 mt-1">
+                {level.userIds.map((uid) => {
+                  const approvedBy = data.approvals.find((a) => a.levelId === level.id && a.approverUserId === uid);
+                  return (
+                    <span key={uid} className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      {approvedBy ? (
+                        <>
+                          <Check size={10} className="text-emerald-500" />
+                          {approvedBy.approverName || `User #${uid}`} approved
+                        </>
+                      ) : (
+                        <>
+                          <span className="w-2.5 h-2.5 rounded-full border border-border shrink-0" />
+                          {`User #${uid}`} — pending
+                        </>
+                      )}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {data.canApprove && !rejectOpen && (
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => approve.mutate()}
+            disabled={approve.isPending}
+            className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-medium disabled:opacity-40"
+          >
+            {approve.isPending ? <Loader2 size={14} className="animate-spin" /> : <ShieldCheck size={14} />}
+            Approve this step
+          </button>
+          <button
+            type="button"
+            onClick={() => setRejectOpen(true)}
+            className="flex items-center justify-center gap-2 px-4 py-2 rounded-lg border border-fuchsia-500/40 text-fuchsia-600 dark:text-fuchsia-400 hover:bg-fuchsia-500/10 text-sm font-medium"
+          >
+            <RotateCcw size={14} /> Reject
+          </button>
+        </div>
+      )}
+
+      {data.canApprove && rejectOpen && (
+        <div className="space-y-2 rounded-xl border border-fuchsia-500/30 bg-fuchsia-500/5 p-3">
+          <p className="text-[10px] uppercase tracking-widest font-semibold text-fuchsia-600 dark:text-fuchsia-400">
+            Reject — sends this back for rework as a new attempt
+          </p>
+          <textarea
+            rows={2}
+            value={rejectRemarks}
+            maxLength={1000}
+            onChange={(e) => setRejectRemarks(e.target.value)}
+            placeholder="Explain what needs rework…"
+            className="w-full px-2.5 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-2 focus:ring-fuchsia-500/30"
+          />
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setRejectOpen(false);
+                setRejectRemarks("");
+              }}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => reject.mutate()}
+              disabled={reject.isPending || rejectRemarks.trim().length < 3}
+              title={rejectRemarks.trim().length < 3 ? "Add a remark first" : undefined}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-fuchsia-600 hover:bg-fuchsia-500 text-white text-xs font-semibold disabled:opacity-40"
+            >
+              {reject.isPending ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+              Confirm Reject
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── History tab ──────────────────────────────────────────────────────────
+// Every past attempt at this rung — only shown once there's more than one
+// (a rework fork happened via QC or an Approval rejection). Read-only:
+// this is the "keep the history of the reworked task" record, not
+// something acted on here.
+const REWORK_SOURCE_LABEL: Record<string, string> = { QC: "Quality Check", APPROVAL: "Approval" };
+
+function HistoryTab({ rungId }: { rungId: number }) {
+  const { data: attempts = [], isLoading } = useQuery({
+    queryKey: ["activity-attempts", rungId],
+    queryFn: () => getAssignmentAttempts(rungId),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10 text-muted-foreground gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading history…
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0">
+      {attempts.map((a, i) => (
+        <div key={a.assignmentId} className="flex items-start gap-3">
+          <div className="flex flex-col items-center shrink-0">
+            <div
+              className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                a.isCurrent ? "bg-cyan-500 border-cyan-500 text-white" : "bg-background border-border text-transparent"
+              }`}
+            >
+              {a.isCurrent && <Check size={11} strokeWidth={3} />}
+            </div>
+            {i < attempts.length - 1 && <div className="w-0.5 flex-1 min-h-[18px] bg-border" />}
+          </div>
+          <div className="flex-1 min-w-0 pb-4 pt-0.5">
+            <span className="text-sm flex items-center gap-1.5 flex-wrap text-foreground font-medium">
+              Attempt {a.attemptNo}
+              {a.isCurrent && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                  Current
+                </span>
+              )}
+              <span className="text-xs font-normal text-muted-foreground">
+                · {ASSIGNMENT_STATUS_META[a.status]?.label ?? a.status}
+              </span>
+            </span>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {a.engineerNames || "Unassigned"}
+              {a.startDate ? ` · Started ${new Date(a.startDate).toLocaleDateString("en-IN")}` : ""}
+            </p>
+            {a.reworkReason && (
+              <p className="text-xs mt-1.5 flex items-start gap-1.5 text-fuchsia-700 dark:text-fuchsia-400">
+                <RotateCcw size={11} className="shrink-0 mt-0.5" />
+                <span>
+                  Sent back for rework via {REWORK_SOURCE_LABEL[a.reworkSource || ""] || "unknown"}: {a.reworkReason}
+                </span>
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Modal shell ──────────────────────────────────────────────────────────
 
 const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
@@ -1010,6 +1277,8 @@ const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
   { id: "photos", label: "Photos", icon: CameraIcon },
   { id: "attendance", label: "Attendance", icon: Users2 },
   { id: "checkpoints", label: "Checkpoints", icon: ListChecks },
+  { id: "approval", label: "Approval", icon: Award },
+  { id: "history", label: "History", icon: History },
 ];
 
 export default function ActivityDetailModal({
@@ -1037,7 +1306,13 @@ export default function ActivityDetailModal({
   const hasBlueprint = row.roomId != null && !!annotation;
   const photoCount = (photos?.before.length ?? 0) + (photos?.after.length ?? 0);
 
-  const visibleTabs = useMemo(() => TABS.filter((t) => t.id !== "blueprint" || hasBlueprint), [hasBlueprint]);
+  const visibleTabs = useMemo(
+    () =>
+      TABS.filter((t) => t.id !== "blueprint" || hasBlueprint)
+        .filter((t) => t.id !== "approval" || row.qcStatus === "APPROVED")
+        .filter((t) => t.id !== "history" || row.attemptNo > 1),
+    [hasBlueprint, row.qcStatus, row.attemptNo],
+  );
 
   return createPortal(
     <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4">
@@ -1048,7 +1323,9 @@ export default function ActivityDetailModal({
           subtitle={row.scopePath}
           icon={ActivityIcon}
           action={
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
+              <QcBadge qcStatus={row.qcStatus} />
+              <AttemptBadge attemptNo={row.attemptNo} />
               <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
               <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
                 <X size={18} />
@@ -1088,6 +1365,8 @@ export default function ActivityDetailModal({
               {tab === "photos" && <PhotosTab rungId={row.rungId} />}
               {tab === "attendance" && <AttendanceTab rungId={row.rungId} />}
               {tab === "checkpoints" && <CheckpointsTab rungId={row.rungId} />}
+              {tab === "approval" && <ApprovalTab rungId={row.rungId} onClose={onClose} />}
+              {tab === "history" && <HistoryTab rungId={row.rungId} />}
             </div>
 
             <ProgressDragBar row={row} />

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import type { NavItem } from "@/components/layout/sidebars/SidebarPrimitives";
 import { buildAdminNavItems } from "@/components/layout/sidebars/AdminSidebar";
-import { civilWorkDprNavItems } from "@/components/layout/sidebars/CivilWorkDprSidebar";
+import { buildCivilWorkDprNavItems } from "@/components/layout/sidebars/CivilWorkDprSidebar";
 import { crmNavItems } from "@/components/layout/sidebars/CrmSidebar";
 import { dbaNavItems } from "@/components/layout/sidebars/DbaSidebar";
 import { engineeringNavItems } from "@/components/layout/sidebars/EngineeringSidebar";
@@ -124,7 +124,7 @@ const SOURCES: ModuleSource[] = [
   // Ticket's builder adds "Pending Tickets" for admin-tier only.
   { id: "ticket", label: "Ticket", nav: ({ isAdminTier }) => buildTicketNavItems(isAdminTier) },
   { id: "records", label: "Records", nav: () => recordsNavItems },
-  { id: "civilworkdpr", label: "Civil Work DPR", nav: () => civilWorkDprNavItems, setup: civilWorkDprSetupItems },
+  { id: "civilworkdpr", label: "Civil Work DPR", nav: () => buildCivilWorkDprNavItems(0), setup: civilWorkDprSetupItems },
   { id: "loan", label: "Loan", nav: () => loanNavItems },
   { id: "fixed-asset", label: "Fixed Asset", nav: () => fixedAssetNavItems, setup: fixedAssetSetupItems },
   { id: "maintenance", label: "Maintenance", nav: () => maintenanceNavItems, setup: maintenanceSetupItems },
