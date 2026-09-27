@@ -529,3 +529,12 @@ export const approveWorkflowLevel = async (
   const res = await fetchWithAuth(`${BASE}/${rungId}/approval/approve`, { method: "POST" });
   return handleResponse<{ success: boolean; fullyApproved: boolean }>(res);
 };
+
+// How many Completed, QC-passed activities are sitting at a level the
+// current viewer can act on right now — powers the sidebar's Reporting
+// badge (see AppSidebar.tsx's useCivilWorkDprApprovalCount).
+export const getPendingApprovalCount = async (): Promise<number> => {
+  const res = await fetchWithAuth(`${BASE}/approvals/pending-count`);
+  const data = await handleResponse<{ count: number }>(res);
+  return data.count ?? 0;
+};

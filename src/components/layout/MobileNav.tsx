@@ -91,7 +91,7 @@ import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
-import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
+import { buildCivilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems } from "./sidebars/CrmSidebar";
 import { loanNavItems } from "./sidebars/LoanSidebar";
@@ -790,7 +790,9 @@ export const MobileNav: React.FC = () => {
       case "records":
         return adaptItems(recordsNavItems as DesktopNavItem[]);
       case "civilworkdpr":
-        return adaptItems(civilWorkDprNavItems as DesktopNavItem[]);
+        // Static 0 here — same precedent as buildAdminNavItems(0) above;
+        // this badge isn't wired to a live poll on mobile.
+        return adaptItems(buildCivilWorkDprNavItems(0) as DesktopNavItem[]);
       case "sales-automation":
         return adaptItems(salesAutomationNavItems as DesktopNavItem[]);
       case "crm":

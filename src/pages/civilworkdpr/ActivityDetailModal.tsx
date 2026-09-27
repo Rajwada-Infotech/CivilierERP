@@ -1028,6 +1028,9 @@ function ApprovalTab({ rungId }: { rungId: number }) {
       queryClient.invalidateQueries({ queryKey: ["activity-approval", rungId] });
       queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
       queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      // Lets the sidebar's badge re-poll immediately instead of waiting up
+      // to 60s — see AppSidebar.tsx's useCivilWorkDprApprovalCount.
+      window.dispatchEvent(new Event("civilworkdpr-approval-action"));
     },
     onError: (err: any) => toast.error(err?.message || "Failed to record approval."),
   });

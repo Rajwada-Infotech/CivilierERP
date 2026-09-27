@@ -428,6 +428,67 @@ router.post(
   },
 );
 
+// GET /approvals/pending-count — how many Completed, QC-passed activities
+// are sitting at a level the viewer can act on right now (named on that
+// level, or super_admin). Polled by the sidebar for the Reporting nav
+// item's badge — same "poll a small count endpoint" shape as the Approval
+// Inbox badge (approvalInbox.js's own /count), just scoped to this
+// separate per-assignment workflow instead of the module-wide one.
+router.get(
+  "/approvals/pending-count",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "view"),
+  async (req, res) => {
+    const viewerUserId = req.user?.userId ?? req.user?.id ?? null;
+    const isSuperAdmin = req.user?.role === "super_admin";
+    if (!viewerUserId) return res.json({ count: 0 });
+    try {
+      const pool = await getPool();
+      const candidates = await pool.request().query(`
+        SELECT daa.Id AS assignmentId, daa.ApprovalLevelsJson AS approvalLevelsJson
+        FROM dbo.DependencyActivityAssignment daa
+        WHERE daa.Status = 'COMPLETED'
+          AND daa.ApprovalLevelsJson IS NOT NULL AND daa.ApprovalLevelsJson <> '[]'
+          AND (
+            SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc
+            WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC
+          ) = 'APPROVED'
+      `);
+      if (!candidates.recordset.length) return res.json({ count: 0 });
+
+      const ids = candidates.recordset.map((c) => c.assignmentId);
+      const approvalsRes = await pool.request().query(`
+        SELECT AssignmentId AS assignmentId, LevelId AS levelId, ApproverUserId AS approverUserId
+        FROM dbo.DependencyActivityApproval WHERE AssignmentId IN (${ids.join(",")})
+      `);
+      const approvalsByAssignment = new Map();
+      for (const a of approvalsRes.recordset) {
+        if (!approvalsByAssignment.has(a.assignmentId)) approvalsByAssignment.set(a.assignmentId, []);
+        approvalsByAssignment.get(a.assignmentId).push(a);
+      }
+
+      let count = 0;
+      for (const c of candidates.recordset) {
+        let levels = [];
+        try { levels = JSON.parse(c.approvalLevelsJson || "[]"); } catch { levels = []; }
+        const approvals = approvalsByAssignment.get(c.assignmentId) || [];
+        const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
+        if (currentLevelIndex == null) continue;
+        const currentLevel = levels[currentLevelIndex];
+        const alreadyActed = approvals.some(
+          (x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId),
+        );
+        if (alreadyActed) continue;
+        if (isSuperAdmin || currentLevel.userIds.map(Number).includes(Number(viewerUserId))) count++;
+      }
+      res.json({ count });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /approvals/pending-count error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // PATCH /:rungId/status — move a rung between report statuses, and/or
 // update its Remarks (the Activity Detail modal's Remarks textarea saves
 // on blur independently of the status dropdown) and/or its ProgressPercent
