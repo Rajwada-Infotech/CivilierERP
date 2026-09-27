@@ -111,12 +111,27 @@ export const fetchCheckpointUpdatePhoto = async (id: number): Promise<string> =>
   return URL.createObjectURL(await res.blob());
 };
 
+// A per-assignment approval level — same shape as Approval Setup's own
+// ApprovalLevel (src/pages/admin/ApprovalSetup.tsx), just scoped to this one
+// activity assignment instead of a module-wide workflow. "all" levels are
+// sequential steps (each must approve in turn); a level with mode "any"
+// lets any ONE of its userIds approve to clear that step — the "one by one
+// then either" case is a run of "all" levels ending in one "any" level.
+export interface ApprovalLevel {
+  id: string;
+  label: string;
+  userIds: number[];
+  mode: "all" | "any";
+}
+
 export interface RungAssignmentDetail {
   rungId: number;
   activityId: number;
   candidateItems: CandidateItem[];
   assignment: {
     engineerIds: number[];
+    qcUserIds: number[];
+    approvalLevels: ApprovalLevel[];
     startDate: string | null;
     days: number | null;
     endDate: string | null;
@@ -133,6 +148,8 @@ export interface RungAssignmentDetail {
 
 export interface RungAssignmentPayload {
   engineerIds: number[];
+  qcUserIds: number[];
+  approvalLevels: ApprovalLevel[];
   startDate: string | null;
   days: number | null;
   endDate: string | null;
@@ -196,10 +213,9 @@ export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 // bearing on the order rows can move through.
 export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; className: string }> = {
   PENDING: { label: "Pending", className: "bg-slate-500/10 text-slate-600 dark:text-slate-400" },
-  // Set automatically the moment an engineer is assigned (POST /:rungId) —
-  // waiting on that engineer's own confirmation in the Approval Inbox, not
-  // something anyone picks from this dropdown by hand. Moves to IN_PROGRESS
-  // by itself once every assigned engineer has confirmed.
+  // No longer set automatically — assigning an engineer now moves straight
+  // to IN_PROGRESS. Kept in the enum/badge map for old records and manual
+  // overrides only.
   ALLOCATED: { label: "Allocated", className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
   IN_PROGRESS: { label: "In Progress", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
   HOLD: { label: "Hold", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
@@ -225,6 +241,7 @@ export interface ReportedAssignment {
   assignmentId: number;
   rungId: number;
   engineerNames: string | null;
+  qcNames: string | null;
   startDate: string | null;
   days: number | null;
   endDate: string | null;

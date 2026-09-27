@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer } from "lucide-react";
+import { X, UserRound, CalendarDays, Package, Loader2, HardHat, FileText, MessageSquare, ChevronDown, ListChecks, Check, Timer, ShieldCheck, Plus, Trash2, Users } from "lucide-react";
 import type { LadderActivity, DependencyMasterListRow } from "@/api/dependencyMasterApi";
 import {
   getEngineers,
@@ -15,6 +15,7 @@ import {
   type AssignmentCheckpoint,
   type SourceType,
   type Engineer,
+  type ApprovalLevel,
 } from "@/api/dependencyActivityAssignmentApi";
 import { getRoomBlueprint } from "@/api/roomMasterApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -27,11 +28,14 @@ const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking
 
 // Native <select multiple> renders as a raw OS listbox no amount of CSS can
 // soften — this pairs a styled trigger with a checkbox list in a Radix
-// popover instead, matching the rest of the app's input styling.
-function EngineerMultiSelect({
-  engineers, selected, onChange,
+// popover instead, matching the rest of the app's input styling. Shared by
+// the Engineers dropdown, the QC dropdown, and each Approval Level's own
+// picker below — same look everywhere a "pick some people" control appears
+// in this modal.
+function UserMultiSelect({
+  users, selected, onChange, placeholder = "Select…", noneLabel = "No one available.",
 }: {
-  engineers: Engineer[]; selected: number[]; onChange: (ids: number[]) => void;
+  users: Engineer[]; selected: number[]; onChange: (ids: number[]) => void; placeholder?: string; noneLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const toggle = (id: number) =>
@@ -39,10 +43,10 @@ function EngineerMultiSelect({
 
   const label =
     selected.length === 0
-      ? "Select engineers…"
+      ? placeholder
       : selected.length === 1
-        ? engineers.find((e) => e.id === selected[0])?.name || "1 engineer selected"
-        : `${selected.length} engineers selected`;
+        ? users.find((e) => e.id === selected[0])?.name || "1 selected"
+        : `${selected.length} selected`;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -56,21 +60,116 @@ function EngineerMultiSelect({
         align="start"
         className="w-[var(--radix-popover-trigger-width)] max-h-72 overflow-y-auto p-1.5"
       >
-        {engineers.length === 0 ? (
-          <p className="text-xs text-muted-foreground italic px-2 py-1.5">No engineers available.</p>
+        {users.length === 0 ? (
+          <p className="text-xs text-muted-foreground italic px-2 py-1.5">{noneLabel}</p>
         ) : (
-          engineers.map((eng) => (
+          users.map((u) => (
             <label
-              key={eng.id}
+              key={u.id}
               className="flex items-center gap-2.5 px-2.5 py-2 rounded-md text-sm text-foreground hover:bg-muted cursor-pointer transition-colors"
             >
-              <Checkbox checked={selected.includes(eng.id)} onCheckedChange={() => toggle(eng.id)} />
-              {eng.name}
+              <Checkbox checked={selected.includes(u.id)} onCheckedChange={() => toggle(u.id)} />
+              {u.name}
             </label>
           ))
         )}
       </PopoverContent>
     </Popover>
+  );
+}
+
+let levelKeySeq = 0;
+const newLevel = (index: number): ApprovalLevel => ({
+  id: `level-${Date.now()}-${++levelKeySeq}`,
+  label: `Level ${index + 1}`,
+  userIds: [],
+  mode: "all",
+});
+
+// Mini Approval Setup, scoped to just THIS activity assignment — not a
+// module-wide workflow like the admin Approval Setup page. Add one level per
+// approver for a strict one-by-one sequence; on the LAST level, pick more
+// than one person and switch its mode to "any one of them" for a
+// "one-by-one, then either" chain. Whoever ends up named here (plus
+// super_admin, always) gets the right to approve this activity's finished
+// work — enforced where that approval action itself lives (Work Reporting).
+function ApprovalLevelsEditor({
+  levels, onChange, users,
+}: {
+  levels: ApprovalLevel[]; onChange: (levels: ApprovalLevel[]) => void; users: Engineer[];
+}) {
+  const updateLevel = (id: string, patch: Partial<ApprovalLevel>) =>
+    onChange(levels.map((l) => (l.id === id ? { ...l, ...patch } : l)));
+  const removeLevel = (id: string) => onChange(levels.filter((l) => l.id !== id));
+  const addLevel = () => onChange([...levels, newLevel(levels.length)]);
+
+  return (
+    <div className="rounded-lg border border-dashed border-border bg-muted/20 p-3.5 space-y-2.5">
+      <div className="flex items-center justify-between">
+        <label className={`${labelCls} mb-0`}>
+          <ShieldCheck size={11} /> Approval Setup
+        </label>
+        <button
+          type="button"
+          onClick={addLevel}
+          className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300 transition-colors"
+        >
+          <Plus size={11} /> Add Approver Level
+        </button>
+      </div>
+
+      {levels.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground italic">
+          No approvers set — only super_admin can approve this activity's work. Add a level to name who else can.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {levels.map((level, i) => {
+            const isLast = i === levels.length - 1;
+            return (
+              <div key={level.id} className="flex items-center gap-2">
+                <span className="shrink-0 w-16 text-[10px] font-heading font-bold uppercase tracking-wide text-muted-foreground">
+                  {isLast ? "Final" : `Step ${i + 1}`}
+                </span>
+                <div className="flex-1">
+                  <UserMultiSelect
+                    users={users}
+                    selected={level.userIds}
+                    onChange={(ids) => updateLevel(level.id, { userIds: ids })}
+                    placeholder="Select approver(s)…"
+                  />
+                </div>
+                {level.userIds.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => updateLevel(level.id, { mode: level.mode === "any" ? "all" : "any" })}
+                    title={level.mode === "any" ? "Any one of them can approve — click to require all" : "All must approve — click to allow any one of them"}
+                    className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full transition-colors ${
+                      level.mode === "any"
+                        ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    <Users size={10} /> {level.mode === "any" ? "Any one" : "All"}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => removeLevel(level.id)}
+                  className="shrink-0 p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                  title="Remove level"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            );
+          })}
+          <p className="text-[10px] text-muted-foreground/70 pt-0.5">
+            Steps approve one after another. If the final step has more than one person, toggle "Any one" so just one of them clears it.
+          </p>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -192,6 +291,8 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   const rungId = rung.rungId!;
 
   const [engineerIds, setEngineerIds] = useState<number[]>([]);
+  const [qcUserIds, setQcUserIds] = useState<number[]>([]);
+  const [approvalLevels, setApprovalLevels] = useState<ApprovalLevel[]>([]);
   const [startDate, setStartDate] = useState<string>("");
   const [days, setDays] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
@@ -232,10 +333,14 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
   useEffect(() => {
     if (!detail?.assignment) {
       setDescription(defaultDescription);
+      setQcUserIds([]);
+      setApprovalLevels([]);
       return;
     }
     const a = detail.assignment;
     setEngineerIds(a.engineerIds);
+    setQcUserIds(a.qcUserIds || []);
+    setApprovalLevels(a.approvalLevels || []);
     setStartDate(a.startDate ? a.startDate.slice(0, 10) : "");
     setDays(a.days != null ? String(a.days) : "");
     setEndDate(a.endDate ? a.endDate.slice(0, 10) : "");
@@ -280,6 +385,8 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
         .filter((m) => Number.isFinite(m.quantity) && m.quantity > 0);
       return saveRungAssignment(rungId, {
         engineerIds,
+        qcUserIds,
+        approvalLevels,
         startDate: startDate || null,
         days: days ? parseInt(days, 10) : null,
         endDate: endDate || null,
@@ -336,12 +443,25 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
           </div>
         ) : (
           <div className="px-6 py-5 space-y-5 overflow-y-auto">
-            {/* Engineers — styled multi-select dropdown */}
-            <div>
-              <label className={labelCls}>
-                <UserRound size={11} /> Engineers
-              </label>
-              <EngineerMultiSelect engineers={engineers} selected={engineerIds} onChange={setEngineerIds} />
+            {/* Mini Approval Setup — who is allowed to approve THIS activity's
+                finished work, scoped to just this assignment. Sits above the
+                Engineers/QC pickers since it governs both of them. */}
+            <ApprovalLevelsEditor levels={approvalLevels} onChange={setApprovalLevels} users={engineers} />
+
+            {/* Engineers & QC — styled multi-select dropdowns, side by side */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className={labelCls}>
+                  <UserRound size={11} /> Engineers
+                </label>
+                <UserMultiSelect users={engineers} selected={engineerIds} onChange={setEngineerIds} placeholder="Select engineers…" noneLabel="No engineers available." />
+              </div>
+              <div>
+                <label className={labelCls}>
+                  <ShieldCheck size={11} /> Quality Check
+                </label>
+                <UserMultiSelect users={engineers} selected={qcUserIds} onChange={setQcUserIds} placeholder="Select QC…" noneLabel="No one available." />
+              </div>
             </div>
 
             {/* Start / Duration / End */}

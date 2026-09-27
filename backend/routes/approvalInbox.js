@@ -857,58 +857,15 @@ function buildInboxQueries(module) {
       `);
     }
 
-    // Work Allocation — per-engineer task confirmation. One row per engineer
-    // per assignment (dbo.DependencyActivityEngineer), not per assignment —
-    // a multi-engineer rung shows up once for EACH engineer still to
-    // confirm, since it's each person's own individual task, not a document
-    // a manager reviews once. Only ALLOCATED assignments (someone's been
-    // assigned, nobody there has confirmed yet) with an unconfirmed engineer
-    // row are pending here; AssigneeUserId is what isVisibleToViewer below
-    // uses to show this ONLY to that specific engineer (plus admin/
-    // super_admin oversight) — there's no role or Approval Setup workflow
-    // concept that fits "whichever engineer happens to be on this row".
-    if (!module || module === "work-allocation-engineer") {
-      queries.push(`
-        SELECT
-          'work-allocation-engineer'            AS Module,
-          'Activity Assignment'                 AS ModuleLabel,
-          CAST(dae.Id AS NVARCHAR)              AS RecordId,
-          CONCAT(dma.SequenceNo, '. ', am.activity_name) AS Reference,
-          daa.StartDate                         AS RecordDate,
-          'Pending'                             AS Status,
-          CAST(NULL AS NVARCHAR)                AS ContractorName,
-          CONCAT(
-            ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
-            ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
-          )                                      AS SupplierName,
-          CAST(NULL AS DECIMAL(18,2))           AS Amount,
-          CAST(NULL AS DECIMAL(18,2))           AS GrnTotalAmount,
-          CAST(NULL AS DECIMAL(18,2))           AS GrnBasicAmount,
-          CAST(NULL AS NVARCHAR(MAX))           AS BillingTermsData,
-          CAST(NULL AS NVARCHAR(100))           AS SourceTransferDocNo,
-          CAST(NULL AS NVARCHAR(255))           AS FromGodownName,
-          CAST(NULL AS NVARCHAR(255))           AS ToGodownName,
-          CAST(NULL AS NVARCHAR(MAX))           AS JournalVoucherSummary,
-          dae.EngineerId                        AS AssigneeUserId,
-          dma.Id                                 AS RungId,
-          CAST(0 AS BIT)                         AS NeedsReview,
-          CAST(daa.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
-          ''                                     AS ApprovedBy,
-          ''                                     AS ApprovedAt,
-          ''                                     AS RejectedBy,
-          ''                                     AS RejectionNote,
-          daa.UpdatedAt                          AS LastModified
-        FROM dbo.DependencyActivityEngineer dae
-        JOIN dbo.DependencyActivityAssignment daa ON daa.Id = dae.AssignmentId
-        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
-        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
-        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
-        LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
-        LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
-        LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
-        WHERE dae.Approved = 0 AND daa.Status = 'ALLOCATED'
-      `);
-    }
+    // NOTE: "work-allocation-engineer" used to populate here — one Approval
+    // Inbox row per assigned engineer, per assignment, for that engineer to
+    // individually confirm their own task (dbo.DependencyActivityEngineer's
+    // Approved flag). Removed: assigning engineers now starts work
+    // immediately (see dependencyActivityAssignment.js's POST /:rungId), and
+    // who gets to approve the finished work is instead a per-assignment
+    // list (ApprovalLevelsJson, set on that same assignment) — enforced
+    // wherever that approve action itself lives (Work Reporting), not
+    // surfaced through this shared inbox.
 
     // Applications no longer have their own approve/reject cycle — they
     // stay Pending permanently once Submitted, and all real review/approval

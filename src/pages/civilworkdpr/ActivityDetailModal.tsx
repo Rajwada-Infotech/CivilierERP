@@ -726,6 +726,8 @@ function CheckpointsTab({ rungId }: { rungId: number }) {
       const a = detail.assignment;
       await saveRungAssignment(rungId, {
         engineerIds: a.engineerIds,
+        qcUserIds: a.qcUserIds,
+        approvalLevels: a.approvalLevels,
         startDate: a.startDate,
         days: a.days,
         endDate: a.endDate,
