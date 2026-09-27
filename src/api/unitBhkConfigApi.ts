@@ -21,6 +21,8 @@ export interface LayoutType {
   summary: string;
   /** The global room list (active categories, quantity > 0). */
   composition: { categoryId: number; alias: string; quantity: number }[];
+  /** One of the 4 seeded BHK defaults — can't be removed. */
+  isSystem: boolean;
 }
 
 // Query key shared by every page that lists layout types, so saving a
@@ -96,6 +98,13 @@ export const addLayoutType = (label: string) =>
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ label }),
   }).then((r) => handle<LayoutType>(r));
+
+// Retires a custom layout type. Refused server-side for a seeded BHK default
+// or for a type still assigned to an active Unit.
+export const removeLayoutType = (typeKey: string) =>
+  fetchWithAuth(`${BASE}/types/${encodeURIComponent(typeKey)}`, { method: "DELETE" }).then((r) =>
+    handle<{ success: boolean }>(r),
+  );
 
 // One composition template per layout type — every Unit whose own
 // UnitType (dbo.UnitMaster) matches inherits it automatically, so there's
