@@ -824,7 +824,11 @@ const Payment: React.FC = () => {
   useEffect(() => {
     // An invoice-linked payment inherits the invoice's TDS; everything else — a
     // direct payment, a standalone advance, or a Contract advance — picks its own.
-    if ((form.expenseRef && !selectedContract) || !form.partyId || !form.company) {
+    // A payment settling a Journal Voucher line (jvLineId) is a third case: TDS,
+    // if any, was already withheld when the JV itself was posted, so this
+    // payment must not ask for (or apply) TDS of its own — see the matching
+    // fix in backend/routes/newPayment.js.
+    if ((form.expenseRef && !selectedContract) || form.jvLineId || !form.partyId || !form.company) {
       setTdsEligibility(null);
       return;
     }

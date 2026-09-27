@@ -834,13 +834,24 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // resolveInvoiceLinkedTds/resolveTds both throw a 400 (via .status) when
     // TDS is due but nothing was selected — caught below like every other
     // validation error in this handler.
+    //
+    // A payment settling a Journal Voucher's credit line (JVLineId) is a
+    // third case, same as invoice-linked: TDS (if any) was already withheld
+    // as its own liability leg when the JV itself was posted — the party's
+    // JV credit line is already net of TDS. Re-running the fresh-TDS
+    // threshold check here resolved to the same party head and demanded a
+    // TDS be selected all over again, which would then double-deduct TDS in
+    // this payment's own GL split on top of what the JV already withheld.
     const isInvoiceLinkedForTds = !!PExpenseRef && !ContractId;
+    const isJvLinkedForTds = !!JVLineId;
     const companyIdForTds = await resolvePaymentCompanyId(pool, PCompany);
     const finYearIdForTds = await resolveFinYearId(pool, PDate);
     let tdsSnapshot;
     try {
       const { resolveInvoiceLinkedTds, resolveTds } = require("../services/tds");
-      if (isInvoiceLinkedForTds) {
+      if (isJvLinkedForTds) {
+        tdsSnapshot = { eligible: false, thresholdMet: false, tdsId: null, tdsAmount: 0, tdsNature: null, tdsName: null, tdsPercentage: null };
+      } else if (isInvoiceLinkedForTds) {
         tdsSnapshot = await resolveInvoiceLinkedTds(pool, sql, {
           expenseRef: PExpenseRef,
           companyId: companyIdForTds,
@@ -2441,7 +2452,7 @@ router.get("/:id/posting", async (req, res) => {
     // Payment row + bank ledger
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PDate, np.PAmount, np.PMode, np.PExpenseRef,
-             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.JVLineId,
              np.TDSId, np.TDSNature, np.TDSName, np.TDSPercentage, np.TDSAmount,
              bank.LHeadName AS BankLedgerName, bank.LHeadCode AS BankLedgerCode,
              np.Status
@@ -2502,8 +2513,10 @@ router.get("/:id/posting", async (req, res) => {
     // invoice-linked payment, pmt.TDSAmount is only an inherited display
     // snapshot (see resolveInvoiceLinkedTds in services/tds.js) — TDS was
     // already withheld as its own liability leg when the INVOICE was
-    // posted, so this payment's own GL split must not re-deduct it.
-    const tdsAmount = pmt.PExpenseRef ? 0 : Number(pmt.TDSAmount) || 0;
+    // posted, so this payment's own GL split must not re-deduct it. Same
+    // for a payment settling a Journal Voucher line (JVLineId) — TDS (if
+    // any) was already withheld when the JV itself was posted.
+    const tdsAmount = (pmt.PExpenseRef || pmt.JVLineId) ? 0 : Number(pmt.TDSAmount) || 0;
 
     // Cash-mode payments never carry a PBankID (Payment.tsx disables the
     // Bank field for Cash) — the seeded Cash in Hand bank (migration 418)
@@ -2602,7 +2615,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
 
     const pmtRes = await pool.request().input("PPaymentID", sql.Int, pmtId).query(`
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
-             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany,
+             np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.JVLineId,
              ISNULL(np.TDSAmount, 0) AS TDSAmount,
              eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
       FROM dbo.NewPayment np
@@ -2638,8 +2651,9 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // already withheld as its own liability leg when the INVOICE was
     // posted, so this route's own GL split must not re-deduct it here too.
     // This route previously skipped that guard, so a manual "Post to GL" on
-    // an invoice-linked payment double-withheld the TDS amount.
-    const tdsAmount = pmt.PExpenseRef ? 0 : parseFloat(pmt.TDSAmount) || 0;
+    // an invoice-linked payment double-withheld the TDS amount. Same for a
+    // payment settling a Journal Voucher line (JVLineId).
+    const tdsAmount = (pmt.PExpenseRef || pmt.JVLineId) ? 0 : parseFloat(pmt.TDSAmount) || 0;
     if (tdsAmount > amount) {
       return res.status(422).json({ error: `TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — re-save the payment before posting.` });
     }

@@ -44,6 +44,9 @@ router.get("/types", authMiddleware, async (req, res) => {
       // the global room list — Flat Master's tree resolves every level's
       // layout from it (src/lib/layoutResolve.ts)
       composition: t.composition,
+      // The 4 seeded BHK defaults — the Remove button is hidden for these
+      // (see DELETE /types/:typeKey).
+      isSystem: t.isSystem,
     })));
   } catch (err) {
     console.error("[unit-bhk-config] GET /types error:", err.message);
@@ -92,6 +95,50 @@ router.post("/types", authMiddleware, requirePageRight("room-composition-builder
     res.status(201).json({ id: inserted.recordset[0].id, typeKey, label });
   } catch (err) {
     console.error("[unit-bhk-config] POST /types error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /types/:typeKey — retire a custom layout type (soft delete:
+// IsActive=0, same convention as everywhere else in this app). Refused for
+// the 4 seeded BHK defaults (IsSystem=1) and for any type still assigned to
+// an active Unit — those must be reassigned to a different Unit Type first,
+// or this would leave them pointing at a layout that no longer resolves.
+router.delete("/types/:typeKey", authMiddleware, requirePageRight("room-composition-builder", "delete"), async (req, res) => {
+  const typeKey = normalizeTypeKey(req.params.typeKey);
+  if (!typeKey) return res.status(400).json({ error: "Invalid layout type" });
+
+  try {
+    const pool = await getPool();
+    const typeRes = await pool.request().input("typeKey", sql.NVarChar(50), typeKey)
+      .query(`SELECT Id, Label, IsSystem FROM dbo.RoomLayoutType WHERE TypeKey = @typeKey AND IsActive = 1`);
+    if (!typeRes.recordset.length) return res.status(404).json({ error: "Layout type not found" });
+    const type = typeRes.recordset[0];
+
+    if (type.IsSystem) {
+      return res.status(400).json({ error: `"${type.Label}" is a default layout type and can't be removed.` });
+    }
+
+    const usage = await pool.request()
+      .input("layoutTypeId", sql.Int, type.Id)
+      .input("typeKey", sql.NVarChar(50), typeKey)
+      .query(`
+        SELECT COUNT(*) AS n FROM dbo.UnitMaster u
+        WHERE u.IsActive = 1
+          AND (u.LayoutTypeId = @layoutTypeId
+               OR (u.LayoutTypeId IS NULL AND UPPER(REPLACE(LTRIM(RTRIM(u.UnitType)), ' ', '')) = @typeKey))
+      `);
+    const unitsUsingIt = usage.recordset[0].n;
+    if (unitsUsingIt > 0) {
+      return res.status(409).json({
+        error: `"${type.Label}" is still assigned to ${unitsUsingIt} unit${unitsUsingIt === 1 ? "" : "s"} — reassign ${unitsUsingIt === 1 ? "it" : "them"} to a different Unit Type before removing this layout.`,
+      });
+    }
+
+    await pool.request().input("id", sql.Int, type.Id).query(`UPDATE dbo.RoomLayoutType SET IsActive = 0 WHERE Id = @id`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error("[unit-bhk-config] DELETE /types error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

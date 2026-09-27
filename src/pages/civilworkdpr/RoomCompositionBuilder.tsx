@@ -10,6 +10,7 @@ import {
   saveBhkTemplate,
   getLayoutTypes,
   addLayoutType,
+  removeLayoutType,
   LAYOUT_TYPES_QUERY_KEY,
   type BhkType,
 } from "@/api/unitBhkConfigApi";
@@ -33,6 +34,7 @@ export default function RoomCompositionBuilder() {
   const [addingType, setAddingType] = useState(false);
   const [newTypeLabel, setNewTypeLabel] = useState("");
   const [addingSaving, setAddingSaving] = useState(false);
+  const [removingTypeKey, setRemovingTypeKey] = useState<string | null>(null);
   const newTypeInputRef = useRef<HTMLInputElement>(null);
 
   const { data: layoutTypes = [], isLoading: loadingTypes } = useQuery({
@@ -130,6 +132,21 @@ export default function RoomCompositionBuilder() {
     }
   };
 
+  const handleRemoveType = async (t: (typeof layoutTypes)[number]) => {
+    if (!window.confirm(`Remove "${t.label}"? This can't be undone; it stays removable only while no unit is still tagged with it.`)) return;
+    setRemovingTypeKey(t.typeKey);
+    try {
+      await removeLayoutType(t.typeKey);
+      toast.success(`"${t.label}" removed`);
+      if (bhkType === t.typeKey) setBhkType(null);
+      await qc.invalidateQueries({ queryKey: LAYOUT_TYPES_QUERY_KEY });
+    } catch (e: any) {
+      toast.error(e.message ?? "Couldn't remove type");
+    } finally {
+      setRemovingTypeKey(null);
+    }
+  };
+
   const totalRooms = Object.values(quantities).reduce((s, n) => s + (n || 0), 0);
 
   return (
@@ -168,11 +185,13 @@ export default function RoomCompositionBuilder() {
                 ) : (
                   <div className="flex flex-wrap gap-2">
                     {layoutTypes.map((t) => (
-                      <button
+                      <div
                         key={t.typeKey}
-                        type="button"
+                        role="button"
+                        tabIndex={0}
                         onClick={() => setBhkType(t.typeKey)}
-                        className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border transition-all ${
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setBhkType(t.typeKey); } }}
+                        className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg border transition-all cursor-pointer ${
                           bhkType === t.typeKey
                             ? "border-cyan-500 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400"
                             : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -185,7 +204,20 @@ export default function RoomCompositionBuilder() {
                             title="No rooms defined yet — this type can't be picked for units until it has a layout"
                           />
                         )}
-                      </button>
+                        {/* Only custom types (not the 4 seeded BHK defaults) can be
+                            removed — same rule the backend enforces. */}
+                        {!t.isSystem && rights.canDelete && (
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleRemoveType(t); }}
+                            disabled={removingTypeKey === t.typeKey}
+                            title={`Remove "${t.label}"`}
+                            className="ml-0.5 -mr-1 w-4 h-4 shrink-0 rounded-full flex items-center justify-center text-muted-foreground/70 hover:text-red-500 hover:bg-red-500/10 disabled:opacity-40 transition-colors"
+                          >
+                            <X size={11} />
+                          </button>
+                        )}
+                      </div>
                     ))}
 
                     {addingType ? (
