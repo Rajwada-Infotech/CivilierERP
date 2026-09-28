@@ -129,6 +129,7 @@ router.get(
         daa.Description AS description,
         daa.Remarks AS remarks,
         daa.Status AS status,
+        daa.PreCancelStatus AS preCancelStatus,
         daa.ProgressPercent AS progressPercent,
         daa.AttemptNo AS attemptNo,
         daa.ReworkFromAssignmentId AS reworkFromAssignmentId,
@@ -798,17 +799,21 @@ router.patch(
     const pool = await getPool();
 
     const MANUAL_STATUSES = new Set(["IN_PROGRESS", "HOLD"]);
+    let current = null;
     if (hasStatus) {
       const cur = await pool.request().input("rungId", sql.Int, rungId).query(
         "SELECT Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
       );
-      const current = cur.recordset[0]?.Status;
+      current = cur.recordset[0]?.Status;
       if (current && current !== status) {
         if (current === "CANCELLED") {
           return res.status(400).json({ error: "A Cancelled activity can't be changed." });
         } else if (status === "CANCELLED") {
           // Allowed from any stage, per explicit instruction — Cancel is
-          // the one manual move with no forward-only restriction.
+          // the one manual move with no forward-only restriction. What it
+          // was right before is snapshotted below (PreCancelStatus) so a
+          // super_admin restoring it later (see POST /:rungId/restore)
+          // knows whether to put it back at APPROVED or IN_PROGRESS.
         } else if (status === "COMPLETED") {
           if (!(hasProgress && progressPercent === 100)) {
             return res.status(400).json({ error: "Completed is set automatically when work reaches 100%." });
@@ -831,12 +836,15 @@ router.patch(
     if (hasStatus) setClauses.push("Status = @status");
     if (hasRemarks) setClauses.push("Remarks = @remarks");
     if (hasProgress) setClauses.push("ProgressPercent = @progressPercent");
+    const capturingPreCancel = hasStatus && status === "CANCELLED" && current && current !== "CANCELLED";
+    if (capturingPreCancel) setClauses.push("PreCancelStatus = @preCancelStatus");
     const request = pool.request()
       .input("rungId", sql.Int, rungId)
       .input("updatedBy", sql.NVarChar(200), actor);
     if (hasStatus) request.input("status", sql.NVarChar(20), status);
     if (hasRemarks) request.input("remarks", sql.NVarChar(1000), remarks);
     if (hasProgress) request.input("progressPercent", sql.Int, progressPercent);
+    if (capturingPreCancel) request.input("preCancelStatus", sql.NVarChar(20), current);
 
     const result = await request.query(`
       UPDATE dbo.DependencyActivityAssignment
@@ -849,6 +857,50 @@ router.patch(
     res.json({ success: true, status, remarks, progressPercent });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:rungId/restore — bring a Cancelled activity back. super_admin
+// only, deliberately checked by role directly rather than a page right —
+// this is meant to be a rare, deliberate override, not something granted
+// out via Menu Rights. Restores to APPROVED if that's genuinely what it
+// was before being cancelled (PreCancelStatus, captured by the status
+// PATCH above); anything else — it was never actually approved — comes
+// back at IN_PROGRESS regardless of exactly where it was, so it has to go
+// through Reporting/QC/Approval again rather than silently resuming
+// wherever it happened to be.
+router.post("/:rungId/restore", authMiddleware, async (req, res) => {
+  if (req.user?.role !== "super_admin") {
+    return res.status(403).json({ error: "Only a super admin can restore a Cancelled activity." });
+  }
+  const rungId = parseInt(req.params.rungId, 10);
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+
+  try {
+    const pool = await getPool();
+    const cur = await pool.request().input("rungId", sql.Int, rungId).query(
+      "SELECT Id, Status, PreCancelStatus FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+    );
+    if (!cur.recordset.length) return res.status(404).json({ error: "No assignment found for this rung" });
+    if (cur.recordset[0].Status !== "CANCELLED") {
+      return res.status(400).json({ error: "Only a Cancelled activity can be restored." });
+    }
+    const restoredStatus = cur.recordset[0].PreCancelStatus === "APPROVED" ? "APPROVED" : "IN_PROGRESS";
+    const actor = req.user?.email || req.user?.name || "system";
+
+    await pool.request()
+      .input("id", sql.Int, cur.recordset[0].Id)
+      .input("status", sql.NVarChar(20), restoredStatus)
+      .input("by", sql.NVarChar(200), actor)
+      .query(`
+        UPDATE dbo.DependencyActivityAssignment
+        SET Status = @status, PreCancelStatus = NULL, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    res.json({ success: true, status: restoredStatus });
+  } catch (err) {
+    console.error("[dependency-activity-assignment] POST /:rungId/restore error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

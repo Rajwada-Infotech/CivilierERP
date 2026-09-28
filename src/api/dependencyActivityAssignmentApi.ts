@@ -257,6 +257,11 @@ export interface ReportedAssignment {
   description: string | null;
   remarks: string | null;
   status: AssignmentStatus;
+  // What Status was right before this activity got Cancelled — only ever
+  // non-null while status === "CANCELLED". Determines what restoring it
+  // (super_admin only) puts it back to: APPROVED if that's genuinely what
+  // it was, IN_PROGRESS otherwise.
+  preCancelStatus: AssignmentStatus | null;
   progressPercent: number;
   // Latest QC decision, if this activity has ever been inspected — drives
   // the "QC Checked" badge shown everywhere this row appears, and (once
@@ -632,4 +637,17 @@ export interface AmendmentRecord {
 export const getAmendments = async (): Promise<AmendmentRecord[]> => {
   const res = await fetchWithAuth(`${BASE}/amendments`);
   return handleResponse<AmendmentRecord[]>(res);
+};
+
+// Bringing a Cancelled activity back — super_admin only (enforced
+// server-side by role, not a page right), and only after reviewing the
+// activity's full detail in ActivityDetailModal, where this is called
+// from. Restores to APPROVED if it genuinely was before being cancelled,
+// otherwise IN_PROGRESS regardless of exactly where it was — see the
+// backend route's own comment.
+export const restoreCancelledActivity = async (
+  rungId: number,
+): Promise<{ success: boolean; status: AssignmentStatus }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/restore`, { method: "POST" });
+  return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
 };

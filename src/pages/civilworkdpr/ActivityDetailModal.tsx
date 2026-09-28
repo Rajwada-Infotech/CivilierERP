@@ -31,6 +31,7 @@ import {
   Timer,
   TrendingUp,
   History,
+  ShieldQuestion,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -44,6 +45,7 @@ import {
   getRungAssignment,
   saveRungAssignment,
   getAssignmentAttempts,
+  restoreCancelledActivity,
   ASSIGNMENT_STATUS_META,
   type PhotoPhase,
   type ActivityPhotoMeta,
@@ -64,6 +66,7 @@ import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStat
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 import { useCameraCapture } from "@/hooks/useCameraCapture";
+import { useAuth } from "@/contexts/AuthContext";
 
 type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "history";
 
@@ -1072,6 +1075,89 @@ function HistoryTab({ rungId }: { rungId: number }) {
   );
 }
 
+// ── Restore (Cancelled only, super_admin only) ──────────────────────────
+// Bringing a Cancelled activity back is a rare, deliberate override — kept
+// out of the plain status dropdown (that badge stays terminal once
+// Cancelled) and behind an explicit confirm step here, only reachable
+// after opening this modal and reviewing the activity's full detail. The
+// target status (APPROVED vs IN_PROGRESS) is decided server-side from
+// PreCancelStatus, but shown here up front so the confirm step isn't a
+// guess — see restoreCancelledActivity's own comment.
+function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const restoreTo: AssignmentStatus = row.preCancelStatus === "APPROVED" ? "APPROVED" : "IN_PROGRESS";
+
+  const restore = useMutation({
+    mutationFn: () => restoreCancelledActivity(row.rungId),
+    onSuccess: (res) => {
+      toast.success(`Restored — back to ${ASSIGNMENT_STATUS_META[res.status].label}.`);
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      setConfirmOpen(false);
+      onClose();
+    },
+    onError: (err: any) => toast.error(err?.message || "Failed to restore this activity."),
+  });
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setConfirmOpen(true)}
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-heading font-bold uppercase tracking-wide border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
+        title="Restore this Cancelled activity"
+      >
+        <ShieldQuestion size={12} /> Restore
+      </button>
+
+      {confirmOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-4" onClick={() => setConfirmOpen(false)}>
+            <div
+              className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-2xl p-5 space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+                  <ShieldQuestion size={16} className="text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-heading font-semibold text-foreground">Restore this activity?</p>
+                  <p className="text-xs text-muted-foreground">{row.activityName}</p>
+                </div>
+              </div>
+              <p className="text-xs text-foreground bg-muted/30 border border-border rounded-lg px-3 py-2.5">
+                It will move from <span className="font-semibold">Cancelled</span> back to{" "}
+                <span className="font-semibold">{ASSIGNMENT_STATUS_META[restoreTo].label}</span>
+                {restoreTo === "IN_PROGRESS" && " — it hadn't been approved yet, so it goes through Reporting/QC/Approval again from there"}.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmOpen(false)}
+                  className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={restore.isPending}
+                  onClick={() => restore.mutate()}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-amber-600 hover:bg-amber-500 disabled:opacity-50 transition-colors"
+                >
+                  {restore.isPending && <Loader2 size={14} className="animate-spin" />}
+                  Restore
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 // ── Modal shell ──────────────────────────────────────────────────────────
 
 const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
@@ -1094,6 +1180,8 @@ export default function ActivityDetailModal({
 }) {
   useOverlayBackClose(onClose);
   const [tab, setTab] = useState<DetailTab>(initialTab);
+  const { currentUser } = useAuth();
+  const canRestore = currentUser?.role === "super_admin" && row.status === "CANCELLED";
 
   const { data: annotation } = useQuery({
     queryKey: ["blueprint-annotation", row.rungId, row.roomId, "allocation"],
@@ -1127,6 +1215,7 @@ export default function ActivityDetailModal({
             <div className="flex items-center gap-2.5">
               <QcBadge qcStatus={row.qcStatus} />
               <AttemptBadge attemptNo={row.attemptNo} />
+              {canRestore && <RestoreCancelledButton row={row} onClose={onClose} />}
               <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
               <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
                 <X size={18} />
