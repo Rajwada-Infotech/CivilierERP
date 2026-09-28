@@ -74,7 +74,7 @@ const bookingStatusColor: Record<string, string> = {
 
 const EMPTY_FORM = {
   CustomerId: "", CompanyId: "",
-  ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitIds: [] as string[], PaymentPlanId: "",
+  ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitIds: [] as string[], PreferredPlotIds: [] as string[], PaymentPlanId: "",
   RatePerSqFt: "", DateOfApply: new Date().toISOString().slice(0, 10),
   Source: "", PlatformId: "", CampaignId: "", AdId: "", ChannelPartnerId: "",
   // ViaBroker is UI-only (never sent to the backend) — it just toggles the
@@ -197,6 +197,9 @@ async function fetchProjects(): Promise<any[]> {
 }
 async function fetchUnits(): Promise<any[]> {
   try { const r = await fetchWithAuth(`${UNIT_API}?isActive=1`); return r.ok ? r.json() : []; } catch { return []; }
+}
+async function fetchPlots(): Promise<any[]> {
+  try { const r = await fetchWithAuth("/api/plot-master?available=1"); return r.ok ? r.json() : []; } catch { return []; }
 }
 async function fetchBrokers(): Promise<any[]> {
   try { const r = await fetchWithAuth("/api/account-head?type=BR"); return r.ok ? r.json() : []; } catch { return []; }
@@ -844,6 +847,7 @@ const CrmApplication: React.FC = () => {
   // of just not seeing it. 30s keeps the common dropdown-render case cheap
   // (no refetch storm) while closing most of that window.
   const { data: units = [] } = useQuery({ queryKey: ["unit-master"], queryFn: fetchUnits, staleTime: 30_000 });
+  const { data: plots = [] } = useQuery({ queryKey: ["plot-master"], queryFn: fetchPlots, staleTime: 30_000 });
   const { data: brokers = [] } = useQuery({ queryKey: ["crm-brokers-dropdown"], queryFn: fetchBrokers, staleTime: 5 * 60_000 });
   const { data: paymentPlans = [] } = useQuery({ queryKey: ["crm-payment-plans"], queryFn: fetchPaymentPlans, staleTime: 5 * 60_000 });
   const { data: rateTiers = [] } = useQuery({ queryKey: ["crm-brokerage-rate-tiers"], queryFn: fetchBrokerageRateTiers, staleTime: 5 * 60_000 });
@@ -902,11 +906,20 @@ const CrmApplication: React.FC = () => {
       && (!(u.LockBookingNo || u.LockHoldId) || String(u.Id) === form.PreferredUnitIds[0])
     );
   }, [units, form.ProjectId, form.PreferredUnitIds[0]]);
+  const plotsForProject = useMemo(
+    () => (plots as any[]).filter((plot: any) =>
+      String(plot.ProjectId) === form.ProjectId
+      && (!(plot.LockBookingNo || plot.LockApplicationNo || plot.LockHoldId)
+        || form.PreferredPlotIds.includes(String(plot.Id)))
+    ),
+    [plots, form.ProjectId, form.PreferredPlotIds],
+  );
   const blocksForProject = useMemo(() => {
     const map = new Map<string, string>();
-    unitsForProject.forEach((u: any) => { if (u.BlockId) map.set(String(u.BlockId), u.BlockName); });
+    const inventory = plotsForProject.length || form.PreferredPlotIds.length ? plotsForProject : unitsForProject;
+    inventory.forEach((u: any) => { if (u.BlockId) map.set(String(u.BlockId), u.BlockName); });
     return Array.from(map, ([Id, Name]) => ({ Id, Name }));
-  }, [unitsForProject]);
+  }, [unitsForProject, plotsForProject, form.PreferredPlotIds.length]);
   const unitsForBlock = useMemo(() => {
     if (!form.BlockId) return unitsForProject;
     return unitsForProject.filter((u: any) => String(u.BlockId) === form.BlockId);
@@ -924,6 +937,12 @@ const CrmApplication: React.FC = () => {
     (units as any[]).find((u: any) => String(u.Id) === form.PreferredUnitIds[0]) || null,
     [units, form.PreferredUnitIds[0]]
   );
+  const selectedPlots = useMemo(() =>
+    (plots as any[]).filter((plot: any) => form.PreferredPlotIds.includes(String(plot.Id))),
+    [plots, form.PreferredPlotIds],
+  );
+  const selectedInventory = selectedUnit || selectedPlots[0] || null;
+  const hasInventorySelection = form.PreferredUnitIds.length > 0 || form.PreferredPlotIds.length > 0;
   // Deposit bank picker for the Payment Details section (Details step) —
   // scoped to the Project picked back in step 1, same pattern as
   // CrmBooking.tsx's own "Deposited To" field.
@@ -955,22 +974,22 @@ const CrmApplication: React.FC = () => {
   // active plan. Either way a plan must be picked once a unit is on the
   // application — there's no more "leave blank for the default split" option.
   const unitTaggedPaymentPlans = useMemo(() => {
-    if (!selectedUnit?.PaymentPlanIds) return [];
-    const taggedIds: string[] = String(selectedUnit.PaymentPlanIds).split(",").filter(Boolean);
+    if (!selectedInventory?.PaymentPlanIds) return [];
+    const taggedIds: string[] = String(selectedInventory.PaymentPlanIds).split(",").filter(Boolean);
     return (paymentPlans as any[]).filter((p: any) => p.IsActive && taggedIds.includes(String(p.Id)));
-  }, [paymentPlans, selectedUnit]);
+  }, [paymentPlans, selectedInventory]);
   const blockTaggedPaymentPlans = useMemo(() => {
-    if (!selectedUnit?.BlockId) return [];
-    const blockRow = (blockPlanTags as any[]).find((b: any) => String(b.Id) === String(selectedUnit.BlockId));
+    if (!selectedInventory?.BlockId) return [];
+    const blockRow = (blockPlanTags as any[]).find((b: any) => String(b.Id) === String(selectedInventory.BlockId));
     if (!blockRow?.PaymentPlanIds) return [];
     const taggedIds: string[] = String(blockRow.PaymentPlanIds).split(",").filter(Boolean);
     return (paymentPlans as any[]).filter((p: any) => p.IsActive && taggedIds.includes(String(p.Id)));
-  }, [paymentPlans, blockPlanTags, selectedUnit]);
+  }, [paymentPlans, blockPlanTags, selectedInventory]);
   const projectTaggedPaymentPlans = useMemo(() => {
-    if (!selectedUnit?.ProjectId) return [];
+    if (!selectedInventory?.ProjectId) return [];
     return (paymentPlans as any[]).filter((p: any) =>
-      p.IsActive && p.ProjectIds && String(p.ProjectIds).split(",").includes(String(selectedUnit.ProjectId)));
-  }, [paymentPlans, selectedUnit]);
+      p.IsActive && p.ProjectIds && String(p.ProjectIds).split(",").includes(String(selectedInventory.ProjectId)));
+  }, [paymentPlans, selectedInventory]);
   const activePaymentPlans = useMemo(() => (paymentPlans as any[]).filter((p: any) => p.IsActive), [paymentPlans]);
   const applicablePaymentPlans = unitTaggedPaymentPlans.length
     ? unitTaggedPaymentPlans
@@ -1027,10 +1046,7 @@ const CrmApplication: React.FC = () => {
   // anymore; see the comment on APPLICATION_TRANSITIONS in
   // crmApplicationWorkflow.js for why Cancel-and-redo isn't the answer
   // either at that point.
-  const isPlottedProject = React.useMemo(() => {
-    if (!unitsForProject || unitsForProject.length === 0) return false;
-    return (unitsForProject as any[]).some((u: any) => u.UnitKind === 'PLOT');
-  }, [unitsForProject]);
+  const isPlottedProject = plotsForProject.length > 0;
 
   const canEditUnitSelection = wizardAppStatus === null || wizardAppStatus === CrmStatus.DRAFT || wizardAppStatus === CrmStatus.PENDING || wizardAppStatus === CrmStatus.REJECTED;
 
@@ -1104,10 +1120,10 @@ const CrmApplication: React.FC = () => {
   // Rate auto-fills from the unit's own rate if UnitMaster carries one;
   // otherwise stays whatever staff typed (or blank, computed manually).
   useEffect(() => {
-    if (selectedUnit?.RatePerSqFt && !form.RatePerSqFt) {
-      setForm((f) => ({ ...f, RatePerSqFt: String(selectedUnit.RatePerSqFt) }));
+    if (selectedInventory?.RatePerSqFt && !form.RatePerSqFt) {
+      setForm((f) => ({ ...f, RatePerSqFt: String(selectedInventory.RatePerSqFt) }));
     }
-  }, [selectedUnit]);
+  }, [selectedInventory]);
 
   // If the unit changes to one with a different (or no) tagged-plan set,
   // clear a PaymentPlanId that no longer applies — e.g. it was one of the
@@ -1121,10 +1137,12 @@ const CrmApplication: React.FC = () => {
   }, [applicationId, selectedUnit?.Id]);
 
   const computedTotal = useMemo(() => {
-    const area = Number(selectedUnit?.AreaSqFt) || 0;
+    const area = selectedPlots.length
+      ? selectedPlots.reduce((sum: number, plot: any) => sum + (Number(plot.AreaSqFt) || 0), 0)
+      : Number(selectedUnit?.AreaSqFt) || 0;
     const rate = Number(form.RatePerSqFt) || 0;
     return area && rate ? Math.round(area * rate) : 0;
-  }, [selectedUnit, form.RatePerSqFt]);
+  }, [selectedUnit, selectedPlots, form.RatePerSqFt]);
   const unitParkingGstPreview = useMemo(
     () => (crmGstRates ? computeUnitParkingGst(computedTotal, detailParkingBase, crmGstRates) : null),
     [crmGstRates, computedTotal, detailParkingBase],
@@ -1254,7 +1272,8 @@ const CrmApplication: React.FC = () => {
         CompanyId: app.CompanyId != null ? String(app.CompanyId) : "",
         ProjectId: app.ProjectId != null ? String(app.ProjectId) : "",
         BlockId: app.BlockId != null ? String(app.BlockId) : "",
-        PreferredUnitIds: app.PreferredUnitId != null ? [String(app.PreferredUnitId)] : [],
+        PreferredUnitIds: app.PreferredUnitIdsCsv ? app.PreferredUnitIdsCsv.split(',') : (app.PreferredUnitId != null ? [String(app.PreferredUnitId)] : []),
+        PreferredPlotIds: app.PreferredPlotIdsCsv ? app.PreferredPlotIdsCsv.split(',') : [],
         PaymentPlanId: app.PaymentPlanId != null ? String(app.PaymentPlanId) : "",
         RatePerSqFt: app.RatePerSqFt != null ? String(app.RatePerSqFt) : "",
         DateOfApply: app.DateOfApply ? String(app.DateOfApply).slice(0, 10) : new Date().toISOString().slice(0, 10),
@@ -1322,7 +1341,7 @@ const CrmApplication: React.FC = () => {
   const handleCreateAndNext = async () => {
     if (!form.CustomerId) { toast.error("Select a customer"); return; }
     if (!form.CompanyId || !form.ProjectId) { toast.error("Select a company and project"); return; }
-    if ((!form.PreferredUnitIds || form.PreferredUnitIds.length === 0)) { toast.error("Select a unit"); return; }
+    if (!form.PreferredUnitIds?.length && !form.PreferredPlotIds?.length) { toast.error("Select a unit or plot"); return; }
     if (form.RatePerSqFt === "" || Number(form.RatePerSqFt) <= 0) { toast.error("Enter a valid Rate (₹/sqft)"); return; }
     if (!form.PaymentPlanId) { toast.error("Select a Payment Plan for this unit"); return; }
     setSaving(true);
@@ -1336,6 +1355,7 @@ const CrmApplication: React.FC = () => {
         CompanyId: form.CompanyId || null,
         ProjectId: form.ProjectId || null,
         PreferredUnitIds: form.PreferredUnitIds || [],
+        PreferredPlotIds: form.PreferredPlotIds || [],
         PaymentPlanId: form.PaymentPlanId || null,
         RatePerSqFt: form.RatePerSqFt || null,
         DateOfApply: form.DateOfApply || null,
@@ -1366,6 +1386,7 @@ const CrmApplication: React.FC = () => {
         setUnitLocked(true);
         toast.success("Project/Unit selection updated");
         if (form.PreferredUnitIds[0]) qc.invalidateQueries({ queryKey: ["unit-master"] });
+        if (form.PreferredPlotIds.length) qc.invalidateQueries({ queryKey: ["plot-master"] });
         advanceStep(2);
         return;
       }
@@ -1389,6 +1410,7 @@ const CrmApplication: React.FC = () => {
       // (see createCrmApplicationRecord) — refresh so this session's own
       // dropdown reflects it right away rather than waiting out staleTime.
       if (form.PreferredUnitIds[0]) qc.invalidateQueries({ queryKey: ["unit-master"] });
+      if (form.PreferredPlotIds.length) qc.invalidateQueries({ queryKey: ["plot-master"] });
       // applicationId (state) won't be updated yet on this render, so
       // advanceStep's saveApplicationFields (which reads applicationId
       // from state) would no-op — patch CurrentStep directly against the
@@ -2139,7 +2161,7 @@ const CrmApplication: React.FC = () => {
                       <label className={labelCls}>Company *</label>
                       <select value={form.CompanyId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => {
-                          setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitIds: [], PaymentPlanId: "" }));
+                          setForm((f) => ({ ...f, CompanyId: e.target.value, ProjectId: "", BlockId: "", FloorNo: "", PreferredUnitIds: [], PreferredPlotIds: [], PaymentPlanId: "" }));
                         }}
                         className={inputCls}>
                         <option value="">Select company</option>
@@ -2150,7 +2172,7 @@ const CrmApplication: React.FC = () => {
                       <label className={labelCls}>Project *</label>
                       <select value={form.ProjectId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => {
-                          setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitIds: [], PaymentPlanId: "" }));
+                          setForm((f) => ({ ...f, ProjectId: e.target.value, BlockId: "", FloorNo: "", PreferredUnitIds: [], PreferredPlotIds: [], PaymentPlanId: "" }));
                         }}
                         className={inputCls}>
                         <option value="">Select project</option>
@@ -2161,48 +2183,49 @@ const CrmApplication: React.FC = () => {
                       <label className={labelCls}>Block / Tower</label>
                       <select value={form.BlockId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => {
-                          setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitIds: [], PaymentPlanId: "" }));
+                          setForm((f) => ({ ...f, BlockId: e.target.value, FloorNo: "", PreferredUnitIds: [], PreferredPlotIds: [], PaymentPlanId: "" }));
                         }}
                         className={inputCls}>
                         <option value="">Select block</option>
                         {blocksForProject.map((b) => <option key={b.Id} value={b.Id}>{b.Name}</option>)}
                       </select>
                     </div>
-                    <div>
+                    {!isPlottedProject && <div>
                       <label className={labelCls}>Floor</label>
                       <select value={form.FloorNo} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
                         onChange={(e) => {
-                          setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitIds: [], PaymentPlanId: "" }));
+                          setForm((f) => ({ ...f, FloorNo: e.target.value, PreferredUnitIds: [], PreferredPlotIds: [], PaymentPlanId: "" }));
                         }}
                         className={inputCls}>
                         <option value="">Select floor</option>
                         {floorsForBlock.map((fl) => <option key={fl} value={fl}>Floor {fl}</option>)}
                       </select>
-                    </div>
+                    </div>}
                     <div className="col-span-2">
-                      <label className={labelCls}>Unit *</label>
+                      <label className={labelCls}>{isPlottedProject ? "Plots" : "Unit"} *</label>
                       {isPlottedProject ? (
                           <div className={unitLocked || !canEditUnitSelection ? "pointer-events-none opacity-50" : ""}>
                           <MultiSelectDropdown
-                            options={(unitsForProject as any[]).map((u: any) => ({
+                            options={(plotsForProject as any[]).map((u: any) => ({
                               id: String(u.Id),
-                              label: `${u.UnitName} ${u.AreaSqFt ? '(' + u.AreaSqFt + ' sq.ft)' : ''}`,
+                              label: `${u.PlotName} ${u.AreaSqFt ? '(' + u.AreaSqFt + ' sq.ft)' : ''}`,
                               group: u.BlockName
                             }))}
-                            value={form.PreferredUnitIds}
+                            value={form.PreferredPlotIds}
                             onChange={(nextIds) => {
-                              const picked = (unitsForProject as any[]).find((u: any) => nextIds.includes(String(u.Id)));
+                              const picked = (plotsForProject as any[]).find((u: any) => nextIds.includes(String(u.Id)));
                               setForm((f) => ({
                                 ...f,
-                                PreferredUnitIds: nextIds,
+                                PreferredUnitIds: [],
+                                PreferredPlotIds: nextIds,
                                 BlockId: picked?.BlockId != null ? String(picked.BlockId) : f.BlockId,
-                                FloorNo: picked?.FloorNo != null ? String(picked.FloorNo) : f.FloorNo,
+                                FloorNo: "",
                                 PaymentPlanId: "",
                               }));
                             }}
-                            placeholder="Select units"
-                            searchPlaceholder="Search units..."
-                            itemNoun="unit"
+                            placeholder="Select plots"
+                            searchPlaceholder="Search plots..."
+                            itemNoun="plot"
                           /></div>
                         ) : (
                           <Select value={form.PreferredUnitIds[0] || undefined} onValueChange={(id) => {
@@ -2243,6 +2266,14 @@ const CrmApplication: React.FC = () => {
                       )}
                     </div>
                   )}
+                  {isPlottedProject && selectedPlots.length > 0 && (
+                    <div className="rounded-lg border border-border bg-muted/20 px-3 py-1.5 text-xs flex items-center gap-1.5 text-muted-foreground">
+                      <IndianRupee size={11} className="text-amber-500 shrink-0" />
+                      {form.RatePerSqFt && computedTotal ? (
+                        <span>{selectedPlots.length} plot{selectedPlots.length === 1 ? "" : "s"} · {selectedPlots.reduce((sum: number, plot: any) => sum + (Number(plot.AreaSqFt) || 0), 0).toLocaleString("en-IN")} sqft × ₹{Number(form.RatePerSqFt).toLocaleString("en-IN")}/sqft = <span className="font-semibold text-foreground">₹{computedTotal.toLocaleString("en-IN")}</span></span>
+                      ) : <span>Enter Rate (₹/sqft) to see the combined plot price.</span>}
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-10 gap-3">
                     <div className="col-span-4 lg:col-span-4">
@@ -2268,14 +2299,14 @@ const CrmApplication: React.FC = () => {
                       empty — keeps the widened dialog's right column from
                       reading as dead space and tells staff what will
                       appear here. */}
-                  {(!form.PreferredUnitIds || form.PreferredUnitIds.length === 0) && (
+                  {!hasInventorySelection && (
                     <div className="rounded-xl border border-dashed border-amber-500/30 bg-amber-500/5 p-5 text-center space-y-1.5">
                       <div className="mx-auto w-9 h-9 rounded-lg bg-amber-500/10 flex items-center justify-center">
                         <Building2 size={16} className="text-amber-500" />
                       </div>
-                      <p className="text-xs font-heading font-semibold text-foreground">Pick a unit to continue</p>
+                      <p className="text-xs font-heading font-semibold text-foreground">Pick {isPlottedProject ? "plots" : "a unit"} to continue</p>
                       <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        Choose the company, project and unit on the left. GST breakdown,
+                        Choose the company, project and {isPlottedProject ? "plots" : "unit"} on the left. GST breakdown,
                         payment plan and broker options will show up here.
                       </p>
                     </div>
@@ -2286,7 +2317,8 @@ const CrmApplication: React.FC = () => {
                       same application, so staff see the real combined
                       bracket from the very start, not just at the very end. */}
                   {form.RatePerSqFt && computedTotal ? (
-                    <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
+                    isPlottedProject ? <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4"><p className="text-xs font-semibold text-foreground">Land sale</p><p className="mt-1 text-[11px] text-muted-foreground">Selected plots are sold as land. GST is not applicable to this land value.</p></div>
+                      : <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
                   ) : null}
 
                   {/* Payment Plan — mandatory the moment a unit is picked.
@@ -2294,7 +2326,7 @@ const CrmApplication: React.FC = () => {
                       Master); if the unit has none tagged, every active plan
                       is offered instead. Not re-selectable on the Booking
                       page — this is the one place it's chosen. */}
-                  {form.PreferredUnitIds[0] && (
+                  {hasInventorySelection && (
                     <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-2">
                       <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
                       <select value={form.PaymentPlanId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
@@ -2516,9 +2548,16 @@ const CrmApplication: React.FC = () => {
                   <p className="text-muted-foreground">{selectedUnit.UnitName} · {selectedUnit.UnitType || "—"} · {selectedUnit.AreaSqFt ? `${selectedUnit.AreaSqFt} sqft` : "—"}</p>
                 </div>
               )}
+              {isPlottedProject && selectedPlots.length > 0 && (
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
+                  <p className="font-semibold text-foreground flex items-center gap-1.5 mb-1"><MapIcon size={12} className="text-primary" /> Plots & Price</p>
+                  <p className="text-muted-foreground">{selectedPlots.map((plot: any) => plot.PlotName).join(", ")} · {selectedPlots.reduce((sum: number, plot: any) => sum + (Number(plot.AreaSqFt) || 0), 0).toLocaleString("en-IN")} sqft combined</p>
+                </div>
+              )}
 
-              {selectedUnit && computedTotal > 0 && (
-                <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
+              {hasInventorySelection && computedTotal > 0 && (
+                isPlottedProject ? <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs"><p className="font-semibold text-foreground">Land sale</p><p className="mt-0.5 text-muted-foreground">GST not applicable to the selected plot value.</p></div>
+                  : <GstBreakdownBox unitValue={computedTotal} parkingBase={detailParkingBase} />
               )}
 
               {/* Extra Charges — separate from the Unit+Parking GST bracket

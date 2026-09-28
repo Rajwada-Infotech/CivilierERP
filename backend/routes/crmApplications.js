@@ -14,13 +14,34 @@ const { advanceApplicationStatus, logStatusChange } = require("../services/crmAp
 // this so approve/reject is gated to admin/super_admin/dba only (the same
 // engine BOQ, Purchase Orders, etc. use), instead of any editor self-approving.
 const { transition: approvalTransition } = require("../services/approvalService");
-const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan } = require("../services/crmEntityCreation");
+const { createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, resolveApplicationPaymentPlan, validatePlotSelection } = require("../services/crmEntityCreation");
 const { placeHoldIfNeeded, releaseAllHoldsForApplication, findActiveHold, releaseHold } = require("../services/crmHoldService");
 const { recalculateRemainingMilestones, requireActiveBooking } = require("../services/crmWorkflowGuards");
 const { releaseAllParkingForApplication, applyAddParking, rollupBookingTotals } = require("../routes/crmParking");
 const { ensureBrokerForChannelPartner } = require("../services/channelPartnerBrokerBridge");
 const { getApplicationFormPdfBuffer } = require("../services/applicationFormPdf");
 const { applyPagination } = require("../services/crmListPagination");
+
+async function getApplicationUnitIds(pool, applicationId, primaryUnitId = null) {
+  const lines = await pool.request().input("aid", sql.Int, applicationId).query(`
+    SELECT UnitId
+    FROM dbo.CrmApplicationUnit
+    WHERE ApplicationId = @aid AND Status = N'Active'
+    ORDER BY CASE WHEN IsPrimary = 1 THEN 0 ELSE 1 END, UnitId
+  `);
+  const ids = lines.recordset.map((row) => Number(row.UnitId)).filter(Number.isInteger);
+  if (primaryUnitId != null && !ids.includes(Number(primaryUnitId))) ids.unshift(Number(primaryUnitId));
+  return ids;
+}
+
+async function getApplicationPlotIds(pool, applicationId) {
+  const lines = await pool.request().input("aid", sql.Int, applicationId).query(`
+    SELECT PlotId FROM dbo.CrmApplicationPlot
+    WHERE ApplicationId = @aid AND Status = N'Active'
+    ORDER BY CASE WHEN IsPrimary = 1 THEN 0 ELSE 1 END, PlotId
+  `);
+  return lines.recordset.map((row) => Number(row.PlotId)).filter(Number.isInteger);
+}
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -37,6 +58,8 @@ const APP_SELECT = `
     COALESCE(cust.Mobile,       a.Mobile)        AS Mobile,
     a.AltMobile, a.Email,
     a.ProjectId, a.PreferredUnitId, a.CompanyId,
+    (SELECT STRING_AGG(CAST(UnitId AS NVARCHAR(10)), ',') FROM dbo.CrmApplicationUnit au WHERE au.ApplicationId = a.Id AND au.Status = 'Active') AS PreferredUnitIdsCsv,
+    (SELECT STRING_AGG(CAST(PlotId AS NVARCHAR(10)), ',') FROM dbo.CrmApplicationPlot ap WHERE ap.ApplicationId = a.Id AND ap.Status = 'Active') AS PreferredPlotIdsCsv,
     a.InterestedProject, a.InterestedUnit, a.PropertyType, a.BhkPreference,
     a.Source, a.PlatformId, a.CampaignId, a.AdId, a.ChannelPartnerId,
     a.AssignedTo, a.AssignedBy, a.Status, a.Notes, a.CurrentStep,
@@ -393,6 +416,14 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
   try {
     const pool = getPool();
     const b = req.body;
+    // Map PreferredUnitIds array (from updated CrmApplication.tsx) back to PreferredUnitId for the primary unit logic
+    if (b.PreferredUnitIds !== undefined) {
+      b.PreferredUnitId = Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0 ? b.PreferredUnitIds[0] : null;
+    }
+    const preferredPlotIds = Array.isArray(b.PreferredPlotIds)
+      ? b.PreferredPlotIds.map(Number).filter(Number.isInteger)
+      : [];
+    if (preferredPlotIds.length > 0) b.PreferredUnitId = null;
     const id = parseId(req.params.id);
     if (id === null) return res.status(400).json({ error: "Invalid id" });
     const actor = actorId(req);
@@ -414,7 +445,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // PUT /:id is reachable directly, not only through the wizard UI.
     const changingUnitSelection =
       b.CompanyId !== undefined || b.ProjectId !== undefined ||
-      b.PreferredUnitId !== undefined || b.PaymentPlanId !== undefined;
+      b.PreferredUnitId !== undefined || b.PreferredPlotIds !== undefined || b.PaymentPlanId !== undefined;
     // Rejected included deliberately: it's the legacy resubmit path (see
     // crmApplicationWorkflow.js's module docstring — nothing in current
     // code sets Rejected, but old data may still carry it), resubmittable
@@ -474,7 +505,13 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       companyId = companyId != null ? companyId : (proj.recordset[0].company_id != null ? proj.recordset[0].company_id : null);
     }
     let unitName = b.InterestedUnit || null;
-    if (b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "") {
+    if (preferredPlotIds.length > 0) {
+      const selectedPlots = await validatePlotSelection(pool, preferredPlotIds, {
+        projectId: b.ProjectId !== undefined ? b.ProjectId : existing.recordset[0].ProjectId,
+        applicationId: id,
+      });
+      unitName = preferredPlotIds.map((plotId) => selectedPlots.find((plot) => plot.Id === plotId)?.PlotName).filter(Boolean).join(", ");
+    } else if (b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "") {
       const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
         .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
       if (!unit.recordset.length) return res.status(400).json({ error: "Selected unit does not exist or is inactive" });
@@ -491,8 +528,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // taken; the old hold is only released afterward, once the new one is
     // confirmed in place.
     const newUnitId = b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : null;
-    const unitIsChanging = newUnitId !== null && newUnitId !== existingUnitId;
-    if (unitIsChanging) {
+    const unitIsChanging = newUnitId !== existingUnitId;
+    if (unitIsChanging && newUnitId !== null) {
       try {
         await placeHoldIfNeeded(pool, {
           entityType: "Unit", entityId: newUnitId, applicationId: id, holdDays: 3,
@@ -510,17 +547,21 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
     // and Booking creation — validates the picked plan against the unit's
     // CrmUnitPaymentPlan tags and enforces the "2+ tags -> must pick one"
     // rule, instead of the old single DefaultPaymentPlanId fallback.
-    const pptouched = (b.PaymentPlanId !== undefined || b.PreferredUnitId !== undefined) ? 1 : 0;
+    const pptouched = (b.PaymentPlanId !== undefined || b.PreferredUnitId !== undefined || b.PreferredPlotIds !== undefined) ? 1 : 0;
     let effectivePaymentPlanId = null;
     if (pptouched) {
       const effectiveUnitId = b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : existingUnitId;
       try {
-        effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
+        if (preferredPlotIds.length > 0) {
+          effectivePaymentPlanId = b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? parseInt(b.PaymentPlanId) : null;
+        } else {
+          effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
           preferredUnitId: effectiveUnitId,
           // b.PaymentPlanId can legitimately be 0 (CrmPaymentPlanTemplate
           // has a row at Id 0) — `||` would silently drop it.
           paymentPlanId: b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? b.PaymentPlanId : null,
-        });
+          });
+        }
       } catch (planErr) {
         return res.status(planErr.status || 400).json({ error: planErr.message });
       }
@@ -548,6 +589,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       .input("em",   sql.NVarChar(200), b.Email || null)
       .input("pid",  sql.Int,           b.ProjectId !== undefined && b.ProjectId !== null && b.ProjectId !== "" ? parseInt(b.ProjectId) : null)
       .input("uid",  sql.Int,           b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : null)
+      .input("plotselected", sql.Bit,   preferredPlotIds.length > 0 ? 1 : 0)
       .input("cid",  sql.Int,           companyId)
       .input("proj", sql.NVarChar(200), projectName)
       .input("unit", sql.NVarChar(100), unitName)
@@ -582,7 +624,7 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
         UPDATE dbo.CrmApplication SET
           ApplicantName = ISNULL(@name, ApplicantName),
           Mobile = ISNULL(@mob, Mobile), AltMobile = ISNULL(@alt, AltMobile), Email = ISNULL(@em, Email),
-          ProjectId = ISNULL(@pid, ProjectId), PreferredUnitId = ISNULL(@uid, PreferredUnitId),
+          ProjectId = ISNULL(@pid, ProjectId), PreferredUnitId = CASE WHEN @plotselected = 1 THEN NULL WHEN @uid IS NOT NULL THEN @uid ELSE PreferredUnitId END,
           CompanyId = ISNULL(@cid, CompanyId),
           InterestedProject = ISNULL(@proj, InterestedProject), InterestedUnit = ISNULL(@unit, InterestedUnit),
           PropertyType = @pt, BhkPreference = @bhk,
@@ -605,6 +647,31 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
           UpdatedBy = @ub, UpdatedAt = SYSDATETIME()
         WHERE Id = @id AND IsActive = 1
       `);
+    // Update CrmApplicationUnit lines if PreferredUnitIds was provided
+    if (b.PreferredUnitIds !== undefined) {
+      const rawIds = Array.isArray(b.PreferredUnitIds) ? b.PreferredUnitIds : [];
+      await pool.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationUnit WHERE ApplicationId = @aid");
+      if (rawIds.length > 0) {
+        for (const uidStr of rawIds) {
+          await pool.request()
+            .input("aid", sql.Int, id)
+            .input("uid", sql.Int, parseInt(uidStr))
+            .input("pri", sql.Bit, String(uidStr) === String(b.PreferredUnitId) ? 1 : 0)
+            .query("INSERT INTO dbo.CrmApplicationUnit (ApplicationId, UnitId, Status, IsPrimary, CreatedAt) VALUES (@aid, @uid, 'Active', @pri, SYSDATETIME())");
+        }
+      }
+    }
+    if (b.PreferredPlotIds !== undefined) {
+      await pool.request().input("aid", sql.Int, id).query("DELETE FROM dbo.CrmApplicationPlot WHERE ApplicationId = @aid");
+      for (let index = 0; index < preferredPlotIds.length; index++) {
+        await pool.request()
+          .input("aid", sql.Int, id)
+          .input("pid", sql.Int, preferredPlotIds[index])
+          .input("pri", sql.Bit, index === 0 ? 1 : 0)
+          .query("INSERT INTO dbo.CrmApplicationPlot (ApplicationId, PlotId, Status, IsPrimary, CreatedAt) VALUES (@aid, @pid, 'Active', @pri, SYSDATETIME())");
+      }
+    }
+
 
     // Now that the new unit's hold is confirmed and the row itself is saved,
     // release whatever hold this same application still has on the OLD unit
@@ -831,9 +898,10 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         const app = await pool.request().input("id", sql.Int, id)
           .query("SELECT PreferredUnitId FROM dbo.CrmApplication WHERE Id = @id");
         const unitId = app.recordset[0]?.PreferredUnitId;
-        if (unitId) {
+        const unitIds = await getApplicationUnitIds(pool, id, unitId);
+        for (const selectedUnitId of unitIds) {
           await placeHoldIfNeeded(pool, {
-            entityType: "Unit", entityId: unitId, applicationId: id, holdDays: 3,
+            entityType: "Unit", entityId: selectedUnitId, applicationId: id, holdDays: 3,
             reason: "Application submitted — auto-hold", userId: actor,
           });
         }
@@ -851,10 +919,12 @@ router.put("/:id/submit", requirePageRight("crm-applications", "edit"), async (r
         FROM dbo.CrmApplication WHERE Id = @id
       `);
       const a = app.recordset[0];
-      if (a?.PreferredUnitId) {
+      const plotIds = await getApplicationPlotIds(pool, id);
+      if (a?.PreferredUnitId || plotIds.length) {
         try {
+          const unitIds = await getApplicationUnitIds(pool, id, a.PreferredUnitId);
           const created = await createCrmBookingRecord(pool, {
-            ApplicationId: id, UnitId: a.PreferredUnitId, RatePerSqFt: a.RatePerSqFt,
+            ApplicationId: id, ...(plotIds.length ? { PlotIds: plotIds } : { UnitIds: unitIds }), RatePerSqFt: a.RatePerSqFt,
             PaymentPlanId: a.PaymentPlanId, BookingDate: a.DateOfApply,
             TokenType: a.TokenType, TokenValue: a.TokenValue, BookingAmount: a.BookingAmount,
             PaymentMode: a.PaymentMode, DepositBankId: a.DepositBankId,
@@ -920,12 +990,14 @@ router.post("/:id/create-booking", requirePageRight("crm-applications", "edit"),
     if (a.Status !== "Pending") {
       return res.status(400).json({ error: `Cannot create a booking for a ${a.Status} application — the application must be submitted first` });
     }
-    if (!a.PreferredUnitId) {
-      return res.status(400).json({ error: "This application has no preferred unit selected" });
+    const plotIds = await getApplicationPlotIds(pool, id);
+    if (!a.PreferredUnitId && !plotIds.length) {
+      return res.status(400).json({ error: "This application has no preferred unit or plot selected" });
     }
 
+    const unitIds = await getApplicationUnitIds(pool, id, a.PreferredUnitId);
     const created = await createCrmBookingRecord(pool, {
-      ApplicationId: id, UnitId: a.PreferredUnitId, RatePerSqFt: a.RatePerSqFt,
+      ApplicationId: id, ...(plotIds.length ? { PlotIds: plotIds } : { UnitIds: unitIds }), RatePerSqFt: a.RatePerSqFt,
       PaymentPlanId: a.PaymentPlanId, BookingDate: a.DateOfApply, TokenType: a.TokenType,
       TokenValue: a.TokenValue, BookingAmount: a.BookingAmount, PaymentMode: a.PaymentMode,
       DepositBankId: a.DepositBankId,
@@ -1005,6 +1077,13 @@ router.put("/:id/cancel", requirePageRight("crm-applications", "edit"), async (r
 
     const result = await advanceApplicationStatus(pool, id, "Cancelled", "Manual", remarks, actorId(req));
     if (!result.ok) return res.status(result.error === "Application not found" ? 404 : 400).json({ error: result.error });
+    // Plot lines have their own active-only unique index. Closing just the
+    // parent application leaves a plot visibly free but permanently blocked
+    // from the next application, so release the inventory line explicitly.
+    await pool.request().input("aid", sql.Int, id).query(`
+      UPDATE dbo.CrmApplicationPlot SET Status = N'Cancelled'
+      WHERE ApplicationId = @aid AND Status = N'Active'
+    `);
     res.json({ success: true, status: result.to });
   } catch (e) {
     console.error("[crm-applications] cancel error:", e.message);
@@ -1062,6 +1141,11 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
     // to the caller rather than leaving inventory stuck on a "deleted" record.
     await releaseAllHoldsForApplication(pool, id, actor);
     await releaseAllParkingForApplication(pool, id);
+
+    await pool.request().input("aid", sql.Int, id).query(`
+      UPDATE dbo.CrmApplicationPlot SET Status = N'Cancelled'
+      WHERE ApplicationId = @aid AND Status = N'Active'
+    `);
 
     await pool.request()
       .input("id", sql.Int, id)

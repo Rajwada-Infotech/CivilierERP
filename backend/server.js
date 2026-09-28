@@ -275,6 +275,7 @@ const ALL_ROUTES = [
   { path: "/api/project-type-master", file: "./routes/projectTypeMaster" },
   { path: "/api/block-master", file: "./routes/blockMaster" },
   { path: "/api/unit-master", file: "./routes/unitMaster" },
+  { path: "/api/plot-master", file: "./routes/plotMaster" },
   { path: "/api/room-master", file: "./routes/roomMaster" },
   { path: "/api/unit-layout-overrides", file: "./routes/unitLayoutOverride" },
   { path: "/api/room-category-master", file: "./routes/roomCategoryMaster" },

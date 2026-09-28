@@ -1262,6 +1262,17 @@ router.delete("/:id", allowRoles("admin", "super_admin"), async (req, res) => {
         WHERE Id = @id
       `);
 
+      // Plot and unit allocation rows use active-only unique indexes. Retiring
+      // the header alone would leave the sold inventory unavailable forever.
+      await tx.request().input("bid", sql.Int, id).input("aid", sql.Int, booking.ApplicationId).query(`
+        UPDATE dbo.CrmBookingPlot SET Status = N'Cancelled'
+        WHERE BookingId = @bid AND Status = N'Active';
+        UPDATE dbo.CrmBookingUnit SET Status = N'Cancelled'
+        WHERE BookingId = @bid AND Status = N'Active';
+        UPDATE dbo.CrmApplicationPlot SET Status = N'Cancelled'
+        WHERE ApplicationId = @aid AND Status = N'Active';
+      `);
+
     // Revert Application-stage rows so the application can be corrected and
     // re-booked without stale child rows remaining pinned to the deleted booking.
     // Parking allotments are fully deactivated (IsActive = 0) rather than just
@@ -1482,6 +1493,10 @@ router.delete("/:id/permanent", allowRoles("admin", "super_admin"), async (req, 
       // already soft-deleted and its Pending tranches were voided at that
       // time — any remaining rows here are Voided/Clawback records.
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBrokerageMaster WHERE BookingId = @bid");
+      // These allocation tables deliberately retain their own audit status on
+      // soft deletion, so they must be removed before a permanent header delete.
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingPlot WHERE BookingId = @bid");
+      await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBookingUnit WHERE BookingId = @bid");
       await tx.request().input("bid", sql.Int, id).query("DELETE FROM dbo.CrmBooking WHERE Id = @bid");
       await tx.commit();
     } catch (txErr) {

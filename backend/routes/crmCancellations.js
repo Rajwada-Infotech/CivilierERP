@@ -511,6 +511,20 @@ router.put("/:id/approve", requirePageRight("crm-cancellations", "edit"), async 
       await tx.request().input("bid", sql.Int, bookingId)
         .query("UPDATE dbo.CrmBooking SET Status = 'Cancelled', UpdatedAt = SYSDATETIME() WHERE Id = @bid");
 
+      // CrmBookingPlot has an active-only unique index. A cancelled booking
+      // must release its plot lines in the same transaction as its header,
+      // otherwise the land inventory can never be sold again.
+      await tx.request().input("bid", sql.Int, bookingId).query(`
+        UPDATE dbo.CrmBookingPlot SET Status = N'Cancelled'
+        WHERE BookingId = @bid AND Status = N'Active'
+      `);
+      await tx.request().input("bid", sql.Int, bookingId).query(`
+        UPDATE ap SET Status = N'Cancelled'
+        FROM dbo.CrmApplicationPlot ap
+        JOIN dbo.CrmBooking b ON b.ApplicationId = ap.ApplicationId
+        WHERE b.Id = @bid AND ap.Status = N'Active'
+      `);
+
       // The Application was force-advanced to 'Approved' the instant this
       // Booking was created and nothing has touched it since — without this,
       // it would sit at 'Approved' forever with a Cancelled Booking

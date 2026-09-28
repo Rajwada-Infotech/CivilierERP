@@ -474,8 +474,8 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
       SELECT t.BlockId, t.PlotCount, t.NumberPrefix, t.StartNumber,
              t.DefaultAreaSqFt, t.DefaultRatePerSqFt, t.DefaultFacing, t.DefaultRoadWidthFt,
              t.IsGenerated,
-             (SELECT COUNT(*) FROM dbo.UnitMaster u
-               WHERE u.BlockId = t.BlockId AND u.UnitKind = N'PLOT' AND u.IsActive = 1) AS PlotsCreated
+             (SELECT COUNT(*) FROM dbo.PlotMaster p
+               WHERE p.BlockId = t.BlockId AND p.IsActive = 1) AS PlotsCreated
       FROM dbo.CrmProjectAutoSetupPlotTemplate t
       WHERE t.ProjectId = @pid AND t.IsActive = 1
     `);
@@ -1707,7 +1707,7 @@ router.post("/generate-plots", requirePageRight("crm-auto-project-setup", "creat
       // partially-generated block can be completed without manual cleanup.
       const dupe = await pool.request()
         .input("pid", sql.Int, tpl.ProjectId).input("bid", sql.Int, blockId).input("n", sql.NVarChar(100), plotNo)
-        .query("SELECT Id FROM dbo.UnitMaster WHERE ProjectId = @pid AND BlockId = @bid AND UnitName = @n");
+        .query("SELECT Id FROM dbo.PlotMaster WHERE ProjectId = @pid AND BlockId = @bid AND PlotName = @n AND IsActive = 1");
       if (dupe.recordset.length) { skipped.push(plotNo); continue; }
 
       await pool.request()
@@ -1721,10 +1721,10 @@ router.post("/generate-plots", requirePageRight("crm-auto-project-setup", "creat
         .input("road", sql.Decimal(18, 2), tpl.DefaultRoadWidthFt)
         .input("by", sql.Int, createdBy)
         .query(`
-          INSERT INTO dbo.UnitMaster
-            (ProjectId, BlockId, UnitName, UnitKind, PlotNo, AreaSqFt, RatePerSqFt,
+          INSERT INTO dbo.PlotMaster
+            (ProjectId, BlockId, PlotName, PlotNo, AreaSqFt, RatePerSqFt,
              Facing, RoadWidthFt, IsActive, CreatedBy, CreatedAt)
-          VALUES (@pid, @bid, @name, N'PLOT', @plotNo, @area, @rate,
+          VALUES (@pid, @bid, @name, @plotNo, @area, @rate,
                   @facing, @road, 1, @by, SYSDATETIME())
         `);
       created++;
@@ -1753,28 +1753,157 @@ router.get("/blocks/:blockId/plots", requirePageRight("crm-auto-project-setup", 
 
     const r = await pool.request().input("bid", sql.Int, blockId).query(`
       SELECT
-        u.Id, u.UnitName, u.PlotNo, u.AreaSqFt, u.RatePerSqFt, u.Facing, u.RoadWidthFt,
-        u.IsActive, u.UnitKind,
+        p.Id, p.PlotName AS UnitName, p.PlotNo, p.AreaSqFt, p.RatePerSqFt, p.Facing, p.RoadWidthFt,
+        p.IsActive, N'PLOT' AS UnitKind,
         -- booking / hold / application locks (same pattern as /floors/:id/units)
         (SELECT TOP 1 b.BookingNo FROM dbo.CrmBooking b
-           JOIN dbo.CrmBookingUnit bu ON bu.BookingId = b.Id
-           WHERE bu.UnitId = u.Id AND b.IsActive = 1
+           JOIN dbo.CrmBookingPlot bp ON bp.BookingId = b.Id
+           WHERE bp.PlotId = p.Id AND b.IsActive = 1
              AND b.Status NOT IN ('Cancelled', 'Draft')) AS LockBookingNo,
-        (SELECT TOP 1 CAST(h.Id AS NVARCHAR) FROM dbo.CrmHold h
-           WHERE h.UnitId = u.Id AND h.IsActive = 1
-             AND h.ExpiresAt > SYSDATETIME()) AS LockHoldId,
+        (SELECT TOP 1 CAST(h.Id AS NVARCHAR) FROM dbo.CrmInventoryHold h
+           WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id AND h.Status = N'Active'
+             AND h.HoldUntil > SYSDATETIME()) AS LockHoldId,
         (SELECT TOP 1 a.ApplicationNo FROM dbo.CrmApplication a
-           JOIN dbo.CrmApplicationUnit au ON au.ApplicationId = a.Id
-           WHERE au.UnitId = u.Id AND a.IsActive = 1
+           JOIN dbo.CrmApplicationPlot ap ON ap.ApplicationId = a.Id
+           WHERE ap.PlotId = p.Id AND a.IsActive = 1
              AND a.Status NOT IN ('Cancelled', 'Draft')) AS LockApplicationNo
-      FROM dbo.UnitMaster u
-      WHERE u.BlockId = @bid AND u.UnitKind = N'PLOT' AND u.IsActive = 1
-      ORDER BY u.UnitName
+      FROM dbo.PlotMaster p
+      WHERE p.BlockId = @bid AND p.IsActive = 1
+      ORDER BY p.PlotName
     `);
     res.json({ plots: r.recordset });
   } catch (e) {
     console.error("[auto-setup] GET /blocks/:blockId/plots:", e.message);
     res.status(500).json({ error: e.message });
+  }
+});
+
+router.delete("/plots/:id", requirePageRight("crm-auto-project-setup", "delete"), async (req, res) => {
+  const plotId = parseInt(req.params.id, 10);
+  if (!Number.isFinite(plotId)) return res.status(400).json({ error: "Invalid plot id" });
+  try {
+    const pool = getPool();
+    const blocked = await pool.request().input("pid", sql.Int, plotId).query(`
+      SELECT TOP 1 1 AS IsBlocked FROM dbo.CrmBookingPlot WHERE PlotId = @pid AND Status = N'Active'
+      UNION ALL
+      SELECT TOP 1 1 FROM dbo.CrmApplicationPlot WHERE PlotId = @pid AND Status = N'Active'
+      UNION ALL
+      SELECT TOP 1 1 FROM dbo.PlotMaster WHERE Id = @pid AND ConvertedUnitId IS NOT NULL
+    `);
+    if (blocked.recordset.length) return res.status(409).json({ error: "This plot is booked, applied for, or converted and cannot be deleted" });
+    const result = await pool.request().input("pid", sql.Int, plotId)
+      .query("UPDATE dbo.PlotMaster SET IsActive = 0, UpdatedAt = SYSDATETIME() WHERE Id = @pid AND IsActive = 1");
+    if (!result.rowsAffected[0]) return res.status(404).json({ error: "Plot not found" });
+    res.json({ success: true, message: "Plot deleted" });
+  } catch (e) {
+    console.error("[auto-setup] DELETE plot:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Convert one or more adjacent plots into one constructed asset. The source
+// plots remain in PlotMaster for land-sale history; UnitMaster begins here.
+router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create"), async (req, res) => {
+  const plotIds = Array.isArray(req.body?.PlotIds) ? req.body.PlotIds.map(Number).filter(Number.isInteger) : [];
+  const unitName = String(req.body?.UnitName || "").trim();
+  const unitType = String(req.body?.UnitType || "").trim();
+  const unitKind = String(req.body?.UnitKind || "").trim();
+  if (!plotIds.length || !unitName || !unitType || !unitKind) return res.status(400).json({ error: "PlotIds, UnitName, UnitType, and UnitKind are required" });
+  try {
+    const pool = getPool();
+    const kind = await pool.request().input("kind", sql.NVarChar(20), unitKind)
+      .query("SELECT Code FROM dbo.CrmConstructedAssetKind WHERE Code = @kind AND IsActive = 1");
+    if (!kind.recordset.length) return res.status(400).json({ error: "Select an active constructed asset kind" });
+    const resolvedType = await resolveUnitTypeInput(
+      pool, { UnitType: unitType }, { requireComposition: true },
+    );
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      // Lock source plots and re-check all inventory claims inside this
+      // transaction. UI availability is advisory; this is the authority that
+      // prevents a sold, applied-for, or held plot becoming a Unit Master row.
+      const plots = await tx.request().query(`
+        SELECT p.Id, p.ProjectId, p.BlockId, p.AreaSqFt, p.RatePerSqFt
+        FROM dbo.PlotMaster p WITH (UPDLOCK, HOLDLOCK)
+        WHERE p.Id IN (${plotIds.join(",")})
+          AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.CrmBookingPlot bp
+            JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
+            WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
+              AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.CrmApplicationPlot ap
+            JOIN dbo.CrmApplication a ON a.Id = ap.ApplicationId
+            WHERE ap.PlotId = p.Id AND ap.Status = N'Active'
+              AND a.IsActive = 1 AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted')
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.CrmInventoryHold h
+            WHERE h.EntityType = N'Plot' AND h.EntityId = p.Id
+              AND h.Status = N'Active' AND h.HoldUntil > SYSDATETIME()
+          )
+      `);
+      if (plots.recordset.length !== plotIds.length) {
+        const conflict = new Error("One or more plots are sold, applied for, held, inactive, or already converted");
+        conflict.status = 409;
+        throw conflict;
+      }
+      const first = plots.recordset[0];
+      if (!plots.recordset.every((p) => p.ProjectId === first.ProjectId && p.BlockId === first.BlockId)) {
+        const invalid = new Error("All converted plots must belong to the same project and block");
+        invalid.status = 400;
+        throw invalid;
+      }
+      if (plotIds.length > 1) {
+        const adjacency = await tx.request().query(`
+          SELECT PlotId, AdjacentPlotId FROM dbo.PlotAdjacency
+          WHERE PlotId IN (${plotIds.join(",")}) AND AdjacentPlotId IN (${plotIds.join(",")})
+        `);
+        const neighbours = new Map(plotIds.map((id) => [id, new Set()]));
+        adjacency.recordset.forEach(({ PlotId, AdjacentPlotId }) => {
+          neighbours.get(PlotId)?.add(AdjacentPlotId);
+          neighbours.get(AdjacentPlotId)?.add(PlotId);
+        });
+        const connected = new Set([plotIds[0]]);
+        const queue = [plotIds[0]];
+        while (queue.length) {
+          const current = queue.shift();
+          for (const next of neighbours.get(current) || []) {
+            if (!connected.has(next)) { connected.add(next); queue.push(next); }
+          }
+        }
+        if (connected.size !== plotIds.length) {
+          const invalid = new Error("Selected plots must form one connected adjacent group before conversion");
+          invalid.status = 409;
+          throw invalid;
+        }
+      }
+      const area = plots.recordset.reduce((sum, p) => sum + Number(p.AreaSqFt || 0), 0);
+      const created = await tx.request()
+        .input("pid", sql.Int, first.ProjectId).input("bid", sql.Int, first.BlockId)
+        .input("name", sql.NVarChar(100), unitName).input("type", sql.NVarChar(50), resolvedType.unitType)
+        .input("layoutTypeId", sql.Int, resolvedType.layoutTypeId)
+        .input("kind", sql.NVarChar(20), unitKind)
+        .input("area", sql.Decimal(18, 2), area).input("rate", sql.Decimal(18, 2), req.body?.RatePerSqFt ?? first.RatePerSqFt ?? null)
+        .input("by", sql.Int, req.user?.userId || null)
+        .query(`INSERT INTO dbo.UnitMaster (ProjectId, BlockId, UnitName, UnitType, LayoutTypeId, UnitKind, AreaSqFt, RatePerSqFt, IsActive, CreatedBy, CreatedAt)
+                OUTPUT INSERTED.Id VALUES (@pid, @bid, @name, @type, @layoutTypeId, @kind, @area, @rate, 1, @by, SYSDATETIME())`);
+      const unitId = created.recordset[0].Id;
+      await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy: req.user?.userId || null });
+      await tx.request().input("uid", sql.Int, unitId)
+        .query(`UPDATE dbo.PlotMaster SET ConvertedUnitId = @uid, ConvertedAt = SYSDATETIME(), UpdatedAt = SYSDATETIME()
+                WHERE Id IN (${plotIds.join(",")})`);
+      await tx.commit();
+      await bumpCacheVersion("unit-master");
+      res.status(201).json({ success: true, UnitId: unitId, PlotIds: plotIds });
+    } catch (e) { await tx.rollback(); throw e; }
+  } catch (e) {
+    if (e instanceof LayoutValidationError) return res.status(400).json({ error: e.message });
+    console.error("[auto-setup] POST convert-plots:", e.message);
+    res.status(e.status || 500).json({ error: e.message });
   }
 });
 

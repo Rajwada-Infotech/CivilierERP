@@ -84,6 +84,33 @@ async function getHsnRate(pool, hcode) {
   return cgst + sgst > 0 ? cgst + sgst : Number(row.HIGST || 0);
 }
 
+// A constructed Unit Master record points back to every source plot through
+// PlotMaster.ConvertedUnitId. Construction is on customer-owned land only
+// when the booking customer already owns every one of those plots under an
+// active land booking; a villa sold together with its land deliberately
+// resolves false rather than being misclassified as a works contract.
+async function resolveLandOwnedByBookingCustomer(pool, bookingId) {
+  const result = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT
+      (SELECT COUNT(*) FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = b.UnitId AND p.IsActive = 1) AS SourcePlotCount,
+      (SELECT COUNT(DISTINCT p.Id)
+       FROM dbo.PlotMaster p
+       JOIN dbo.CrmBookingPlot bp ON bp.PlotId = p.Id AND bp.Status = N'Active'
+       JOIN dbo.CrmBooking landBooking ON landBooking.Id = bp.BookingId
+       JOIN dbo.CrmApplication landApplication ON landApplication.Id = landBooking.ApplicationId
+       WHERE p.ConvertedUnitId = b.UnitId AND p.IsActive = 1
+         AND landBooking.IsActive = 1 AND landBooking.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+         AND landApplication.CustomerId = currentApplication.CustomerId
+      ) AS CustomerOwnedPlotCount
+    FROM dbo.CrmBooking b
+    JOIN dbo.CrmApplication currentApplication ON currentApplication.Id = b.ApplicationId
+    WHERE b.Id = @bid AND b.UnitId IS NOT NULL
+  `);
+  const row = result.recordset[0];
+  const sourceCount = Number(row?.SourcePlotCount || 0);
+  return sourceCount > 0 && Number(row?.CustomerOwnedPlotCount || 0) === sourceCount;
+}
+
 // The single source of truth for ParkingTotal/ExtraChargesTotal/GrandTotal
 // AND the fixed HSN-driven GST — merged into one function (rather than two
 // separate rollups) so milestones are always redistributed
@@ -147,23 +174,10 @@ async function recalculateBookingGst(pool, bookingId) {
   // worse than one that carried on as it always had.
   let hsnCode = null;
   if (!outsideGst) {
+    const landOwnedByCustomer = await resolveLandOwnedByBookingCustomer(pool, bookingId);
     const resolved = await resolveHsnCode(pool, APPLIES_TO.UNIT_PARKING, {
       value: bracketBase,
-      // Left UNKNOWN on purpose, so only rules that do not care can match.
-      //
-      // The works-contract question is whether the villa stands on land the
-      // customer ALREADY OWNED from an earlier purchase. A booking merely
-      // containing a plot does not answer that — a plot sold together with its
-      // villa is a composite sale, not construction on pre-owned land. Deriving
-      // this from the booking's own land content would encode a different fact
-      // than the rule asks about, and would start mispricing the moment a
-      // CONSTRUCTION_ON_CUSTOMER_LAND rule is added.
-      //
-      // Answering it properly means asking whether this booking's customer held
-      // an earlier booking on the plot beneath the villa (CrmUnitLineage +
-      // CrmBookingUnit + CrmApplication.CustomerId). Until that lookup exists,
-      // null keeps behaviour identical to today rather than guessing.
-      landOwnedByCustomer: null,
+      landOwnedByCustomer,
     });
     hsnCode = resolved.hsnCode
       ?? (bracketBase <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE);

@@ -18,6 +18,7 @@ import {
   Home,
   Settings,
   Layers,
+  Map,
   Hash,
   ReceiptIndianRupee,
   CreditCard,
@@ -538,6 +539,13 @@ const crmSetupItems: SetupItem[] = [
     path: "/crm/setup/unit-master",
     color: "text-orange-500",
     pageKey: "followup-unit-master",
+  },
+  {
+    icon: Map,
+    label: "Plot Master",
+    path: "/crm/setup/plot-master",
+    color: "text-emerald-500",
+    pageKey: "crm-auto-project-setup",
   },
   {
     icon: Layers,

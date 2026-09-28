@@ -33,6 +33,67 @@ class CrmCreationError extends Error {
   }
 }
 
+async function assertConnectedPlotGroup(pool, plotIds) {
+  if (plotIds.length < 2) return;
+  const pairs = await pool.request().query(`
+    SELECT PlotId, AdjacentPlotId FROM dbo.PlotAdjacency
+    WHERE PlotId IN (${plotIds.join(",")}) AND AdjacentPlotId IN (${plotIds.join(",")})
+  `);
+  const neighbours = new Map(plotIds.map((id) => [id, new Set()]));
+  pairs.recordset.forEach(({ PlotId, AdjacentPlotId }) => {
+    neighbours.get(PlotId)?.add(AdjacentPlotId);
+    neighbours.get(AdjacentPlotId)?.add(PlotId);
+  });
+  const reached = new Set([plotIds[0]]);
+  const queue = [plotIds[0]];
+  while (queue.length) {
+    const id = queue.shift();
+    for (const next of neighbours.get(id) || []) {
+      if (!reached.has(next)) { reached.add(next); queue.push(next); }
+    }
+  }
+  if (reached.size !== plotIds.length) {
+    throw new CrmCreationError("Selected plots must form one connected adjacent group", 409);
+  }
+}
+
+async function validatePlotSelection(pool, plotIds, { projectId = null, applicationId = null, requireAdjacent = true } = {}) {
+  if (!plotIds.length) return [];
+  const requestedProjectId = projectId != null && projectId !== "" ? Number(projectId) : null;
+  const result = await pool.request()
+    .input("applicationId", sql.Int, applicationId)
+    .query(`
+      SELECT p.Id, p.PlotName, p.ProjectId, p.BlockId
+      FROM dbo.PlotMaster p
+      WHERE p.Id IN (${plotIds.join(",")}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.CrmBookingPlot bp
+          JOIN dbo.CrmBooking b ON b.Id = bp.BookingId
+          WHERE bp.PlotId = p.Id AND bp.Status = N'Active'
+            AND b.IsActive = 1 AND b.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.CrmApplicationPlot ap
+          JOIN dbo.CrmApplication a ON a.Id = ap.ApplicationId
+          WHERE ap.PlotId = p.Id AND ap.Status = N'Active'
+            AND (@applicationId IS NULL OR ap.ApplicationId <> @applicationId)
+            AND a.IsActive = 1 AND a.Status NOT IN (N'Rejected', N'Cancelled', N'Expired', N'Converted')
+        )
+    `);
+  if (result.recordset.length !== plotIds.length) {
+    throw new CrmCreationError("One or more selected plots are unavailable", 409);
+  }
+  const first = result.recordset[0];
+  if (!result.recordset.every((plot) => plot.ProjectId === first.ProjectId && plot.BlockId === first.BlockId)) {
+    throw new CrmCreationError("Selected plots must belong to the same project and block", 400);
+  }
+  if (requestedProjectId != null && first.ProjectId !== requestedProjectId) {
+    throw new CrmCreationError("Selected plots do not belong to the application project", 400);
+  }
+  if (requireAdjacent) await assertConnectedPlotGroup(pool, plotIds);
+  return result.recordset;
+}
+
 // Every Application must resolve to a Customer — either an existing one the
 // caller explicitly selected, or one auto-found-by-Mobile/auto-created from
 // whatever raw name/mobile fields the caller has (the SA Leads handoff path
@@ -231,9 +292,14 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     projectName = proj.recordset[0].name;
     companyId = companyId != null ? companyId : (proj.recordset[0].company_id != null ? proj.recordset[0].company_id : null);
   }
+  const rawAppPlotIds = Array.isArray(b.PreferredPlotIds) ? b.PreferredPlotIds.map(Number).filter(Number.isInteger) : [];
   const rawAppUnitIds = Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0 ? b.PreferredUnitIds : (preferredUnitId ? [preferredUnitId] : []);
   const preferredUnitId = rawAppUnitIds.length > 0 ? rawAppUnitIds[0] : null;
   let unitName = b.InterestedUnit || null;
+  if (rawAppPlotIds.length > 0) {
+    const plots = await validatePlotSelection(pool, rawAppPlotIds, { projectId: b.ProjectId });
+    unitName = rawAppPlotIds.map((id) => plots.find((p) => p.Id === id)?.PlotName).filter(Boolean).join(", ");
+  }
   if (preferredUnitId !== undefined && preferredUnitId !== null && preferredUnitId !== "") {
     const unit = await pool.request().input("uid", sql.Int, parseInt(preferredUnitId))
       .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
@@ -265,7 +331,9 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       throw new CrmCreationError("This unit already has an active hold from another application", 409);
     }
   }
-  const effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
+  const effectivePaymentPlanId = rawAppPlotIds.length > 0
+    ? (b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? parseInt(b.PaymentPlanId) : null)
+    : await resolveApplicationPaymentPlan(pool, {
     preferredUnitId: preferredUnitId !== undefined && preferredUnitId !== null && preferredUnitId !== "" ? parseInt(preferredUnitId) : null,
     paymentPlanId: b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? b.PaymentPlanId : null,
   });
@@ -395,6 +463,14 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
         .input('uid', sql.Int, parseInt(uid))
         .input('pri', sql.Bit, uid === preferredUnitId ? 1 : 0)
         .query("INSERT INTO dbo.CrmApplicationUnit (ApplicationId, UnitId, Status, IsPrimary, CreatedAt) VALUES (@aid, @uid, 'Active', @pri, SYSDATETIME())");
+    }
+  }
+  if (rawAppPlotIds.length > 0) {
+    for (let i = 0; i < rawAppPlotIds.length; i++) {
+      await pool.request()
+        .input("aid", sql.Int, applicationId).input("pid", sql.Int, rawAppPlotIds[i])
+        .input("pri", sql.Bit, i === 0 ? 1 : 0)
+        .query("INSERT INTO dbo.CrmApplicationPlot (ApplicationId, PlotId, Status, IsPrimary, CreatedAt) VALUES (@aid, @pid, 'Active', @pri, SYSDATETIME())");
     }
   }
   if (preferredUnitId) {
@@ -619,9 +695,14 @@ const { priceBooking } = require("./bookingUnits");
 
 async function createCrmBookingRecord(pool, b, actorUserId) {
   if (!b.ApplicationId) throw new CrmCreationError("ApplicationId is required");
+  const rawPlotIds = Array.isArray(b.PlotIds) && b.PlotIds.length > 0 ? b.PlotIds : [];
   const rawUnitIds = Array.isArray(b.UnitIds) && b.UnitIds.length > 0 ? b.UnitIds : (b.UnitId ? [b.UnitId] : []);
-  if (rawUnitIds.length === 0) throw new CrmCreationError("UnitId or UnitIds is required — at least one unit must be selected");
-  const unitIds = rawUnitIds.map((id) => parseInt(id));
+  const isPlotBooking = rawPlotIds.length > 0;
+  if (!isPlotBooking && rawUnitIds.length === 0) throw new CrmCreationError("UnitId or UnitIds is required — at least one unit must be selected");
+  const unitIds = (isPlotBooking ? rawPlotIds : rawUnitIds).map((id) => parseInt(id));
+  if (!unitIds.every(Number.isInteger) || new Set(unitIds).size !== unitIds.length) {
+    throw new CrmCreationError("Select one or more distinct valid plots or units");
+  }
 
   // One Application, one Booking — enforced here (not just at the
   // Application-approval call site) so the manual/fallback creation path
@@ -650,8 +731,19 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       `A Booking can't be created for an application that is ${appRow.recordset[0].Status}`, 400);
   }
 
+  if (isPlotBooking) {
+    await validatePlotSelection(pool, unitIds, { applicationId: parseInt(b.ApplicationId) });
+  }
+
   // Fetch all selected units
-  const unitsRes = await pool.request().query(`
+  const unitsRes = await pool.request().query(isPlotBooking ? `
+    SELECT p.Id, p.PlotName AS UnitName, p.ProjectId, p.BlockId, CAST(NULL AS NVARCHAR(50)) AS UnitType,
+           p.AreaSqFt, p.RatePerSqFt, proj.name AS ProjectName, proj.company_id AS CompanyId, blk.BlockName
+    FROM dbo.PlotMaster p
+    LEFT JOIN dbo.enterprise proj ON proj.id = p.ProjectId AND proj.business_type = 'P'
+    LEFT JOIN dbo.BlockMaster blk ON blk.Id = p.BlockId
+    WHERE p.Id IN (${unitIds.join(",")}) AND p.IsActive = 1 AND p.ConvertedUnitId IS NULL
+  ` : `
     SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
            u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
            proj.name AS ProjectName, proj.company_id AS CompanyId,
@@ -695,7 +787,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // uses its own internal locking and has partial-failure tolerance; the real
   // double-booking prevention is the UPDLOCK re-check inside the transaction
   // below.
-  for (const uid of unitIds) {
+  for (const uid of (isPlotBooking ? [] : unitIds)) {
     await guardAndConvertHold(pool, "Unit", uid, parseInt(b.ApplicationId));
   }
 
@@ -706,7 +798,9 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // explicit b.PaymentPlanId still wins if the caller is deliberately
   // changing it at booking time.
   const hasId = (v) => v !== null && v !== undefined && v !== "";
-  const effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
+  const effectivePaymentPlanId = isPlotBooking
+    ? (hasId(b.PaymentPlanId) ? parseInt(b.PaymentPlanId) : (hasId(appRow.recordset[0].PaymentPlanId) ? parseInt(appRow.recordset[0].PaymentPlanId) : null))
+    : await resolveApplicationPaymentPlan(pool, {
     preferredUnitId: unitRow.Id,
     paymentPlanId: hasId(b.PaymentPlanId) ? b.PaymentPlanId : (hasId(appRow.recordset[0].PaymentPlanId) ? appRow.recordset[0].PaymentPlanId : null),
   });
@@ -771,13 +865,13 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   let bookingId;
   try {
     const taken = await tx.request()
-      .query(`SELECT Id FROM dbo.CrmBookingUnit WITH (UPDLOCK, ROWLOCK) WHERE UnitId IN (${unitIds.join(",")}) AND Status = N'Active'`);
+      .query(`SELECT Id FROM dbo.${isPlotBooking ? "CrmBookingPlot" : "CrmBookingUnit"} WITH (UPDLOCK, ROWLOCK) WHERE ${isPlotBooking ? "PlotId" : "UnitId"} IN (${unitIds.join(",")}) AND Status = N'Active'`);
     if (taken.recordset.length) throw new CrmCreationError("One or more units are already booked", 409);
 
     const result = await tx.request()
       .input("no",    sql.NVarChar(30),  bookingNo)
       .input("appId", sql.Int,           parseInt(b.ApplicationId))
-      .input("uid",   sql.Int,           unitRow.Id) // Primary UnitId
+      .input("uid",   sql.Int,           isPlotBooking ? null : unitRow.Id)
       .input("pid",   sql.Int,           unitRow.ProjectId != null ? unitRow.ProjectId : null)
       .input("pname", sql.NVarChar(200), unitRow.ProjectName || b.ProjectName || null)
       .input("cid",   sql.Int,           unitRow.CompanyId != null ? unitRow.CompanyId : null)
@@ -841,8 +935,8 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
         .input("cb", sql.Int, actorUserId)
         .input("isp", sql.Bit, i === 0 ? 1 : 0)
         .query(`
-          INSERT INTO dbo.CrmBookingUnit
-            (BookingId, UnitId, AreaSqFt, RatePerSqFt, PremiumAmount, AllocatedValue, Status, IsPrimary, CreatedBy, CreatedAt)
+          INSERT INTO dbo.${isPlotBooking ? "CrmBookingPlot" : "CrmBookingUnit"}
+            (BookingId, ${isPlotBooking ? "PlotId" : "UnitId"}, AreaSqFt, RatePerSqFt, PremiumAmount, AllocatedValue, Status, IsPrimary, CreatedBy, CreatedAt)
           VALUES
             (@bid, @uid, @area, @rate, @premium, @alloc, N'Active', @isp, @cb, SYSDATETIME())
         `);
@@ -995,6 +1089,6 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, resolveApplicationPaymentPlan, getApplicablePaymentPlans,
+  generateMilestonesForBooking, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 
