@@ -8,13 +8,11 @@ import { NavItem } from "./SidebarPrimitives";
 // (Follow-Up's own Department Master is likewise not repeated in
 // FollowupSidebar.ts).
 //
-// pendingApprovalCount is how many Completed, QC-passed activities are
-// sitting at an approval level the viewer can act on right now (see
-// dependencyActivityAssignmentApi.ts's getPendingApprovalCount) — surfaced
-// as a badge on Reporting, the natural place to open one and act on it via
-// its Approval tab. Same "poll a count into a badge" shape as Admin's own
-// Approval Inbox badge (buildAdminNavItems).
-export const buildCivilWorkDprNavItems = (pendingApprovalCount: number): NavItem[] => [
+// No longer badges Reporting with a pending-approval count — removed per
+// explicit instruction. dependencyActivityAssignmentApi.ts's
+// getPendingApprovalCount and the /approvals/pending-count endpoint still
+// exist and work; they're just not surfaced here any more.
+export const buildCivilWorkDprNavItems = (_pendingApprovalCount: number): NavItem[] => [
   {
     label: "Dashboard",
     icon: Chart2,
@@ -33,7 +31,6 @@ export const buildCivilWorkDprNavItems = (pendingApprovalCount: number): NavItem
     icon: DocumentText,
     path: "/civilworkdpr/activity-reporting",
     pageKey: "civilworkdpr-activity-reporting",
-    badge: pendingApprovalCount > 0 ? pendingApprovalCount : undefined,
   },
   {
     label: "Quality Check",
