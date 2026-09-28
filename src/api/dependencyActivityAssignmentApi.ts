@@ -592,3 +592,44 @@ export const getPendingApprovalCount = async (): Promise<number> => {
   const data = await handleResponse<{ count: number }>(res);
   return data.count ?? 0;
 };
+
+// ── Amendment log ────────────────────────────────────────────────────────
+// Every superseded assignment attempt (IsCurrent = 0) — each one exists
+// only because it was reworked (see migration 488), so this is already
+// exactly "every reworked activity", across every chain, not scoped to
+// one rung the way getAssignmentAttempts is.
+export interface AmendmentRecord {
+  assignmentId: number;
+  rungId: number;
+  attemptNo: number;
+  status: AssignmentStatus;
+  reworkReason: string | null;
+  reworkSource: "QC" | "APPROVAL" | null;
+  startDate: string | null;
+  endDate: string | null;
+  updatedAt: string;
+  sequenceNo: number;
+  activityName: string;
+  dependencyMasterId: number;
+  alias: string;
+  workType: "INTERNAL" | "EXTERNAL";
+  projectId: number;
+  projectName: string | null;
+  towerId: number;
+  towerName: string | null;
+  floor: string;
+  flatId: number;
+  flatName: string | null;
+  roomId: number | null;
+  roomName: string | null;
+  scopePath: string;
+  engineerNames: string | null;
+  // The attempt that replaced this one — null only if the rung's current
+  // attempt was somehow itself deleted (shouldn't normally happen).
+  currentStatus: AssignmentStatus | null;
+  currentAttemptNo: number | null;
+}
+export const getAmendments = async (): Promise<AmendmentRecord[]> => {
+  const res = await fetchWithAuth(`${BASE}/amendments`);
+  return handleResponse<AmendmentRecord[]>(res);
+};

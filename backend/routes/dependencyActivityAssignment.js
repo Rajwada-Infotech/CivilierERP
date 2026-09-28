@@ -195,6 +195,74 @@ router.get(
   }
 });
 
+// GET /amendments — Civil Work DPR's Amendment page: every superseded
+// assignment attempt (IsCurrent = 0) across every chain, newest first.
+// Every such row exists ONLY because it was reworked (see migration 488's
+// fork-on-rework design — the only way IsCurrent ever becomes 0), so this
+// is already exactly "every reworked activity", no extra status filter
+// needed. currentStatus/currentAttemptNo describe whatever attempt
+// eventually replaced it, so this reads as a log ("attempt 2 was sent
+// back for rework by QC on this date; attempt 3 is now In Progress"), not
+// just a pile of orphaned rows.
+router.get(
+  "/amendments",
+  authMiddleware,
+  requirePageRight("civilworkdpr-amendment", "view"),
+  async (req, res) => {
+    try {
+      const pool = await getPool();
+      const r = await pool.request().query(`
+        SELECT
+          daa.Id AS assignmentId,
+          daa.DependencyMasterActivityId AS rungId,
+          daa.AttemptNo AS attemptNo,
+          daa.Status AS status,
+          daa.ReworkReason AS reworkReason,
+          daa.ReworkSource AS reworkSource,
+          daa.StartDate AS startDate,
+          daa.EndDate AS endDate,
+          daa.UpdatedAt AS updatedAt,
+          dma.SequenceNo AS sequenceNo,
+          am.activity_name AS activityName,
+          dm.Id AS dependencyMasterId, dm.Alias AS alias, dm.WorkType AS workType,
+          dm.ProjectId AS projectId, ep.name AS projectName,
+          dm.TowerId AS towerId, bm.BlockName AS towerName,
+          dm.Floor AS floor,
+          dm.FlatId AS flatId, um.UnitName AS flatName,
+          dm.RoomId AS roomId, rm.RoomName AS roomName,
+          CONCAT(
+            ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
+            ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+          ) AS scopePath,
+          (
+            SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+            FROM dbo.DependencyActivityEngineer dae
+            JOIN dbo.users u ON u.id = dae.EngineerId
+            WHERE dae.AssignmentId = daa.Id
+          ) AS engineerNames,
+          cur.Status AS currentStatus,
+          cur.AttemptNo AS currentAttemptNo
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+        LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+        LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+        LEFT JOIN dbo.DependencyActivityAssignment cur
+          ON cur.DependencyMasterActivityId = daa.DependencyMasterActivityId AND cur.IsCurrent = 1
+        WHERE daa.IsCurrent = 0
+        ORDER BY daa.UpdatedAt DESC
+      `);
+      res.json(r.recordset);
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /amendments error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // ── Quality Check ────────────────────────────────────────────────────────────
 // QC inspects a Completed activity (work dragged to 100% in Reporting),
 // signs off its checklist and either Approves it or sends it back for
