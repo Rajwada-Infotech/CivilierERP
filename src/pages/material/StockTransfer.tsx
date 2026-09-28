@@ -1414,6 +1414,9 @@ export default function StockTransfer() {
       interTransferMut.mutate({
         SenderProjectId: senderProjectId,
         ReceiverProjectId: receiverProjectId,
+        // Pass selected company overrides for cross-tagged project godowns
+        ...(filterCompanyId ? { SenderCompanyId: Number(filterCompanyId) } : {}),
+        ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
         Remarks: remarks || undefined,
         Items: validItems.map((it) => ({
           itemId: it.itemId,
@@ -1498,11 +1501,16 @@ export default function StockTransfer() {
     isFetching: interPreviewLoading,
     error: interPreviewError,
   } = useQuery<InterCompanyTransferPreview>({
-    queryKey: ["ict-preview", fromGodown?.ProjectID, toGodown?.ProjectID, interPreviewKey],
+    queryKey: ["ict-preview", fromGodown?.ProjectID, toGodown?.ProjectID, filterCompanyId, toCompanyId, interPreviewKey],
     queryFn: () =>
       previewInterCompanyTransfer({
         SenderProjectId: fromGodown!.ProjectID!,
         ReceiverProjectId: toGodown!.ProjectID!,
+        // Pass the user-selected companies so the preview labels (and GL
+        // posting on submit) reflect Delta Gardens, not Yashvi Construction,
+        // when Pristine Enclave is tagged to Delta Gardens.
+        ...(filterCompanyId ? { SenderCompanyId: Number(filterCompanyId) } : {}),
+        ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
         Items: interPreviewItems.map((it) => ({
           itemId: it.itemId,
           itemName: it.itemName,
@@ -1517,6 +1525,7 @@ export default function StockTransfer() {
       interPreviewItems.length > 0,
     retry: false,
   });
+
 
   const companyOptions = (enterprisesData ?? []).map((e) => ({
     value: String(e.id),

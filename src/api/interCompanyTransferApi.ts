@@ -26,6 +26,10 @@ export interface InterCompanyTransferItemPayload {
 export interface InterCompanyTransferPayload {
   SenderProjectId: number;
   ReceiverProjectId: number;
+  /** Optional — override the sender company when using a cross-tagged project godown. */
+  SenderCompanyId?: number;
+  /** Optional — override the receiver company when using a cross-tagged project godown. */
+  ReceiverCompanyId?: number;
   TransferDate?: string;
   Remarks?: string;
   ReferenceNumber?: string;
@@ -65,6 +69,12 @@ export interface InterCompanyTransferPreview {
 export const previewInterCompanyTransfer = async (payload: {
   SenderProjectId: number;
   ReceiverProjectId: number;
+  /** Optional override — when the selected FROM company differs from the
+   *  project's primary company_id (cross-tagged project godown). */
+  SenderCompanyId?: number;
+  /** Optional override — when the selected TO company differs from the
+   *  project's primary company_id (cross-tagged project godown). */
+  ReceiverCompanyId?: number;
   Items: InterCompanyTransferItemPayload[];
 }): Promise<InterCompanyTransferPreview> => {
   const res = await fetchWithAuth(`${BASE}/preview`, {
@@ -74,6 +84,7 @@ export const previewInterCompanyTransfer = async (payload: {
   });
   return handleResponse<InterCompanyTransferPreview>(res);
 };
+
 
 export const createInterCompanyTransfer = async (
   payload: InterCompanyTransferPayload,
