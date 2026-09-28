@@ -279,6 +279,9 @@ router.get("/", cache("project-master", 60, { shared: true }), async (req, res) 
         p.logo                  AS ProjectImage,
         p.enterprise_id         AS EnterpriseId,
         e.name                  AS EnterpriseName,
+        p.project_type_id       AS ProjectTypeId,
+        pt.Name                 AS ProjectTypeName,
+        pt.Code                 AS ProjectTypeCode,
         p.company_id            AS CompanyId,
         c.name                  AS CompanyName,
         c.gst_no                AS CompanyGST,
@@ -295,6 +298,7 @@ router.get("/", cache("project-master", 60, { shared: true }), async (req, res) 
       FROM dbo.enterprise p WITH (NOLOCK)
       LEFT JOIN dbo.enterprise e WITH (NOLOCK) ON e.id = p.enterprise_id
       LEFT JOIN dbo.enterprise c WITH (NOLOCK) ON c.id = p.company_id
+      LEFT JOIN dbo.ProjectTypeMaster pt WITH (NOLOCK) ON pt.Id = p.project_type_id
       WHERE p.business_type = 'P'
       ORDER BY p.name
     `);
@@ -305,6 +309,32 @@ router.get("/", cache("project-master", 60, { shared: true }), async (req, res) 
 });
 
 // ── GET /company/:id — fetch compliance fields from linked Company ─────────────
+// The Project Type options the create/edit form offers (migration 482).
+//
+// Returns the BEHAVIOUR FLAGS alongside the name, not just id/label, so the
+// form can react to the choice without a second round trip or a hardcoded list
+// of which codes mean what — e.g. hiding floor-related setup for a type whose
+// HasFloors is false. Callers must branch on the flags, never on Code/Name.
+//
+// Authenticated but not admin-gated: picking a type is part of ordinary project
+// creation, and the write itself is still behind adminOnly below.
+router.get("/types", async (_req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT Id, Code, Name, Description,
+             HasFloors, SellsLand, SellsConstruction, AllowsMultiUnitSale
+      FROM dbo.ProjectTypeMaster
+      WHERE IsActive = 1
+      ORDER BY SortOrder, Name
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[projectMaster] GET /types:", err.message);
+    res.status(500).json({ error: "Failed to load project types" });
+  }
+});
+
 router.get("/company/:id", async (req, res) => {
   try {
     const pool = getPool();
@@ -342,6 +372,7 @@ router.post("/", adminOnly, async (req, res) => {
       .input("business_identity", sql.NVarChar(100), f.code || null)
       .input("business_type", sql.NVarChar(10), "P")
       .input("entity_type", sql.NVarChar(50), f.type || null)
+      .input("project_type_id", sql.Int, f.projectTypeId != null && f.projectTypeId !== "" ? parseInt(f.projectTypeId, 10) : null)
       .input("description", sql.NVarChar(sql.MAX), f.description || null)
       .input("address", sql.NVarChar(sql.MAX), f.addressLine1 || null)
       .input("address_line2", sql.NVarChar(500), f.addressLine2 || null)
@@ -385,13 +416,13 @@ router.post("/", adminOnly, async (req, res) => {
           address, address_line2, address_line3, pincode, latitude, longitude,
           currency, status, rera_no, start_date, end_date, team_size, remarks,
           logo, enterprise_id, company_id,
-          jv_enabled, jv_company_name, discontinue, date_of_entry
+          jv_enabled, jv_company_name, discontinue, date_of_entry, project_type_id
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
           @address, @address_line2, @address_line3, @pincode, @latitude, @longitude,
           @currency, @status, @rera_no, @start_date, @end_date, @team_size, @remarks,
           @logo, @enterprise_id, @company_id,
-          @jv_enabled, @jv_company_name, @discontinue, @date_of_entry
+          @jv_enabled, @jv_company_name, @discontinue, @date_of_entry, @project_type_id
         )
       `);
     await bumpCacheVersion("enterprises");
@@ -511,6 +542,7 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("short_name", sql.NVarChar(100), f.shortName || null)
       .input("business_identity", sql.NVarChar(100), f.code || null)
       .input("entity_type", sql.NVarChar(50), f.type || null)
+      .input("project_type_id", sql.Int, f.projectTypeId != null && f.projectTypeId !== "" ? parseInt(f.projectTypeId, 10) : null)
       .input("description", sql.NVarChar(sql.MAX), f.description || null)
       .input("address", sql.NVarChar(sql.MAX), f.addressLine1 || null)
       .input("address_line2", sql.NVarChar(500), f.addressLine2 || null)
@@ -550,7 +582,7 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1).query(`
         UPDATE dbo.enterprise SET
           name=@name, short_name=@short_name, business_identity=@business_identity,
-          entity_type=@entity_type, description=@description,
+          entity_type=@entity_type, project_type_id=@project_type_id, description=@description,
           address=@address, address_line2=@address_line2, address_line3=@address_line3,
           pincode=@pincode, latitude=@latitude, longitude=@longitude,
           currency=@currency, status=@status, rera_no=@rera_no,

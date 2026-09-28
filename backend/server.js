@@ -272,6 +272,7 @@ const ALL_ROUTES = [
   { path: "/api/applicants", file: "./routes/applicants" },
   { path: "/api/company-master", file: "./routes/companyMaster" },
   { path: "/api/project-master", file: "./routes/projectMaster" },
+  { path: "/api/project-type-master", file: "./routes/projectTypeMaster" },
   { path: "/api/block-master", file: "./routes/blockMaster" },
   { path: "/api/unit-master", file: "./routes/unitMaster" },
   { path: "/api/room-master", file: "./routes/roomMaster" },
