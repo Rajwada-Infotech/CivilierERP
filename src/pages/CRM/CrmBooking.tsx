@@ -329,8 +329,8 @@ const CrmBooking: React.FC = () => {
   }, [selectedPlan]);
 
   const selectedUnitProjectId: number | undefined = useMemo(
-    () => (units as any[]).find((u: any) => String(u.Id) === form.UnitId)?.ProjectId,
-    [units, form.UnitId],
+    () => (units as any[]).find((u: any) => String(u.Id) === form.UnitIds[0])?.ProjectId,
+    [units, form.UnitIds[0]],
   );
   const { data: projectBanks = [] } = useQuery({
     queryKey: ["crm-booking-project-banks", selectedUnitProjectId],
@@ -364,9 +364,9 @@ const CrmBooking: React.FC = () => {
     // system-wide, not scoped to this page's filters) is the reliable
     // source — same fields CrmApplication.tsx's own unit picker now uses.
     return (units as any[]).filter((u: any) =>
-      u.IsActive && (!(u.LockBookingNo || u.LockHoldId) || String(u.Id) === form.UnitId)
+      u.IsActive && (!(u.LockBookingNo || u.LockHoldId) || String(u.Id) === form.UnitIds[0])
     );
-  }, [units, form.UnitId]);
+  }, [units, form.UnitIds[0]]);
 
   // The selected Application's own PreferredUnitId — auto-fetched and locked
   // here just like its other fields, since it's already been decided. Only
@@ -458,6 +458,12 @@ const CrmBooking: React.FC = () => {
       TotalValue: !isNaN(area) && !isNaN(rate) ? String(Math.round(area * rate)) : f.TotalValue,
     }));
   };
+
+  const isPlottedProject = useMemo(() => {
+    if (!availableUnits || availableUnits.length === 0) return false;
+    // If any available unit in this project is a plot, it's a plotted project
+    return (availableUnits as any[]).some((u: any) => u.UnitKind === 'PLOT');
+  }, [availableUnits]);
 
   function updateFilter<T>(setter: (v: T) => void) {
     return (v: T) => { setter(v); setPage(1); };
@@ -883,18 +889,31 @@ const CrmBooking: React.FC = () => {
                       className={inputClsDisabled} />
                   ) : (
                     <>
-                      <MultiSelectDropdown
-                        options={(availableUnits as any[]).map((u: any) => ({
-                          id: String(u.Id),
-                          label: `${u.ProjectName} — ${u.BlockName} — ${u.UnitName}`,
-                          group: u.BlockName
-                        }))}
-                        value={form.UnitIds}
-                        onChange={handleUnitsChange}
-                        placeholder="Select units"
-                        searchPlaceholder="Search units..."
-                        itemNoun="unit"
-                      />
+                      {isPlottedProject ? (
+                        <MultiSelectDropdown
+                          options={(availableUnits as any[]).map((u: any) => ({
+                            id: String(u.Id),
+                            label: `${u.ProjectName} — ${u.BlockName} — ${u.UnitName}`,
+                            group: u.BlockName
+                          }))}
+                          value={form.UnitIds}
+                          onChange={handleUnitsChange}
+                          placeholder="Select units"
+                          searchPlaceholder="Search units..."
+                          itemNoun="unit"
+                        />
+                      ) : (
+                        <Select value={form.UnitIds[0] || undefined} onValueChange={(id) => handleUnitsChange([id])}>
+                          <SelectTrigger className={inputCls}>
+                            <SelectValue placeholder="Select unit" />
+                          </SelectTrigger>
+                          <SelectContent className="max-w-[min(90vw,420px)]">
+                            {(availableUnits as any[]).map((u: any) => (
+                              <SelectItem key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                       {appPreferredUnitId != null && !appPreferredUnitAvailable && (
                         <p className="text-[11px] text-amber-600 mt-1">
                           This Application's preferred unit is no longer available — select a different one.
@@ -1143,4 +1162,6 @@ const CrmBooking: React.FC = () => {
 };
 
 export default CrmBooking;
+
+
 

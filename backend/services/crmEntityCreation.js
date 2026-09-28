@@ -231,9 +231,11 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     projectName = proj.recordset[0].name;
     companyId = companyId != null ? companyId : (proj.recordset[0].company_id != null ? proj.recordset[0].company_id : null);
   }
+  const rawAppUnitIds = Array.isArray(b.PreferredUnitIds) && b.PreferredUnitIds.length > 0 ? b.PreferredUnitIds : (preferredUnitId ? [preferredUnitId] : []);
+  const preferredUnitId = rawAppUnitIds.length > 0 ? rawAppUnitIds[0] : null;
   let unitName = b.InterestedUnit || null;
-  if (b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "") {
-    const unit = await pool.request().input("uid", sql.Int, parseInt(b.PreferredUnitId))
+  if (preferredUnitId !== undefined && preferredUnitId !== null && preferredUnitId !== "") {
+    const unit = await pool.request().input("uid", sql.Int, parseInt(preferredUnitId))
       .query("SELECT UnitName FROM dbo.UnitMaster WHERE Id = @uid AND IsActive = 1");
     if (!unit.recordset.length) throw new CrmCreationError("Selected unit does not exist or is inactive");
     unitName = unit.recordset[0].UnitName;
@@ -254,17 +256,17 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
     // actually picks the right HTTP status) still fires correctly instead of
     // silently falling through to a 500.
     try {
-      await assertEntityNotTaken(pool, "Unit", parseInt(b.PreferredUnitId));
+      await assertEntityNotTaken(pool, "Unit", parseInt(preferredUnitId));
     } catch (takenErr) {
       throw new CrmCreationError(takenErr.message, takenErr.status || 409);
     }
-    const existingHold = await findActiveHold(pool, "Unit", parseInt(b.PreferredUnitId));
+    const existingHold = await findActiveHold(pool, "Unit", parseInt(preferredUnitId));
     if (existingHold) {
       throw new CrmCreationError("This unit already has an active hold from another application", 409);
     }
   }
   const effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
-    preferredUnitId: b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : null,
+    preferredUnitId: preferredUnitId !== undefined && preferredUnitId !== null && preferredUnitId !== "" ? parseInt(preferredUnitId) : null,
     paymentPlanId: b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? b.PaymentPlanId : null,
   });
 
@@ -293,7 +295,7 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       .input("alt",  sql.NVarChar(20),  customerRow?.AltMobile || b.AltMobile || prefill.AltMobile || null)
       .input("em",   sql.NVarChar(200), customerRow?.Email     || b.Email     || prefill.Email     || null)
       .input("pid",  sql.Int,           b.ProjectId !== undefined && b.ProjectId !== null && b.ProjectId !== "" ? parseInt(b.ProjectId) : null)
-      .input("uid",  sql.Int,           b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : null)
+      .input("uid",  sql.Int,           preferredUnitId !== undefined && preferredUnitId !== null && preferredUnitId !== "" ? parseInt(preferredUnitId) : null)
       .input("cid",  sql.Int,           companyId)
       .input("proj", sql.NVarChar(200), projectName)
       .input("unit", sql.NVarChar(100), unitName)
@@ -386,10 +388,19 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
   // doesn't fail the whole creation; crmApplications.js's own submit-time
   // placeHoldIfNeeded call remains the backstop that catches it if it's
   // still unresolved by the time this application is submitted.
-  if (b.PreferredUnitId) {
+  if (rawAppUnitIds.length > 0) {
+    for (const uid of rawAppUnitIds) {
+      await pool.request()
+        .input('aid', sql.Int, applicationId)
+        .input('uid', sql.Int, parseInt(uid))
+        .input('pri', sql.Bit, uid === preferredUnitId ? 1 : 0)
+        .query("INSERT INTO dbo.CrmApplicationUnit (ApplicationId, UnitId, Status, IsPrimary, CreatedAt) VALUES (@aid, @uid, 'Active', @pri, SYSDATETIME())");
+    }
+  }
+  if (preferredUnitId) {
     try {
       await placeHoldIfNeeded(pool, {
-        entityType: "Unit", entityId: parseInt(b.PreferredUnitId), applicationId, holdDays: 3,
+        entityType: "Unit", entityId: parseInt(preferredUnitId), applicationId, holdDays: 3,
         reason: "Application created — auto-hold", userId: actorUserId,
       });
     } catch (holdErr) {
