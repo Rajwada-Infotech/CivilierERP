@@ -1336,6 +1336,11 @@ export default function StockTransfer() {
   const [remarks, setRemarks] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  // Toggles which figure the Posting Preview leads with per item and in its
+  // Total row. The GL Posting section below always posts incl-GST — that's
+  // the real amount transacted between the two companies — regardless of
+  // this toggle, which is purely a preview display choice.
+  const [interGstMode, setInterGstMode] = useState<"incl" | "excl">("incl");
 
   const { data: godownsData } = useQuery({
     queryKey: ["godowns"],
@@ -2052,9 +2057,37 @@ export default function StockTransfer() {
                   </div>
                   {transferMode === "inter" && (
                     <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-xs space-y-2">
-                      <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">
-                        Posting Preview
-                      </p>
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">
+                          Posting Preview
+                        </p>
+                        {interPreview && interPreview.items.length > 0 && (
+                          <div className="flex items-center rounded-lg border border-border p-0.5 text-[10px] font-medium shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setInterGstMode("excl")}
+                              className={`px-2 py-0.5 rounded-md transition-colors ${
+                                interGstMode === "excl"
+                                  ? "bg-primary text-primary-foreground"
+                                  : "text-muted-foreground hover:bg-muted"
+                              }`}
+                            >
+                              Excl. GST
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setInterGstMode("incl")}
+                              className={`px-2 py-0.5 rounded-md transition-colors ${
+                                interGstMode === "incl"
+                                  ? "bg-primary text-primary-foreground"
+                                  : "text-muted-foreground hover:bg-muted"
+                              }`}
+                            >
+                              Incl. GST
+                            </button>
+                          </div>
+                        )}
+                      </div>
                       {interPreviewLoading ? (
                         <p className="text-muted-foreground flex items-center gap-1.5">
                           <RefreshCw size={11} className="animate-spin" /> Pricing items…
@@ -2071,6 +2104,7 @@ export default function StockTransfer() {
                               const gstPct = it.gstPct ?? 0;
                               const gstAmt = it.gstAmount ?? 0;
                               const inclAmt = it.amountInclGst ?? it.amount;
+                              const headlineAmt = interGstMode === "incl" ? inclAmt : it.amount;
                               return (
                                 <div key={it.itemId} className="rounded-md bg-muted/30 border border-border/40 px-3 py-2 space-y-0.5">
                                   <div className="flex items-center justify-between gap-3 text-[11px] font-medium">
@@ -2078,7 +2112,7 @@ export default function StockTransfer() {
                                       {it.itemName || it.itemId} — {it.qty} {it.unit}
                                     </span>
                                     <span className="text-foreground shrink-0">
-                                      ₹{inclAmt.toLocaleString("en-IN")}
+                                      ₹{headlineAmt.toLocaleString("en-IN")}
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between text-[10px] text-muted-foreground">
@@ -2112,8 +2146,13 @@ export default function StockTransfer() {
                               </div>
                             )}
                             <div className="flex items-center justify-between font-semibold border-t border-border/40 pt-1">
-                              <span className="text-foreground">Total (incl. GST)</span>
-                              <span className="text-foreground">₹{(interPreview.totalAmountInclGst ?? interPreview.totalAmount).toLocaleString("en-IN")}</span>
+                              <span className="text-foreground">Total ({interGstMode === "incl" ? "incl." : "excl."} GST)</span>
+                              <span className="text-foreground">
+                                ₹{(interGstMode === "incl"
+                                  ? (interPreview.totalAmountInclGst ?? interPreview.totalAmount)
+                                  : interPreview.totalAmount
+                                ).toLocaleString("en-IN")}
+                              </span>
                             </div>
                           </div>
 
