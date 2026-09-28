@@ -1249,13 +1249,27 @@ export default function StockTransfer() {
     tagged_company_ids?: string | null;
   }[] = projectsData ?? [];
 
+  // Collect all project IDs that belong (directly or via tagging) to the FROM company.
+  const fromCompanyProjectIds = useMemo(() => {
+    if (!filterCompanyId) return new Set<string>();
+    return new Set(
+      allProjects
+        .filter((p) => projectBelongsToCompany(p, filterCompanyId))
+        .map((p) => String(p.id)),
+    );
+  }, [allProjects, filterCompanyId]);
+
   const companyGodowns = useMemo(() => {
     return allGodowns.filter((g) => {
-      if (filterCompanyId && String(g.EnterpriseID ?? "") !== filterCompanyId)
-        return false;
-      return true;
+      if (!filterCompanyId) return true;
+      // 1. Godown is directly owned by the company
+      if (String(g.EnterpriseID ?? "") === filterCompanyId) return true;
+      // 2. Godown is linked to a project that belongs/is tagged to the company
+      if (g.ProjectID != null && fromCompanyProjectIds.has(String(g.ProjectID)))
+        return true;
+      return false;
     });
-  }, [allGodowns, filterCompanyId]);
+  }, [allGodowns, filterCompanyId, fromCompanyProjectIds]);
 
   // The dedicated godown auto-created for the selected project (if any).
   const projectGodown = useMemo(() => {
@@ -1273,6 +1287,7 @@ export default function StockTransfer() {
     if (!filterCompanyId) return allProjects;
     return allProjects.filter((p) => projectBelongsToCompany(p, filterCompanyId));
   }, [allProjects, filterCompanyId]);
+
 
   // Auto-fill the source godown with the project's own godown once one is selected.
   useEffect(() => {
@@ -1426,11 +1441,31 @@ export default function StockTransfer() {
     setErrorMsg("");
   };
 
+  // Collect all project IDs that belong (directly or via tagging) to the TO company.
+  const toCompanyProjectIds = useMemo(() => {
+    if (!toCompanyId) return new Set<string>();
+    return new Set(
+      allProjects
+        .filter((p) => projectBelongsToCompany(p, toCompanyId))
+        .map((p) => String(p.id)),
+    );
+  }, [allProjects, toCompanyId]);
+
   const toCompanyGodowns = useMemo(() => {
     if (transferMode === "intra") return companyGodowns;
-    if (!toCompanyId) return allGodowns.filter((g) => g.EnterpriseID != null && String(g.EnterpriseID) !== filterCompanyId);
-    return allGodowns.filter((g) => String(g.EnterpriseID ?? "") === toCompanyId);
-  }, [allGodowns, transferMode, toCompanyId, filterCompanyId, companyGodowns]);
+    if (!toCompanyId)
+      return allGodowns.filter(
+        (g) => g.EnterpriseID != null && String(g.EnterpriseID) !== filterCompanyId,
+      );
+    return allGodowns.filter((g) => {
+      // 1. Godown is directly owned by the TO company
+      if (String(g.EnterpriseID ?? "") === toCompanyId) return true;
+      // 2. Godown is linked to a project tagged to the TO company
+      if (g.ProjectID != null && toCompanyProjectIds.has(String(g.ProjectID)))
+        return true;
+      return false;
+    });
+  }, [allGodowns, transferMode, toCompanyId, filterCompanyId, companyGodowns, toCompanyProjectIds]);
 
   // The dedicated godown auto-created for the selected receiver project (if any).
   const toProjectGodown = useMemo(() => {
@@ -1446,6 +1481,7 @@ export default function StockTransfer() {
       setToGodownId(toProjectGodown.GodownID);
     }
   }, [toProjectGodown]);
+
 
   const fromGodown =
     companyGodowns.find((g) => g.GodownID === fromGodownId) || null;
