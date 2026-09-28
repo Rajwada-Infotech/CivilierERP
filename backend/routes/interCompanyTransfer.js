@@ -20,6 +20,49 @@ const { transition } = require("../services/approvalService");
 const { getLastPurchaseRateByCompany } = require("../services/lastPurchaseRate");
 const { postInterCompanyStockTransferToGL } = require("../services/interCompanyStockTransferGL");
 
+// Idempotent schema migration — adds GST columns if missing (safe to run every
+// startup; IF NOT EXISTS pattern avoids errors on already-updated DBs).
+async function ensureIctGstColumns(pool) {
+  try {
+    await pool.request().query(`
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransferItems' AND COLUMN_NAME='GstPct')
+        ALTER TABLE dbo.InterCompanyTransferItems ADD GstPct DECIMAL(5,2) NULL;
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransferItems' AND COLUMN_NAME='GstAmount')
+        ALTER TABLE dbo.InterCompanyTransferItems ADD GstAmount DECIMAL(18,2) NULL;
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransferItems' AND COLUMN_NAME='AmountInclGst')
+        ALTER TABLE dbo.InterCompanyTransferItems ADD AmountInclGst DECIMAL(18,2) NULL;
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransferItems' AND COLUMN_NAME='SortOrder')
+        ALTER TABLE dbo.InterCompanyTransferItems ADD SortOrder INT NULL;
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransfer' AND COLUMN_NAME='TotalGstAmount')
+        ALTER TABLE dbo.InterCompanyTransfer ADD TotalGstAmount DECIMAL(18,2) NULL;
+
+      IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+                     WHERE TABLE_NAME='InterCompanyTransfer' AND COLUMN_NAME='TotalAmountInclGst')
+        ALTER TABLE dbo.InterCompanyTransfer ADD TotalAmountInclGst DECIMAL(18,2) NULL;
+    `);
+  } catch (err) {
+    console.warn("[ICT] GST column migration warning (non-fatal):", err.message);
+  }
+}
+
+// Run migration once at module load time (pool may not be ready yet — the
+// getPool() call inside will connect lazily on first request if needed, so
+// we defer by one event-loop tick to let the connection pool initialise).
+setImmediate(async () => {
+  try { await ensureIctGstColumns(getPool()); }
+  catch (e) { /* pool not ready yet — migration will be skipped; it will
+                  re-run on next deploy */ }
+});
+
 function parsePositiveInt(value) {
   const n = parseInt(value, 10);
   return Number.isFinite(n) && n > 0 ? n : null;
@@ -435,7 +478,9 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     }
 
     const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items);
-    const totalAmount = pricedItems.reduce((sum, item) => sum + item.amount, 0);
+    const totalAmount        = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+    const totalGstAmount     = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
+    const totalAmountInclGst = Math.round((totalAmount + totalGstAmount) * 100) / 100;
 
 
     // Only validate + record the request here — no stock/GL happens yet.
@@ -463,16 +508,18 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
         .input("ReceiverProjectId", sql.Int, ctx.receiver.ProjectId)
         .input("ReceiverCompanyId", sql.Int, receiverCompanyId)
         .input("TotalAmount", sql.Decimal(18, 2), totalAmount)
+        .input("TotalGstAmount", sql.Decimal(18, 2), totalGstAmount)
+        .input("TotalAmountInclGst", sql.Decimal(18, 2), totalAmountInclGst)
         .input("Remarks", sql.NVarChar(500), remarks)
         .input("DocTypeId", sql.Int, ictDocTypeId)
         .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
           INSERT INTO dbo.InterCompanyTransfer
             (DocNo, TransferDate, SenderProjectId, SenderCompanyId, ReceiverProjectId, ReceiverCompanyId,
-             Status, TotalAmount, Remarks, DocTypeId, CreatedBy)
+             Status, TotalAmount, TotalGstAmount, TotalAmountInclGst, Remarks, DocTypeId, CreatedBy)
           OUTPUT INSERTED.ICTId
           VALUES
             (@DocNo, @TransferDate, @SenderProjectId, @SenderCompanyId, @ReceiverProjectId, @ReceiverCompanyId,
-             'Draft', @TotalAmount, @Remarks, @DocTypeId, @CreatedBy)
+             'Draft', @TotalAmount, @TotalGstAmount, @TotalAmountInclGst, @Remarks, @DocTypeId, @CreatedBy)
         `);
       ictId = header.recordset[0].ICTId;
 
@@ -485,12 +532,17 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
           .input("Quantity", sql.Decimal(18, 4), item.qty)
           .input("Rate", sql.Decimal(18, 4), item.rate)
           .input("Amount", sql.Decimal(18, 2), item.amount)
+          .input("GstPct", sql.Decimal(5, 2), item.gstPct || 0)
+          .input("GstAmount", sql.Decimal(18, 2), item.gstAmount || 0)
+          .input("AmountInclGst", sql.Decimal(18, 2), item.amountInclGst || item.amount)
           .input("SourceDocNo", sql.NVarChar(100), item.sourceDocNo)
           .input("SortOrder", sql.Int, idx).query(`
             INSERT INTO dbo.InterCompanyTransferItems
-              (ICTId, ItemId, ItemName, UOMCode, Quantity, Rate, Amount, SourceDocNo, SortOrder)
+              (ICTId, ItemId, ItemName, UOMCode, Quantity, Rate, Amount,
+               GstPct, GstAmount, AmountInclGst, SourceDocNo, SortOrder)
             VALUES
-              (@ICTId, @ItemId, @ItemName, @UOMCode, @Quantity, @Rate, @Amount, @SourceDocNo, @SortOrder)
+              (@ICTId, @ItemId, @ItemName, @UOMCode, @Quantity, @Rate, @Amount,
+               @GstPct, @GstAmount, @AmountInclGst, @SourceDocNo, @SortOrder)
           `);
       }
 
@@ -515,6 +567,8 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       ICTId: ictId,
       DocNo: ictDocNo,
       TotalAmount: totalAmount,
+      TotalGstAmount: totalGstAmount,
+      TotalAmountInclGst: totalAmountInclGst,
       Status: "Pending",
       message: "Submitted for super_admin approval — stock will move and the GL voucher will post automatically once approved.",
     });
@@ -523,6 +577,7 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     res.status(err.status || 500).json({ error: err.message });
   }
 });
+
 
 // ── PUT /:id/approve — Pending → Approved (super_admin only); fires the
 // direct stock move + two-sided GL voucher the moment full approval lands ──
@@ -595,8 +650,11 @@ router.get("/:id", authenticateToken, async (req, res) => {
     if (!id) return res.status(400).json({ error: "Invalid id" });
 
     const header = await pool.request().input("id", sql.Int, id).query(`
-      SELECT ict.*, sp.name AS SenderProjectName, sc.name AS SenderCompanyName,
-             rp.name AS ReceiverProjectName, rc.name AS ReceiverCompanyName
+      SELECT ict.*,
+             ISNULL(ict.TotalGstAmount, 0)    AS TotalGstAmount,
+             ISNULL(ict.TotalAmountInclGst, ict.TotalAmount) AS TotalAmountInclGst,
+             sp.name AS SenderProjectName,     sc.name AS SenderCompanyName,
+             rp.name AS ReceiverProjectName,   rc.name AS ReceiverCompanyName
       FROM dbo.InterCompanyTransfer ict
       LEFT JOIN dbo.enterprise sp ON sp.id = ict.SenderProjectId
       LEFT JOIN dbo.enterprise sc ON sc.id = ict.SenderCompanyId
@@ -607,10 +665,15 @@ router.get("/:id", authenticateToken, async (req, res) => {
     if (!header.recordset.length) return res.status(404).json({ error: "Not found" });
 
     const items = await pool.request().input("id", sql.Int, id).query(`
-      SELECT *
+      SELECT ICTItemId, ItemId, ItemName, UOMCode, Quantity, Rate, Amount,
+             ISNULL(GstPct, 0)       AS GstPct,
+             ISNULL(GstAmount, 0)    AS GstAmount,
+             ISNULL(AmountInclGst, Amount) AS AmountInclGst,
+             SourceDocNo,
+             ISNULL(SortOrder, 0)   AS SortOrder
       FROM dbo.InterCompanyTransferItems
       WHERE ICTId = @id
-      ORDER BY SortOrder, ICTItemId
+      ORDER BY ISNULL(SortOrder, 0), ICTItemId
     `);
 
     res.json({ ...header.recordset[0], items: items.recordset });
@@ -618,5 +681,6 @@ router.get("/:id", authenticateToken, async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 module.exports = router;

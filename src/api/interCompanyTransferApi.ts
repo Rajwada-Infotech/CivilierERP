@@ -115,6 +115,8 @@ export interface InterCompanyTransferSummary {
   ReceiverProjectName?: string;
   ReceiverCompanyName?: string;
   TotalAmount: number;
+  TotalGstAmount?: number;
+  TotalAmountInclGst?: number;
   Status: string;
   Remarks?: string | null;
   CreatedBy?: string | null;
@@ -135,12 +137,16 @@ export interface InterCompanyTransferDetailItem {
   Quantity: number;
   Rate: number;
   Amount: number;
+  GstPct?: number;
+  GstAmount?: number;
+  AmountInclGst?: number;
   SourceDocNo: string | null;
 }
 
 export interface InterCompanyTransferDetail extends InterCompanyTransferSummary {
   items: InterCompanyTransferDetailItem[];
 }
+
 
 export const getInterCompanyTransfer = async (
   id: number,

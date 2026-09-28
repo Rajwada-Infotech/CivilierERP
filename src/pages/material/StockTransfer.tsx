@@ -734,10 +734,12 @@ function ICTPreviewModal({
   ictId: number;
   onClose: () => void;
 }) {
-  const { data: detail, isLoading } = useQuery({
+  const { data: detail, isLoading, isError } = useQuery({
     queryKey: ["inter-company-transfer", ictId],
     queryFn: () => getInterCompanyTransfer(ictId),
+    retry: 1,
   });
+
 
   const DOC_LINKS = detail
     ? [
@@ -777,9 +779,13 @@ function ICTPreviewModal({
           </button>
         </div>
 
-        {isLoading || !detail ? (
+        {isLoading ? (
           <div className="px-5 py-10 text-center text-xs text-muted-foreground">
             Loading…
+          </div>
+        ) : isError || !detail ? (
+          <div className="px-5 py-10 text-center text-xs text-destructive">
+            Could not load transfer details. Please try again or open the full record.
           </div>
         ) : (
           <>
@@ -827,19 +833,42 @@ function ICTPreviewModal({
                       <th className="px-3 py-2 text-left font-medium text-muted-foreground">Item</th>
                       <th className="px-3 py-2 text-right font-medium text-muted-foreground">Qty</th>
                       <th className="px-3 py-2 text-right font-medium text-muted-foreground">Rate</th>
-                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Amount</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Excl. GST</th>
+                      <th className="px-3 py-2 text-right font-medium text-amber-600 dark:text-amber-400">GST</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Incl. GST</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {detail.items.map((item) => (
-                      <tr key={item.ICTItemId} className="border-b border-border last:border-0 hover:bg-muted/20">
-                        <td className="px-3 py-2 text-foreground">{item.ItemName || item.ItemId}</td>
-                        <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Quantity)}</td>
-                        <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Rate)}</td>
-                        <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Amount)}</td>
-                      </tr>
-                    ))}
+                    {detail.items.map((item) => {
+                      const gstPct = item.GstPct ?? 0;
+                      const gstAmt = item.GstAmount ?? 0;
+                      const inclAmt = item.AmountInclGst ?? item.Amount;
+                      return (
+                        <tr key={item.ICTItemId} className="border-b border-border last:border-0 hover:bg-muted/20">
+                          <td className="px-3 py-2 text-foreground">{item.ItemName || item.ItemId}</td>
+                          <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Quantity)}</td>
+                          <td className="px-3 py-2 text-right font-mono text-muted-foreground">{fmtNum(item.Rate)}</td>
+                          <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Amount)}</td>
+                          <td className="px-3 py-2 text-right font-mono text-amber-600 dark:text-amber-400">
+                            {gstPct > 0 ? `${gstPct}% = ${fmtNum(gstAmt)}` : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono font-semibold">{fmtNum(inclAmt)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
+                  <tfoot className="bg-muted/30 border-t border-border">
+                    <tr>
+                      <td colSpan={3} className="px-3 py-2 text-right text-muted-foreground font-medium">Total</td>
+                      <td className="px-3 py-2 text-right font-mono">{fmtNum(detail.TotalAmount)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-amber-600 dark:text-amber-400">
+                        {(detail.TotalGstAmount ?? 0) > 0 ? `+${fmtNum(detail.TotalGstAmount!)}` : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono font-bold text-foreground">
+                        {fmtNum(detail.TotalAmountInclGst ?? detail.TotalAmount)}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>
@@ -867,6 +896,7 @@ function ICTPreviewModal({
                 </p>
               </div>
             )}
+
           </>
         )}
 

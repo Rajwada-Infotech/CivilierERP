@@ -855,8 +855,8 @@ function buildInboxQueries(module) {
           ict.TransferDate                      AS RecordDate,
           ict.Status,
           sp.name                               AS ContractorName,
-          rp.name                                AS SupplierName,
-          ict.TotalAmount                       AS Amount,
+          rp.name                               AS SupplierName,
+          ISNULL(ict.TotalAmountInclGst, ict.TotalAmount) AS Amount,
           ${NULL_EXTRA}
           CAST(ict.CreatedBy AS NVARCHAR(255))  AS CreatedBy,
           ''                                     AS ApprovedBy,
@@ -870,6 +870,7 @@ function buildInboxQueries(module) {
         WHERE ict.Status = 'Pending'
       `);
     }
+
 
     if (!module || module === "fund-transfer") {
       queries.push(`
