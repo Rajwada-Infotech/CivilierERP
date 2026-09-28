@@ -129,6 +129,7 @@ router.get(
         daa.Description AS description,
         daa.Remarks AS remarks,
         daa.Status AS status,
+        daa.PreCancelStatus AS preCancelStatus,
         daa.ProgressPercent AS progressPercent,
         daa.AttemptNo AS attemptNo,
         daa.ReworkFromAssignmentId AS reworkFromAssignmentId,
@@ -194,6 +195,74 @@ router.get(
     res.status(500).json({ error: err.message });
   }
 });
+
+// GET /amendments — Civil Work DPR's Amendment page: every superseded
+// assignment attempt (IsCurrent = 0) across every chain, newest first.
+// Every such row exists ONLY because it was reworked (see migration 488's
+// fork-on-rework design — the only way IsCurrent ever becomes 0), so this
+// is already exactly "every reworked activity", no extra status filter
+// needed. currentStatus/currentAttemptNo describe whatever attempt
+// eventually replaced it, so this reads as a log ("attempt 2 was sent
+// back for rework by QC on this date; attempt 3 is now In Progress"), not
+// just a pile of orphaned rows.
+router.get(
+  "/amendments",
+  authMiddleware,
+  requirePageRight("civilworkdpr-amendment", "view"),
+  async (req, res) => {
+    try {
+      const pool = await getPool();
+      const r = await pool.request().query(`
+        SELECT
+          daa.Id AS assignmentId,
+          daa.DependencyMasterActivityId AS rungId,
+          daa.AttemptNo AS attemptNo,
+          daa.Status AS status,
+          daa.ReworkReason AS reworkReason,
+          daa.ReworkSource AS reworkSource,
+          daa.StartDate AS startDate,
+          daa.EndDate AS endDate,
+          daa.UpdatedAt AS updatedAt,
+          dma.SequenceNo AS sequenceNo,
+          am.activity_name AS activityName,
+          dm.Id AS dependencyMasterId, dm.Alias AS alias, dm.WorkType AS workType,
+          dm.ProjectId AS projectId, ep.name AS projectName,
+          dm.TowerId AS towerId, bm.BlockName AS towerName,
+          dm.Floor AS floor,
+          dm.FlatId AS flatId, um.UnitName AS flatName,
+          dm.RoomId AS roomId, rm.RoomName AS roomName,
+          CONCAT(
+            ISNULL(bm.BlockName, '—'), ' > Floor ', dm.Floor,
+            ' > ', ISNULL(um.UnitName, '—'), ' > ', ISNULL(rm.RoomName, '—')
+          ) AS scopePath,
+          (
+            SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+            FROM dbo.DependencyActivityEngineer dae
+            JOIN dbo.users u ON u.id = dae.EngineerId
+            WHERE dae.AssignmentId = daa.Id
+          ) AS engineerNames,
+          cur.Status AS currentStatus,
+          cur.AttemptNo AS currentAttemptNo
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+        LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+        LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+        LEFT JOIN dbo.DependencyActivityAssignment cur
+          ON cur.DependencyMasterActivityId = daa.DependencyMasterActivityId AND cur.IsCurrent = 1
+        WHERE daa.IsCurrent = 0
+        ORDER BY daa.UpdatedAt DESC
+      `);
+      res.json(r.recordset);
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /amendments error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // ── Quality Check ────────────────────────────────────────────────────────────
 // QC inspects a Completed activity (work dragged to 100% in Reporting),
@@ -695,10 +764,16 @@ router.get(
 // — keep the two in sync). Completed is reachable only bundled with
 // progressPercent === 100 in this same request (the drag bar sends both
 // together) — never chosen on its own. Rework's one way out is manually
-// re-opening to In Progress; Completed can likewise be dragged back below
-// 100%, which reverts it to In Progress. Approved/Cancelled are no longer
-// settable here at all — Approved/Rework come only from the QC decision
-// route above.
+// re-opening to In Progress. Approved/Cancelled are no longer settable
+// here at all — Approved/Rework come only from the QC decision route
+// above.
+//
+// ProgressPercent is a one-way ratchet — it can only increase, never
+// decrease (dragging to 45% then means the bar can go to 50 but not back
+// to 40), and once the activity is Completed it's locked outright: no
+// further ProgressPercent change is accepted at all, forward or back. A
+// mistaken 100% now has to go through QC sending it back for rework (a
+// fresh attempt, not editing this one), not a drag on the same bar.
 router.patch(
   "/:rungId/status",
   authMiddleware,
@@ -730,17 +805,35 @@ router.patch(
     const pool = await getPool();
 
     const MANUAL_STATUSES = new Set(["IN_PROGRESS", "HOLD"]);
-    if (hasStatus) {
+    let current = null;
+    let currentProgress = null;
+    if (hasStatus || hasProgress) {
       const cur = await pool.request().input("rungId", sql.Int, rungId).query(
-        "SELECT Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+        "SELECT Status, ProgressPercent FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
       );
-      const current = cur.recordset[0]?.Status;
+      current = cur.recordset[0]?.Status;
+      currentProgress = cur.recordset[0]?.ProgressPercent;
+    }
+
+    if (hasProgress) {
+      if (current === "COMPLETED") {
+        return res.status(400).json({ error: "Work Done is locked once an activity is Completed." });
+      }
+      if (currentProgress != null && progressPercent < currentProgress) {
+        return res.status(400).json({ error: "Work Done can only move forward, not backward." });
+      }
+    }
+
+    if (hasStatus) {
       if (current && current !== status) {
         if (current === "CANCELLED") {
           return res.status(400).json({ error: "A Cancelled activity can't be changed." });
         } else if (status === "CANCELLED") {
           // Allowed from any stage, per explicit instruction — Cancel is
-          // the one manual move with no forward-only restriction.
+          // the one manual move with no forward-only restriction. What it
+          // was right before is snapshotted below (PreCancelStatus) so a
+          // super_admin restoring it later (see POST /:rungId/restore)
+          // knows whether to put it back at APPROVED or IN_PROGRESS.
         } else if (status === "COMPLETED") {
           if (!(hasProgress && progressPercent === 100)) {
             return res.status(400).json({ error: "Completed is set automatically when work reaches 100%." });
@@ -750,8 +843,6 @@ router.patch(
           }
         } else if (current === "REWORK" && status === "IN_PROGRESS") {
           // Allowed — manually re-opening a reworked activity to redo it.
-        } else if (current === "COMPLETED" && status === "IN_PROGRESS") {
-          // Allowed — the progress bar dragged back below 100%, undoing the auto-complete.
         } else if (!MANUAL_STATUSES.has(status)) {
           return res.status(400).json({ error: "Status can only be manually set to In Progress or Hold." });
         } else if (!MANUAL_STATUSES.has(current) && current !== "PENDING" && current !== "ALLOCATED") {
@@ -763,12 +854,15 @@ router.patch(
     if (hasStatus) setClauses.push("Status = @status");
     if (hasRemarks) setClauses.push("Remarks = @remarks");
     if (hasProgress) setClauses.push("ProgressPercent = @progressPercent");
+    const capturingPreCancel = hasStatus && status === "CANCELLED" && current && current !== "CANCELLED";
+    if (capturingPreCancel) setClauses.push("PreCancelStatus = @preCancelStatus");
     const request = pool.request()
       .input("rungId", sql.Int, rungId)
       .input("updatedBy", sql.NVarChar(200), actor);
     if (hasStatus) request.input("status", sql.NVarChar(20), status);
     if (hasRemarks) request.input("remarks", sql.NVarChar(1000), remarks);
     if (hasProgress) request.input("progressPercent", sql.Int, progressPercent);
+    if (capturingPreCancel) request.input("preCancelStatus", sql.NVarChar(20), current);
 
     const result = await request.query(`
       UPDATE dbo.DependencyActivityAssignment
@@ -781,6 +875,50 @@ router.patch(
     res.json({ success: true, status, remarks, progressPercent });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /:rungId/restore — bring a Cancelled activity back. super_admin
+// only, deliberately checked by role directly rather than a page right —
+// this is meant to be a rare, deliberate override, not something granted
+// out via Menu Rights. Restores to APPROVED if that's genuinely what it
+// was before being cancelled (PreCancelStatus, captured by the status
+// PATCH above); anything else — it was never actually approved — comes
+// back at IN_PROGRESS regardless of exactly where it was, so it has to go
+// through Reporting/QC/Approval again rather than silently resuming
+// wherever it happened to be.
+router.post("/:rungId/restore", authMiddleware, async (req, res) => {
+  if (req.user?.role !== "super_admin") {
+    return res.status(403).json({ error: "Only a super admin can restore a Cancelled activity." });
+  }
+  const rungId = parseInt(req.params.rungId, 10);
+  if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+
+  try {
+    const pool = await getPool();
+    const cur = await pool.request().input("rungId", sql.Int, rungId).query(
+      "SELECT Id, Status, PreCancelStatus FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+    );
+    if (!cur.recordset.length) return res.status(404).json({ error: "No assignment found for this rung" });
+    if (cur.recordset[0].Status !== "CANCELLED") {
+      return res.status(400).json({ error: "Only a Cancelled activity can be restored." });
+    }
+    const restoredStatus = cur.recordset[0].PreCancelStatus === "APPROVED" ? "APPROVED" : "IN_PROGRESS";
+    const actor = req.user?.email || req.user?.name || "system";
+
+    await pool.request()
+      .input("id", sql.Int, cur.recordset[0].Id)
+      .input("status", sql.NVarChar(20), restoredStatus)
+      .input("by", sql.NVarChar(200), actor)
+      .query(`
+        UPDATE dbo.DependencyActivityAssignment
+        SET Status = @status, PreCancelStatus = NULL, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+        WHERE Id = @id
+      `);
+    res.json({ success: true, status: restoredStatus });
+  } catch (err) {
+    console.error("[dependency-activity-assignment] POST /:rungId/restore error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
