@@ -1,6 +1,7 @@
 const { sql } = require("../db");
 const { resolveOcCcGate } = require("./crmWorkflowGuards");
 const { getBookingLandSplit } = require("./projectType");
+const { resolveHsnCode, APPLIES_TO } = require("./gstRules");
 
 // Fixed business rule (migration 283) — never a per-booking input, never
 // editable anywhere except by editing the HSN Master rows themselves:
@@ -134,7 +135,39 @@ async function recalculateBookingGst(pool, bookingId) {
   // only. For an all-flat booking constructionValue === totalValue and this is
   // byte-for-byte the previous behaviour.
   const bracketBase = split.constructionValue + parkingBase;
-  const hsnCode = outsideGst ? null : (bracketBase <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE);
+
+  // WHICH HSN applies now comes from dbo.CrmGstRule (migration 487) so the
+  // threshold and the works-contract question are editable master data rather
+  // than constants in this file. The RATE still comes from dbo.HSN via
+  // getHsnRate below — one place for rates, one place for selection.
+  //
+  // The constants above remain as the fallback: if the rule table is empty or
+  // nothing matches, behaviour is exactly what it was before 487. A GST engine
+  // that stopped taxing because someone deactivated a master row would be far
+  // worse than one that carried on as it always had.
+  let hsnCode = null;
+  if (!outsideGst) {
+    const resolved = await resolveHsnCode(pool, APPLIES_TO.UNIT_PARKING, {
+      value: bracketBase,
+      // Left UNKNOWN on purpose, so only rules that do not care can match.
+      //
+      // The works-contract question is whether the villa stands on land the
+      // customer ALREADY OWNED from an earlier purchase. A booking merely
+      // containing a plot does not answer that — a plot sold together with its
+      // villa is a composite sale, not construction on pre-owned land. Deriving
+      // this from the booking's own land content would encode a different fact
+      // than the rule asks about, and would start mispricing the moment a
+      // CONSTRUCTION_ON_CUSTOMER_LAND rule is added.
+      //
+      // Answering it properly means asking whether this booking's customer held
+      // an earlier booking on the plot beneath the villa (CrmUnitLineage +
+      // CrmBookingUnit + CrmApplication.CustomerId). Until that lookup exists,
+      // null keeps behaviour identical to today rather than guessing.
+      landOwnedByCustomer: null,
+    });
+    hsnCode = resolved.hsnCode
+      ?? (bracketBase <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE);
+  }
   const unitParkingRate = outsideGst ? 0 : await getHsnRate(pool, hsnCode);
 
   // Reprice every active parking allotment to this same resolved rate (0
