@@ -32,6 +32,7 @@ import {
   TrendingUp,
   History,
   ShieldQuestion,
+  Lock,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -913,22 +914,30 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
 // Docked below the tabbed content, inside the modal — a draggable
 // percent-done bar. Saved on drag-release/click only, not per pixel of
 // movement, same "commit at the end" shape as everything else in this
-// modal that patches the server. The one place it DOES touch Status:
-// dragging all the way to 100% bundles status: "COMPLETED" into the same
-// request (the backend requires exactly this pairing — see
-// dependencyActivityAssignment.js's PATCH /:rungId/status), which is what
-// sends the activity to Quality Check. Dragging back below 100% undoes
-// that, reverting to In Progress.
+// modal that patches the server. Two rules, both enforced here AND
+// server-side (dependencyActivityAssignment.js's PATCH /:rungId/status —
+// never trust the client alone for either):
+//  - One-way ratchet: it can only move forward. Dragging to 45% means the
+//    bar can go on to 50 but never back down to 40 — the track itself is
+//    clamped so the thumb physically can't be pulled below the last saved
+//    value, not just rejected on release.
+//  - Locked once Completed: reaching 100% bundles status: "COMPLETED" into
+//    the same request (what sends the activity to Quality Check), and from
+//    then on the whole bar is frozen — no more dragging at all, forward or
+//    back. A mistaken 100% now goes through QC sending it back for rework
+//    (a fresh attempt), not a drag on this same bar.
 function ProgressDragBar({ row }: { row: ReportedAssignment }) {
   const queryClient = useQueryClient();
   const trackRef = useRef<HTMLDivElement>(null);
-  const [percent, setPercent] = useState(row.progressPercent ?? 0);
+  const saved = row.progressPercent ?? 0;
+  const locked = row.status === "COMPLETED";
+  const [percent, setPercent] = useState(saved);
   const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
-    if (!dragging) setPercent(row.progressPercent ?? 0);
+    if (!dragging) setPercent(saved);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [row.rungId, row.progressPercent]);
+  }, [row.rungId, saved]);
 
   const mutation = useMutation({
     mutationFn: (patch: { progressPercent: number; status?: AssignmentStatus }) =>
@@ -941,37 +950,39 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
     },
     onError: (err: any) => {
       toast.error(err?.message || "Failed to save progress.");
-      setPercent(row.progressPercent ?? 0);
+      setPercent(saved);
     },
   });
 
+  // Clamped to [saved, 100] — the floor is the last saved value (the
+  // ratchet), never 0, so the drag itself can't go backward.
   const percentFromClientX = (clientX: number): number => {
     const el = trackRef.current;
     if (!el) return percent;
     const rect = el.getBoundingClientRect();
     const ratio = (clientX - rect.left) / rect.width;
-    return Math.max(0, Math.min(100, Math.round(ratio * 100)));
+    return Math.max(saved, Math.min(100, Math.round(ratio * 100)));
   };
 
   const commit = (next: number) => {
-    if (next === (row.progressPercent ?? 0)) return;
+    if (next === saved) return;
     const patch: { progressPercent: number; status?: AssignmentStatus } = { progressPercent: next };
     if (next === 100 && row.status !== "COMPLETED") patch.status = "COMPLETED";
-    else if (next < 100 && row.status === "COMPLETED") patch.status = "IN_PROGRESS";
     mutation.mutate(patch);
   };
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (locked) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     setDragging(true);
     setPercent(percentFromClientX(e.clientX));
   };
   const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragging) return;
+    if (!dragging || locked) return;
     setPercent(percentFromClientX(e.clientX));
   };
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragging) return;
+    if (!dragging || locked) return;
     setDragging(false);
     const next = percentFromClientX(e.clientX);
     setPercent(next);
@@ -983,6 +994,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
       <div className="flex items-center justify-between mb-1.5">
         <span className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
           <TrendingUp size={11} /> Work Done
+          {locked && <Lock size={10} className="text-muted-foreground/70" />}
         </span>
         <span className="text-xs font-heading font-bold text-foreground tabular-nums flex items-center gap-1">
           {mutation.isPending && <Loader2 size={10} className="animate-spin text-muted-foreground" />}
@@ -994,7 +1006,8 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
-        className="relative h-3 rounded-full bg-muted cursor-pointer touch-none select-none"
+        title={locked ? "Locked — this activity is Completed" : undefined}
+        className={`relative h-3 rounded-full bg-muted touch-none select-none ${locked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
       >
         <div
           className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500"

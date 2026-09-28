@@ -764,10 +764,16 @@ router.get(
 // — keep the two in sync). Completed is reachable only bundled with
 // progressPercent === 100 in this same request (the drag bar sends both
 // together) — never chosen on its own. Rework's one way out is manually
-// re-opening to In Progress; Completed can likewise be dragged back below
-// 100%, which reverts it to In Progress. Approved/Cancelled are no longer
-// settable here at all — Approved/Rework come only from the QC decision
-// route above.
+// re-opening to In Progress. Approved/Cancelled are no longer settable
+// here at all — Approved/Rework come only from the QC decision route
+// above.
+//
+// ProgressPercent is a one-way ratchet — it can only increase, never
+// decrease (dragging to 45% then means the bar can go to 50 but not back
+// to 40), and once the activity is Completed it's locked outright: no
+// further ProgressPercent change is accepted at all, forward or back. A
+// mistaken 100% now has to go through QC sending it back for rework (a
+// fresh attempt, not editing this one), not a drag on the same bar.
 router.patch(
   "/:rungId/status",
   authMiddleware,
@@ -800,11 +806,25 @@ router.patch(
 
     const MANUAL_STATUSES = new Set(["IN_PROGRESS", "HOLD"]);
     let current = null;
-    if (hasStatus) {
+    let currentProgress = null;
+    if (hasStatus || hasProgress) {
       const cur = await pool.request().input("rungId", sql.Int, rungId).query(
-        "SELECT Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+        "SELECT Status, ProgressPercent FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
       );
       current = cur.recordset[0]?.Status;
+      currentProgress = cur.recordset[0]?.ProgressPercent;
+    }
+
+    if (hasProgress) {
+      if (current === "COMPLETED") {
+        return res.status(400).json({ error: "Work Done is locked once an activity is Completed." });
+      }
+      if (currentProgress != null && progressPercent < currentProgress) {
+        return res.status(400).json({ error: "Work Done can only move forward, not backward." });
+      }
+    }
+
+    if (hasStatus) {
       if (current && current !== status) {
         if (current === "CANCELLED") {
           return res.status(400).json({ error: "A Cancelled activity can't be changed." });
@@ -823,8 +843,6 @@ router.patch(
           }
         } else if (current === "REWORK" && status === "IN_PROGRESS") {
           // Allowed — manually re-opening a reworked activity to redo it.
-        } else if (current === "COMPLETED" && status === "IN_PROGRESS") {
-          // Allowed — the progress bar dragged back below 100%, undoing the auto-complete.
         } else if (!MANUAL_STATUSES.has(status)) {
           return res.status(400).json({ error: "Status can only be manually set to In Progress or Hold." });
         } else if (!MANUAL_STATUSES.has(current) && current !== "PENDING" && current !== "ALLOCATED") {
