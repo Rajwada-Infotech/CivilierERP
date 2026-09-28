@@ -35,6 +35,7 @@ import {
   previewInterCompanyTransfer,
   getInterCompanyTransfers,
   getInterCompanyTransfer,
+  deleteInterCompanyTransfer,
   type InterCompanyTransferSummary,
   type InterCompanyTransferPreview,
 } from "@/api/interCompanyTransferApi";
@@ -943,6 +944,23 @@ function TransferHistory() {
     useState<StockTransfer | null>(null);
   const [previewIctId, setPreviewIctId] = useState<number | null>(null);
   const [successGrnNo, setSuccessGrnNo] = useState<string | null>(null);
+  // Inter-Company Transfer amounts include GST by default — the actual
+  // money that moves between the two companies — with a toggle to switch
+  // that single-figure column to the excl-GST base amount instead.
+  const [ictGstMode, setIctGstMode] = useState<"incl" | "excl">("incl");
+  const [ictDeleteError, setIctDeleteError] = useState("");
+
+  const qc = useQueryClient();
+  const deleteIctMut = useMutation({
+    mutationFn: deleteInterCompanyTransfer,
+    onSuccess: () => {
+      setIctDeleteError("");
+      qc.invalidateQueries({ queryKey: ["inter-company-transfer-list"] });
+      qc.invalidateQueries({ queryKey: ["stock-transfers"] });
+      qc.invalidateQueries({ queryKey: ["inventory-master"] });
+    },
+    onError: (e: Error) => setIctDeleteError(e.message),
+  });
   // Track which transfers already have a GRN (transferId → GRN summary[])
   const [grnMap, setGrnMap] = useState<Record<number, TransferGRNSummary[]>>(
     {},
@@ -1008,6 +1026,19 @@ function TransferHistory() {
         <ICTPreviewModal ictId={previewIctId} onClose={() => setPreviewIctId(null)} />
       )}
 
+      {ictDeleteError && (
+        <div className="mb-3 flex items-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+          <X size={15} />
+          {ictDeleteError}
+          <button
+            onClick={() => setIctDeleteError("")}
+            className="ml-auto p-0.5 hover:opacity-60 transition-opacity"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {successGrnNo && (
         <div className="mb-3 flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-400">
           <CheckCircle2 size={15} />
@@ -1032,17 +1063,45 @@ function TransferHistory() {
               Recent godown-to-godown stock movements
             </p>
           </div>
-          <button
-            onClick={() => {
-              refetch();
-              refetchIct();
-            }}
-            disabled={isFetching || isFetchingIct}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={12} className={isFetching || isFetchingIct ? "animate-spin" : ""} />{" "}
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            {ictTransfers.length > 0 && (
+              <div className="flex items-center rounded-lg border border-border p-0.5 text-[10px] font-medium">
+                <button
+                  onClick={() => setIctGstMode("excl")}
+                  title="Show Inter-Company amounts excl. GST"
+                  className={`px-2 py-1 rounded-md transition-colors ${
+                    ictGstMode === "excl"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Excl. GST
+                </button>
+                <button
+                  onClick={() => setIctGstMode("incl")}
+                  title="Show Inter-Company amounts incl. GST"
+                  className={`px-2 py-1 rounded-md transition-colors ${
+                    ictGstMode === "incl"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Incl. GST
+                </button>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                refetch();
+                refetchIct();
+              }}
+              disabled={isFetching || isFetchingIct}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={isFetching || isFetchingIct ? "animate-spin" : ""} />{" "}
+              Refresh
+            </button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -1052,7 +1111,10 @@ function TransferHistory() {
                   { label: "Doc No", cls: "" },
                   { label: "Date", cls: "hidden sm:table-cell" },
                   { label: "Route", cls: "hidden sm:table-cell" },
-                  { label: "Items", cls: "hidden md:table-cell" },
+                  {
+                    label: ictTransfers.length > 0 ? `Items / Amount (${ictGstMode === "incl" ? "Incl." : "Excl."} GST)` : "Items",
+                    cls: "hidden md:table-cell",
+                  },
                   { label: "Status", cls: "" },
                   { label: "", cls: "" },
                 ].map(({ label, cls }) => (
@@ -1116,7 +1178,11 @@ function TransferHistory() {
                           </div>
                         </td>
                         <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap hidden md:table-cell">
-                          {fmtNum(t.TotalAmount)}
+                          {fmtNum(
+                            ictGstMode === "incl"
+                              ? (t.TotalAmountInclGst ?? t.TotalAmount)
+                              : t.TotalAmount,
+                          )}
                         </td>
                         <td className="px-3 py-2.5">
                           {t.Status === "Completed" ? (
@@ -1150,6 +1216,23 @@ function TransferHistory() {
                             >
                               <Eye size={12} />
                             </button>
+                            {rights.canDelete && (
+                              <button
+                                onClick={() => {
+                                  const msg =
+                                    t.Status === "Completed"
+                                      ? `Delete ${t.DocNo}? This reverses the stock movement (${t.SenderProjectName} → ${t.ReceiverProjectName}) and the two-sided GL voucher it posted. This cannot be undone.`
+                                      : `Delete ${t.DocNo}? This request never moved stock or posted to GL, so nothing to reverse — it will just be removed.`;
+                                  if (!window.confirm(msg)) return;
+                                  deleteIctMut.mutate(t.ICTId);
+                                }}
+                                disabled={deleteIctMut.isPending}
+                                title={t.Status === "Completed" ? "Delete — reverses stock & GL" : "Delete"}
+                                className="p-1.5 rounded-lg border border-border hover:bg-red-500/10 hover:text-red-500 hover:border-red-400/40 transition-colors disabled:opacity-50"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

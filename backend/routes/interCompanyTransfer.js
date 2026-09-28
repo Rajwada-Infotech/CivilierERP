@@ -19,6 +19,7 @@ const { resolveDocTypeId, lockNextDocNumber, backPatchRecordId } = require("../u
 const { transition } = require("../services/approvalService");
 const { getLastPurchaseRateByCompany } = require("../services/lastPurchaseRate");
 const { postInterCompanyStockTransferToGL } = require("../services/interCompanyStockTransferGL");
+const { reversePostingBySource } = require("../services/generalLedger");
 
 // Idempotent schema migration — adds GST columns if missing (safe to run every
 // startup; IF NOT EXISTS pattern avoids errors on already-updated DBs).
@@ -649,10 +650,21 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const id = parsePositiveInt(req.params.id);
     if (!id) return res.status(400).json({ error: "Invalid id" });
 
+    // Explicit column list (no `ict.*`) so the ISNULL-wrapped GST columns
+    // below don't collide with their own raw names from the header table —
+    // a duplicate-named column pair is technically legal in a SQL Server
+    // result set, but there's no reason to rely on the driver picking the
+    // right one of two same-named keys when building the row object.
     const header = await pool.request().input("id", sql.Int, id).query(`
-      SELECT ict.*,
+      SELECT ict.ICTId, ict.DocNo, ict.TransferDate,
+             ict.SenderProjectId, ict.SenderCompanyId,
+             ict.ReceiverProjectId, ict.ReceiverCompanyId,
+             ict.Status, ict.TotalAmount,
              ISNULL(ict.TotalGstAmount, 0)    AS TotalGstAmount,
              ISNULL(ict.TotalAmountInclGst, ict.TotalAmount) AS TotalAmountInclGst,
+             ict.Remarks, ict.SaleOrderId, ict.SaleInvoiceId, ict.ReceivedPaymentId,
+             ict.PurchaseOrderId, ict.GRNId, ict.ExpenseBookingId, ict.NewPaymentId,
+             ict.DocTypeId, ict.CreatedBy, ict.CreatedAt,
              sp.name AS SenderProjectName,     sc.name AS SenderCompanyName,
              rp.name AS ReceiverProjectName,   rc.name AS ReceiverCompanyName
       FROM dbo.InterCompanyTransfer ict
@@ -682,5 +694,89 @@ router.get("/:id", authenticateToken, async (req, res) => {
   }
 });
 
+// ── DELETE /:id — any status is deletable; Completed reverses the stock
+// move and the two-sided GL voucher first, same convention journal-
+// voucher.js's DELETE uses (reversePostingBySource flips IsReversed rather
+// than deleting the ledger rows, preserving the audit trail). Draft/Pending/
+// Rejected never touched StockLedger/GL, so there's nothing to reverse for
+// them — just remove the request.
+router.delete("/:id", authenticateToken, requirePageRight("stock-transfers", "delete"), async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+
+    const headerRes = await pool.request().input("id", sql.Int, id)
+      .query("SELECT * FROM dbo.InterCompanyTransfer WHERE ICTId = @id");
+    const ictRow = headerRes.recordset[0];
+    if (!ictRow) return res.status(404).json({ error: "Not found" });
+
+    if (ictRow.Status === "Completed") {
+      const itemRows = await pool.request().input("id", sql.Int, id).query(`
+        SELECT ItemId, Quantity FROM dbo.InterCompanyTransferItems WHERE ICTId = @id
+      `);
+
+      // Guard against pushing the receiver's godown negative — if any of
+      // this transfer's stock has already been consumed downstream (issued
+      // out, transferred again, etc.), un-doing the original IN movement
+      // here would leave that later consumption unbacked.
+      const receiverGodown = await getProjectGodown(pool, ictRow.ReceiverProjectId);
+      if (receiverGodown) {
+        for (const item of itemRows.recordset) {
+          const avail = await pool.request()
+            .input("itemId", sql.NVarChar(100), String(item.ItemId))
+            .input("godownId", sql.Int, receiverGodown.GodownID).query(`
+              SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
+              FROM dbo.StockLedger
+              WHERE ItemID = @itemId AND GodownID = @godownId
+            `);
+          const available = Number(avail.recordset[0].Available || 0);
+          if (available < Number(item.Quantity)) {
+            return res.status(409).json({
+              error: `Cannot delete — item ${item.ItemId} has already been partly consumed from the receiver's godown (available=${available}, transferred=${item.Quantity}). Reverse those downstream movements first.`,
+            });
+          }
+        }
+      }
+
+      await pool.request().input("RefID", sql.Int, id)
+        .query("DELETE FROM dbo.StockLedger WHERE RefType = 'ICT' AND RefID = @RefID");
+
+      await reversePostingBySource(pool, "InterCompanyTransfer", id);
+    }
+
+    const tx = pool.transaction();
+    await tx.begin();
+    try {
+      await tx.request().input("id", sql.Int, id)
+        .query("DELETE FROM dbo.InterCompanyTransferItems WHERE ICTId = @id");
+      await tx.request().input("id", sql.Int, id)
+        .query("DELETE FROM dbo.InterCompanyTransfer WHERE ICTId = @id");
+      await tx.commit();
+    } catch (txErr) {
+      try { await tx.rollback(); } catch {}
+      throw txErr;
+    }
+
+    await Promise.all([
+      bumpCacheVersion("stock-transfers"),
+      bumpCacheVersion("inventory-master"),
+      bumpCacheVersion("trial-balance"),
+      bumpCacheVersion("general-ledger"),
+      bumpCacheVersion("balance-sheet"),
+      bumpCacheVersion("account-head-master"),
+    ]);
+
+    res.json({
+      message:
+        ictRow.Status === "Completed"
+          ? "Deleted — stock movement and GL voucher reversed"
+          : "Deleted",
+    });
+  } catch (err) {
+    console.error("[inter-company-transfer] DELETE /:id:", err);
+    res.status(err.status || 500).json({ error: err.message });
+  }
+});
 
 module.exports = router;

@@ -170,3 +170,12 @@ export const getInterCompanyTransfers = async (params: {
   const res = await fetchWithAuth(`${BASE}${s ? `?${s}` : ""}`);
   return handleResponse(res);
 };
+
+// Deletes an ICT of any status — for a Completed one, the backend reverses
+// the StockLedger movement and the two-sided GL voucher first.
+export const deleteInterCompanyTransfer = async (
+  id: number,
+): Promise<{ message: string }> => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  return handleResponse(res);
+};
