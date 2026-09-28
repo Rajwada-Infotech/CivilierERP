@@ -777,7 +777,7 @@ export default function JournalVoucher() {
               </div>
               <div className="space-y-1.5">
                 <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Narration</label>
-                <Input value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Reason for this correction" />
+                <Input value={narration} onChange={(e) => setNarration(e.target.value)} placeholder="Reason for this Journal Voucher" />
               </div>
             </div>
 
