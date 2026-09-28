@@ -478,7 +478,9 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     }
 
     const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items);
-    const totalAmount = pricedItems.reduce((sum, item) => sum + item.amount, 0);
+    const totalAmount        = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+    const totalGstAmount     = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
+    const totalAmountInclGst = Math.round((totalAmount + totalGstAmount) * 100) / 100;
 
 
     // Only validate + record the request here — no stock/GL happens yet.
