@@ -10,6 +10,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { MultiSelectDropdown } from "@/components/ui/MultiSelectDropdown";
 import {
   Plus, Search, ChevronRight, MoreHorizontal, CheckCircle2,
   Eye, Phone, MessageSquare, Landmark, FileSignature, IndianRupee, Repeat, Building2,
@@ -73,7 +74,7 @@ const workflowStageLabel: Record<string, string> = {
 // requires picking a real Application, same as before — this is not a
 // freeform booking with no Application behind it.
 const EMPTY_FORM = {
-  ApplicationId: "", UnitId: "", ProjectName: "", UnitNo: "", BlockName: "",
+  ApplicationId: "", UnitIds: [] as string[], ProjectName: "", UnitNo: "", BlockName: "",
   UnitType: "", AreaSqFt: "", RatePerSqFt: "", TotalValue: "",
   TokenType: "Percentage", TokenValue: "", PaymentPlanId: "",
   BookingDate: "", PaymentMode: "", AssignedTo: "", Notes: "",
@@ -402,7 +403,7 @@ const CrmBooking: React.FC = () => {
     setForm((f) => ({
       ...f,
       ApplicationId: applicationId,
-      UnitId: appUnit ? String(appUnit.Id) : "",
+      UnitIds: appUnit ? [String(appUnit.Id)] : [],
       UnitNo: appUnit?.UnitName || "",
       ProjectName: appUnit?.ProjectName || "",
       BlockName: appUnit?.BlockName || "",
@@ -423,24 +424,26 @@ const CrmBooking: React.FC = () => {
     }));
   };
 
-  const handleUnitSelect = (unitId: string) => {
-    const u = (units as any[]).find((x: any) => String(x.Id) === unitId);
-    const area = u?.AreaSqFt != null ? String(u.AreaSqFt) : "";
+  const handleUnitsChange = (nextIds: string[]) => {
+    const selectedUnits = (units as any[]).filter((u: any) => nextIds.includes(String(u.Id)));
+    const primary = selectedUnits[0] || null;
+    
+    // Multi-unit pricing: combined area is the sum of all selected units
+    const combinedArea = selectedUnits.reduce((acc, u) => acc + (parseFloat(u.AreaSqFt) || 0), 0);
+    const areaStr = combinedArea > 0 ? String(combinedArea) : "";
+    
     const rate = parseFloat(form.RatePerSqFt);
-    const areaNum = parseFloat(area);
+    
     setForm((f) => ({
       ...f,
-      UnitId: unitId,
-      UnitNo: u?.UnitName || f.UnitNo,
-      ProjectName: u?.ProjectName || f.ProjectName,
-      BlockName: u?.BlockName || f.BlockName,
-      UnitType: u?.UnitType || "",
-      AreaSqFt: area,
-      // PaymentPlanId comes from the Application (mandatory there) — a Unit
-      // no longer has a single "default" plan, only 1+ tagged plans, so
-      // there's nothing to fall back to here.
+      UnitIds: nextIds,
+      UnitNo: selectedUnits.map((u: any) => u.UnitName).join(", ") || f.UnitNo,
+      ProjectName: primary?.ProjectName || f.ProjectName,
+      BlockName: primary?.BlockName || f.BlockName,
+      UnitType: primary?.UnitType || "",
+      AreaSqFt: areaStr,
       PaymentPlanId: f.PaymentPlanId,
-      TotalValue: !isNaN(areaNum) && !isNaN(rate) ? String(Math.round(areaNum * rate)) : f.TotalValue,
+      TotalValue: !isNaN(combinedArea) && combinedArea > 0 && !isNaN(rate) ? String(Math.round(combinedArea * rate)) : (nextIds.length === 0 ? "" : f.TotalValue),
     }));
   };
 
@@ -462,7 +465,7 @@ const CrmBooking: React.FC = () => {
 
   const handleSave = async () => {
     if (!form.ApplicationId) { toast.error("Please select an Application"); return; }
-    if (!form.UnitId)  { toast.error("A unit must be selected from Unit Master"); return; }
+    if (!form.UnitIds || form.UnitIds.length === 0) { toast.error("At least one unit must be selected from Unit Master"); return; }
     // DepositBankId/DepositBankName were never persisted or read anywhere in
     // the actual booking-creation path (createCrmBookingRecord in
     // crmEntityCreation.js) — CrmBooking has no such columns at all. This
@@ -478,7 +481,7 @@ const CrmBooking: React.FC = () => {
         body: JSON.stringify({
           ...form,
           ApplicationId: parseInt(form.ApplicationId),
-          UnitId:        parseInt(form.UnitId),
+          UnitIds:       form.UnitIds.map(id => parseInt(id)),
           AreaSqFt:      form.AreaSqFt    || null,
           RatePerSqFt:   form.RatePerSqFt || null,
           TotalValue:    form.TotalValue   || null,
@@ -880,16 +883,18 @@ const CrmBooking: React.FC = () => {
                       className={inputClsDisabled} />
                   ) : (
                     <>
-                      <Select value={form.UnitId || undefined} onValueChange={handleUnitSelect}>
-                        <SelectTrigger className={inputCls}>
-                          <SelectValue placeholder="Select unit" />
-                        </SelectTrigger>
-                        <SelectContent className="max-w-[min(90vw,420px)]">
-                          {(availableUnits as any[]).map((u: any) => (
-                            <SelectItem key={u.Id} value={String(u.Id)}>{u.ProjectName} — {u.BlockName} — {u.UnitName}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <MultiSelectDropdown
+                        options={(availableUnits as any[]).map((u: any) => ({
+                          id: String(u.Id),
+                          label: `${u.ProjectName} — ${u.BlockName} — ${u.UnitName}`,
+                          group: u.BlockName
+                        }))}
+                        value={form.UnitIds}
+                        onChange={handleUnitsChange}
+                        placeholder="Select units"
+                        searchPlaceholder="Search units..."
+                        itemNoun="unit"
+                      />
                       {appPreferredUnitId != null && !appPreferredUnitAvailable && (
                         <p className="text-[11px] text-amber-600 mt-1">
                           This Application's preferred unit is no longer available — select a different one.
@@ -1138,3 +1143,4 @@ const CrmBooking: React.FC = () => {
 };
 
 export default CrmBooking;
+

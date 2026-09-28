@@ -465,13 +465,44 @@ router.get("/status", requirePageRight("crm-auto-project-setup", "view"), async 
       WHERE ProjectId = @pid AND IsActive = 1 AND BlockId IS NULL
     `);
 
+    // The effective project type, and each block's own, so the wizard knows
+    // whether to render the floor path or the plot path. Resolved server-side
+    // rather than left to the client to work out, and returned as FLAGS — the
+    // UI must branch on HasFloors, never on the type's name.
+    const projectType = await getEffectiveType(pool, { projectId });
+    const plotTemplates = await pool.request().input("pid", sql.Int, projectId).query(`
+      SELECT t.BlockId, t.PlotCount, t.NumberPrefix, t.StartNumber,
+             t.DefaultAreaSqFt, t.DefaultRatePerSqFt, t.DefaultFacing, t.DefaultRoadWidthFt,
+             t.IsGenerated,
+             (SELECT COUNT(*) FROM dbo.UnitMaster u
+               WHERE u.BlockId = t.BlockId AND u.UnitKind = N'PLOT' AND u.IsActive = 1) AS PlotsCreated
+      FROM dbo.CrmProjectAutoSetupPlotTemplate t
+      WHERE t.ProjectId = @pid AND t.IsActive = 1
+    `);
+    const tplByBlock = new Map(plotTemplates.recordset.map((t) => [t.BlockId, t]));
+
+    // Per-block effective type: a mixed township can hold both kinds, so this
+    // cannot be answered once for the whole project.
+    const blocksOut = [];
+    for (const b of blocks.recordset) {
+      const bType = await getEffectiveType(pool, { blockId: b.Id, projectId });
+      blocksOut.push({
+        ...b,
+        HasFloors: bType.HasFloors,
+        ProjectTypeName: bType.Name,
+        ProjectTypeCode: bType.Code,
+        PlotTemplate: tplByBlock.get(b.Id) || null,
+      });
+    }
+
     res.json({
       project: { Id: project.Id, Name: project.Name, ShortCode: shortCode },
       shortCodeValid: isValidShortCode(shortCode),
+      projectType,
       legacyUnitCount: legacyUnitsRes.recordset.length,
       legacyUnits: legacyUnitsRes.recordset,
       orphanParkingSlotCount: orphanParkingRes.recordset[0].c,
-      blocks: blocks.recordset,
+      blocks: blocksOut,
       floors: floors.recordset,
     });
   } catch (e) {
@@ -1707,6 +1738,43 @@ router.post("/generate-plots", requirePageRight("crm-auto-project-setup", "creat
   } catch (e) {
     console.error("[auto-setup] POST generate-plots:", e.message);
     res.status(500).json({ error: "Failed to generate plots" });
+  }
+});
+
+// GET /blocks/:blockId/plots — lists all PLOT-kind units in this block so the
+// Auto Setup UI can show a drill-down browse panel (same pattern as
+// /floors/:id/units for the floor path). No pagination — plot counts are
+// bounded by the template (≤ 500); returning them all in one shot is fine.
+router.get("/blocks/:blockId/plots", requirePageRight("crm-auto-project-setup", "view"), async (req, res) => {
+  const pool = getPool();
+  try {
+    const blockId = parseInt(req.params.blockId, 10);
+    if (!Number.isFinite(blockId)) return res.status(400).json({ error: "blockId required" });
+
+    const r = await pool.request().input("bid", sql.Int, blockId).query(`
+      SELECT
+        u.Id, u.UnitName, u.PlotNo, u.AreaSqFt, u.RatePerSqFt, u.Facing, u.RoadWidthFt,
+        u.IsActive, u.UnitKind,
+        -- booking / hold / application locks (same pattern as /floors/:id/units)
+        (SELECT TOP 1 b.BookingNo FROM dbo.CrmBooking b
+           JOIN dbo.CrmBookingUnit bu ON bu.BookingId = b.Id
+           WHERE bu.UnitId = u.Id AND b.IsActive = 1
+             AND b.Status NOT IN ('Cancelled', 'Draft')) AS LockBookingNo,
+        (SELECT TOP 1 CAST(h.Id AS NVARCHAR) FROM dbo.CrmHold h
+           WHERE h.UnitId = u.Id AND h.IsActive = 1
+             AND h.ExpiresAt > SYSDATETIME()) AS LockHoldId,
+        (SELECT TOP 1 a.ApplicationNo FROM dbo.CrmApplication a
+           JOIN dbo.CrmApplicationUnit au ON au.ApplicationId = a.Id
+           WHERE au.UnitId = u.Id AND a.IsActive = 1
+             AND a.Status NOT IN ('Cancelled', 'Draft')) AS LockApplicationNo
+      FROM dbo.UnitMaster u
+      WHERE u.BlockId = @bid AND u.UnitKind = N'PLOT' AND u.IsActive = 1
+      ORDER BY u.UnitName
+    `);
+    res.json({ plots: r.recordset });
+  } catch (e) {
+    console.error("[auto-setup] GET /blocks/:blockId/plots:", e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

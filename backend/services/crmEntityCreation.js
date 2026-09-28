@@ -604,9 +604,13 @@ async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPla
 // ApplicationId -> BookingId backfill every other Application-stage capture
 // (bank/KYC, documents, parking) already gets a few lines below.
 
+const { priceBooking } = require("./bookingUnits");
+
 async function createCrmBookingRecord(pool, b, actorUserId) {
   if (!b.ApplicationId) throw new CrmCreationError("ApplicationId is required");
-  if (!b.UnitId) throw new CrmCreationError("UnitId is required — a unit must be selected from Unit Master");
+  const rawUnitIds = Array.isArray(b.UnitIds) && b.UnitIds.length > 0 ? b.UnitIds : (b.UnitId ? [b.UnitId] : []);
+  if (rawUnitIds.length === 0) throw new CrmCreationError("UnitId or UnitIds is required — at least one unit must be selected");
+  const unitIds = rawUnitIds.map((id) => parseInt(id));
 
   // One Application, one Booking — enforced here (not just at the
   // Application-approval call site) so the manual/fallback creation path
@@ -635,7 +639,8 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       `A Booking can't be created for an application that is ${appRow.recordset[0].Status}`, 400);
   }
 
-  const unit = await pool.request().input("uid", sql.Int, parseInt(b.UnitId)).query(`
+  // Fetch all selected units
+  const unitsRes = await pool.request().query(`
     SELECT u.Id, u.UnitName, u.ProjectId, u.BlockId, u.UnitType, u.AreaSqFt,
            u.CarpetAreaSqFt, u.BuiltUpAreaSqFt, u.SuperBuiltUpAreaSqFt, u.OpenTerraceAreaSqFt, u.RatePerSqFt,
            proj.name AS ProjectName, proj.company_id AS CompanyId,
@@ -643,10 +648,14 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     FROM dbo.UnitMaster u
     LEFT JOIN dbo.enterprise proj ON proj.id = u.ProjectId AND proj.business_type = 'P'
     LEFT JOIN dbo.BlockMaster blk ON blk.Id = u.BlockId
-    WHERE u.Id = @uid AND u.IsActive = 1
+    WHERE u.Id IN (${unitIds.join(",")}) AND u.IsActive = 1
   `);
-  if (!unit.recordset.length) throw new CrmCreationError("Selected unit does not exist or is inactive");
-  const unitRow = unit.recordset[0];
+  if (unitsRes.recordset.length !== unitIds.length) {
+    throw new CrmCreationError("One or more selected units do not exist or are inactive");
+  }
+  // Order to match input array (primary is first)
+  const unitRows = unitIds.map((id) => unitsRes.recordset.find((u) => u.Id === id));
+  const unitRow = unitRows[0]; // Primary unit provides the descriptive fields
 
   // A customer can't actually get their Booking approved/paid against an
   // unapproved Application, so the real "confirm within N days" clock only
@@ -675,7 +684,9 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // uses its own internal locking and has partial-failure tolerance; the real
   // double-booking prevention is the UPDLOCK re-check inside the transaction
   // below.
-  await guardAndConvertHold(pool, "Unit", parseInt(b.UnitId), parseInt(b.ApplicationId));
+  for (const uid of unitIds) {
+    await guardAndConvertHold(pool, "Unit", uid, parseInt(b.ApplicationId));
+  }
 
   // The Application already went through the mandatory-plan-selection gate
   // (see resolveApplicationPaymentPlan in createCrmApplicationRecord / the
@@ -689,16 +700,23 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
     paymentPlanId: hasId(b.PaymentPlanId) ? b.PaymentPlanId : (hasId(appRow.recordset[0].PaymentPlanId) ? appRow.recordset[0].PaymentPlanId : null),
   });
 
-  // AreaSqFt is the single pricing/saleable area. Structural breakdown fields
-  // are copied to the booking as descriptive snapshots only.
-  const area  = unitRow.AreaSqFt != null ? unitRow.AreaSqFt
-              : (b.AreaSqFt != null && b.AreaSqFt !== "" ? parseFloat(b.AreaSqFt) : null);
-  // Rate: request body wins (editable at booking time); falls back to unit master's defined rate.
-  const rate  = b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt)
-              : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
-  const total = b.TotalValue  != null && b.TotalValue !== "" ? parseFloat(b.TotalValue)
-              : (area && rate ? Math.round(area * rate) : null);
+  // Calculate pricing using the combined multi-unit apportionment logic.
+  // Rate: request body wins (editable at booking time); falls back to primary unit's defined rate.
+  const userRate = b.RatePerSqFt != null && b.RatePerSqFt !== "" ? parseFloat(b.RatePerSqFt)
+                 : unitRow.RatePerSqFt != null ? Number(unitRow.RatePerSqFt) : null;
 
+  const linesInput = unitRows.map((u) => ({
+    unitId: u.Id,
+    areaSqFt: u.AreaSqFt,
+  }));
+  const pricing = priceBooking({ lines: linesInput, ratePerSqFt: userRate });
+
+  // If a manual TotalValue was typed, it overrides the computed sum, but we
+  // still use the combined area.
+  const area  = b.AreaSqFt != null && b.AreaSqFt !== "" ? parseFloat(b.AreaSqFt) : pricing.combinedArea;
+  const rate  = userRate;
+  const total = b.TotalValue != null && b.TotalValue !== "" ? parseFloat(b.TotalValue) : pricing.total;
+  
   const tokenType = b.TokenType === "Amount" ? "Amount" : "Percentage";
   const tokenValue = b.TokenValue != null && b.TokenValue !== "" ? parseFloat(b.TokenValue) : null;
   // Booking Amount is ALWAYS the fixed ₹ figure set on the tagged Payment
@@ -742,18 +760,18 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   let bookingId;
   try {
     const taken = await tx.request()
-      .input("uid", sql.Int, parseInt(b.UnitId))
-      .query("SELECT Id FROM dbo.CrmBooking WITH (UPDLOCK, ROWLOCK) WHERE UnitId = @uid AND IsActive = 1 AND Status NOT IN ('Cancelled', 'Rejected')");
-    if (taken.recordset.length) throw new CrmCreationError("This unit is already booked", 409);
+      .query(`SELECT Id FROM dbo.CrmBookingUnit WITH (UPDLOCK, ROWLOCK) WHERE UnitId IN (${unitIds.join(",")}) AND Status = N'Active'`);
+    if (taken.recordset.length) throw new CrmCreationError("One or more units are already booked", 409);
 
     const result = await tx.request()
       .input("no",    sql.NVarChar(30),  bookingNo)
       .input("appId", sql.Int,           parseInt(b.ApplicationId))
-      .input("uid",   sql.Int,           parseInt(b.UnitId))
+      .input("uid",   sql.Int,           unitRow.Id) // Primary UnitId
       .input("pid",   sql.Int,           unitRow.ProjectId != null ? unitRow.ProjectId : null)
       .input("pname", sql.NVarChar(200), unitRow.ProjectName || b.ProjectName || null)
       .input("cid",   sql.Int,           unitRow.CompanyId != null ? unitRow.CompanyId : null)
-      .input("unit",  sql.NVarChar(100), unitRow.UnitName)
+      // Name concatenates multiple unit names if there are several
+      .input("unit",  sql.NVarChar(100), unitRows.map(u => u.UnitName).join(", "))
       .input("blk",   sql.NVarChar(100), unitRow.BlockName || b.BlockName || null)
       .input("flr",   sql.NVarChar(100), b.FloorName   || null)
       .input("utype", sql.NVarChar(100), unitRow.UnitType || b.UnitType || null)
@@ -797,6 +815,28 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       `);
 
     bookingId = result.recordset[0].Id;
+
+    // Insert unit lines (Migration 485 support for multi-plot sales)
+    // Primary flag set on the first unit in the array.
+    for (let i = 0; i < pricing.lines.length; i++) {
+      const line = pricing.lines[i];
+      await tx.request()
+        .input("bid", sql.Int, bookingId)
+        .input("uid", sql.Int, line.unitId)
+        .input("area", sql.Decimal(18,2), line.areaSqFt)
+        .input("rate", sql.Decimal(18,2), line.ratePerSqFt)
+        .input("premium", sql.Decimal(18,2), line.premiumAmount)
+        .input("alloc", sql.Decimal(18,2), line.allocatedValue)
+        .input("cb", sql.Int, actorUserId)
+        .input("isp", sql.Bit, i === 0 ? 1 : 0)
+        .query(`
+          INSERT INTO dbo.CrmBookingUnit
+            (BookingId, UnitId, AreaSqFt, RatePerSqFt, PremiumAmount, AllocatedValue, Status, IsPrimary, CreatedBy, CreatedAt)
+          VALUES
+            (@bid, @uid, @area, @rate, @premium, @alloc, N'Active', @isp, @cb, SYSDATETIME())
+        `);
+    }
+
 
     // The Application-stage capture (bank/KYC, documents, parking) was saved
     // keyed by ApplicationId with BookingId left NULL, since no Booking existed
