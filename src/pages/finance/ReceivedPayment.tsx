@@ -1813,20 +1813,35 @@ export default function ReceivedPaymentPage() {
                         />
                       </SelectTrigger>
                       <SelectContent>
+                        {/* Two accounts can share a brand name ("Axis Bank"
+                            at two branches), so every identifying detail is
+                            on the row — branch, masked A/C and IFSC. */}
                         {depositBanks.map((b) => (
                           <SelectItem key={b.BId} value={String(b.BId)}>
-                            <span className="flex items-center gap-2">
+                            <span className="flex items-start gap-2">
                               <Landmark
                                 size={13}
-                                className="text-muted-foreground"
+                                className="text-muted-foreground mt-0.5 shrink-0"
                               />
-                              {b.BName}
-                              {b.BBranch ? ` – ${b.BBranch}` : ""}
-                              {b.BAccountNumber ? (
-                                <span className="text-muted-foreground text-[10px]">
-                                  ···{b.BAccountNumber.slice(-4)}
+                              <span className="flex flex-col leading-tight">
+                                <span className="font-medium">
+                                  {b.BName}
+                                  {b.BBranch ? (
+                                    <span className="text-muted-foreground font-normal">
+                                      {" "}– {b.BBranch}
+                                    </span>
+                                  ) : null}
                                 </span>
-                              ) : null}
+                                {(b.BAccountNumber || b.BIfscCode) && (
+                                  <span className="text-muted-foreground text-[10px] font-mono">
+                                    {b.BAccountNumber
+                                      ? `A/C ••${b.BAccountNumber.slice(-4)}`
+                                      : ""}
+                                    {b.BAccountNumber && b.BIfscCode ? "  ·  " : ""}
+                                    {b.BIfscCode ?? ""}
+                                  </span>
+                                )}
+                              </span>
                             </span>
                           </SelectItem>
                         ))}

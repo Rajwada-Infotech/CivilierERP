@@ -46,7 +46,7 @@ const CONFIG_MATCHES_LAYOUT = `
 `;
 
 const LAYOUT_SELECT = `
-  SELECT lt.Id, lt.TypeKey, lt.Label,
+  SELECT lt.Id, lt.TypeKey, lt.Label, lt.IsSystem,
     ISNULL((
       SELECT SUM(rc.Quantity)
       FROM dbo.UnitRoomConfig cfg
@@ -58,7 +58,9 @@ const LAYOUT_SELECT = `
 `;
 
 function toLayout(row) {
-  return row ? { id: row.Id, typeKey: row.TypeKey, label: row.Label, roomCount: Number(row.RoomCount) || 0 } : null;
+  return row
+    ? { id: row.Id, typeKey: row.TypeKey, label: row.Label, roomCount: Number(row.RoomCount) || 0, isSystem: !!row.IsSystem }
+    : null;
 }
 
 // Resolves a layout type by id (preferred) or by the free-text UnitType the

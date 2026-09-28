@@ -41,7 +41,7 @@ import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
 import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { salesNavItems } from "./sidebars/SalesSidebar";
 import { recordsNavItems } from "./sidebars/RecordsSidebar";
-import { civilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
+import { buildCivilWorkDprNavItems } from "./sidebars/CivilWorkDprSidebar";
 import { salesAutomationNavItems } from "./sidebars/SalesAutomationSidebar";
 import { crmNavItems } from "./sidebars/CrmSidebar";
 import { loanNavItems } from "./sidebars/LoanSidebar";
@@ -261,6 +261,67 @@ function useApprovalCount() {
   return count;
 }
 
+// ── Civil Work DPR approval count poller ─────────────────────────────────────
+// Same shape as useApprovalCount above, just scoped to the separate
+// per-assignment approval workflow (dependencyActivityAssignmentApi.ts's
+// getPendingApprovalCount) instead of the module-wide Approval Inbox.
+function useCivilWorkDprApprovalCount() {
+  const [count, setCount] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const failRef = useRef(0);
+  const mountedRef = useRef(true);
+
+  const poll = () => {
+    if (!mountedRef.current) return;
+    if (document.visibilityState === "hidden") {
+      timerRef.current = setTimeout(poll, 60_000);
+      return;
+    }
+    const token = sessionStorage.getItem("token");
+    window
+      .fetch("/api/dependency-activity-assignment/approvals/pending-count", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      .then((r) => (r.ok ? r.json().catch(() => ({})) : Promise.reject()))
+      .then((d) => {
+        if (!mountedRef.current) return;
+        failRef.current = 0;
+        setCount(d.count ?? 0);
+        timerRef.current = setTimeout(poll, 60_000);
+      })
+      .catch(() => {
+        if (!mountedRef.current) return;
+        failRef.current += 1;
+        timerRef.current = setTimeout(
+          poll,
+          Math.min(5 * 60_000, 60_000 * failRef.current),
+        );
+      });
+  };
+
+  // Immediately re-poll after this session's own Approval tab records an
+  // approval, same reasoning as onApprovalAction above — otherwise the
+  // badge can lag up to 60s behind an action just taken.
+  const onCivilWorkDprApprovalAction = () => {
+    if (!mountedRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    poll();
+  };
+
+  useEffect(() => {
+    mountedRef.current = true;
+    poll();
+    window.addEventListener("civilworkdpr-approval-action", onCivilWorkDprApprovalAction);
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+      window.removeEventListener("civilworkdpr-approval-action", onCivilWorkDprApprovalAction);
+    };
+  }, []);
+
+  return count;
+}
+
 // ── AppSidebar (nav panel) ────────────────────────────────────────────────────
 export const AppSidebar = () => {
   const location = useLocation();
@@ -270,6 +331,7 @@ export const AppSidebar = () => {
   const { currentUser } = useAuth();
   useAppVersion();
   const pendingApprovalCount = useApprovalCount();
+  const civilWorkDprApprovalCount = useCivilWorkDprApprovalCount();
 
   const { canAccessPage } = useAuth();
 
@@ -376,7 +438,7 @@ export const AppSidebar = () => {
         raw = recordsNavItems;
         break;
       case "civilworkdpr":
-        raw = civilWorkDprNavItems;
+        raw = buildCivilWorkDprNavItems(civilWorkDprApprovalCount);
         break;
       case "sales-automation":
         raw = salesAutomationNavItems;

@@ -1,4 +1,4 @@
-import { Chart2, Hierarchy, Profile2User, TaskSquare, DocumentText, ShieldTick } from "iconsax-react";
+import { Chart2, Hierarchy, Profile2User, TaskSquare, DocumentText, ShieldTick, Edit2 } from "iconsax-react";
 import { NavItem } from "./SidebarPrimitives";
 
 // Room Composition, Room Categories and Room Master are reachable from the
@@ -7,7 +7,12 @@ import { NavItem } from "./SidebarPrimitives";
 // matching the existing convention every other module already follows
 // (Follow-Up's own Department Master is likewise not repeated in
 // FollowupSidebar.ts).
-export const civilWorkDprNavItems: NavItem[] = [
+//
+// No longer badges Reporting with a pending-approval count — removed per
+// explicit instruction. dependencyActivityAssignmentApi.ts's
+// getPendingApprovalCount and the /approvals/pending-count endpoint still
+// exist and work; they're just not surfaced here any more.
+export const buildCivilWorkDprNavItems = (_pendingApprovalCount: number): NavItem[] => [
   {
     label: "Dashboard",
     icon: Chart2,
@@ -44,5 +49,11 @@ export const civilWorkDprNavItems: NavItem[] = [
     icon: Profile2User,
     path: "/civilworkdpr/worker-attendance",
     pageKey: "civilworkdpr-worker-attendance",
+  },
+  {
+    label: "Amendment",
+    icon: Edit2,
+    path: "/civilworkdpr/amendment",
+    pageKey: "civilworkdpr-amendment",
   },
 ];

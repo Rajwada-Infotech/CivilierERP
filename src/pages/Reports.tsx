@@ -1605,7 +1605,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: ClipboardList,
     color: "#0ea5e9",
     apiPath: "/api/crm/reports/booking-register",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
     columns: [
       { header: "Booking No", accessor: "BookingNo" },
       { header: "Applicant", accessor: "ApplicantName" },
@@ -1627,7 +1627,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: IndianRupee,
     color: "#0284c7",
     apiPath: "/api/crm/reports/payment-collection",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
     columns: [
       { header: "Booking No", accessor: "BookingNo" },
       { header: "Applicant", accessor: "ApplicantName" },
@@ -1646,7 +1646,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Banknote,
     color: "#0369a1",
     apiPath: "/api/crm/reports/receipt-register",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
     columns: [
       { header: "Receipt No", accessor: "ReceiptNo" },
       { header: "Booking No", accessor: "BookingNo" },
@@ -1656,6 +1656,10 @@ const ALL_REPORTS: ReportDef[] = [
       { header: "Received Date", accessor: (r) => (r.ReceivedDate ? String(r.ReceivedDate).slice(0, 10) : "—") },
       { header: "Mode", accessor: "PaymentMode" },
       { header: "Txn Ref", accessor: (r) => (r.TransactionRef ?? "—") as string },
+      // Customer's own bank (money FROM) vs the company account it landed in
+      // (money TO) — two different things, so both are named explicitly.
+      { header: "Customer Bank", accessor: (r) => (r.CustomerBank ?? "—") as string },
+      { header: "Deposit Bank", accessor: (r) => (r.DepositBank ?? "—") as string },
     ],
   },
   {
@@ -1665,7 +1669,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: AlertCircle,
     color: "#dc2626",
     apiPath: "/api/crm/reports/overdue-payments",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: null, dateToParam: null },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: null, dateToParam: null },
     columns: [
       { header: "Booking No", accessor: "BookingNo" },
       { header: "Applicant", accessor: "ApplicantName" },
@@ -1683,7 +1687,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Percent,
     color: "#0891b2",
     apiPath: "/api/crm/reports/brokerage-report",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
     columns: [
       { header: "Broker", accessor: "BrokerName" },
       { header: "Firm", accessor: (r) => (r.BrokerFirm ?? "—") as string },
@@ -1704,7 +1708,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: XCircle,
     color: "#e11d48",
     apiPath: "/api/crm/reports/cancellation-report",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
     columns: [
       { header: "Cancellation No", accessor: "CancellationNo" },
       { header: "Booking No", accessor: "BookingNo" },
@@ -1724,7 +1728,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: BarChart3,
     color: "#0e7490",
     apiPath: "/api/crm/reports/booking-status-summary",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: null, dateToParam: null },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: null, dateToParam: null },
     columns: [
       { header: "Status", accessor: "Status" },
       { header: "Count", accessor: "Count" },
@@ -1738,7 +1742,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Users,
     color: "#155e75",
     apiPath: "/api/crm/reports/customer-report",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
     columns: [
       { header: "Customer No", accessor: "CustomerNo" },
       { header: "Name", accessor: "CustomerName" },
@@ -1755,7 +1759,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: GitPullRequest,
     color: "#0d9488",
     apiPath: "/api/crm/reports/application-funnel",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
     columns: [
       { header: "Status", accessor: "Status" },
       { header: "Count", accessor: "Count" },
@@ -1769,7 +1773,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: PhoneCall,
     color: "#059669",
     apiPath: "/api/crm/reports/service-tickets",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
     columns: [
       { header: "Ticket No", accessor: "TicketNo" },
       { header: "Booking No", accessor: "BookingNo" },
@@ -1789,7 +1793,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: BookOpen,
     color: "#047857",
     apiPath: "/api/crm/reports/legal-milestones",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: null, dateToParam: null },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: null, dateToParam: null },
     columns: [
       { header: "Booking No", accessor: "BookingNo" },
       { header: "Applicant", accessor: "ApplicantName" },
@@ -1806,7 +1810,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: FileText,
     color: "#065f46",
     apiPath: "/api/crm/reports/noc-report",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
     columns: [
       { header: "NOC No", accessor: "NocNo" },
       { header: "Booking No", accessor: "BookingNo" },
@@ -1825,7 +1829,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: FileBarChart2,
     color: "#134e4a",
     apiPath: "/api/crm/reports/sales-deed-report",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: null, dateToParam: null },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: null, dateToParam: null },
     columns: [
       { header: "Deed No", accessor: "DeedNo" },
       { header: "Booking No", accessor: "BookingNo" },
@@ -1845,7 +1849,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: ArrowDownToLine,
     color: "#0f766e",
     apiPath: "/api/crm/reports/handover-report",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: null, dateToParam: null },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: null, dateToParam: null },
     columns: [
       { header: "Booking No", accessor: "BookingNo" },
       { header: "Applicant", accessor: "ApplicantName" },
@@ -1863,7 +1867,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: ClipboardList,
     color: "#115e59",
     apiPath: "/api/crm/reports/agreement-report",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: null, dateToParam: null },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: null, dateToParam: null },
     columns: [
       { header: "Agreement No", accessor: "AgreementNo" },
       { header: "Booking No", accessor: "BookingNo" },
@@ -1881,7 +1885,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: PhoneCall,
     color: "#0e7490",
     apiPath: "/api/crm/reports/welcome-call-report",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: null, dateToParam: null },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
     columns: [
       { header: "Booking No", accessor: "BookingNo" },
       { header: "Applicant", accessor: "ApplicantName" },
@@ -1898,7 +1902,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Warehouse,
     color: "#155e75",
     apiPath: "/api/crm/reports/parking-report",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: null, dateToParam: null },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: null, dateToParam: null },
     columns: [
       { header: "Booking No", accessor: (r) => (r.BookingNo ?? "—") as string },
       { header: "Applicant", accessor: (r) => (r.ApplicantName ?? "—") as string },
@@ -1916,7 +1920,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: MapPinned,
     color: "#0369a1",
     apiPath: "/api/crm/reports/possession-notice-report",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: null, dateToParam: null },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: null, dateToParam: null },
     columns: [
       { header: "Notice No", accessor: "NoticeNo" },
       { header: "Booking No", accessor: "BookingNo" },
@@ -1934,7 +1938,7 @@ const ALL_REPORTS: ReportDef[] = [
     icon: MapPinned,
     color: "#0c4a6e",
     apiPath: "/api/crm/reports/pre-possession-report",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: null, dateToParam: null },
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: null, dateToParam: null },
     columns: [
       { header: "Booking No", accessor: "BookingNo" },
       { header: "Applicant", accessor: "ApplicantName" },
@@ -1950,13 +1954,49 @@ const ALL_REPORTS: ReportDef[] = [
     icon: Wrench,
     color: "#164e63",
     apiPath: "/api/crm/reports/construction-updates",
-    filterConfig: { companyParam: null, finYearParam: null, singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
+    filterConfig: { companyParam: null, finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: "from", dateToParam: "to" },
     columns: [
       { header: "Project", accessor: "ProjectName" },
       { header: "Update Date", accessor: (r) => (r.UpdateDate ? String(r.UpdateDate).slice(0, 10) : "—") },
       { header: "% Complete", accessor: (r) => (r.PercentComplete != null ? `${r.PercentComplete}%` : "—") },
       { header: "Stage", accessor: "Stage" },
       { header: "Summary", accessor: (r) => (r.Summary ?? "—") as string },
+    ],
+  },
+  {
+    id: "crm-aging-analysis",
+    label: "Aging Analysis",
+    description: "Overdue balances bucketed 0–30 / 31–60 / 61–90 / 90+ days",
+    icon: Clock,
+    color: "#b45309",
+    apiPath: "/api/crm/reports/aging-analysis",
+    filterConfig: { companyParam: "companyId", finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: null, dateToParam: null },
+    columns: [
+      { header: "Booking No", accessor: "BookingNo" },
+      { header: "Project", accessor: "ProjectName" },
+      { header: "Applicant", accessor: "ApplicantName" },
+      { header: "Mobile", accessor: "Mobile" },
+      { header: "Milestone", accessor: "MilestoneName" },
+      { header: "Due Date", accessor: (r) => (r.DueDate ? String(r.DueDate).slice(0, 10) : "—") },
+      { header: "Balance", accessor: (r) => fmt(r.Balance as number) },
+      { header: "Days Overdue", accessor: "DaysOverdue" },
+      { header: "Aging Bucket", accessor: "AgingBucket" },
+    ],
+  },
+  {
+    id: "crm-inventory-status",
+    label: "Inventory Status",
+    description: "Units total, booked & available per project and unit type",
+    icon: Boxes,
+    color: "#0e7490",
+    apiPath: "/api/crm/reports/inventory-status",
+    filterConfig: { companyParam: null, finYearParam: null, projectParam: "projectId", singleDateParam: null, dateFromParam: null, dateToParam: null },
+    columns: [
+      { header: "Project", accessor: "ProjectName" },
+      { header: "Unit Type", accessor: "UnitType" },
+      { header: "Total Units", accessor: "TotalUnits" },
+      { header: "Booked Units", accessor: "BookedUnits" },
+      { header: "Available Units", accessor: "AvailableUnits" },
     ],
   },
 
@@ -2114,7 +2154,7 @@ const MODULE_SECTIONS: ModuleSection[] = [
     id: "crm",
     label: "CRM",
     accent: "#0891b2",
-    description: "Bookings, payment collection, brokerage & cancellations",
+    description: "Bookings, collections, aging, inventory, legal, handover & after-sales",
     icon: ClipboardList,
     reportIds: [
       "crm-booking-register",
@@ -2137,6 +2177,8 @@ const MODULE_SECTIONS: ModuleSection[] = [
       "crm-possession-notice-report",
       "crm-pre-possession-report",
       "crm-construction-updates",
+      "crm-aging-analysis",
+      "crm-inventory-status",
     ],
   },
 ];

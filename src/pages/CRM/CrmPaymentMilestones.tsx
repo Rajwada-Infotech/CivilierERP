@@ -8,11 +8,12 @@ import { CrmShell } from "@/components/crm/CrmShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw, ArrowDownCircle, ArrowUpCircle, AlertTriangle, MessageSquare, Hourglass } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, Plus, Wallet, RefreshCw, ArrowDownCircle, ArrowUpCircle, AlertTriangle, MessageSquare, Hourglass, Landmark } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { promptNextStep } from "@/lib/workflowNav";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 
 const API = "/api/crm/payments";
@@ -22,6 +23,16 @@ const CUSTOMER_BANK_API = "/api/crm/customer-bank-details";
 const PROJECT_BANK_API = "/api/crm/project-banks";
 
 const PAY_MODES = ["Cash", "Cheque", "NEFT", "RTGS", "UPI", "Home Loan", "Other"];
+// Modes where the money demonstrably came out of a bank account, so asking
+// which one is meaningful. Mirrors ReceivedPayment.tsx's `needsBankRef`.
+const MODES_WITH_BANK = ["Cheque", "NEFT", "RTGS", "UPI", "Home Loan"];
+// One control style for every field in the payment dialogs, so the form
+// reads as a single unit instead of a stack of differently-sized boxes.
+const FIELD =
+  "w-full h-9 text-sm border border-border rounded-lg px-2.5 bg-background " +
+  "focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-shadow";
+const LABEL = "text-[11px] font-medium text-muted-foreground uppercase tracking-wide block mb-1.5";
+const modeHasBank = (mode: string) => MODES_WITH_BANK.includes(mode);
 
 const statusColor: Record<string, string> = {
   Pending: "text-orange-600 bg-orange-50 border-orange-200",
@@ -141,12 +152,12 @@ const CrmPaymentMilestones: React.FC = () => {
   const [sp, setSp] = useSearchParams();
   const selectedBookingId = sp.get("bookingId") || "";
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", TransactionRef: "", Remarks: "", DepositBankId: "" });
+  const [payForm, setPayForm] = useState({ AmountPaid: "", PaidDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Remarks: "", DepositBankId: "" });
   const [saving, setSaving] = useState(false);
   const [addDialog, setAddDialog] = useState(false);
   const [addForm, setAddForm] = useState({ MilestoneName: "", DueDate: "", AmountDue: "", ResponsibleDepartment: "", RequiredDocuments: "" });
   const [onAccountDialog, setOnAccountDialog] = useState(false);
-  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "", DepositBankId: "" });
+  const [onAccountForm, setOnAccountForm] = useState({ Amount: "", ReceivedDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Notes: "", DepositBankId: "" });
   const [applyDialog, setApplyDialog] = useState<{ payment: any; milestone: any | null; amount: string } | null>(null);
   const [applyMilestoneId, setApplyMilestoneId] = useState<string>("");
   const [waiveDialog, setWaiveDialog] = useState<{ milestone: any; reason: string } | null>(null);
@@ -246,6 +257,14 @@ const CrmPaymentMilestones: React.FC = () => {
       AmountPaid: m.AmountPaid != null && Number(m.AmountPaid) > 0 ? String(m.AmountPaid) : (remaining > 0 ? String(remaining) : ""),
       PaidDate: m.PaidDate ? String(m.PaidDate).slice(0, 10) : todayStr(),
       PaymentMode: m.PaymentMode || "",
+      // Deliberately NOT pre-filled from the KYC bank on file. The whole
+      // point of this field is that a customer can pay from any of their
+      // accounts — defaulting to the registered one would silently record
+      // the wrong bank whenever staff didn't notice it was pre-selected.
+      // The bank on file stays visible just below as reference. Matches
+      // Received Payment's own Customer Bank Name field, which also starts
+      // empty.
+      BankName: m.BankName || "",
       TransactionRef: m.TransactionRef || "",
       Remarks: m.Remarks || "",
       DepositBankId: m.DepositBankId != null ? String(m.DepositBankId)
@@ -298,6 +317,7 @@ const CrmPaymentMilestones: React.FC = () => {
           AmountPaid:    payForm.AmountPaid    ? parseFloat(payForm.AmountPaid) : undefined,
           PaidDate:      payForm.PaidDate      || undefined,
           PaymentMode:   payForm.PaymentMode   || undefined,
+          BankName:      payForm.BankName      || undefined,
           TransactionRef:payForm.TransactionRef|| undefined,
           Remarks:       payForm.Remarks       || undefined,
         }),
@@ -374,6 +394,7 @@ const CrmPaymentMilestones: React.FC = () => {
           Amount: parseFloat(onAccountForm.Amount),
           ReceivedDate: onAccountForm.ReceivedDate || null,
           PaymentMode: onAccountForm.PaymentMode || null,
+          BankName: onAccountForm.BankName || null,
           TransactionRef: onAccountForm.TransactionRef || null,
           Notes: onAccountForm.Notes || null,
         }),
@@ -382,7 +403,7 @@ const CrmPaymentMilestones: React.FC = () => {
       if (!res.ok) throw new Error(data.error);
       toast.success(`On-account deposit submitted for Finance approval${data.RPDocNo ? ` — ${data.RPDocNo}` : ""}. It won't appear until approved.`);
       setOnAccountDialog(false);
-      setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", TransactionRef: "", Notes: "", DepositBankId: "" });
+      setOnAccountForm({ Amount: "", ReceivedDate: "", PaymentMode: "", BankName: "", TransactionRef: "", Notes: "", DepositBankId: "" });
       qc.invalidateQueries({ queryKey: ["crm-on-account", selectedBookingId] });
     } catch (e: any) {
       toast.error(translateError(e.message));
@@ -1000,86 +1021,120 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Record Payment Dialog */}
         <Dialog open={editingId != null} onOpenChange={(o) => { if (!o) setEditingId(null); }}>
-          <DialogContent accent="crm" className="max-w-md">
+          <DialogContent accent="crm" className="max-w-2xl">
             <DialogHeader>
               <DialogTitle className="font-heading">Submit Payment for Approval</DialogTitle>
-              {editingMilestone && (
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  <span className="font-medium text-foreground">{editingMilestone.MilestoneName}</span>
-                  {" — "}{fmt(editingMilestone.AmountDue)}
-                  {editingBalance > 0 && <span className="text-muted-foreground"> · Balance: {fmt(editingBalance)}</span>}
-                </p>
-              )}
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Goes to Finance's Received Payment queue — Account's Head (or admin/super admin) must approve before it counts as paid.
+              </p>
             </DialogHeader>
-            <p className="text-[11px] text-muted-foreground -mt-2">Goes to Finance's Received Payment queue — Account's Head (or admin/super admin) must approve before it counts as paid.</p>
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Amount Paid (₹)</label>
-                  <input type="number" value={payForm.AmountPaid}
-                    onChange={(e) => setPayForm((f) => ({ ...f, AmountPaid: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+
+            {/* What's being paid — the one thing worth reading before typing */}
+            {editingMilestone && (
+              <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
+                <div className="min-w-0">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-primary/80">Milestone</p>
+                  <p className="text-sm font-semibold text-foreground truncate">{editingMilestone.MilestoneName}</p>
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Payment Date</label>
-                  <input type="date" value={payForm.PaidDate}
-                    onChange={(e) => setPayForm((f) => ({ ...f, PaidDate: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-                </div>
-                {previewOverflow > 0 && (
-                  <div className="col-span-2 -mt-1">
-                    <p className="text-[11px] text-blue-600 font-medium flex items-center gap-1">
-                      <Wallet size={11} /> ₹{previewOverflow.toLocaleString("en-IN")} beyond what's due — will be parked to On Account if still true when approved.
+                <div className="flex items-center gap-6 shrink-0">
+                  <div className="text-right">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Amount Due</p>
+                    <p className="text-sm font-semibold tabular-nums text-foreground">{fmt(editingMilestone.AmountDue)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Balance</p>
+                    <p className={`text-lg font-bold tabular-nums ${editingBalance > 0 ? "text-primary" : "text-emerald-600 dark:text-emerald-400"}`}>
+                      {fmt(editingBalance)}
                     </p>
                   </div>
-                )}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
-                  <select value={payForm.PaymentMode} onChange={(e) => setPayForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <label className={LABEL}>Amount Paid (₹)</label>
+                  <input type="number" value={payForm.AmountPaid}
+                    onChange={(e) => setPayForm((f) => ({ ...f, AmountPaid: e.target.value }))}
+                    className={`${FIELD} font-semibold tabular-nums`} />
+                </div>
+                <div>
+                  <label className={LABEL}>Payment Date</label>
+                  <input type="date" value={payForm.PaidDate}
+                    onChange={(e) => setPayForm((f) => ({ ...f, PaidDate: e.target.value }))}
+                    className={FIELD} />
+                </div>
+                <div>
+                  <label className={LABEL}>Payment Mode</label>
+                  <select value={payForm.PaymentMode} onChange={(e) => setPayForm((f) => ({ ...f, PaymentMode: e.target.value, BankName: modeHasBank(e.target.value) ? f.BankName : "" }))}
+                    className={FIELD}>
                     <option value="">Select mode</option>
                     {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
                   </select>
                 </div>
-                <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
-                  <input type="text" value={payForm.TransactionRef}
+                {previewOverflow > 0 && (
+                  <div className="col-span-2 sm:col-span-3">
+                    <p className="text-[11px] text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5 rounded-lg bg-blue-500/10 px-2.5 py-1.5">
+                      <Wallet size={12} className="shrink-0" /> ₹{previewOverflow.toLocaleString("en-IN")} beyond what's due — will be parked to On Account if still true when approved.
+                    </p>
+                  </div>
+                )}
+                {modeHasBank(payForm.PaymentMode) && (
+                  <div className="col-span-2 sm:col-span-1">
+                    <label className={LABEL}>Customer Bank Name</label>
+                    <BankNamePicker
+                      value={payForm.BankName}
+                      onChange={(v) => setPayForm((f) => ({ ...f, BankName: v }))}
+                      placeholder="Select customer's bank…"
+                      otherPlaceholder="Bank of customer"
+                    />
+                  </div>
+                )}
+                <div className={modeHasBank(payForm.PaymentMode) ? "col-span-2" : "col-span-2 sm:col-span-3"}>
+                  <label className={LABEL}>Transaction Ref</label>
+                  <input type="text" value={payForm.TransactionRef} placeholder="UTR / cheque / reference no."
                     onChange={(e) => setPayForm((f) => ({ ...f, TransactionRef: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                    className={FIELD} />
                 </div>
-                <div className="col-span-2">
-                  <p className="text-[11px] text-muted-foreground rounded border border-dashed border-border px-2 py-1.5">
-                    Deposit bank: assigned by Accounts on the Received Payment before approval.
-                  </p>
-                </div>
-                <div className="col-span-2">
-                  <label className="text-xs text-muted-foreground block mb-1">Remarks</label>
+                <div className="col-span-2 sm:col-span-3">
+                  <label className={LABEL}>Remarks</label>
                   <textarea value={payForm.Remarks} onChange={(e) => setPayForm((f) => ({ ...f, Remarks: e.target.value }))}
-                    rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+                    rows={2} placeholder="Optional note for Finance…"
+                    className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-shadow" />
                 </div>
               </div>
 
-              {customerBank && (customerBank.BankName || customerBank.AccountNo) && (
-                <div className="rounded-lg border border-border bg-muted/30 p-3">
-                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Customer's Bank (reference only)</p>
-                  <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                    <span className="text-muted-foreground">Bank</span>
-                    <span className="font-medium text-right">{customerBank.BankName || "—"}</span>
-                    <span className="text-muted-foreground">A/C No.</span>
-                    <span className="font-medium text-right font-mono">{customerBank.AccountNo || "—"}</span>
-                    <span className="text-muted-foreground">IFSC</span>
-                    <span className="font-medium text-right font-mono">{customerBank.IfscCode || "—"}</span>
-                  </div>
+              {/* Context Finance will need, kept visually subordinate to the form */}
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2">
+                  <Landmark size={13} className="text-muted-foreground mt-0.5 shrink-0" />
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    <span className="font-medium text-foreground">Deposit bank</span> — assigned by Accounts on the Received Payment before approval.
+                  </p>
                 </div>
-              )}
+                {customerBank && (customerBank.BankName || customerBank.AccountNo) ? (
+                  <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5">
+                    <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide mb-1.5">Bank on file (KYC) — reference only</p>
+                    <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-[11px]">
+                      <span className="text-muted-foreground">Bank</span>
+                      <span className="font-medium text-right truncate">{customerBank.BankName || "—"}</span>
+                      <span className="text-muted-foreground">A/C No.</span>
+                      <span className="font-medium text-right font-mono">{customerBank.AccountNo || "—"}</span>
+                      <span className="text-muted-foreground">IFSC</span>
+                      <span className="font-medium text-right font-mono">{customerBank.IfscCode || "—"}</span>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
             </div>
             <div className="flex justify-end gap-2 pt-3 border-t border-border">
               <button onClick={() => setEditingId(null)}
-                className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
+                className="px-4 h-9 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted transition-colors">Cancel</button>
               <button onClick={handleRecordPayment}
                 disabled={saving}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
-                {saving ? "Submitting..." : "Submit for Approval"}
+                className="px-5 h-9 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                {saving ? "Submitting…" : "Submit for Approval"}
               </button>
             </div>
           </DialogContent>
@@ -1139,47 +1194,64 @@ const CrmPaymentMilestones: React.FC = () => {
 
         {/* Deposit On Account Dialog */}
         <Dialog open={onAccountDialog} onOpenChange={(o) => { if (!o) setOnAccountDialog(false); }}>
-          <DialogContent accent="crm" className="max-w-sm">
-            <DialogHeader><DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> Submit On-Account Deposit</DialogTitle></DialogHeader>
-            <p className="text-xs text-muted-foreground -mt-2">Goes to Finance's Received Payment queue for approval. Once approved, it's held as a credit and auto-applied to the next due milestone in sequence.</p>
-            <div className="space-y-3">
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Amount (₹) *</label>
-                <input type="number" value={onAccountForm.Amount}
-                  onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
+          <DialogContent accent="crm" className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="font-heading flex items-center gap-1.5"><Wallet size={16} className="text-blue-600" /> Submit On-Account Deposit</DialogTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Goes to Finance's Received Payment queue for approval. Once approved, it's held as a credit and auto-applied to the next due milestone in sequence.
+              </p>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Received Date</label>
-                  <input type="date" value={onAccountForm.ReceivedDate}
-                    onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
+                  <label className={LABEL}>Amount (₹) *</label>
+                  <input type="number" value={onAccountForm.Amount}
+                    onChange={(e) => setOnAccountForm((f) => ({ ...f, Amount: e.target.value }))}
+                    className={`${FIELD} font-semibold tabular-nums`} />
                 </div>
                 <div>
-                  <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
-                  <select value={onAccountForm.PaymentMode} onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value }))}
-                    className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
+                  <label className={LABEL}>Received Date</label>
+                  <input type="date" value={onAccountForm.ReceivedDate}
+                    onChange={(e) => setOnAccountForm((f) => ({ ...f, ReceivedDate: e.target.value }))}
+                    className={FIELD} />
+                </div>
+                <div>
+                  <label className={LABEL}>Payment Mode</label>
+                  <select value={onAccountForm.PaymentMode} onChange={(e) => setOnAccountForm((f) => ({ ...f, PaymentMode: e.target.value, BankName: modeHasBank(e.target.value) ? f.BankName : "" }))}
+                    className={FIELD}>
                     <option value="">Select mode</option>
                     {PAY_MODES.map((m) => <option key={m}>{m}</option>)}
                   </select>
                 </div>
+                {modeHasBank(onAccountForm.PaymentMode) && (
+                  <div className="col-span-2 sm:col-span-1">
+                    <label className={LABEL}>Customer Bank Name</label>
+                    <BankNamePicker
+                      value={onAccountForm.BankName}
+                      onChange={(v) => setOnAccountForm((f) => ({ ...f, BankName: v }))}
+                      placeholder="Select customer's bank…"
+                      otherPlaceholder="Bank of customer"
+                    />
+                  </div>
+                )}
+                <div className={modeHasBank(onAccountForm.PaymentMode) ? "col-span-2" : "col-span-2 sm:col-span-3"}>
+                  <label className={LABEL}>Transaction Ref</label>
+                  <input type="text" value={onAccountForm.TransactionRef} placeholder="UTR / cheque / reference no."
+                    onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
+                    className={FIELD} />
+                </div>
+                <div className="col-span-2 sm:col-span-3">
+                  <label className={LABEL}>Notes</label>
+                  <textarea value={onAccountForm.Notes} onChange={(e) => setOnAccountForm((f) => ({ ...f, Notes: e.target.value }))}
+                    rows={2} placeholder="Optional note for Finance…"
+                    className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/50 transition-shadow" />
+                </div>
               </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Transaction Ref</label>
-                <input type="text" value={onAccountForm.TransactionRef}
-                  onChange={(e) => setOnAccountForm((f) => ({ ...f, TransactionRef: e.target.value }))}
-                  className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-              </div>
-              <div>
-                <p className="text-[11px] text-muted-foreground rounded border border-dashed border-border px-2 py-1.5">
-                    Deposit bank: assigned by Accounts on the Received Payment before approval.
-                  </p>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground block mb-1">Notes</label>
-                <textarea value={onAccountForm.Notes} onChange={(e) => setOnAccountForm((f) => ({ ...f, Notes: e.target.value }))}
-                  rows={2} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background resize-none" />
+              <div className="rounded-lg border border-dashed border-border px-3 py-2.5 flex items-start gap-2">
+                <Landmark size={13} className="text-muted-foreground mt-0.5 shrink-0" />
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  <span className="font-medium text-foreground">Deposit bank</span> — assigned by Accounts on the Received Payment before approval.
+                </p>
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-3 border-t border-border">

@@ -29,6 +29,10 @@ import {
   ListChecks,
   Check,
   Timer,
+  TrendingUp,
+  History,
+  ShieldQuestion,
+  Lock,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -41,10 +45,14 @@ import {
   updateAssignmentDetail,
   getRungAssignment,
   saveRungAssignment,
+  getAssignmentAttempts,
+  restoreCancelledActivity,
+  ASSIGNMENT_STATUS_META,
   type PhotoPhase,
   type ActivityPhotoMeta,
   type ReportedAssignment,
   type AssignmentCheckpoint,
+  type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 import {
@@ -56,10 +64,12 @@ import {
 import { AddWorkerDialog, inputCls, STATUS_LABEL, STATUS_CLS, todayIso } from "@/pages/civilworkdpr/WorkerAttendance";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
+import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 import { useCameraCapture } from "@/hooks/useCameraCapture";
+import { useAuth } from "@/contexts/AuthContext";
 
-type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints";
+type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "history";
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00`);
@@ -726,6 +736,8 @@ function CheckpointsTab({ rungId }: { rungId: number }) {
       const a = detail.assignment;
       await saveRungAssignment(rungId, {
         engineerIds: a.engineerIds,
+        qcUserIds: a.qcUserIds,
+        approvalLevels: a.approvalLevels,
         startDate: a.startDate,
         days: a.days,
         endDate: a.endDate,
@@ -898,6 +910,267 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
   );
 }
 
+// ── Progress bar ─────────────────────────────────────────────────────────
+// Docked below the tabbed content, inside the modal — a draggable
+// percent-done bar. Saved on drag-release/click only, not per pixel of
+// movement, same "commit at the end" shape as everything else in this
+// modal that patches the server. Two rules, both enforced here AND
+// server-side (dependencyActivityAssignment.js's PATCH /:rungId/status —
+// never trust the client alone for either):
+//  - One-way ratchet: it can only move forward. Dragging to 45% means the
+//    bar can go on to 50 but never back down to 40 — the track itself is
+//    clamped so the thumb physically can't be pulled below the last saved
+//    value, not just rejected on release.
+//  - Locked once Completed: reaching 100% bundles status: "COMPLETED" into
+//    the same request (what sends the activity to Quality Check), and from
+//    then on the whole bar is frozen — no more dragging at all, forward or
+//    back. A mistaken 100% now goes through QC sending it back for rework
+//    (a fresh attempt), not a drag on this same bar.
+function ProgressDragBar({ row }: { row: ReportedAssignment }) {
+  const queryClient = useQueryClient();
+  const trackRef = useRef<HTMLDivElement>(null);
+  const saved = row.progressPercent ?? 0;
+  const locked = row.status === "COMPLETED";
+  const [percent, setPercent] = useState(saved);
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    if (!dragging) setPercent(saved);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.rungId, saved]);
+
+  const mutation = useMutation({
+    mutationFn: (patch: { progressPercent: number; status?: AssignmentStatus }) =>
+      updateAssignmentDetail(row.rungId, patch),
+    onSuccess: (_res, patch) => {
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      queryClient.invalidateQueries({ queryKey: ["qc-queue"] });
+      if (patch.status === "COMPLETED") toast.success("Activity completed — sent to Quality Check.");
+    },
+    onError: (err: any) => {
+      toast.error(err?.message || "Failed to save progress.");
+      setPercent(saved);
+    },
+  });
+
+  // Clamped to [saved, 100] — the floor is the last saved value (the
+  // ratchet), never 0, so the drag itself can't go backward.
+  const percentFromClientX = (clientX: number): number => {
+    const el = trackRef.current;
+    if (!el) return percent;
+    const rect = el.getBoundingClientRect();
+    const ratio = (clientX - rect.left) / rect.width;
+    return Math.max(saved, Math.min(100, Math.round(ratio * 100)));
+  };
+
+  const commit = (next: number) => {
+    if (next === saved) return;
+    const patch: { progressPercent: number; status?: AssignmentStatus } = { progressPercent: next };
+    if (next === 100 && row.status !== "COMPLETED") patch.status = "COMPLETED";
+    mutation.mutate(patch);
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (locked) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setDragging(true);
+    setPercent(percentFromClientX(e.clientX));
+  };
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging || locked) return;
+    setPercent(percentFromClientX(e.clientX));
+  };
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging || locked) return;
+    setDragging(false);
+    const next = percentFromClientX(e.clientX);
+    setPercent(next);
+    commit(next);
+  };
+
+  return (
+    <div className="px-4 py-3 border-t border-border shrink-0 bg-muted/10">
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+          <TrendingUp size={11} /> Work Done
+          {locked && <Lock size={10} className="text-muted-foreground/70" />}
+        </span>
+        <span className="text-xs font-heading font-bold text-foreground tabular-nums flex items-center gap-1">
+          {mutation.isPending && <Loader2 size={10} className="animate-spin text-muted-foreground" />}
+          {percent}%
+        </span>
+      </div>
+      <div
+        ref={trackRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        title={locked ? "Locked — this activity is Completed" : undefined}
+        className={`relative h-3 rounded-full bg-muted touch-none select-none ${locked ? "cursor-not-allowed opacity-70" : "cursor-pointer"}`}
+      >
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-gradient-to-r from-cyan-500 to-emerald-500"
+          style={{ width: `${percent}%`, transition: dragging ? "none" : "width 150ms ease-out" }}
+        />
+        <div
+          className="absolute top-1/2 w-4 h-4 rounded-full bg-white border-2 border-cyan-500 shadow-md -translate-y-1/2 -translate-x-1/2"
+          style={{ left: `${percent}%`, transition: dragging ? "none" : "left 150ms ease-out" }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── History tab ──────────────────────────────────────────────────────────
+// Every past attempt at this rung — only shown once there's more than one
+// (a rework fork happened via QC or an Approval rejection). Read-only:
+// this is the "keep the history of the reworked task" record, not
+// something acted on here.
+const REWORK_SOURCE_LABEL: Record<string, string> = { QC: "Quality Check", APPROVAL: "Approval" };
+
+function HistoryTab({ rungId }: { rungId: number }) {
+  const { data: attempts = [], isLoading } = useQuery({
+    queryKey: ["activity-attempts", rungId],
+    queryFn: () => getAssignmentAttempts(rungId),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10 text-muted-foreground gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading history…
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-0">
+      {attempts.map((a, i) => (
+        <div key={a.assignmentId} className="flex items-start gap-3">
+          <div className="flex flex-col items-center shrink-0">
+            <div
+              className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${
+                a.isCurrent ? "bg-cyan-500 border-cyan-500 text-white" : "bg-background border-border text-transparent"
+              }`}
+            >
+              {a.isCurrent && <Check size={11} strokeWidth={3} />}
+            </div>
+            {i < attempts.length - 1 && <div className="w-0.5 flex-1 min-h-[18px] bg-border" />}
+          </div>
+          <div className="flex-1 min-w-0 pb-4 pt-0.5">
+            <span className="text-sm flex items-center gap-1.5 flex-wrap text-foreground font-medium">
+              Attempt {a.attemptNo}
+              {a.isCurrent && (
+                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                  Current
+                </span>
+              )}
+              <span className="text-xs font-normal text-muted-foreground">
+                · {ASSIGNMENT_STATUS_META[a.status]?.label ?? a.status}
+              </span>
+            </span>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {a.engineerNames || "Unassigned"}
+              {a.startDate ? ` · Started ${new Date(a.startDate).toLocaleDateString("en-IN")}` : ""}
+            </p>
+            {a.reworkReason && (
+              <p className="text-xs mt-1.5 flex items-start gap-1.5 text-fuchsia-700 dark:text-fuchsia-400">
+                <RotateCcw size={11} className="shrink-0 mt-0.5" />
+                <span>
+                  Sent back for rework via {REWORK_SOURCE_LABEL[a.reworkSource || ""] || "unknown"}: {a.reworkReason}
+                </span>
+              </p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Restore (Cancelled only, super_admin only) ──────────────────────────
+// Bringing a Cancelled activity back is a rare, deliberate override — kept
+// out of the plain status dropdown (that badge stays terminal once
+// Cancelled) and behind an explicit confirm step here, only reachable
+// after opening this modal and reviewing the activity's full detail. The
+// target status (APPROVED vs IN_PROGRESS) is decided server-side from
+// PreCancelStatus, but shown here up front so the confirm step isn't a
+// guess — see restoreCancelledActivity's own comment.
+function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onClose: () => void }) {
+  const queryClient = useQueryClient();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const restoreTo: AssignmentStatus = row.preCancelStatus === "APPROVED" ? "APPROVED" : "IN_PROGRESS";
+
+  const restore = useMutation({
+    mutationFn: () => restoreCancelledActivity(row.rungId),
+    onSuccess: (res) => {
+      toast.success(`Restored — back to ${ASSIGNMENT_STATUS_META[res.status].label}.`);
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
+      queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
+      setConfirmOpen(false);
+      onClose();
+    },
+    onError: (err: any) => toast.error(err?.message || "Failed to restore this activity."),
+  });
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setConfirmOpen(true)}
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-heading font-bold uppercase tracking-wide border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
+        title="Restore this Cancelled activity"
+      >
+        <ShieldQuestion size={12} /> Restore
+      </button>
+
+      {confirmOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-[80] bg-black/70 flex items-center justify-center p-4" onClick={() => setConfirmOpen(false)}>
+            <div
+              className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-2xl p-5 space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+                  <ShieldQuestion size={16} className="text-amber-600 dark:text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-heading font-semibold text-foreground">Restore this activity?</p>
+                  <p className="text-xs text-muted-foreground">{row.activityName}</p>
+                </div>
+              </div>
+              <p className="text-xs text-foreground bg-muted/30 border border-border rounded-lg px-3 py-2.5">
+                It will move from <span className="font-semibold">Cancelled</span> back to{" "}
+                <span className="font-semibold">{ASSIGNMENT_STATUS_META[restoreTo].label}</span>
+                {restoreTo === "IN_PROGRESS" && " — it hadn't been approved yet, so it goes through Reporting/QC/Approval again from there"}.
+              </p>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfirmOpen(false)}
+                  className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={restore.isPending}
+                  onClick={() => restore.mutate()}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white bg-amber-600 hover:bg-amber-500 disabled:opacity-50 transition-colors"
+                >
+                  {restore.isPending && <Loader2 size={14} className="animate-spin" />}
+                  Restore
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+    </>
+  );
+}
+
 // ── Modal shell ──────────────────────────────────────────────────────────
 
 const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
@@ -906,6 +1179,7 @@ const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
   { id: "photos", label: "Photos", icon: CameraIcon },
   { id: "attendance", label: "Attendance", icon: Users2 },
   { id: "checkpoints", label: "Checkpoints", icon: ListChecks },
+  { id: "history", label: "History", icon: History },
 ];
 
 export default function ActivityDetailModal({
@@ -919,6 +1193,8 @@ export default function ActivityDetailModal({
 }) {
   useOverlayBackClose(onClose);
   const [tab, setTab] = useState<DetailTab>(initialTab);
+  const { currentUser } = useAuth();
+  const canRestore = currentUser?.role === "super_admin" && row.status === "CANCELLED";
 
   const { data: annotation } = useQuery({
     queryKey: ["blueprint-annotation", row.rungId, row.roomId, "allocation"],
@@ -933,7 +1209,12 @@ export default function ActivityDetailModal({
   const hasBlueprint = row.roomId != null && !!annotation;
   const photoCount = (photos?.before.length ?? 0) + (photos?.after.length ?? 0);
 
-  const visibleTabs = useMemo(() => TABS.filter((t) => t.id !== "blueprint" || hasBlueprint), [hasBlueprint]);
+  const visibleTabs = useMemo(
+    () =>
+      TABS.filter((t) => t.id !== "blueprint" || hasBlueprint)
+        .filter((t) => t.id !== "history" || row.attemptNo > 1),
+    [hasBlueprint, row.attemptNo],
+  );
 
   return createPortal(
     <div className="fixed inset-0 z-[70] bg-black/70 flex items-center justify-center p-4">
@@ -944,7 +1225,10 @@ export default function ActivityDetailModal({
           subtitle={row.scopePath}
           icon={ActivityIcon}
           action={
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
+              <QcBadge qcStatus={row.qcStatus} />
+              <AttemptBadge attemptNo={row.attemptNo} />
+              {canRestore && <RestoreCancelledButton row={row} onClose={onClose} />}
               <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
               <button onClick={onClose} className="text-muted-foreground hover:text-foreground transition-colors">
                 <X size={18} />
@@ -984,7 +1268,10 @@ export default function ActivityDetailModal({
               {tab === "photos" && <PhotosTab rungId={row.rungId} />}
               {tab === "attendance" && <AttendanceTab rungId={row.rungId} />}
               {tab === "checkpoints" && <CheckpointsTab rungId={row.rungId} />}
+              {tab === "history" && <HistoryTab rungId={row.rungId} />}
             </div>
+
+            <ProgressDragBar row={row} />
           </div>
         </CivilWorkDprShell>
       </div>

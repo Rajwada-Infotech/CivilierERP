@@ -11,14 +11,81 @@ import {
   type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
-import { ClipboardList, UserRound, CalendarDays, Package, Loader2, ChevronDown, ChevronRight, GitBranch, Camera } from "lucide-react";
+import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
+import {
+  ClipboardList,
+  UserRound,
+  CalendarDays,
+  Package,
+  Loader2,
+  ChevronDown,
+  ChevronRight,
+  GitBranch,
+  Camera,
+  Clock,
+  Activity,
+  PauseCircle,
+  XCircle,
+  ShieldCheck,
+  RotateCcw,
+  CheckCircle2,
+  type LucideIcon,
+} from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
 import ActivityDetailModal from "./ActivityDetailModal";
+
+// Purely presentational — icon + accent color per status, same colors as
+// ASSIGNMENT_STATUS_META's Tailwind classes just as hex for GlassCard's
+// inline styling. "ALL" isn't in that enum so it gets its own entry.
+const STATUS_TILE_META: Record<AssignmentStatus | "ALL", { icon: LucideIcon; accentColor: string }> = {
+  ALL: { icon: ClipboardList, accentColor: "#06b6d4" },
+  PENDING: { icon: Clock, accentColor: "#64748b" },
+  ALLOCATED: { icon: GitBranch, accentColor: "#6366f1" },
+  IN_PROGRESS: { icon: Activity, accentColor: "#3b82f6" },
+  HOLD: { icon: PauseCircle, accentColor: "#f59e0b" },
+  CANCELLED: { icon: XCircle, accentColor: "#ef4444" },
+  APPROVED: { icon: ShieldCheck, accentColor: "#14b8a6" },
+  REWORK: { icon: RotateCcw, accentColor: "#d946ef" },
+  COMPLETED: { icon: CheckCircle2, accentColor: "#10b981" },
+};
 
 const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> = [
   { value: "ALL", label: "All" },
   ...ASSIGNMENT_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label })),
 ];
+
+// Lean status filter chip — icon + label only, no count. Replaces the
+// earlier GlassCard-based stat tiles, which read as a KPI dashboard when
+// this is just a filter row.
+function StatusTile({
+  label,
+  icon: Icon,
+  accentColor,
+  active,
+  onClick,
+}: {
+  label: string;
+  icon: LucideIcon;
+  accentColor: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-colors border"
+      style={
+        active
+          ? { background: `${accentColor}18`, borderColor: `${accentColor}59`, color: accentColor }
+          : { background: "transparent", borderColor: "var(--border)", color: "var(--muted-foreground)" }
+      }
+    >
+      <Icon size={12} />
+      {label}
+    </button>
+  );
+}
 
 // Purely informational — clicking anywhere on the row (including this
 // badge) opens the Activity Detail modal; clicking the badge specifically
@@ -120,39 +187,39 @@ export default function ActivityReporting() {
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-border bg-muted/30">
               <span className="text-sm font-heading font-semibold text-foreground">Assigned Activities</span>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {groupedRows.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={toggleAllGroups}
-                    className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors mr-1"
-                  >
-                    {allGroupsExpanded ? (
-                      <>
-                        <ChevronRight size={12} /> Collapse all
-                      </>
-                    ) : (
-                      <>
-                        <ChevronDown size={12} /> Expand all
-                      </>
-                    )}
-                  </button>
-                )}
-                {FILTER_OPTIONS.map((opt) => (
-                  <button
+              {groupedRows.length > 0 && (
+                <button
+                  type="button"
+                  onClick={toggleAllGroups}
+                  className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors"
+                >
+                  {allGroupsExpanded ? (
+                    <>
+                      <ChevronRight size={12} /> Collapse all
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={12} /> Expand all
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5 px-5 py-3 border-b border-border bg-muted/10">
+              {FILTER_OPTIONS.map((opt) => {
+                const meta = STATUS_TILE_META[opt.value];
+                return (
+                  <StatusTile
                     key={opt.value}
-                    type="button"
+                    label={opt.label}
+                    icon={meta.icon}
+                    accentColor={meta.accentColor}
+                    active={statusFilter === opt.value}
                     onClick={() => setStatusFilter(opt.value)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-heading font-medium transition-colors ${
-                      statusFilter === opt.value
-                        ? "bg-cyan-500 text-white"
-                        : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+                  />
+                );
+              })}
             </div>
 
             {isLoading ? (
@@ -222,8 +289,10 @@ export default function ActivityReporting() {
                                 className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer"
                               >
                                 <td className="px-5 py-3">
-                                  <span className="text-xs font-medium text-foreground">
+                                  <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
                                     {row.sequenceNo}. {row.activityName}
+                                    <QcBadge qcStatus={row.qcStatus} />
+                                    <AttemptBadge attemptNo={row.attemptNo} />
                                   </span>
                                 </td>
                                 <td className="px-3 py-3">

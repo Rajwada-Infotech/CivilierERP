@@ -261,7 +261,7 @@ router.post("/", authMiddleware, requirePageRight("dependency-master", "create")
       // Each rung freezes its own WorkType at the moment it's added — falls
       // back to the record's own WorkType only for older callers that don't
       // send one per activity.
-      await pool
+      const rungIns = await pool
         .request()
         .input("DependencyMasterId", sql.Int, newId)
         .input("ActivityId", sql.Int, activities[i].activityId)
@@ -269,8 +269,17 @@ router.post("/", authMiddleware, requirePageRight("dependency-master", "create")
         .input("WorkType", sql.NVarChar(20), activities[i].workType || workType)
         .query(`
           INSERT INTO dbo.DependencyMasterActivity (DependencyMasterId, ActivityId, SequenceNo, WorkType)
+          OUTPUT INSERTED.Id AS id
           VALUES (@DependencyMasterId, @ActivityId, @SequenceNo, @WorkType)
         `);
+      // A stub assignment row (Status defaults to PENDING) up front — a
+      // rung that's never been opened in Work Allocation is genuinely
+      // pending, not invisible to Work Reporting's own Pending count (see
+      // migration 487's own comment for the bug this fixes).
+      await pool.request().input("rungId", sql.Int, rungIns.recordset[0].id).input("by", sql.NVarChar(200), actor).query(`
+        INSERT INTO dbo.DependencyActivityAssignment (DependencyMasterActivityId, CreatedBy)
+        VALUES (@rungId, @by)
+      `);
     }
 
     res.status(201).json({ success: true, id: newId, message: "Dependency record created" });
@@ -391,7 +400,7 @@ router.put("/:id", authMiddleware, requirePageRight("dependency-master", "edit")
           .input("WorkType", sql.NVarChar(20), step.workType)
           .query(`UPDATE dbo.DependencyMasterActivity SET SequenceNo = @SequenceNo, WorkType = @WorkType WHERE Id = @Rung`);
       } else {
-        await tx
+        const rungIns = await tx
           .request()
           .input("DependencyMasterId", sql.Int, id)
           .input("ActivityId", sql.Int, step.activityId)
@@ -399,8 +408,15 @@ router.put("/:id", authMiddleware, requirePageRight("dependency-master", "edit")
           .input("WorkType", sql.NVarChar(20), step.workType)
           .query(`
             INSERT INTO dbo.DependencyMasterActivity (DependencyMasterId, ActivityId, SequenceNo, WorkType)
+            OUTPUT INSERTED.Id AS id
             VALUES (@DependencyMasterId, @ActivityId, @SequenceNo, @WorkType)
           `);
+        // Stub assignment row, same as the POST create route — see its
+        // own comment and migration 487.
+        await tx.request().input("rungId", sql.Int, rungIns.recordset[0].id).input("by", sql.NVarChar(200), actor).query(`
+          INSERT INTO dbo.DependencyActivityAssignment (DependencyMasterActivityId, CreatedBy)
+          VALUES (@rungId, @by)
+        `);
       }
     }
 

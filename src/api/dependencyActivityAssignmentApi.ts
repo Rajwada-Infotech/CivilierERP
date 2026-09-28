@@ -111,12 +111,27 @@ export const fetchCheckpointUpdatePhoto = async (id: number): Promise<string> =>
   return URL.createObjectURL(await res.blob());
 };
 
+// A per-assignment approval level — same shape as Approval Setup's own
+// ApprovalLevel (src/pages/admin/ApprovalSetup.tsx), just scoped to this one
+// activity assignment instead of a module-wide workflow. "all" levels are
+// sequential steps (each must approve in turn); a level with mode "any"
+// lets any ONE of its userIds approve to clear that step — the "one by one
+// then either" case is a run of "all" levels ending in one "any" level.
+export interface ApprovalLevel {
+  id: string;
+  label: string;
+  userIds: number[];
+  mode: "all" | "any";
+}
+
 export interface RungAssignmentDetail {
   rungId: number;
   activityId: number;
   candidateItems: CandidateItem[];
   assignment: {
     engineerIds: number[];
+    qcUserIds: number[];
+    approvalLevels: ApprovalLevel[];
     startDate: string | null;
     days: number | null;
     endDate: string | null;
@@ -133,6 +148,8 @@ export interface RungAssignmentDetail {
 
 export interface RungAssignmentPayload {
   engineerIds: number[];
+  qcUserIds: number[];
+  approvalLevels: ApprovalLevel[];
   startDate: string | null;
   days: number | null;
   endDate: string | null;
@@ -196,10 +213,9 @@ export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 // bearing on the order rows can move through.
 export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; className: string }> = {
   PENDING: { label: "Pending", className: "bg-slate-500/10 text-slate-600 dark:text-slate-400" },
-  // Set automatically the moment an engineer is assigned (POST /:rungId) —
-  // waiting on that engineer's own confirmation in the Approval Inbox, not
-  // something anyone picks from this dropdown by hand. Moves to IN_PROGRESS
-  // by itself once every assigned engineer has confirmed.
+  // No longer set automatically — assigning an engineer now moves straight
+  // to IN_PROGRESS. Kept in the enum/badge map for old records and manual
+  // overrides only.
   ALLOCATED: { label: "Allocated", className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
   IN_PROGRESS: { label: "In Progress", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
   HOLD: { label: "Hold", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
@@ -209,22 +225,30 @@ export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; c
   COMPLETED: { label: "Completed", className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" },
 };
 
-// A rung only moves forward: once it has left Pending/Allocated (i.e. it's
-// been approved into In Progress, or gone on to any later state) it can
-// never go back to either of them, and while In Progress the only manual
-// moves are Hold or Cancelled. Mirrored server-side in
-// dependencyActivityAssignment.js's status route — keep the two in sync.
+// The status dropdown is an In Progress <-> Hold toggle, plus Cancelled —
+// which is reachable from any stage, including a terminal one (Completed/
+// Approved), per explicit instruction. Completed is set automatically by
+// dragging the progress bar to 100% (see ActivityDetailModal's
+// ProgressDragBar); Approved/Rework come only from a QC decision; Rework's
+// one way out is manually re-opening it to In Progress to redo the work.
+// A single-element result means "read-only badge, no dropdown" — see
+// AssignmentStatusSelect (only Cancelled itself is truly terminal). Mirrored
+// server-side in dependencyActivityAssignment.js's status route — keep the
+// two in sync.
 export function allowedNextStatuses(current: AssignmentStatus): AssignmentStatus[] {
-  if (current === "PENDING" || current === "ALLOCATED") return [...ASSIGNMENT_STATUSES];
-  if (current === "IN_PROGRESS") return ["IN_PROGRESS", "HOLD", "CANCELLED"];
-  if (current === "HOLD") return ["HOLD", "IN_PROGRESS", "CANCELLED"];
-  return ASSIGNMENT_STATUSES.filter((s) => s !== "PENDING" && s !== "ALLOCATED");
+  if (current === "CANCELLED") return ["CANCELLED"];
+  if (current === "REWORK") return ["REWORK", "IN_PROGRESS", "CANCELLED"];
+  if (current === "PENDING" || current === "ALLOCATED" || current === "IN_PROGRESS" || current === "HOLD") {
+    return ["IN_PROGRESS", "HOLD", "CANCELLED"];
+  }
+  return [current, "CANCELLED"];
 }
 
 export interface ReportedAssignment {
   assignmentId: number;
   rungId: number;
   engineerNames: string | null;
+  qcNames: string | null;
   startDate: string | null;
   days: number | null;
   endDate: string | null;
@@ -233,6 +257,25 @@ export interface ReportedAssignment {
   description: string | null;
   remarks: string | null;
   status: AssignmentStatus;
+  // What Status was right before this activity got Cancelled — only ever
+  // non-null while status === "CANCELLED". Determines what restoring it
+  // (super_admin only) puts it back to: APPROVED if that's genuinely what
+  // it was, IN_PROGRESS otherwise.
+  preCancelStatus: AssignmentStatus | null;
+  progressPercent: number;
+  // Latest QC decision, if this activity has ever been inspected — drives
+  // the "QC Checked" badge shown everywhere this row appears, and (once
+  // APPROVED) means it's no longer the Quality Check page's job, it's
+  // awaiting the approval workflow or already finalized.
+  qcStatus: "APPROVED" | "REWORK" | null;
+  // Rework forks a brand-new attempt rather than mutating the rejected one
+  // in place (see migration 488) — attemptNo counts which attempt this is,
+  // and reworkFromAssignmentId/reworkReason/reworkSource describe why the
+  // attempt before this one exists at all (both null on a first attempt).
+  attemptNo: number;
+  reworkFromAssignmentId: number | null;
+  reworkReason: string | null;
+  reworkSource: "QC" | "APPROVAL" | null;
   updatedAt: string;
   sequenceNo: number;
   activityId: number;
@@ -283,19 +326,20 @@ export const updateAssignmentStatus = async (
   return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
 };
 
-// Status and Remarks share one PATCH endpoint but are independent — the
-// Activity Detail modal's status dropdown and its Remarks textarea (saved
-// on blur) each call this with only the field that actually changed.
+// Status, Remarks and ProgressPercent share one PATCH endpoint but are
+// independent — the Activity Detail modal's status dropdown, its Remarks
+// textarea (saved on blur), and its draggable progress bar (saved on
+// drag-release) each call this with only the field that actually changed.
 export const updateAssignmentDetail = async (
   rungId: number,
-  patch: { status?: AssignmentStatus; remarks?: string },
-): Promise<{ success: boolean; status: AssignmentStatus | null; remarks: string | null }> => {
+  patch: { status?: AssignmentStatus; remarks?: string; progressPercent?: number },
+): Promise<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }> => {
   const res = await fetchWithAuth(`${BASE}/${rungId}/status`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   });
-  return handleResponse<{ success: boolean; status: AssignmentStatus | null; remarks: string | null }>(res);
+  return handleResponse<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }>(res);
 };
 
 // ── Blueprint Annotation Workflow ───────────────────────────────────────────
@@ -422,9 +466,11 @@ export const deleteActivityPhoto = async (rungId: number, photoId: number): Prom
 };
 
 // ── Quality Check ────────────────────────────────────────────────────────────
+export type QcRating = "POOR" | "GOOD" | "EXCELLENT";
+
 export interface QcCheckInput {
   checkpointId: number;
-  passed: boolean;
+  rating: QcRating;
   note?: string;
 }
 
@@ -434,11 +480,14 @@ export interface QcHistoryEntry {
   remarks: string | null;
   qcAt: string;
   qcBy: string | null;
-  checks: { fieldName: string; passed: boolean; note: string | null }[];
+  checks: { fieldName: string; passed: boolean; rating: QcRating | null; note: string | null }[];
 }
 
-export const getInProgressAssignments = async (): Promise<ReportedAssignment[]> => {
-  const res = await fetchWithAuth(`${BASE}?status=IN_PROGRESS`);
+// Quality Check now inspects COMPLETED activities (work dragged to 100%),
+// not IN_PROGRESS ones — an activity only reaches QC once it's actually
+// done, not while it's still being worked on.
+export const getCompletedAssignments = async (): Promise<ReportedAssignment[]> => {
+  const res = await fetchWithAuth(`${BASE}?status=COMPLETED`);
   return handleResponse<ReportedAssignment[]>(res);
 };
 
@@ -447,13 +496,158 @@ export const getQcHistory = async (rungId: number): Promise<QcHistoryEntry[]> =>
   return handleResponse<QcHistoryEntry[]>(res);
 };
 
+export interface QcDecisionResult {
+  success: boolean;
+  status: AssignmentStatus;
+  awaitingApproval: boolean;
+  // Set when decision is REWORK — the id of the brand-new attempt this
+  // decision forked (see forkAssignmentForRework's own comment).
+  reworkAssignmentId: number | null;
+}
 export const submitQcDecision = async (
   rungId: number,
   payload: { decision: "APPROVED" | "REWORK"; remarks?: string; checks: QcCheckInput[] },
-): Promise<{ success: boolean; status: AssignmentStatus }> => {
+): Promise<QcDecisionResult> => {
   const res = await fetchWithAuth(`${BASE}/qc/${rungId}/decision`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
+  return handleResponse<QcDecisionResult>(res);
+};
+
+// ── Approval workflow ───────────────────────────────────────────────────────
+// Enforces the ApprovalLevel[] set on this same assignment (Work
+// Allocation's mini Approval Setup, see saveRungAssignment) once QC has
+// passed a Completed activity — kept as its own small state, not the
+// module-wide Approval Setup/Approval Inbox (see ApprovalLevel's own
+// comment above).
+export interface ApprovalWorkflowLevel extends ApprovalLevel {
+  satisfied: boolean;
+  current: boolean;
+}
+export interface ApprovalWorkflowEntry {
+  levelId: string;
+  approverUserId: number;
+  approverName: string | null;
+  approvedAt: string;
+}
+export interface ApprovalWorkflowState {
+  status: AssignmentStatus;
+  levels: ApprovalWorkflowLevel[];
+  approvals: ApprovalWorkflowEntry[];
+  currentLevelIndex: number | null;
+  canApprove: boolean;
+}
+
+export const getApprovalWorkflow = async (rungId: number): Promise<ApprovalWorkflowState> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/approval`);
+  return handleResponse<ApprovalWorkflowState>(res);
+};
+
+export const approveWorkflowLevel = async (
+  rungId: number,
+): Promise<{ success: boolean; fullyApproved: boolean }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/approval/approve`, { method: "POST" });
+  return handleResponse<{ success: boolean; fullyApproved: boolean }>(res);
+};
+
+// The other way a Completed, QC-passed activity gets sent back — an
+// approver at the current level rejects it instead of clearing it.
+// Requires a remark, and forks a brand-new attempt exactly like QC's own
+// REWORK decision does (see forkAssignmentForRework's own comment).
+export const rejectWorkflowLevel = async (
+  rungId: number,
+  remarks: string,
+): Promise<{ success: boolean; reworkAssignmentId: number }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/approval/reject`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ remarks }),
+  });
+  return handleResponse<{ success: boolean; reworkAssignmentId: number }>(res);
+};
+
+// ── Rework history ───────────────────────────────────────────────────────
+// Every assignment attempt ever made against a rung — the "keep the
+// history of the reworked task" view (migration 488's own comment).
+export interface AssignmentAttempt {
+  assignmentId: number;
+  attemptNo: number;
+  isCurrent: boolean;
+  status: AssignmentStatus;
+  startDate: string | null;
+  endDate: string | null;
+  reworkFromAssignmentId: number | null;
+  reworkReason: string | null;
+  reworkSource: "QC" | "APPROVAL" | null;
+  createdAt: string;
+  updatedAt: string | null;
+  engineerNames: string | null;
+}
+export const getAssignmentAttempts = async (rungId: number): Promise<AssignmentAttempt[]> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/attempts`);
+  return handleResponse<AssignmentAttempt[]>(res);
+};
+
+// How many Completed, QC-passed activities are sitting at a level the
+// current viewer can act on right now — powers the sidebar's Reporting
+// badge (see AppSidebar.tsx's useCivilWorkDprApprovalCount).
+export const getPendingApprovalCount = async (): Promise<number> => {
+  const res = await fetchWithAuth(`${BASE}/approvals/pending-count`);
+  const data = await handleResponse<{ count: number }>(res);
+  return data.count ?? 0;
+};
+
+// ── Amendment log ────────────────────────────────────────────────────────
+// Every superseded assignment attempt (IsCurrent = 0) — each one exists
+// only because it was reworked (see migration 488), so this is already
+// exactly "every reworked activity", across every chain, not scoped to
+// one rung the way getAssignmentAttempts is.
+export interface AmendmentRecord {
+  assignmentId: number;
+  rungId: number;
+  attemptNo: number;
+  status: AssignmentStatus;
+  reworkReason: string | null;
+  reworkSource: "QC" | "APPROVAL" | null;
+  startDate: string | null;
+  endDate: string | null;
+  updatedAt: string;
+  sequenceNo: number;
+  activityName: string;
+  dependencyMasterId: number;
+  alias: string;
+  workType: "INTERNAL" | "EXTERNAL";
+  projectId: number;
+  projectName: string | null;
+  towerId: number;
+  towerName: string | null;
+  floor: string;
+  flatId: number;
+  flatName: string | null;
+  roomId: number | null;
+  roomName: string | null;
+  scopePath: string;
+  engineerNames: string | null;
+  // The attempt that replaced this one — null only if the rung's current
+  // attempt was somehow itself deleted (shouldn't normally happen).
+  currentStatus: AssignmentStatus | null;
+  currentAttemptNo: number | null;
+}
+export const getAmendments = async (): Promise<AmendmentRecord[]> => {
+  const res = await fetchWithAuth(`${BASE}/amendments`);
+  return handleResponse<AmendmentRecord[]>(res);
+};
+
+// Bringing a Cancelled activity back — super_admin only (enforced
+// server-side by role, not a page right), and only after reviewing the
+// activity's full detail in ActivityDetailModal, where this is called
+// from. Restores to APPROVED if it genuinely was before being cancelled,
+// otherwise IN_PROGRESS regardless of exactly where it was — see the
+// backend route's own comment.
+export const restoreCancelledActivity = async (
+  rungId: number,
+): Promise<{ success: boolean; status: AssignmentStatus }> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/restore`, { method: "POST" });
   return handleResponse<{ success: boolean; status: AssignmentStatus }>(res);
 };
