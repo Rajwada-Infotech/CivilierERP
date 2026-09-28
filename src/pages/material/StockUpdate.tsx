@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { PackagePlus, Plus, Trash2, Eye, Loader2 } from "lucide-react";
+import { PackagePlus, Plus, Trash2, Eye, Pencil, Loader2 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -13,6 +13,7 @@ import { getCompanies, getProjects, getGodowns, getItemOptions } from "@/api/iss
 import { getUomList } from "@/api/uomApi";
 import {
   createStockUpdate,
+  updateStockUpdate,
   deleteStockUpdate,
   getStockUpdate,
   getStockUpdates,
@@ -34,6 +35,214 @@ function Label({ children }: { children: React.ReactNode }) {
   return <label className="block text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground mb-1.5">{children}</label>;
 }
 
+// Company/Project/Godown are locked once saved (see stockUpdates.js's own
+// PUT /:id comment for why) — only the date, remarks and item list/
+// quantities can change here. Backend still blocks reducing an item below
+// what's already been consumed elsewhere.
+function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => void }) {
+  const qc = useQueryClient();
+  const { data, isLoading } = useQuery<StockUpdateDetail>({
+    queryKey: ["stock-update", id],
+    queryFn: () => getStockUpdate(id),
+  });
+  const [updateDate, setUpdateDate] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [lines, setLines] = useState<Line[]>([]);
+
+  const { data: uoms = [] } = useQuery({ queryKey: ["su-uoms"], queryFn: getUomList, staleTime: 5 * 60_000 });
+  const { data: godownItems = [] } = useQuery({
+    queryKey: ["su-items", data?.GodownId],
+    queryFn: () => getItemOptions(data?.GodownId ?? null),
+    enabled: !!data?.GodownId,
+  });
+
+  useEffect(() => {
+    if (!data) return;
+    setUpdateDate(data.UpdateDate.slice(0, 10));
+    setRemarks(data.Remarks || "");
+    setLines(data.items.map((i) => ({ key: ++lineKey, itemId: i.ItemId, uom: i.UOM || "", qty: String(i.Qty) })));
+  }, [data]);
+
+  // The godown's current item list, plus whatever this update's own lines
+  // already reference — an item that's since gone inactive (or otherwise
+  // dropped from the godown's list) must still show its name here rather
+  // than looking blank.
+  const itemOptions = useMemo(() => {
+    const byId = new Map((godownItems as any[]).map((i) => [String(i.M_Id), { value: String(i.M_Id), label: String(i.M_Name) }]));
+    for (const i of data?.items ?? []) {
+      if (!byId.has(i.ItemId)) byId.set(i.ItemId, { value: i.ItemId, label: i.ItemName || i.ItemId });
+    }
+    return Array.from(byId.values());
+  }, [godownItems, data?.items]);
+  const itemById = useMemo(() => {
+    const m = new Map<string, any>();
+    (godownItems as any[]).forEach((i) => m.set(String(i.M_Id), i));
+    return m;
+  }, [godownItems]);
+
+  const setLine = (key: number, patch: Partial<Line>) =>
+    setLines((ls) => ls.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  const pickItem = (key: number, itemId: string) => {
+    const it = itemById.get(itemId);
+    setLine(key, { itemId, uom: it?.DefaultUOM || "" });
+  };
+  const usedIds = new Set(lines.map((l) => l.itemId).filter(Boolean));
+
+  const save = useMutation({
+    mutationFn: () =>
+      updateStockUpdate(id, {
+        UpdateDate: updateDate,
+        Remarks: remarks.trim() || undefined,
+        items: lines.map((l) => ({ ItemId: l.itemId, UOM: l.uom || null, Qty: Number(l.qty) })),
+      }),
+    onSuccess: () => {
+      toast.success("Stock update saved");
+      qc.invalidateQueries({ queryKey: ["stock-updates"] });
+      qc.invalidateQueries({ queryKey: ["stock-update", id] });
+      qc.invalidateQueries({ queryKey: ["su-items"] });
+      qc.invalidateQueries({ queryKey: ["stock-ledger"] });
+      onClose();
+    },
+    onError: (e: any) => toast.error(e?.message || "Failed to save stock update"),
+  });
+
+  const handleSave = () => {
+    if (!updateDate) return toast.error("Pick the date of the update.");
+    if (lines.some((l) => !l.itemId)) return toast.error("Every row needs an item.");
+    if (lines.some((l) => !(Number(l.qty) > 0))) return toast.error("Every quantity must be greater than zero.");
+    const ids = lines.map((l) => l.itemId);
+    if (new Set(ids).size !== ids.length) return toast.error("An item is listed twice. Combine it into one row.");
+    save.mutate();
+  };
+
+  return (
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Edit Stock Update {data?.DocNo ? `— ${data.DocNo}` : ""}</DialogTitle>
+        </DialogHeader>
+        {isLoading || !data ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">Loading…</p>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-xs">
+              {[
+                ["Company", data.CompanyName || "—"],
+                ["Project", data.ProjectName || "—"],
+                ["Godown", data.GodownName || "—"],
+              ].map(([k, v]) => (
+                <div key={k} className="px-3 py-2 rounded-xl bg-muted/30 border border-border/50">
+                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{k} (locked)</p>
+                  <p className="font-semibold text-foreground">{v}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <Label>Date of update</Label>
+                <input type="date" className={inp} value={updateDate} max={todayStr()} onChange={(e) => setUpdateDate(e.target.value)} />
+              </div>
+              <div>
+                <Label>Remarks</Label>
+                <input className={inp} value={remarks} maxLength={500} onChange={(e) => setRemarks(e.target.value)} placeholder="Optional note" />
+              </div>
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <Label>Items</Label>
+                <button
+                  type="button"
+                  onClick={() => setLines((ls) => [...ls, newLine()])}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border hover:bg-muted/60 transition-colors"
+                >
+                  <Plus size={12} /> Add Item
+                </button>
+              </div>
+              <div className="rounded-xl border border-border overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40 border-b border-border text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Item</th>
+                      <th className="px-3 py-2 text-left w-40">UOM</th>
+                      <th className="px-3 py-2 text-right w-36">Qty</th>
+                      <th className="w-10" />
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/50">
+                    {lines.map((l) => (
+                      <tr key={l.key}>
+                        <td className="px-3 py-2">
+                          <SearchableSelect
+                            value={l.itemId}
+                            onChange={(v) => pickItem(l.key, v)}
+                            placeholder="— Select Item —"
+                            searchPlaceholder="Search items…"
+                            options={itemOptions.map((o) => ({
+                              ...o,
+                              disabled: usedIds.has(o.value) && o.value !== l.itemId,
+                            }))}
+                          />
+                        </td>
+                        <td className="px-3 py-2">
+                          <select className={inp} value={l.uom} disabled={!l.itemId} onChange={(e) => setLine(l.key, { uom: e.target.value })}>
+                            <option value="">— UOM —</option>
+                            {(uoms as any[]).map((u) => (
+                              <option key={u.UOMCode} value={u.UOMCode}>{u.UOMName ?? u.UOMCode}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-3 py-2">
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            className={inp + " text-right"}
+                            value={l.qty}
+                            disabled={!l.itemId}
+                            onChange={(e) => setLine(l.key, { qty: e.target.value })}
+                          />
+                        </td>
+                        <td className="px-2 py-2 text-center">
+                          <button
+                            type="button"
+                            disabled={lines.length === 1}
+                            onClick={() => setLines((ls) => ls.filter((x) => x.key !== l.key))}
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-30 transition-colors"
+                            title="Remove row"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={save.isPending}
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-50 transition shadow-sm shadow-emerald-500/20"
+              >
+                {save.isPending && <Loader2 size={14} className="animate-spin" />}
+                Save Changes
+              </button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export default function StockUpdate() {
   const rights = usePageRights("stock-update");
   const { currentUser } = useAuth();
@@ -47,6 +256,7 @@ export default function StockUpdate() {
   const [remarks, setRemarks] = useState("");
   const [lines, setLines] = useState<Line[]>([newLine()]);
   const [viewId, setViewId] = useState<number | null>(null);
+  const [editId, setEditId] = useState<number | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
 
   const { data: companies = [] } = useQuery({ queryKey: ["su-companies"], queryFn: getCompanies, staleTime: 5 * 60_000 });
@@ -73,6 +283,19 @@ export default function StockUpdate() {
     () => (projects as any[]).filter((p) => projectBelongsToCompany(p, companyId)),
     [projects, companyId],
   );
+  // A project can be tagged to more than one company (dbo.ProjectCompanies
+  // multi-company tagging) — surfaced here so picking it under one company
+  // doesn't hide that it's shared with others.
+  const companyById = useMemo(() => {
+    const m = new Map<string, any>();
+    (companies as any[]).forEach((c) => m.set(String(c.id), c));
+    return m;
+  }, [companies]);
+  const otherCompanyNames = (project: any): string[] =>
+    projectCompanyIds(project)
+      .filter((id) => id !== String(companyId))
+      .map((id) => companyById.get(id)?.label ?? companyById.get(id)?.name)
+      .filter(Boolean);
   const projectGodowns = useMemo(
     () => (godowns as any[]).filter((g) => String(g.projectId) === projectId),
     [godowns, projectId],
@@ -197,9 +420,15 @@ export default function StockUpdate() {
                     }}
                   >
                     <option value="">{companyId ? "— Select Project —" : "Select a company first"}</option>
-                    {companyProjects.map((p) => (
-                      <option key={p.id} value={p.id}>{p.name}</option>
-                    ))}
+                    {companyProjects.map((p) => {
+                      const others = otherCompanyNames(p);
+                      return (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                          {others.length > 0 ? ` (also: ${others.join(", ")})` : ""}
+                        </option>
+                      );
+                    })}
                   </select>
                 </div>
                 <div>
@@ -368,6 +597,11 @@ export default function StockUpdate() {
                           <button onClick={() => setViewId(h.StockUpdateId)} className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors" title="View">
                             <Eye size={13} />
                           </button>
+                          {rights.canEdit && (
+                            <button onClick={() => setEditId(h.StockUpdateId)} className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors" title="Edit">
+                              <Pencil size={13} />
+                            </button>
+                          )}
                           {isSuperAdmin && (
                             <button
                               onClick={() => setDeleteConfirmId(h.StockUpdateId)}
@@ -436,6 +670,8 @@ export default function StockUpdate() {
           )}
         </DialogContent>
       </Dialog>
+
+      {editId != null && <EditStockUpdateDialog id={editId} onClose={() => setEditId(null)} />}
 
       <Dialog open={deleteConfirmId != null} onOpenChange={(o) => !o && setDeleteConfirmId(null)}>
         <DialogContent className="max-w-sm">

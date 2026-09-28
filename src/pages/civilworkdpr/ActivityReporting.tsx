@@ -2,7 +2,6 @@ import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
-import { GlassCard } from "@/components/dashboard/GlassShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   ASSIGNMENT_STATUSES,
@@ -55,6 +54,39 @@ const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> 
   ...ASSIGNMENT_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label })),
 ];
 
+// Lean status filter chip — icon + label only, no count. Replaces the
+// earlier GlassCard-based stat tiles, which read as a KPI dashboard when
+// this is just a filter row.
+function StatusTile({
+  label,
+  icon: Icon,
+  accentColor,
+  active,
+  onClick,
+}: {
+  label: string;
+  icon: LucideIcon;
+  accentColor: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-colors border"
+      style={
+        active
+          ? { background: `${accentColor}18`, borderColor: `${accentColor}59`, color: accentColor }
+          : { background: "transparent", borderColor: "var(--border)", color: "var(--muted-foreground)" }
+      }
+    >
+      <Icon size={12} />
+      {label}
+    </button>
+  );
+}
+
 // Purely informational — clicking anywhere on the row (including this
 // badge) opens the Activity Detail modal; clicking the badge specifically
 // jumps straight to its Photos tab instead of landing on Overview.
@@ -97,14 +129,6 @@ export default function ActivityReporting() {
     () => (statusFilter === "ALL" ? rows : rows.filter((r) => r.status === statusFilter)),
     [rows, statusFilter],
   );
-
-  // Counts always reflect the full unfiltered set — a tile shows how many
-  // rows WOULD be in view if selected, not the current selection's count.
-  const statusCounts = useMemo(() => {
-    const counts = { ALL: rows.length } as Record<AssignmentStatus | "ALL", number>;
-    for (const s of ASSIGNMENT_STATUSES) counts[s] = rows.filter((r) => r.status === s).length;
-    return counts;
-  }, [rows]);
 
   // Group by dependency chain — every activity raised against the same
   // chain now shows together instead of scattered across the flat list,
@@ -182,14 +206,13 @@ export default function ActivityReporting() {
               )}
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9 gap-2.5 px-5 py-4 border-b border-border bg-muted/10">
+            <div className="flex flex-wrap items-center gap-1.5 px-5 py-3 border-b border-border bg-muted/10">
               {FILTER_OPTIONS.map((opt) => {
                 const meta = STATUS_TILE_META[opt.value];
                 return (
-                  <GlassCard
+                  <StatusTile
                     key={opt.value}
                     label={opt.label}
-                    value={statusCounts[opt.value] ?? 0}
                     icon={meta.icon}
                     accentColor={meta.accentColor}
                     active={statusFilter === opt.value}

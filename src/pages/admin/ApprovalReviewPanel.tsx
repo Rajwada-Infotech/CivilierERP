@@ -218,7 +218,14 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
   const Icon = cfg?.icon ?? ClipboardCheck;
   const approvalTable: ApprovalTable | undefined = MODULE_APPROVAL_TABLE[item.Module];
 
-  const isWorkAllocationEngineer = item.Module === "work-allocation-engineer";
+  // Both modules key their "record" off a rung (DependencyMasterActivityId)
+  // rather than a normal table row with a matching id — work-allocation-
+  // engineer's is a per-engineer confirmation row (now dead, see its own
+  // MODULE_CONFIG comment) and civilworkdpr-approval's is the assignment
+  // itself. Both reuse the same full-assignment detail (engineers, dates,
+  // materials, checkpoints) RungAssignmentModal.tsx shows, keyed off RungId
+  // instead of the generic cfg.apiEndpoint/RecordId fetch below.
+  const usesRungDetail = item.Module === "work-allocation-engineer" || item.Module === "civilworkdpr-approval";
 
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -251,7 +258,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     let cancelled = false;
     setDetail(null);
     setDetailFailed(false);
-    if (cfg?.apiEndpoint && !isWorkAllocationEngineer) {
+    if (cfg?.apiEndpoint && !usesRungDetail) {
       setLoadingDetail(true);
       fetchWithAuth(`${cfg.apiEndpoint}/${item.RecordId}`)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
@@ -267,7 +274,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     }
 
     setRungDetail(null);
-    if (isWorkAllocationEngineer && item.RungId != null) {
+    if (usesRungDetail && item.RungId != null) {
       setLoadingRungDetail(true);
       Promise.all([getRungAssignment(item.RungId), getEngineers()])
         .then(([rd, eng]) => {
@@ -302,7 +309,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     return () => {
       cancelled = true;
     };
-  }, [open, item.Module, item.RecordId, item.RungId, isWorkAllocationEngineer, cfg?.apiEndpoint, approvalTable]);
+  }, [open, item.Module, item.RecordId, item.RungId, usesRungDetail, cfg?.apiEndpoint, approvalTable]);
 
   if (!open) return null;
 
@@ -463,10 +470,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             >
               <div className="px-5 py-4">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
-                  {isWorkAllocationEngineer ? "Total Days" : rawTdsAmount > 0 ? "Total Amount (Before TDS)" : "Total Amount"}
+                  {usesRungDetail ? "Total Days" : rawTdsAmount > 0 ? "Total Amount (Before TDS)" : "Total Amount"}
                 </p>
                 <p className="text-3xl font-bold font-heading text-foreground tabular-nums tracking-tight">
-                  {isWorkAllocationEngineer
+                  {usesRungDetail
                     ? rungDetail?.assignment?.days != null
                       ? `${rungDetail.assignment.days} day${rungDetail.assignment.days === 1 ? "" : "s"}`
                       : "—"
@@ -478,7 +485,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                   </p>
                 )}
               </div>
-              {!isWorkAllocationEngineer && rawTdsAmount > 0 && (
+              {!usesRungDetail && rawTdsAmount > 0 && (
                 <div className="grid grid-cols-2 divide-x divide-border border-t border-border/60 bg-background/40">
                   <div className="px-5 py-3">
                     <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground mb-1">
@@ -507,10 +514,10 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             <div>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Overview</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                <FormField label={isWorkAllocationEngineer ? "Start Date" : "Date"} value={fmtDate(item.RecordDate)} />
+                <FormField label={usesRungDetail ? "Start Date" : "Date"} value={fmtDate(item.RecordDate)} />
                 <FormField label="Party" value={party} />
                 <FormField label="Created By" value={item.CreatedBy || "—"} />
-                {isWorkAllocationEngineer ? (
+                {usesRungDetail ? (
                   <FormField label="End Date" value={fmtDate(rungDetail?.assignment?.endDate ?? null)} />
                 ) : (
                   <FormField label="Last Modified" value={fmtDate(item.LastModified)} />
@@ -526,7 +533,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             {/* Work Allocation — engineers, labour/material source, description,
                 checkpoints. Same fields RungAssignmentModal.tsx's "Assign
                 engineers & material" form shows, read-only here for review. */}
-            {isWorkAllocationEngineer && (
+            {usesRungDetail && (
               loadingRungDetail ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                   {Array.from({ length: 3 }).map((_, i) => (
@@ -775,7 +782,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             {/* Details — the rest of the record, form-style. Not shown for
                 work-allocation-engineer — its own Engineers/Materials/
                 Checkpoints sections above already cover its full record. */}
-            {!isWorkAllocationEngineer && <div>
+            {!usesRungDetail && <div>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground mb-2">Details</p>
               {loadingDetail ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">

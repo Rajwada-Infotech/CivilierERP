@@ -56,5 +56,18 @@ export const createStockUpdate = (payload: StockUpdatePayload) =>
     handle<{ StockUpdateId: number; DocNo: string; message: string }>(r),
   );
 
+// Company/Project/Godown are locked once saved — only date, remarks and
+// the item list/quantities can be edited (see the PUT /:id route's own
+// comment for why).
+export interface StockUpdateEditPayload {
+  UpdateDate: string;
+  Remarks?: string;
+  items: { ItemId: string; UOM: string | null; Qty: number }[];
+}
+export const updateStockUpdate = (id: number, payload: StockUpdateEditPayload) =>
+  fetchWithAuth(`${BASE}/${id}`, { method: "PUT", body: JSON.stringify(payload) }).then((r) =>
+    handle<{ message: string }>(r),
+  );
+
 export const deleteStockUpdate = (id: number) =>
   fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => handle<{ message: string }>(r));
