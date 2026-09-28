@@ -47,6 +47,7 @@ import {
   ChevronDown,
   ChevronRight,
   Loader2,
+  ShieldCheck,
 } from "lucide-react";
 import type { ApprovalTable } from "@/components/ApprovalStatusChain";
 import { ApprovalReviewPanel } from "./ApprovalReviewPanel";
@@ -375,6 +376,22 @@ export const MODULE_CONFIG: Record<
     apiEndpoint: "/api/debit-note",
     label: "Debit Notes",
   },
+  // Civil Work DPR's per-assignment Approval Setup — a Completed, QC-passed
+  // activity awaiting whichever levels were configured for it in Work
+  // Allocation. Not a dbo.ApprovalWorkflows module (see approvalInbox.js's
+  // own comment on this query block and isVisibleToViewer branch), so it's
+  // deliberately not in RESTRICTED_MODULES' sibling role-list logic below —
+  // it's added to RESTRICTED_MODULES itself instead, which makes button
+  // visibility depend purely on _canAct (this activity's own named
+  // approvers, computed server-side) rather than the generic
+  // "approval-inbox edit" fallback.
+  "civilworkdpr-approval": {
+    icon: ShieldCheck,
+    color: "text-cyan-600 bg-cyan-600/10",
+    navPath: "/civilworkdpr/activity-reporting",
+    apiEndpoint: "/api/dependency-activity-assignment",
+    label: "Activity Approvals",
+  },
 };
 
 // Module → ApprovalAuditLog TableName, only for modules the backend's
@@ -425,6 +442,11 @@ export const RESTRICTED_MODULES = new Set([
   "fund-transfer",
   "crm-money-receipts",
   "crm-refund-payment",
+  // Gates Approve/Reject to exactly this activity's own named approvers
+  // (server-computed _canAct) — the generic "approval-inbox edit" fallback
+  // must not open these, since that right has nothing to do with who's
+  // actually named in this one activity's Approval Setup.
+  "civilworkdpr-approval",
   ...SUB_GATE_MODULES,
 ]);
 
@@ -867,6 +889,12 @@ const InboxRow: React.FC<{
             // MODULE_APPROVER_ROLE_OVERRIDES["crm-refund-payment"] exactly.
             : item.Module === "crm-money-receipts" || item.Module === "crm-refund-payment" ? MR_APPROVER_ROLES
             : CRM_MODULES.has(item.Module) ? CRM_APPROVER_ROLES
+            // super_admin only — matches the backend's own gate exactly
+            // (dependencyActivityAssignment.js's approve/reject routes:
+            // named-on-the-level OR super_admin, never admin/dba generically).
+            // Everyone else's button visibility comes from workflowVisible
+            // (_canAct) below, not this role list.
+            : item.Module === "civilworkdpr-approval" ? ["super_admin"]
             : undefined
           }
           // crm-applications'/crm-bookings' own PUT /:id/approve routes 400

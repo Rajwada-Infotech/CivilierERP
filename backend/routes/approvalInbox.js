@@ -3,7 +3,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const logger = require("../logger");
-const { getPool } = require("../db");
+const { getPool, sql } = require("../db");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const {
   MODULE_MAP,
@@ -88,6 +88,49 @@ async function isVisibleToViewer(item, viewerRole, viewerUserId, workflowCache) 
   if (item.Module === "work-allocation-engineer") {
     const visible = viewerUserId != null && Number(item.AssigneeUserId) === Number(viewerUserId);
     return { visible, canAct: visible };
+  }
+
+  // Civil Work DPR's per-assignment Approval Setup (ApprovalLevelsJson,
+  // dependencyActivityAssignment.js) is its own separate, per-record
+  // workflow — not a dbo.ApprovalWorkflows entry, so it's not in MODULE_MAP
+  // and gets the same kind of special-cased, self-contained visibility
+  // check as work-allocation-engineer above rather than going through
+  // resolveCurrentLevel. Visible to whoever is named anywhere on the
+  // activity's levels (read-only if it's not their turn yet, matching the
+  // "isNamedOnWorkflow" fallback below); actionable only for the level
+  // that's actually next in line.
+  if (item.Module === "civilworkdpr-approval") {
+    const rungId = parseInt(item.RecordId, 10);
+    if (!Number.isFinite(rungId) || viewerUserId == null) return { visible: false, canAct: false };
+    try {
+      const pool = getPool();
+      const a = await pool.request().input("rungId", sql.Int, rungId).query(
+        "SELECT Id, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+      );
+      if (!a.recordset.length) return { visible: false, canAct: false };
+      let levels = [];
+      try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
+      if (!levels.length) return { visible: false, canAct: false };
+
+      const approvalsRes = await pool.request().input("aid", sql.Int, a.recordset[0].Id).query(
+        "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
+      );
+      const approvals = approvalsRes.recordset;
+      const satisfied = (level) => {
+        const approvedIds = new Set(approvals.filter((x) => x.levelId === level.id).map((x) => Number(x.approverUserId)));
+        if (level.mode === "any") return level.userIds.some((id) => approvedIds.has(Number(id)));
+        return level.userIds.length > 0 && level.userIds.every((id) => approvedIds.has(Number(id)));
+      };
+      const currentLevel = levels.find((l) => !satisfied(l));
+      if (!currentLevel) return { visible: false, canAct: false }; // fully cleared — shouldn't normally still appear
+
+      const named = currentLevel.userIds.map(Number).includes(Number(viewerUserId));
+      const namedAnywhere = levels.some((l) => l.userIds.map(Number).includes(Number(viewerUserId)));
+      return { visible: named || namedAnywhere, canAct: named };
+    } catch (err) {
+      logger.warn({ rungId, err: err.message }, "approval-inbox: civilworkdpr-approval visibility check failed");
+      return { visible: false, canAct: false };
+    }
   }
 
   const map = MODULE_MAP[item.Module];
@@ -198,7 +241,9 @@ router.use(requirePageRight("approval-inbox", "view"));
 // NULL placeholders so every UNION ALL branch has the same column count.
 // Only the expense-booking branch populates GrnTotalAmount, GrnBasicAmount,
 // and BillingTermsData; only journal-voucher populates JournalVoucherSummary;
-// only work-allocation-engineer populates AssigneeUserId and RungId.
+// only work-allocation-engineer (dead — see its own isVisibleToViewer
+// comment) and civilworkdpr-approval populate RungId; nothing currently
+// populates AssigneeUserId.
 const NULL_EXTRA = `
   CAST(NULL AS DECIMAL(18,2)) AS GrnTotalAmount,
   CAST(NULL AS DECIMAL(18,2)) AS GrnBasicAmount,
@@ -218,6 +263,14 @@ const NULL_EXTRA = `
 const NULL_EXTRA_RECEIVED_PAYMENT = NULL_EXTRA.replace(
   "CAST(0 AS BIT) AS NeedsReview",
   "CAST(CASE WHEN CrmBookingId IS NOT NULL AND RPDepositBankId IS NULL THEN 1 ELSE 0 END AS BIT) AS NeedsReview",
+);
+
+// Populates RungId with the real rung id instead of NULL — the only field
+// this module's row needs beyond the shared shape, since its Reference
+// already carries the activity's name/chain.
+const NULL_EXTRA_CIVILWORKDPR_APPROVAL = NULL_EXTRA.replace(
+  "CAST(NULL AS INT) AS RungId,",
+  "daa.DependencyMasterActivityId AS RungId,",
 );
 
 // Builds the per-module SELECT list (optionally scoped to one module) shared
@@ -1228,6 +1281,51 @@ function buildInboxQueries(module) {
         LEFT JOIN dbo.Users rq ON rq.id = r.RequestedBy
         LEFT JOIN dbo.Users ap ON ap.id = r.ApprovedBy
         WHERE r.Status = 'FinancePending'
+      `);
+    }
+
+    // Civil Work DPR's per-assignment Approval Setup — an activity that's
+    // Completed and already passed Quality Check, now waiting on whichever
+    // levels were configured for it in Work Allocation (ApprovalLevelsJson,
+    // dependencyActivityAssignment.js). Status is always reported as the
+    // literal 'Pending' here regardless of the row's real DB status — from
+    // this inbox's perspective "awaiting this workflow" is all that matters,
+    // same as every other module's own Pending filter. RecordId is the
+    // RUNG id (not the assignment id) since that's what
+    // dependencyActivityAssignment.js's approve/reject routes key on.
+    // isVisibleToViewer above (not MODULE_MAP/resolveCurrentLevel) decides
+    // who actually sees each row — this query intentionally returns every
+    // candidate regardless of viewer.
+    if (!module || module === "civilworkdpr-approval") {
+      queries.push(`
+        SELECT
+          'civilworkdpr-approval'                        AS Module,
+          'Activity Approval'                            AS ModuleLabel,
+          CAST(daa.DependencyMasterActivityId AS NVARCHAR) AS RecordId,
+          CONCAT(dm.Alias, ' — ', am.activity_name)      AS Reference,
+          daa.UpdatedAt                                  AS RecordDate,
+          'Pending'                                      AS Status,
+          CAST(NULL AS NVARCHAR)                         AS ContractorName,
+          CAST(NULL AS NVARCHAR)                         AS SupplierName,
+          CAST(NULL AS DECIMAL(18,2))                    AS Amount,
+          ${NULL_EXTRA_CIVILWORKDPR_APPROVAL}
+          CAST(daa.CreatedBy AS NVARCHAR(255))           AS CreatedBy,
+          ''                                              AS ApprovedBy,
+          ''                                              AS ApprovedAt,
+          ''                                              AS RejectedBy,
+          ''                                              AS RejectionNote,
+          daa.UpdatedAt                                  AS LastModified
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        WHERE daa.IsCurrent = 1
+          AND daa.Status = 'COMPLETED'
+          AND daa.ApprovalLevelsJson IS NOT NULL AND daa.ApprovalLevelsJson <> '[]'
+          AND (
+            SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc
+            WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC
+          ) = 'APPROVED'
       `);
     }
 
