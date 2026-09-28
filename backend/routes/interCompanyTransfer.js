@@ -175,7 +175,7 @@ async function resolveTransferContext(pool, { senderProjectId, receiverProjectId
 // Priced at the SENDING COMPANY's own most recent purchase rate — across
 // every project that company owns, not just the one project the stock
 // happens to be leaving from (a sibling project may have bought the same
-// item more recently) — excluding GST, per getLastPurchaseRateByCompany.
+// item more recently). Returns excl-GST rate + GST breakdown per item.
 async function priceItems(pool, senderCompanyId, senderCompanyName, items) {
   const pricedItems = [];
   for (const [idx, item] of items.entries()) {
@@ -194,19 +194,25 @@ async function priceItems(pool, senderCompanyId, senderCompanyName, items) {
       err.status = 400;
       throw err;
     }
-    const rate = Number(rateInfo.rate);
+    const rate     = Number(rateInfo.rate);
+    const gstPct   = Number(rateInfo.gstPct || 0);
+    const baseAmt  = Math.round(qty * rate * 100) / 100;
+    const gstAmt   = Math.round(baseAmt * (gstPct / 100) * 100) / 100;
     pricedItems.push({
-      itemId: String(itemId),
-      itemName: item.itemName || item.ItemName || null,
-      itemCode: item.itemCode || item.ItemCode || null,
-      description: item.description || item.itemName || item.ItemName || null,
-      quantity: qty,
+      itemId:       String(itemId),
+      itemName:     item.itemName || item.ItemName || null,
+      itemCode:     item.itemCode || item.ItemCode || null,
+      description:  item.description || item.itemName || item.ItemName || null,
+      quantity:     qty,
       qty,
-      unit: item.uom || item.Unit || item.unit || "NOS",
-      uom: item.uom || item.Unit || item.unit || "NOS",
+      unit:         item.uom || item.Unit || item.unit || "NOS",
+      uom:          item.uom || item.Unit || item.unit || "NOS",
       rate,
-      amount: Math.round(qty * rate * 100) / 100,
-      sourceDocNo: rateInfo.sourceDocNo || null,
+      amount:       baseAmt,          // excl. GST
+      gstPct,
+      gstAmount:    gstAmt,
+      amountInclGst: Math.round((baseAmt + gstAmt) * 100) / 100,
+      sourceDocNo:  rateInfo.sourceDocNo || null,
     });
   }
   return pricedItems;
@@ -326,6 +332,12 @@ router.post("/preview", authenticateToken, async (req, res) => {
     const pool = getPool();
     const senderProjectId = parsePositiveInt(req.body.SenderProjectId);
     const receiverProjectId = parsePositiveInt(req.body.ReceiverProjectId);
+    // Optional company overrides — used when a project is cross-tagged to a
+    // company that isn't its primary company_id (e.g. Pristine Enclave tagged
+    // to Delta Gardens). The override governs GL posting; purchase rate
+    // lookup still uses the project's own company for accurate pricing.
+    const senderCompanyOverrideId = parsePositiveInt(req.body.SenderCompanyId);
+    const receiverCompanyOverrideId = parsePositiveInt(req.body.ReceiverCompanyId);
     const items = asItems(req.body.Items || req.body.TransferItems);
 
     if (!senderProjectId || !receiverProjectId) {
@@ -336,21 +348,52 @@ router.post("/preview", authenticateToken, async (req, res) => {
     }
 
     const ctx = await resolveTransferContext(pool, { senderProjectId, receiverProjectId });
+
+    // Resolve override company names if IDs were supplied
+    let senderCompanyId = ctx.sender.CompanyId;
+    let senderCompanyName = ctx.sender.CompanyName;
+    let receiverCompanyId = ctx.receiver.CompanyId;
+    let receiverCompanyName = ctx.receiver.CompanyName;
+
+    if (senderCompanyOverrideId && senderCompanyOverrideId !== senderCompanyId) {
+      const overrideRes = await pool.request()
+        .input("Id", sql.Int, senderCompanyOverrideId)
+        .query("SELECT id, name FROM dbo.enterprise WHERE id = @Id");
+      if (overrideRes.recordset[0]) {
+        senderCompanyId = overrideRes.recordset[0].id;
+        senderCompanyName = overrideRes.recordset[0].name;
+      }
+    }
+    if (receiverCompanyOverrideId && receiverCompanyOverrideId !== receiverCompanyId) {
+      const overrideRes = await pool.request()
+        .input("Id", sql.Int, receiverCompanyOverrideId)
+        .query("SELECT id, name FROM dbo.enterprise WHERE id = @Id");
+      if (overrideRes.recordset[0]) {
+        receiverCompanyId = overrideRes.recordset[0].id;
+        receiverCompanyName = overrideRes.recordset[0].name;
+      }
+    }
+
     const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items);
-    const totalAmount = pricedItems.reduce((sum, item) => sum + item.amount, 0);
+    const totalAmount       = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+    const totalGstAmount    = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
+    const totalAmountInclGst = Math.round((totalAmount + totalGstAmount) * 100) / 100;
 
     res.json({
       items: pricedItems,
       totalAmount,
-      senderCompanyId: ctx.sender.CompanyId,
-      senderCompanyName: ctx.sender.CompanyName,
-      receiverCompanyId: ctx.receiver.CompanyId,
-      receiverCompanyName: ctx.receiver.CompanyName,
+      totalGstAmount,
+      totalAmountInclGst,
+      senderCompanyId,
+      senderCompanyName,
+      receiverCompanyId,
+      receiverCompanyName,
     });
   } catch (err) {
     res.status(err.status || 500).json({ error: err.message });
   }
 });
+
 
 router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"), async (req, res) => {
   try {
@@ -359,6 +402,8 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     const transferDate = req.body.TransferDate || new Date().toISOString().slice(0, 10);
     const senderProjectId = parsePositiveInt(req.body.SenderProjectId);
     const receiverProjectId = parsePositiveInt(req.body.ReceiverProjectId);
+    const senderCompanyOverrideId = parsePositiveInt(req.body.SenderCompanyId);
+    const receiverCompanyOverrideId = parsePositiveInt(req.body.ReceiverCompanyId);
     const items = asItems(req.body.Items || req.body.TransferItems);
     const finYear = req.body.finYear || req.body.FinYear || null;
     const remarks = req.body.Remarks || null;
@@ -374,8 +419,24 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     }
 
     const ctx = await resolveTransferContext(pool, { senderProjectId, receiverProjectId });
+
+    // Apply company overrides (cross-tagged project support)
+    let senderCompanyId = ctx.sender.CompanyId;
+    let receiverCompanyId = ctx.receiver.CompanyId;
+    if (senderCompanyOverrideId && senderCompanyOverrideId !== senderCompanyId) {
+      const r = await pool.request().input("Id", sql.Int, senderCompanyOverrideId)
+        .query("SELECT id FROM dbo.enterprise WHERE id = @Id");
+      if (r.recordset[0]) senderCompanyId = senderCompanyOverrideId;
+    }
+    if (receiverCompanyOverrideId && receiverCompanyOverrideId !== receiverCompanyId) {
+      const r = await pool.request().input("Id", sql.Int, receiverCompanyOverrideId)
+        .query("SELECT id FROM dbo.enterprise WHERE id = @Id");
+      if (r.recordset[0]) receiverCompanyId = receiverCompanyOverrideId;
+    }
+
     const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items);
     const totalAmount = pricedItems.reduce((sum, item) => sum + item.amount, 0);
+
 
     // Only validate + record the request here — no stock/GL happens yet.
     // That only fires once a super_admin approves this request via
@@ -398,9 +459,9 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
         .input("DocNo", sql.NVarChar(100), ictDocNo)
         .input("TransferDate", sql.Date, transferDate)
         .input("SenderProjectId", sql.Int, ctx.sender.ProjectId)
-        .input("SenderCompanyId", sql.Int, ctx.sender.CompanyId)
+        .input("SenderCompanyId", sql.Int, senderCompanyId)
         .input("ReceiverProjectId", sql.Int, ctx.receiver.ProjectId)
-        .input("ReceiverCompanyId", sql.Int, ctx.receiver.CompanyId)
+        .input("ReceiverCompanyId", sql.Int, receiverCompanyId)
         .input("TotalAmount", sql.Decimal(18, 2), totalAmount)
         .input("Remarks", sql.NVarChar(500), remarks)
         .input("DocTypeId", sql.Int, ictDocTypeId)

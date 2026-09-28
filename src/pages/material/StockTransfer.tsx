@@ -1414,6 +1414,9 @@ export default function StockTransfer() {
       interTransferMut.mutate({
         SenderProjectId: senderProjectId,
         ReceiverProjectId: receiverProjectId,
+        // Pass selected company overrides for cross-tagged project godowns
+        ...(filterCompanyId ? { SenderCompanyId: Number(filterCompanyId) } : {}),
+        ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
         Remarks: remarks || undefined,
         Items: validItems.map((it) => ({
           itemId: it.itemId,
@@ -1498,11 +1501,16 @@ export default function StockTransfer() {
     isFetching: interPreviewLoading,
     error: interPreviewError,
   } = useQuery<InterCompanyTransferPreview>({
-    queryKey: ["ict-preview", fromGodown?.ProjectID, toGodown?.ProjectID, interPreviewKey],
+    queryKey: ["ict-preview", fromGodown?.ProjectID, toGodown?.ProjectID, filterCompanyId, toCompanyId, interPreviewKey],
     queryFn: () =>
       previewInterCompanyTransfer({
         SenderProjectId: fromGodown!.ProjectID!,
         ReceiverProjectId: toGodown!.ProjectID!,
+        // Pass the user-selected companies so the preview labels (and GL
+        // posting on submit) reflect Delta Gardens, not Yashvi Construction,
+        // when Pristine Enclave is tagged to Delta Gardens.
+        ...(filterCompanyId ? { SenderCompanyId: Number(filterCompanyId) } : {}),
+        ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
         Items: interPreviewItems.map((it) => ({
           itemId: it.itemId,
           itemName: it.itemName,
@@ -1517,6 +1525,7 @@ export default function StockTransfer() {
       interPreviewItems.length > 0,
     retry: false,
   });
+
 
   const companyOptions = (enterprisesData ?? []).map((e) => ({
     value: String(e.id),
@@ -1943,30 +1952,72 @@ export default function StockTransfer() {
                         </p>
                       ) : interPreview && interPreview.items.length > 0 ? (
                         <>
-                          <div className="space-y-1">
-                            {interPreview.items.map((it) => (
-                              <div key={it.itemId} className="flex items-center justify-between gap-3 text-[11px]">
-                                <span className="text-foreground truncate">
-                                  {it.itemName || it.itemId} — {it.qty} {it.unit}
-                                </span>
-                                <span className="text-muted-foreground shrink-0">
-                                  ₹{it.rate.toLocaleString("en-IN")}/unit (excl. GST) = ₹{it.amount.toLocaleString("en-IN")}
+                          {/* Per-item breakdown */}
+                          <div className="space-y-2">
+                            {interPreview.items.map((it) => {
+                              const gstPct = it.gstPct ?? 0;
+                              const gstAmt = it.gstAmount ?? 0;
+                              const inclAmt = it.amountInclGst ?? it.amount;
+                              return (
+                                <div key={it.itemId} className="rounded-md bg-muted/30 border border-border/40 px-3 py-2 space-y-0.5">
+                                  <div className="flex items-center justify-between gap-3 text-[11px] font-medium">
+                                    <span className="text-foreground truncate">
+                                      {it.itemName || it.itemId} — {it.qty} {it.unit}
+                                    </span>
+                                    <span className="text-foreground shrink-0">
+                                      ₹{inclAmt.toLocaleString("en-IN")}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                                    <span>Excl. GST: ₹{it.rate.toLocaleString("en-IN")}/unit × {it.qty} = ₹{it.amount.toLocaleString("en-IN")}</span>
+                                  </div>
+                                  {gstPct > 0 ? (
+                                    <div className="flex items-center justify-between text-[10px] text-amber-600 dark:text-amber-400">
+                                      <span>GST @ {gstPct}%</span>
+                                      <span>+ ₹{gstAmt.toLocaleString("en-IN")}</span>
+                                    </div>
+                                  ) : (
+                                    <div className="text-[10px] text-muted-foreground/60">GST: N/A (0%)</div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Totals summary */}
+                          <div className="border-t border-border/60 pt-2 space-y-1 text-[11px]">
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Subtotal (excl. GST)</span>
+                              <span className="font-mono">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
+                            </div>
+                            {(interPreview.totalGstAmount ?? 0) > 0 && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-amber-600 dark:text-amber-400">GST</span>
+                                <span className="font-mono text-amber-600 dark:text-amber-400">
+                                  + ₹{(interPreview.totalGstAmount!).toLocaleString("en-IN")}
                                 </span>
                               </div>
-                            ))}
-                          </div>
-                          <div className="border-t border-border/60 pt-2 space-y-1">
-                            <div className="flex items-center justify-between text-[11px]">
-                              <span className="text-muted-foreground">
-                                {interPreview.senderCompanyName} — Inter-Company A/c debited (receivable from {interPreview.receiverCompanyName})
-                              </span>
-                              <span className="font-semibold text-foreground">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
+                            )}
+                            <div className="flex items-center justify-between font-semibold border-t border-border/40 pt-1">
+                              <span className="text-foreground">Total (incl. GST)</span>
+                              <span className="text-foreground">₹{(interPreview.totalAmountInclGst ?? interPreview.totalAmount).toLocaleString("en-IN")}</span>
                             </div>
-                            <div className="flex items-center justify-between text-[11px]">
+                          </div>
+
+                          {/* GL posting lines */}
+                          <div className="border-t border-border/60 pt-2 space-y-1 text-[10px]">
+                            <p className="text-muted-foreground/60 uppercase tracking-wider text-[9px] font-semibold">GL Posting</p>
+                            <div className="flex items-center justify-between">
                               <span className="text-muted-foreground">
-                                {interPreview.receiverCompanyName} — Inter-Company A/c credited (payable to {interPreview.senderCompanyName})
+                                {interPreview.senderCompanyName} — Inter-Company A/c debited
                               </span>
-                              <span className="font-semibold text-foreground">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
+                              <span className="font-semibold">₹{(interPreview.totalAmountInclGst ?? interPreview.totalAmount).toLocaleString("en-IN")}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">
+                                {interPreview.receiverCompanyName} — Inter-Company A/c credited
+                              </span>
+                              <span className="font-semibold">₹{(interPreview.totalAmountInclGst ?? interPreview.totalAmount).toLocaleString("en-IN")}</span>
                             </div>
                           </div>
                         </>

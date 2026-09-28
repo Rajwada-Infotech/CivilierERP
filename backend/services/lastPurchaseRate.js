@@ -87,16 +87,18 @@ async function getLastPurchaseRateByCompany(pool, companyId, itemId) {
     .input("CompanyId", sql.Int, companyId)
     .input("ItemId", sql.NVarChar(100), String(itemId)).query(`
       SELECT TOP 1
-        item.rate AS Rate,
-        grn.DocNo AS SourceDocNo,
-        grn.GRNDate AS SourceDate
+        item.rate    AS Rate,
+        item.gstPct  AS GstPct,
+        grn.DocNo    AS SourceDocNo,
+        grn.GRNDate  AS SourceDate
       FROM dbo.GoodsReceiptNotes grn
       JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
       JOIN dbo.enterprise proj ON proj.id = po.ProjectId AND proj.business_type = 'P'
       CROSS APPLY OPENJSON(grn.GRNItems)
         WITH (
           itemId NVARCHAR(100) '$.itemId',
-          rate DECIMAL(18, 4) '$.rate'
+          rate   DECIMAL(18, 4) '$.rate',
+          gstPct DECIMAL(5, 2)  '$.gstPct'
         ) item
       WHERE proj.company_id = @CompanyId
         AND item.itemId = @ItemId
@@ -106,8 +108,16 @@ async function getLastPurchaseRateByCompany(pool, companyId, itemId) {
 
   const grnRow = grnResult.recordset[0];
   if (grnRow) {
+    // GRN row found — use its gstPct if stored, else fall back to item master
+    let gstPct = Number(grnRow.GstPct || 0);
+    if (!gstPct) {
+      const im = await pool.request().input("ItemId", sql.NVarChar(100), String(itemId))
+        .query("SELECT ISNULL(M_CGST,0)+ISNULL(M_SGST,0) AS TotalGst FROM dbo.ItemMaster WHERE M_ItemId = @ItemId");
+      gstPct = Number(im.recordset[0]?.TotalGst || 0);
+    }
     return {
       rate: Number(grnRow.Rate),
+      gstPct,
       sourceDocNo: grnRow.SourceDocNo,
       sourceDate: grnRow.SourceDate,
     };
@@ -132,8 +142,13 @@ async function getLastPurchaseRateByCompany(pool, companyId, itemId) {
 
   const poRow = poResult.recordset[0];
   if (poRow) {
+    // PO path — fall back to item master for GST %
+    const im = await pool.request().input("ItemId", sql.NVarChar(100), String(itemId))
+      .query("SELECT ISNULL(M_CGST,0)+ISNULL(M_SGST,0) AS TotalGst FROM dbo.ItemMaster WHERE M_ItemId = @ItemId");
+    const gstPct = Number(im.recordset[0]?.TotalGst || 0);
     return {
       rate: Number(poRow.Rate),
+      gstPct,
       sourceDocNo: poRow.SourceDocNo,
       sourceDate: poRow.SourceDate,
     };
