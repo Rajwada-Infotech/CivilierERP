@@ -175,7 +175,7 @@ async function resolveTransferContext(pool, { senderProjectId, receiverProjectId
 // Priced at the SENDING COMPANY's own most recent purchase rate — across
 // every project that company owns, not just the one project the stock
 // happens to be leaving from (a sibling project may have bought the same
-// item more recently) — excluding GST, per getLastPurchaseRateByCompany.
+// item more recently). Returns excl-GST rate + GST breakdown per item.
 async function priceItems(pool, senderCompanyId, senderCompanyName, items) {
   const pricedItems = [];
   for (const [idx, item] of items.entries()) {
@@ -194,19 +194,25 @@ async function priceItems(pool, senderCompanyId, senderCompanyName, items) {
       err.status = 400;
       throw err;
     }
-    const rate = Number(rateInfo.rate);
+    const rate     = Number(rateInfo.rate);
+    const gstPct   = Number(rateInfo.gstPct || 0);
+    const baseAmt  = Math.round(qty * rate * 100) / 100;
+    const gstAmt   = Math.round(baseAmt * (gstPct / 100) * 100) / 100;
     pricedItems.push({
-      itemId: String(itemId),
-      itemName: item.itemName || item.ItemName || null,
-      itemCode: item.itemCode || item.ItemCode || null,
-      description: item.description || item.itemName || item.ItemName || null,
-      quantity: qty,
+      itemId:       String(itemId),
+      itemName:     item.itemName || item.ItemName || null,
+      itemCode:     item.itemCode || item.ItemCode || null,
+      description:  item.description || item.itemName || item.ItemName || null,
+      quantity:     qty,
       qty,
-      unit: item.uom || item.Unit || item.unit || "NOS",
-      uom: item.uom || item.Unit || item.unit || "NOS",
+      unit:         item.uom || item.Unit || item.unit || "NOS",
+      uom:          item.uom || item.Unit || item.unit || "NOS",
       rate,
-      amount: Math.round(qty * rate * 100) / 100,
-      sourceDocNo: rateInfo.sourceDocNo || null,
+      amount:       baseAmt,          // excl. GST
+      gstPct,
+      gstAmount:    gstAmt,
+      amountInclGst: Math.round((baseAmt + gstAmt) * 100) / 100,
+      sourceDocNo:  rateInfo.sourceDocNo || null,
     });
   }
   return pricedItems;
@@ -369,11 +375,15 @@ router.post("/preview", authenticateToken, async (req, res) => {
     }
 
     const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items);
-    const totalAmount = pricedItems.reduce((sum, item) => sum + item.amount, 0);
+    const totalAmount       = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
+    const totalGstAmount    = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
+    const totalAmountInclGst = Math.round((totalAmount + totalGstAmount) * 100) / 100;
 
     res.json({
       items: pricedItems,
       totalAmount,
+      totalGstAmount,
+      totalAmountInclGst,
       senderCompanyId,
       senderCompanyName,
       receiverCompanyId,

@@ -50,13 +50,18 @@ export interface InterCompanyTransferPreviewItem {
   qty: number;
   unit: string;
   rate: number;
-  amount: number;
+  amount: number;        // excl. GST
+  gstPct?: number;
+  gstAmount?: number;
+  amountInclGst?: number;
   sourceDocNo: string | null;
 }
 
 export interface InterCompanyTransferPreview {
   items: InterCompanyTransferPreviewItem[];
-  totalAmount: number;
+  totalAmount: number;           // excl. GST
+  totalGstAmount?: number;
+  totalAmountInclGst?: number;
   senderCompanyId?: number;
   senderCompanyName?: string;
   receiverCompanyId?: number;
