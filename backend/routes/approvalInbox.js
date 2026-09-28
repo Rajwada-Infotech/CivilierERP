@@ -1306,7 +1306,16 @@ function buildInboxQueries(module) {
           daa.UpdatedAt                                  AS RecordDate,
           'Pending'                                      AS Status,
           CAST(NULL AS NVARCHAR)                         AS ContractorName,
-          CAST(NULL AS NVARCHAR)                         AS SupplierName,
+          -- Feeds the row list's "Party" column and the review panel's
+          -- "Party" field — the engineer(s) actually doing the work reads
+          -- far more usefully there than daa.CreatedBy, which for an older
+          -- activity is often a migration/backfill script, not a person.
+          (
+            SELECT STRING_AGG(u.name, ', ') WITHIN GROUP (ORDER BY u.name)
+            FROM dbo.DependencyActivityEngineer dae
+            JOIN dbo.users u ON u.id = dae.EngineerId
+            WHERE dae.AssignmentId = daa.Id
+          )                                               AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))                    AS Amount,
           ${NULL_EXTRA_CIVILWORKDPR_APPROVAL}
           CAST(daa.CreatedBy AS NVARCHAR(255))           AS CreatedBy,

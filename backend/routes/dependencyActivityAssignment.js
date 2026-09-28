@@ -604,17 +604,22 @@ async function handleRejectLevel(req, res) {
   }
 }
 
-const approvalActionMiddleware = [
-  authMiddleware,
-  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "edit"),
-];
-router.post("/:rungId/approval/approve", ...approvalActionMiddleware, handleApproveLevel);
-router.post("/:rungId/approval/reject", ...approvalActionMiddleware, handleRejectLevel);
+// No requireAnyPageRight gate here — deliberately, same precedent as e.g.
+// fundTransfer.js's PUT /:id/approve (just authenticateToken): the real
+// authorization is the handler's own check (super_admin OR named on the
+// activity's current approval level), not a generic Civil Work DPR page
+// right. A named approver acting purely through the shared Approval Inbox
+// (a director, say, who has no reason to hold "edit" on
+// civilworkdpr-activity-reporting/work-done) must still be able to act on
+// an activity that specifically names them — gating on those page rights
+// here would 403 exactly the people this workflow is meant to let approve.
+router.post("/:rungId/approval/approve", authMiddleware, handleApproveLevel);
+router.post("/:rungId/approval/reject", authMiddleware, handleRejectLevel);
 // Plain PUT aliases at the shared Approval Inbox's default path shape
 // (${endpoint}/${recordId}/${action}) — see ApprovalInbox.tsx's
 // MODULE_CONFIG["civilworkdpr-approval"] entry and ApprovalActions.tsx.
-router.put("/:rungId/approve", ...approvalActionMiddleware, handleApproveLevel);
-router.put("/:rungId/reject", ...approvalActionMiddleware, handleRejectLevel);
+router.put("/:rungId/approve", authMiddleware, handleApproveLevel);
+router.put("/:rungId/reject", authMiddleware, handleRejectLevel);
 
 // GET /approvals/pending-count — how many Completed, QC-passed activities
 // are sitting at a level the viewer can act on right now (named on that
