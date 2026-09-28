@@ -39,12 +39,6 @@ export const buildCivilWorkDprNavItems = (_pendingApprovalCount: number): NavIte
     pageKey: "civilworkdpr-quality-check",
   },
   {
-    label: "Amendment",
-    icon: Edit2,
-    path: "/civilworkdpr/amendment",
-    pageKey: "civilworkdpr-amendment",
-  },
-  {
     label: "Dependency",
     icon: Hierarchy,
     path: "/civilworkdpr/dependency",
@@ -55,5 +49,11 @@ export const buildCivilWorkDprNavItems = (_pendingApprovalCount: number): NavIte
     icon: Profile2User,
     path: "/civilworkdpr/worker-attendance",
     pageKey: "civilworkdpr-worker-attendance",
+  },
+  {
+    label: "Amendment",
+    icon: Edit2,
+    path: "/civilworkdpr/amendment",
+    pageKey: "civilworkdpr-amendment",
   },
 ];

@@ -573,9 +573,16 @@ async function handleApproveLevel(req, res) {
         VALUES (@aid, @levelId, @levelIndex, @userId)
       `);
 
-    // Levels clear strictly in order, so this level is only "the last
-    // missing one" if it was also the last level overall.
-    const fullyApproved = currentLevelIndex === levels.length - 1;
+    // NOT just "was this the last level by position" — a mode "all" level
+    // with several named users isn't actually cleared until every one of
+    // them has approved, so this has to re-check real satisfaction
+    // (including the approval just inserted above), not just where the
+    // level sits in the array. Getting this wrong meant a 3-approver "all"
+    // level flipped the whole activity to APPROVED after just the FIRST
+    // of three signoffs, the moment that level happened to be the last one
+    // configured.
+    const approvalsAfter = [...approvals, { levelId: currentLevel.id, approverUserId: viewerUserId }];
+    const fullyApproved = firstUnsatisfiedLevelIndex(levels, approvalsAfter) == null;
     if (fullyApproved) {
       await pool.request()
         .input("aid", sql.Int, assignmentId)
