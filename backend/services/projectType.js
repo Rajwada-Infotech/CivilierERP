@@ -18,6 +18,9 @@
 // ask "is this project GST-free?", because that question has no correct answer.
 
 const { sql } = require("../db");
+// Same paise rounding the multi-unit pricing uses, so an apportioned land/
+// construction split and the line allocations it came from agree exactly.
+const { round2 } = require("./bookingUnits");
 
 // What an unset type means. Every project that existed before migration 482 has
 // project_type_id NULL, and must keep behaving exactly as CRM did then:
@@ -141,11 +144,79 @@ function bookingSaleTreatment(unitKinds = []) {
   };
 }
 
+/**
+ * Split a booking's value into its LAND and CONSTRUCTION halves.
+ *
+ * Sale of land is outside GST altogether — Schedule III of the CGST Act, the
+ * same entry that exempts a completed building post-OC (checkGstExemption
+ * above). It is not a zero-rated or exempt supply: it is not a supply at all.
+ *
+ * Two consequences, and the second is the one that is easy to miss:
+ *   1. No output tax on the land consideration.
+ *   2. Land value must stay OUT of the Rs 45 lakh bracket test. That threshold
+ *      is an affordable-HOUSING test on construction value; feeding plot value
+ *      into it would push the construction half of a plotted project over the
+ *      bracket and silently reprice every villa from 1% to 5%.
+ *
+ * Derived from the UNIT KIND on the booking's lines (migrations 483/485), never
+ * from the project's type — a mixed township holds both plotted and tower
+ * blocks, so the project cannot answer this question. See services/projectType.js.
+ *
+ * Bookings predating migration 485 have no lines; they fall back to the single
+ * unit CrmBooking.UnitId points at, which for all existing data is a FLAT.
+ */
+async function getBookingLandSplit(pool, bookingId, totalValue) {
+  const rows = await pool.request().input("bid", sql.Int, bookingId).query(`
+    SELECT u.UnitKind, l.AllocatedValue
+    FROM dbo.CrmBookingUnit l
+    JOIN dbo.UnitMaster u ON u.Id = l.UnitId
+    WHERE l.BookingId = @bid AND l.Status = N'Active'
+    UNION ALL
+    -- Pre-485 fallback: no lines, so use the booking's own primary unit.
+    SELECT u2.UnitKind, b.TotalValue
+    FROM dbo.CrmBooking b
+    JOIN dbo.UnitMaster u2 ON u2.Id = b.UnitId
+    WHERE b.Id = @bid
+      AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingUnit l2 WHERE l2.BookingId = @bid AND l2.Status = N'Active')
+  `);
+
+  const lines = rows.recordset;
+  // No resolvable unit at all: treat the whole value as construction. Failing
+  // the other way would zero-rate a taxable sale.
+  if (!lines.length) {
+    return { landValue: 0, constructionValue: round2(totalValue), isPureLand: false, hasLand: false };
+  }
+
+  let landValue = 0;
+  let constructionValue = 0;
+  for (const l of lines) {
+    const v = Number(l.AllocatedValue || 0);
+    if (String(l.UnitKind || "").toUpperCase() === "PLOT") landValue += v;
+    else constructionValue += v;
+  }
+
+  const hasLand = lines.some((l) => String(l.UnitKind || "").toUpperCase() === "PLOT");
+  const isPureLand = hasLand && constructionValue === 0;
+
+  // AllocatedValue can lag a booking edit (it is written when lines are priced).
+  // For a pure-land booking the split is unambiguous regardless of that, so trust
+  // the booking's own TotalValue rather than a possibly stale allocation.
+  if (isPureLand) return { landValue: round2(totalValue), constructionValue: 0, isPureLand: true, hasLand: true };
+
+  return {
+    landValue: round2(landValue),
+    constructionValue: round2(hasLand ? constructionValue : totalValue),
+    isPureLand: false,
+    hasLand,
+  };
+}
+
 module.exports = {
   LEGACY_DEFAULT,
   UNIT_KIND,
   INCOME_ACCOUNT,
   getEffectiveType,
+  getBookingLandSplit,
   unitSaleTreatment,
   bookingSaleTreatment,
 };

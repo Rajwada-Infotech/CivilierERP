@@ -15,6 +15,7 @@
 
 const { sql } = require("../db");
 const { getGLHeadId, postVoucher, hasPosting, GL_ACCOUNTS } = require("./generalLedger");
+const { getBookingLandSplit } = require("./projectType");
 
 const CRM_COLLECTIONS_ACCOUNT = "CRM Collections A/c";
 const CRM_STAMP_DUTY_ACCOUNT = "Stamp Duty & Registration Expense";
@@ -24,6 +25,9 @@ const CRM_GST_OUTPUT_ACCOUNT = "GST Output Liability - CRM Sales";
 // crmBookings.js's full-payment gate) — never on cash receipt, since until
 // then the money is a pure liability, not yet earned income.
 const CRM_SALE_INCOME_ACCOUNT = "Sale of Flat/Parking";
+// Seeded by migration 484. Kept strictly separate from the construction head
+// above — see postCrmInvoiceToGL for why they must never be pooled.
+const CRM_SALE_LAND_ACCOUNT = "Sale of Land";
 // Income head the company keeps when a cancelled booking is refunded (not
 // re-booked). Seeded by migration 416.
 const CRM_FORFEITURE_ACCOUNT = "Booking Cancellation Forfeiture";
@@ -892,7 +896,7 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
 
   const r = await pool.request().input("id", sql.Int, invoiceId).query(`
     SELECT inv.Id, inv.InvoiceNo, inv.InvoiceType, inv.Amount, inv.InvoiceDate,
-           b.CompanyId, b.ProjectId
+           b.Id AS BookingId, b.CompanyId, b.ProjectId
     FROM dbo.CrmInvoice inv
     JOIN dbo.CrmBooking b ON b.Id = inv.BookingId
     WHERE inv.Id = @id
@@ -906,7 +910,46 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
   if (amount <= 0) return { posted: false, reason: `Invoice ${invoiceId} amount is ${amount} (<= 0)` };
 
   const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
-  const incomeHeadId = await getGLHeadId(pool, CRM_SALE_INCOME_ACCOUNT);
+
+  // Which income head is credited follows WHAT WAS SOLD, never the project's
+  // type. Land and construction must not share a head: the sale of land is
+  // outside GST (Schedule III, CGST Act) while construction is a taxable
+  // supply, so pooling them makes the P&L impossible to reconcile against the
+  // GST returns — part of the turnover would carry no output tax by design,
+  // with nothing in the ledger to show why.
+  const split = await getBookingLandSplit(pool, row.BookingId, amount);
+
+  let legs;
+  if (split.isPureLand) {
+    const landHeadId = await getGLHeadId(pool, CRM_SALE_LAND_ACCOUNT);
+    legs = [
+      { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
+      { lHeadId: landHeadId, credit: amount, narration: `${row.InvoiceNo} — land sale income recognised` },
+    ];
+  } else if (split.hasLand) {
+    // A land + villa package on one invoice. Apportion this invoice between the
+    // two heads in the same land:construction ratio as the booking, so each
+    // head accumulates only its own kind of turnover. Residual paise go to the
+    // construction leg so the voucher balances to the rupee.
+    const base = split.landValue + split.constructionValue;
+    const landPart = base > 0 ? Math.round(((amount * split.landValue) / base) * 100) / 100 : 0;
+    const constructionPart = Math.round((amount - landPart) * 100) / 100;
+    const landHeadId = await getGLHeadId(pool, CRM_SALE_LAND_ACCOUNT);
+    const incomeHeadId = await getGLHeadId(pool, CRM_SALE_INCOME_ACCOUNT);
+    legs = [
+      { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
+    ];
+    if (landPart > 0)
+      legs.push({ lHeadId: landHeadId, credit: landPart, narration: `${row.InvoiceNo} — land sale income recognised` });
+    if (constructionPart > 0)
+      legs.push({ lHeadId: incomeHeadId, credit: constructionPart, narration: `${row.InvoiceNo} — flat/villa sale income recognised` });
+  } else {
+    const incomeHeadId = await getGLHeadId(pool, CRM_SALE_INCOME_ACCOUNT);
+    legs = [
+      { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
+      { lHeadId: incomeHeadId, credit: amount, narration: `${row.InvoiceNo} — flat/parking sale income recognised` },
+    ];
+  }
 
   await postVoucher(pool, {
     voucherNo: row.InvoiceNo,
@@ -916,10 +959,7 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
     companyId: row.CompanyId ?? null,
     projectId: row.ProjectId ?? null,
     createdBy: userEmail,
-    legs: [
-      { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
-      { lHeadId: incomeHeadId, credit: amount, narration: `${row.InvoiceNo} — flat/parking sale income recognised` },
-    ],
+    legs,
   });
   return { posted: true };
 }
@@ -928,6 +968,7 @@ module.exports = {
   CRM_COLLECTIONS_ACCOUNT,
   CRM_GST_OUTPUT_ACCOUNT,
   CRM_SALE_INCOME_ACCOUNT,
+  CRM_SALE_LAND_ACCOUNT,
   ensureCrmCustomerLedgerHead,
   syncCrmCustomerLedgerHead,
   getGstRateForBooking,

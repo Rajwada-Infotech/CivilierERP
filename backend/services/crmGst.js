@@ -1,5 +1,6 @@
 const { sql } = require("../db");
 const { resolveOcCcGate } = require("./crmWorkflowGuards");
+const { getBookingLandSplit } = require("./projectType");
 
 // Fixed business rule (migration 283) — never a per-booking input, never
 // editable anywhere except by editing the HSN Master rows themselves:
@@ -20,6 +21,7 @@ const EXTRA_WORK_HSN_CODE = "9954EXW";
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
+
 
 /**
  * GST exemption on post-OC/CC sales — Schedule III, Entry 5 of the CGST Act
@@ -119,8 +121,21 @@ async function recalculateBookingGst(pool, bookingId) {
   // cached beyond these same columns.
   const { exempt } = await checkGstExemption(pool, bookingId);
 
-  const hsnCode = exempt ? null : (totalValue + parkingBase <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE);
-  const unitParkingRate = exempt ? 0 : await getHsnRate(pool, hsnCode);
+  // Land is outside GST (see getBookingLandSplit). A purely-land booking
+  // therefore behaves exactly like an exempt one — no HSN, no rate, every GST
+  // figure zero — while a mixed land+villa booking taxes only its construction
+  // half. Tracked separately from `exempt` rather than folded into it because
+  // the two are different facts: one is a completed-building exemption the
+  // booking can gain or lose over time, the other is what was sold.
+  const split = await getBookingLandSplit(pool, bookingId, totalValue);
+  const outsideGst = exempt || split.isPureLand;
+
+  // The bracket is an affordable-HOUSING test, so it sees construction value
+  // only. For an all-flat booking constructionValue === totalValue and this is
+  // byte-for-byte the previous behaviour.
+  const bracketBase = split.constructionValue + parkingBase;
+  const hsnCode = outsideGst ? null : (bracketBase <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE);
+  const unitParkingRate = outsideGst ? 0 : await getHsnRate(pool, hsnCode);
 
   // Reprice every active parking allotment to this same resolved rate (0
   // when exempt) — Parking is part of the Unit+Parking bracket, not
@@ -145,6 +160,14 @@ async function recalculateBookingGst(pool, bookingId) {
   // ExtraChargesTotal, which is itself already GST-inclusive. When exempt,
   // zero each active row's own Gst columns too (they're stored separately
   // from CrmBooking and getGstSplit doesn't touch them) before summing.
+  //
+  // DELIBERATELY `exempt` AND NOT `outsideGst`: a land sale does not zero Extra
+  // Charges. The completed-building exemption was a business decision to cover
+  // the entire booking, but Extra Charges on a plot (legal, documentation,
+  // development work) are separate supplies of SERVICES and remain taxable at
+  // 18% even though the land itself is not a supply at all. Flagged for
+  // confirmation with the finance team — if they want them zero-rated on land
+  // sales too, this one condition becomes `outsideGst`.
   if (exempt) {
     await pool.request().input("bid", sql.Int, bookingId).query(`
       UPDATE dbo.CrmExtraCharge SET GstRate = 0, GstAmount = 0, TotalAmount = Amount
@@ -162,7 +185,10 @@ async function recalculateBookingGst(pool, bookingId) {
   // convention Parking/Extra Charges already use). Computed on its own
   // (not just implied inside the combined unitParkingGstAmount below) so it
   // can be added into grandTotal explicitly instead of only being displayed.
-  const unitGstAmount = round2(totalValue * unitParkingRate / 100);
+  // Charged on the CONSTRUCTION half only. Identical to the old
+  // `totalValue * rate` for every all-flat booking, and the difference that
+  // matters for a land+villa package: the land half is never taxed.
+  const unitGstAmount = round2(split.constructionValue * unitParkingRate / 100);
 
   // unitParkingGstAmount is the combined Unit+Parking tax figure shown to
   // the customer as one bracket-level number — Unit's portion (above) plus
@@ -208,6 +234,12 @@ async function recalculateBookingGst(pool, bookingId) {
     extraWorkGstAmount, totalGstAmount,
     parkingTotal, extraChargesTotal, grandTotal,
     isGstExempt: exempt,
+    // Surfaced so a caller or the UI can say WHY there is no tax — a completed
+    // building (exempt) and a sale of land (not a supply) both produce zero GST
+    // but are different facts, and GST returns report them differently.
+    isLandSale: split.isPureLand,
+    landValue: split.landValue,
+    constructionValue: split.constructionValue,
   };
 }
 
