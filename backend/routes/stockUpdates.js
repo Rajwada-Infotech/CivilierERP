@@ -150,6 +150,113 @@ router.post("/", authenticateToken, requirePageRight("stock-update", "create"), 
   }
 });
 
+// PUT /:id — edit an existing update's date, remarks and item list/
+// quantities. Company/Project/Godown are locked once saved (changing
+// which godown a posted movement targets is effectively "delete and
+// recreate elsewhere", out of scope here) — the client only ever sends
+// UpdateDate/Remarks/items, but CompanyId/ProjectId/GodownId are accepted
+// too and simply ignored if present, so an old payload shape can't
+// silently move the record.
+//
+// The StockUpdateItems + StockLedger IN rows are replaced wholesale
+// (delete then re-insert), same as the header's original insert shape —
+// but only after checking every item whose quantity is being reduced or
+// removed still leaves that item's godown balance non-negative, same
+// safety check DELETE below already applies to a full removal.
+router.put("/:id", authenticateToken, requirePageRight("stock-update", "edit"), async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  const { UpdateDate, Remarks, items } = req.body || {};
+
+  if (!UpdateDate || Number.isNaN(Date.parse(UpdateDate))) return res.status(400).json({ error: "Update date is required." });
+  if (!Array.isArray(items) || items.length === 0) return res.status(400).json({ error: "Add at least one item." });
+
+  const seen = new Set();
+  for (const it of items) {
+    if (!it.ItemId) return res.status(400).json({ error: "Every row needs an item." });
+    const qty = Number(it.Qty);
+    if (!Number.isFinite(qty) || qty <= 0) return res.status(400).json({ error: "Every quantity must be greater than zero." });
+    const key = String(it.ItemId);
+    if (seen.has(key)) return res.status(400).json({ error: "The same item is listed twice. Combine the quantities into one row." });
+    seen.add(key);
+  }
+
+  const pool = getPool();
+  const tx = new sql.Transaction(pool);
+  try {
+    const header = await pool.request().input("id", sql.Int, id).query(
+      "SELECT StockUpdateId, GodownId, DocNo FROM dbo.StockUpdate WHERE StockUpdateId = @id",
+    );
+    if (!header.recordset.length) return res.status(404).json({ error: "Not found" });
+    const { GodownId: godownId, DocNo: docNo } = header.recordset[0];
+
+    const oldItems = await pool.request().input("id", sql.Int, id).query(
+      "SELECT ItemId, Qty FROM dbo.StockUpdateItems WHERE StockUpdateId = @id",
+    );
+    const newQtyByItem = new Map(items.map((it) => [String(it.ItemId), Number(it.Qty)]));
+
+    for (const old of oldItems.recordset) {
+      const newQty = newQtyByItem.get(String(old.ItemId)) ?? 0;
+      const decrease = Number(old.Qty) - newQty;
+      if (decrease <= 0) continue; // unchanged, increased, or a brand-new line — never a risk
+      const avail = await pool.request()
+        .input("itemId", sql.NVarChar(50), old.ItemId)
+        .input("godownId", sql.Int, godownId).query(`
+          SELECT ISNULL(SUM(CASE WHEN Type='IN' THEN Qty ELSE -Qty END), 0) AS Available
+          FROM dbo.StockLedger
+          WHERE ItemID = @itemId AND GodownID = @godownId
+        `);
+      const available = Number(avail.recordset[0].Available || 0);
+      if (available < decrease) {
+        return res.status(409).json({
+          error: `Can't reduce item ${old.ItemId} by that much — only ${available} left in this godown, less than the ${decrease} this edit would remove. Some of it has already been used elsewhere.`,
+        });
+      }
+    }
+
+    await tx.begin();
+    await new sql.Request(tx)
+      .input("id", sql.Int, id)
+      .input("UpdateDate", sql.Date, UpdateDate)
+      .input("Remarks", sql.NVarChar(500), Remarks ? String(Remarks).slice(0, 500) : null)
+      .query("UPDATE dbo.StockUpdate SET UpdateDate = @UpdateDate, Remarks = @Remarks WHERE StockUpdateId = @id");
+
+    await new sql.Request(tx).input("id", sql.Int, id).query("DELETE FROM dbo.StockUpdateItems WHERE StockUpdateId = @id");
+    await new sql.Request(tx).input("id", sql.Int, id).query("DELETE FROM dbo.StockLedger WHERE RefType = 'STKUPD' AND RefID = @id");
+
+    for (const it of items) {
+      const qty = Number(it.Qty);
+      const uom = it.UOM ? String(it.UOM).slice(0, 20) : null;
+      await new sql.Request(tx)
+        .input("id", sql.Int, id)
+        .input("ItemId", sql.NVarChar(50), String(it.ItemId))
+        .input("UOM", sql.NVarChar(20), uom)
+        .input("Qty", sql.Decimal(18, 3), qty).query(`
+          INSERT INTO dbo.StockUpdateItems (StockUpdateId, ItemId, UOM, Qty) VALUES (@id, @ItemId, @UOM, @Qty)
+        `);
+      await new sql.Request(tx)
+        .input("ItemID", sql.NVarChar(50), String(it.ItemId))
+        .input("Qty", sql.Decimal(18, 3), qty)
+        .input("UOM", sql.NVarChar(20), uom)
+        .input("RefID", sql.Int, id)
+        .input("DocNo", sql.NVarChar(100), docNo)
+        .input("GodownID", sql.Int, godownId)
+        .input("CreatedDate", sql.DateTime, new Date(`${UpdateDate}T12:00:00`)).query(`
+          INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, GodownID, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, 'IN', 'STKUPD', @RefID, @DocNo, @GodownID, @CreatedDate)
+        `);
+    }
+    await tx.commit();
+
+    await bumpCacheVersion("stock-ledger").catch(() => {});
+    res.json({ message: "Stock update saved" });
+  } catch (err) {
+    try { await tx.rollback(); } catch (_) { /* not begun or already rolled back */ }
+    console.error("[stock-updates] PUT /:id error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE /:id — super_admin only. Removes the StockLedger IN rows this
 // update posted, then its items, then the header, in one transaction —
 // same hard-delete-by-RefType/RefID shape GRN and Material Issue already
