@@ -75,10 +75,17 @@ export function useCameraCapture() {
         }
       }
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      // Attaching srcObject here only works when the caller renders <video>
+      // unconditionally (CameraCaptureModal.tsx does). A caller that only
+      // mounts <video> once isActive is true (ActivityDetailModal.tsx's
+      // Photos tab) has videoRef.current still null at this exact point —
+      // the element doesn't exist yet, since setIsActive(true) below is
+      // what causes React to render it. That silently dropped the stream
+      // and never called play(), leaving a permanently black video panel
+      // even though the camera really was granted and running (the "camera
+      // opens but shows black" bug). The effect further down re-attaches
+      // once isActive flips and the element has actually mounted, so this
+      // hook works correctly either way the caller structures its JSX.
       setIsActive(true);
       return true;
     } catch (err) {
@@ -109,7 +116,29 @@ export function useCameraCapture() {
     });
   }, []);
 
+  // Runs after every commit where isActive is true, i.e. after React has
+  // actually mounted <video> for a caller that renders it conditionally —
+  // attaches whatever stream is live to whatever video element exists now,
+  // regardless of which one changed. A callback ref (below) covers the
+  // case where the element mounts on the SAME render isActive flips true
+  // (before this effect would otherwise run); this effect is what covers
+  // Strict Mode's extra mount/unmount pass and any later remount.
+  useEffect(() => {
+    if (isActive && videoRef.current && streamRef.current && videoRef.current.srcObject !== streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  });
+
+  const setVideoRef = useCallback((el: HTMLVideoElement | null) => {
+    videoRef.current = el;
+    if (el && streamRef.current && el.srcObject !== streamRef.current) {
+      el.srcObject = streamRef.current;
+      el.play().catch(() => {});
+    }
+  }, []);
+
   useEffect(() => stop, [stop]);
 
-  return { videoRef, isActive, unsupported, error, start, stop, capture };
+  return { videoRef: setVideoRef, isActive, unsupported, error, start, stop, capture };
 }

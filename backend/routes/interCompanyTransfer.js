@@ -224,6 +224,16 @@ async function resolveTransferContext(pool, { senderProjectId, receiverProjectId
 // — some inter-company movements genuinely aren't a taxable supply — so it
 // zeroes the GST component entirely rather than just hiding it: gstPct/
 // gstAmount come back 0 and amountInclGst equals the excl-GST amount.
+//
+// An item with no purchase history anywhere under the sending company used
+// to hard-fail the whole preview/create call — one such item blocked
+// pricing every other, perfectly priceable, item on the same transfer.
+// Now it prices at 0 with needsManualRate: true instead, so /preview can
+// still show every other item; the caller passes manualRate (and, if it
+// matters, manualGstPct) once the user's typed one in, and this same
+// function re-prices that item for real on the next call. POST / (actual
+// creation) still refuses to create anything while any item is still
+// unpriced — see its own check after calling this.
 async function priceItems(pool, senderCompanyId, senderCompanyName, items, applyGst = true) {
   const pricedItems = [];
   for (const [idx, item] of items.entries()) {
@@ -234,16 +244,27 @@ async function priceItems(pool, senderCompanyId, senderCompanyName, items, apply
       err.status = 400;
       throw err;
     }
+    const manualRate = Number(item.manualRate ?? item.ManualRate);
     const rateInfo = await getLastPurchaseRateByCompany(pool, senderCompanyId, itemId);
-    if (!rateInfo) {
-      const err = new Error(
-        `No last purchase rate found for item ${item.itemName || itemId} anywhere under ${senderCompanyName}.`,
-      );
-      err.status = 400;
-      throw err;
+
+    let rate, gstPct, sourceDocNo, needsManualRate;
+    if (rateInfo) {
+      rate = Number(rateInfo.rate);
+      gstPct = applyGst ? Number(rateInfo.gstPct || 0) : 0;
+      sourceDocNo = rateInfo.sourceDocNo || null;
+      needsManualRate = false;
+    } else if (Number.isFinite(manualRate) && manualRate > 0) {
+      rate = manualRate;
+      gstPct = applyGst ? Number(item.manualGstPct ?? item.ManualGstPct ?? 0) || 0 : 0;
+      sourceDocNo = "Manual entry — no purchase history found";
+      needsManualRate = false;
+    } else {
+      rate = 0;
+      gstPct = 0;
+      sourceDocNo = null;
+      needsManualRate = true;
     }
-    const rate     = Number(rateInfo.rate);
-    const gstPct   = applyGst ? Number(rateInfo.gstPct || 0) : 0;
+
     const baseAmt  = Math.round(qty * rate * 100) / 100;
     const gstAmt   = Math.round(baseAmt * (gstPct / 100) * 100) / 100;
     pricedItems.push({
@@ -260,7 +281,8 @@ async function priceItems(pool, senderCompanyId, senderCompanyName, items, apply
       gstPct,
       gstAmount:    gstAmt,
       amountInclGst: Math.round((baseAmt + gstAmt) * 100) / 100,
-      sourceDocNo:  rateInfo.sourceDocNo || null,
+      sourceDocNo,
+      needsManualRate,
     });
   }
   return pricedItems;
@@ -491,6 +513,12 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     }
 
     const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items, applyGst);
+    const unpriced = pricedItems.filter((i) => i.needsManualRate);
+    if (unpriced.length) {
+      return res.status(400).json({
+        error: `No purchase history found for ${unpriced.map((i) => i.itemName || i.itemId).join(", ")} under ${ctx.sender.CompanyName} — enter a rate manually for ${unpriced.length === 1 ? "it" : "them"} before submitting.`,
+      });
+    }
     const totalAmount        = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
     const totalGstAmount     = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
     const totalAmountInclGst = Math.round((totalAmount + totalGstAmount) * 100) / 100;
