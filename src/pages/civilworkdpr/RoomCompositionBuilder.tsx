@@ -290,7 +290,8 @@ export default function RoomCompositionBuilder() {
                       <p className="text-xs text-muted-foreground">
                         This layout applies to every unit tagged {selectedLabel} across every project,
                         tower, and floor — set it once here instead of per unit. Saving adds any new
-                        rooms to units whose rooms are already built; unused empty rooms are automatically removed.
+                        rooms to units whose rooms are already built; unused empty rooms are automatically
+                        removed. Rooms that already have DPR work or blueprints attached are always kept.
                       </p>
 
                       <div className="space-y-2">
