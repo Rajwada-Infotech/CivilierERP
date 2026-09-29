@@ -14,8 +14,6 @@ const {
   listLayoutTypes,
   resolveLayoutType,
   getEffectiveComposition,
-  syncRoomsForUnits,
-  bumpFlatMasterCaches,
 } = require("../services/unitLayout");
 
 // A real layout can reasonably have a handful of any one room category —
@@ -288,36 +286,19 @@ router.post(
         throw e;
       }
 
-      // Propagate to units that already have their rooms built: ADD any room
-      // the new composition calls for (e.g. a 2nd Bathroom), and REMOVE
-      // any unused empty rooms that are no longer in the layout.
-      // Units whose rooms haven't been generated yet are left to Room
-      // Master's bulk "Generate rooms" action.
-      const affected = await pool.request()
-        .input("layoutTypeId", sql.Int, layoutTypeId)
-        .input("typeKey", sql.NVarChar(50), typeKey)
-        .query(`
-          SELECT u.Id FROM dbo.UnitMaster u
-          WHERE u.IsActive = 1
-            AND (u.LayoutTypeId = @layoutTypeId
-                 OR (u.LayoutTypeId IS NULL AND UPPER(REPLACE(LTRIM(RTRIM(u.UnitType)), ' ', '')) = @typeKey))
-            AND EXISTS (SELECT 1 FROM dbo.RoomMaster r WHERE r.UnitId = u.Id AND r.IsActive = 1 AND r.RoomCategoryId IS NOT NULL)
-        `);
-      const sync = await syncRoomsForUnits(pool, affected.recordset.map((r) => r.Id), { removeUnused: true, createdBy: req.user?.userId || null });
-      if (sync.created || sync.reactivated || sync.renamed || sync.deactivated) await bumpFlatMasterCaches();
-      if (sync.failed.length) console.error("[unit-bhk-config] POST /template room sync failures:", sync.failed);
-
-      res.json({
-        success: true,
-        configId,
-        roomSync: {
-          unitsChecked: sync.units,
-          unitsUpdated: sync.unitsChanged,
-          roomsAdded: sync.created + sync.reactivated,
-          roomsRemoved: sync.deactivated,
-          failed: sync.failed.length,
-        },
-      });
+      // Deliberately does NOT touch any already-built room here. A layout
+      // type like "2BHK" is shared company-wide, but every project can
+      // reach the point of actually generating its units' rooms at a
+      // different time — auto-propagating this save into every unit that
+      // happens to already have rooms built (across every project, with no
+      // project scoping at all) meant tweaking the composition for one
+      // project's needs could silently add or delete rooms in a totally
+      // unrelated project's already-built units. Room Master's own
+      // project-scoped "Generate rooms" / bulk resync (POST
+      // /generate-bulk, ProjectId required) is now the only thing that
+      // ever builds or reconciles rooms from this composition, one project
+      // at a time, only on the project someone explicitly runs it for.
+      res.json({ success: true, configId });
     } catch (err) {
       console.error("[unit-bhk-config] POST /template error:", err.message);
       res.status(500).json({ error: err.message });
