@@ -854,10 +854,12 @@ router.patch(
     const MANUAL_STATUSES = new Set(["IN_PROGRESS", "HOLD"]);
     let current = null;
     let currentProgress = null;
-    if (hasStatus || hasProgress) {
+    let assignmentId = null;
+    if (hasStatus || hasProgress || hasRemarks) {
       const cur = await pool.request().input("rungId", sql.Int, rungId).query(
-        "SELECT Status, ProgressPercent FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+        "SELECT Id, Status, ProgressPercent FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
       );
+      assignmentId = cur.recordset[0]?.Id ?? null;
       current = cur.recordset[0]?.Status;
       currentProgress = cur.recordset[0]?.ProgressPercent;
     }
@@ -935,12 +937,61 @@ router.patch(
     if (!result.rowsAffected[0]) {
       return res.status(404).json({ error: "No assignment found for this rung" });
     }
+
+    // Audit trail for Work Reporting — who touched the progress bar or
+    // Remarks, and when. Status-only moves (Hold/Cancel from the dropdown)
+    // aren't logged here; those already show up in the rework/QC history.
+    if (hasProgress || hasRemarks) {
+      await pool.request()
+        .input("assignmentId", sql.Int, assignmentId)
+        .input("fromProgress", sql.Int, hasProgress ? currentProgress : null)
+        .input("toProgress", sql.Int, hasProgress ? progressPercent : null)
+        .input("remarks", sql.NVarChar(1000), hasRemarks ? remarks : null)
+        .input("statusAfter", sql.NVarChar(20), effectiveStatus || current)
+        .input("loggedBy", sql.NVarChar(200), actor)
+        .query(`
+          INSERT INTO dbo.DependencyActivityProgressLog
+            (AssignmentId, FromProgressPercent, ToProgressPercent, Remarks, StatusAfter, LoggedBy)
+          VALUES
+            (@assignmentId, @fromProgress, @toProgress, @remarks, @statusAfter, @loggedBy)
+        `);
+    }
+
     res.json({ success: true, status: effectiveStatus, remarks, progressPercent });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+// GET /:rungId/progress-log — Work Reporting's audit trail: every past
+// progress-bar/Remarks update on this rung's CURRENT attempt, newest
+// first, with who made it and when. Read-only — nothing here is acted on.
+router.get(
+  "/:rungId/progress-log",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "view"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    try {
+      const pool = await getPool();
+      const r = await pool.request().input("rungId", sql.Int, rungId).query(`
+        SELECT pl.Id AS id, pl.FromProgressPercent AS fromProgressPercent,
+               pl.ToProgressPercent AS toProgressPercent, pl.Remarks AS remarks,
+               pl.StatusAfter AS statusAfter, pl.LoggedBy AS loggedBy, pl.LoggedAt AS loggedAt
+        FROM dbo.DependencyActivityProgressLog pl
+        JOIN dbo.DependencyActivityAssignment daa ON daa.Id = pl.AssignmentId
+        WHERE daa.DependencyMasterActivityId = @rungId AND daa.IsCurrent = 1
+        ORDER BY pl.LoggedAt DESC, pl.Id DESC
+      `);
+      res.json(r.recordset);
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /:rungId/progress-log error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // POST /:rungId/restore — bring a Cancelled activity back. super_admin
 // only, deliberately checked by role directly rather than a page right —

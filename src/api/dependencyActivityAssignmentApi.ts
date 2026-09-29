@@ -349,6 +349,23 @@ export const updateAssignmentDetail = async (
   return handleResponse<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }>(res);
 };
 
+// Work Reporting's audit trail — every past progress-bar/Remarks update on
+// this rung, newest first, with who made it and when.
+export interface ProgressLogEntry {
+  id: number;
+  fromProgressPercent: number | null;
+  toProgressPercent: number | null;
+  remarks: string | null;
+  statusAfter: AssignmentStatus | null;
+  loggedBy: string | null;
+  loggedAt: string;
+}
+
+export const getProgressLog = async (rungId: number): Promise<ProgressLogEntry[]> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/progress-log`);
+  return handleResponse<ProgressLogEntry[]>(res);
+};
+
 // ── Blueprint Annotation Workflow ───────────────────────────────────────────
 // Scoped per (rung, room, context) — see migration 345/346's own comments
 // for why: two activities in the same chain sharing a room's blueprint

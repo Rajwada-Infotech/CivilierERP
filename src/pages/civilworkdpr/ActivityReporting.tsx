@@ -29,6 +29,8 @@ import {
   ShieldCheck,
   RotateCcw,
   CheckCircle2,
+  Search,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
@@ -123,6 +125,7 @@ function ActivityPhotosBadge({ rungId }: { rungId: number }) {
 export default function ActivityReporting() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
   const [statusFilter, setStatusFilter] = useState<AssignmentStatus | "ALL">("ALL");
+  const [search, setSearch] = useState("");
   const [detailRow, setDetailRow] = useState<ReportedAssignment | null>(null);
   const [detailTab, setDetailTab] = useState<"overview" | "blueprint" | "photos">("overview");
   const openDetail = (row: ReportedAssignment, tab: "overview" | "blueprint" | "photos" = "overview") => {
@@ -136,10 +139,17 @@ export default function ActivityReporting() {
     enabled: rights.canView,
   });
 
-  const filteredRows = useMemo(
-    () => (statusFilter === "ALL" ? rows : rows.filter((r) => r.status === statusFilter)),
-    [rows, statusFilter],
-  );
+  const filteredRows = useMemo(() => {
+    let out = statusFilter === "ALL" ? rows : rows.filter((r) => r.status === statusFilter);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      out = out.filter((r) =>
+        [r.activityName, r.flatName, r.alias, r.scopePath, r.projectName, r.towerName, r.roomName]
+          .some((v) => (v || "").toLowerCase().includes(q)),
+      );
+    }
+    return out;
+  }, [rows, statusFilter, search]);
 
   // Per-status counts for the filter row's badges — always computed off
   // the full, unfiltered set so a tab shows how many activities are in
@@ -207,23 +217,43 @@ export default function ActivityReporting() {
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-border bg-muted/30">
               <span className="text-sm font-heading font-semibold text-foreground">Assigned Activities</span>
-              {groupedRows.length > 0 && (
-                <button
-                  type="button"
-                  onClick={toggleAllGroups}
-                  className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors"
-                >
-                  {allGroupsExpanded ? (
-                    <>
-                      <ChevronRight size={12} /> Collapse all
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown size={12} /> Expand all
-                    </>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search flat or activity…"
+                    className="pl-7 pr-7 py-1.5 w-56 text-xs rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-cyan-500/30"
+                  />
+                  {search && (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X size={12} />
+                    </button>
                   )}
-                </button>
-              )}
+                </div>
+                {groupedRows.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={toggleAllGroups}
+                    className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors shrink-0"
+                  >
+                    {allGroupsExpanded ? (
+                      <>
+                        <ChevronRight size={12} /> Collapse all
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown size={12} /> Expand all
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 px-5 py-3 border-b border-border bg-muted/10">
@@ -252,7 +282,9 @@ export default function ActivityReporting() {
               <div className="p-8 text-center text-sm text-muted-foreground">
                 {rows.length === 0
                   ? "No activities have been assigned yet — click an activity chip in Work Allocation's Link Dependency chain to assign one."
-                  : "No activities match this status."}
+                  : search.trim()
+                    ? `No activities match "${search.trim()}".`
+                    : "No activities match this status."}
               </div>
             ) : (
               groupedRows.map((group) => {
