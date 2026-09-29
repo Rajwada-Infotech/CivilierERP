@@ -1569,6 +1569,7 @@ export default function StockTransfer() {
       setToGodownId(null);
       setItems([emptyItem()]);
       setRemarks("");
+      setManualRates({});
       qc.invalidateQueries({ queryKey: ["inventory-master"] });
       qc.invalidateQueries({ queryKey: ["stock-transfers"] });
       setTimeout(() => setSuccessMsg(""), 6000);
@@ -1630,12 +1631,16 @@ export default function StockTransfer() {
         ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
         ApplyGst: applyGst,
         Remarks: remarks || undefined,
-        Items: validItems.map((it) => ({
-          itemId: it.itemId,
-          itemName: it.itemName,
-          uom: it.uom,
-          qty: it.qty,
-        })),
+        Items: validItems.map((it) => {
+          const manual = parseFloat(manualRates[it.itemId]);
+          return {
+            itemId: it.itemId,
+            itemName: it.itemName,
+            uom: it.uom,
+            qty: it.qty,
+            ...(Number.isFinite(manual) && manual > 0 ? { manualRate: manual } : {}),
+          };
+        }),
       });
       return;
     }
@@ -1654,6 +1659,7 @@ export default function StockTransfer() {
     setItems([emptyItem()]);
     setRemarks("");
     setErrorMsg("");
+    setManualRates({});
   };
 
   // Collect all project IDs that belong (directly or via tagging) to the TO company.
@@ -1706,8 +1712,15 @@ export default function StockTransfer() {
   // Posting preview — prices the current item lines at the sender company's
   // most recent purchase rate so the user can see exactly what will post
   // (which company gets debited/credited and how much) before submitting.
+  // An item with no purchase history anywhere under the sending company
+  // comes back with needsManualRate: true instead of failing the whole
+  // preview — manualRates holds whatever the user's typed in for those,
+  // keyed by itemId, fed back into both the preview and the actual submit.
+  const [manualRates, setManualRates] = useState<Record<string, string>>({});
   const interPreviewItems = items.filter((it) => it.itemId && parseFloat(it.qty) > 0);
-  const interPreviewKey = interPreviewItems.map((it) => `${it.itemId}:${it.qty}`).join(",");
+  const interPreviewKey = interPreviewItems
+    .map((it) => `${it.itemId}:${it.qty}:${manualRates[it.itemId] || ""}`)
+    .join(",");
   const {
     data: interPreview,
     isFetching: interPreviewLoading,
@@ -1724,12 +1737,16 @@ export default function StockTransfer() {
         ...(filterCompanyId ? { SenderCompanyId: Number(filterCompanyId) } : {}),
         ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
         ApplyGst: applyGst,
-        Items: interPreviewItems.map((it) => ({
-          itemId: it.itemId,
-          itemName: it.itemName,
-          uom: it.uom,
-          qty: parseFloat(it.qty),
-        })),
+        Items: interPreviewItems.map((it) => {
+          const manual = parseFloat(manualRates[it.itemId]);
+          return {
+            itemId: it.itemId,
+            itemName: it.itemName,
+            uom: it.uom,
+            qty: parseFloat(it.qty),
+            ...(Number.isFinite(manual) && manual > 0 ? { manualRate: manual } : {}),
+          };
+        }),
       }),
     enabled:
       transferMode === "inter" &&
@@ -1739,6 +1756,11 @@ export default function StockTransfer() {
     retry: false,
   });
 
+  // Blocks submit while any priced item is still waiting on a manual rate
+  // — only meaningful for inter-company transfers, which are the only ones
+  // that price off purchase history at all.
+  const hasUnpricedItems =
+    transferMode === "inter" && !!interPreview?.items.some((it) => it.needsManualRate);
 
   const companyOptions = (enterprisesData ?? []).map((e) => ({
     value: String(e.id),
@@ -2182,6 +2204,35 @@ export default function StockTransfer() {
                               const gstPct = it.gstPct ?? 0;
                               const gstAmt = it.gstAmount ?? 0;
                               const inclAmt = it.amountInclGst ?? it.amount;
+                              if (it.needsManualRate) {
+                                return (
+                                  <div key={it.itemId} className="rounded-md bg-amber-500/5 border border-amber-400/30 px-3 py-2 space-y-1.5">
+                                    <div className="flex items-center justify-between gap-3 text-[11px] font-medium">
+                                      <span className="text-foreground truncate">
+                                        {it.itemName || it.itemId} — {it.qty} {it.unit}
+                                      </span>
+                                    </div>
+                                    <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                                      No purchase history found under this company — enter a rate to price this item.
+                                    </p>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[11px] text-muted-foreground">₹</span>
+                                      <input
+                                        type="number"
+                                        min="0.01"
+                                        step="any"
+                                        value={manualRates[it.itemId] ?? ""}
+                                        onChange={(e) =>
+                                          setManualRates((prev) => ({ ...prev, [it.itemId]: e.target.value }))
+                                        }
+                                        placeholder="Rate per unit"
+                                        className="w-32 px-2 py-1 rounded-md border border-amber-400/40 bg-background text-xs text-foreground outline-none focus:ring-2 focus:ring-amber-500/30"
+                                      />
+                                      <span className="text-[10px] text-muted-foreground">per {it.unit}</span>
+                                    </div>
+                                  </div>
+                                );
+                              }
                               return (
                                 <div key={it.itemId} className="rounded-md bg-muted/30 border border-border/40 px-3 py-2 space-y-0.5">
                                   <div className="flex items-center justify-between gap-3 text-[11px] font-medium">
@@ -2268,7 +2319,7 @@ export default function StockTransfer() {
                       {rights.canCreate && (
                       <button
                         onClick={handleTransfer}
-                        disabled={!canTransfer}
+                        disabled={!canTransfer || hasUnpricedItems}
                         className="flex-1 sm:flex-none whitespace-nowrap flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-sm"
                       >
                         {transferMut.isPending || interTransferMut.isPending ? (

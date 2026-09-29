@@ -21,6 +21,9 @@ export interface InterCompanyTransferItemPayload {
   itemName?: string;
   uom?: string;
   qty: number;
+  /** Only needed when the preview comes back with needsManualRate for this
+   *  item (no purchase history found anywhere under the sending company). */
+  manualRate?: number;
 }
 
 export interface InterCompanyTransferPayload {
@@ -59,6 +62,10 @@ export interface InterCompanyTransferPreviewItem {
   gstAmount?: number;
   amountInclGst?: number;
   sourceDocNo: string | null;
+  /** True when no purchase history exists anywhere under the sending
+   *  company — rate/amount come back 0 until the caller supplies
+   *  manualRate for this item and re-previews. */
+  needsManualRate?: boolean;
 }
 
 export interface InterCompanyTransferPreview {
@@ -75,7 +82,10 @@ export interface InterCompanyTransferPreview {
 
 // Prices items at the sending company's most recent purchase rate (excl.
 // GST) without creating anything — powers the Posting preview shown before
-// submit. Throws if any item has no purchase history to price from.
+// submit. An item with no purchase history anywhere under the sending
+// company comes back with needsManualRate: true (rate/amount 0) rather
+// than failing the whole call — pass manualRate for that item and
+// re-preview once the user's entered one.
 export const previewInterCompanyTransfer = async (payload: {
   SenderProjectId: number;
   ReceiverProjectId: number;
