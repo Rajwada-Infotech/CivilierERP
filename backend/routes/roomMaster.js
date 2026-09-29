@@ -591,7 +591,7 @@ router.post("/generate-bulk", allowRoles("admin", "super_admin", "dba"), async (
 });
 
 // POST /delete-bulk — Delete rooms hierarchically by level (Project/Block/Floor/Unit)
-router.post("/delete-bulk", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+router.post("/delete-bulk", allowRoles("super_admin"), async (req, res) => {
   const { level, position } = req.body;
   if (!level || !position) return res.status(400).json({ error: "level and position are required" });
   

@@ -9,12 +9,12 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { getProjectOverrides } from "@/api/unitLayoutOverrideApi";
 import { getLayoutTypes, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 import { getRoomCategoryOptions, type RoomCategory } from "@/api/roomCategoryMasterApi";
-import {
-  resolveLayout, compositionText, roomTotal,
+import { resolveLayout, compositionText, roomTotal,
   type Level, type Position, type LayoutOverrideRow,
 } from "@/lib/layoutResolve";
 import { InlineLayoutEditor, type NodeType } from "./InlineLayoutEditor";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useAuth } from "@/contexts/AuthContext";
 import { safeHtml } from "@/utils/escapeHtml";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import {
@@ -651,6 +651,8 @@ const roomViewFields: {
 // ── Component ─────────────────────────────────────────────────────────────────
 const RoomMaster: React.FC = () => {
   const rights = usePageRights("civilworkdpr-room-master");
+  const { currentUser } = useAuth();
+  const canBulkDelete = currentUser?.role === "super_admin";
   const queryClient = useQueryClient();
 
   const {
@@ -1077,7 +1079,7 @@ const RoomMaster: React.FC = () => {
                       custom={isCustom.project(pos.projectId)} chips={<LayoutChips items={chipsFor(types, pos, "PROJECT")} />}
                       editing={editing?.key === p.key}
                       onEditLayout={() => toggleEditor({ key: p.key, level: "PROJECT", position: pos, types })}
-                      onDeleteLevel={rights.canDelete ? () => setDeletingLevel({ level: "PROJECT", position: pos, name: p.name, roomCount: p.roomCount }) : undefined} />
+                      onDeleteLevel={canBulkDelete ? () => setDeletingLevel({ level: "PROJECT", position: pos, name: p.name, roomCount: p.roomCount }) : undefined} />
                   );
                 })()}
                 {editorFor(p.key)}
@@ -1092,7 +1094,7 @@ const RoomMaster: React.FC = () => {
                           custom={isCustom.block(b.blockIdNum)} chips={<LayoutChips items={chipsFor(types, pos, "BLOCK")} />}
                           editing={editing?.key === b.key}
                           onEditLayout={() => toggleEditor({ key: b.key, level: "BLOCK", position: pos, types })}
-                          onDeleteLevel={rights.canDelete ? () => setDeletingLevel({ level: "BLOCK", position: pos, name: `Block ${b.name}`, roomCount: b.roomCount }) : undefined} />
+                          onDeleteLevel={canBulkDelete ? () => setDeletingLevel({ level: "BLOCK", position: pos, name: `Block ${b.name}`, roomCount: b.roomCount }) : undefined} />
                       );
                     })()}
                     {editorFor(b.key)}
@@ -1111,7 +1113,7 @@ const RoomMaster: React.FC = () => {
                               chips={f.floorNo == null ? undefined : <LayoutChips items={chipsFor(types, pos, "FLOOR")} />}
                               editing={editing?.key === f.key}
                               onEditLayout={f.floorNo == null ? undefined : () => toggleEditor({ key: f.key, level: "FLOOR", position: pos, types })}
-                              onDeleteLevel={rights.canDelete ? () => setDeletingLevel({ level: "FLOOR", position: pos, name: floorLabelText, roomCount: f.roomCount }) : undefined} />
+                              onDeleteLevel={canBulkDelete ? () => setDeletingLevel({ level: "FLOOR", position: pos, name: floorLabelText, roomCount: f.roomCount }) : undefined} />
                           );
                         })()}
                         {editorFor(f.key)}
@@ -1164,7 +1166,7 @@ const RoomMaster: React.FC = () => {
                                     types: typesOf([g]),
                                   })} />
                                 )}
-                                {rights.canDelete && g.rooms.length > 0 && (
+                                {canBulkDelete && g.rooms.length > 0 && (
                                   <button type="button" onClick={() => setDeletingLevel({ level: "UNIT", position: { projectId: Number(g.projectId), blockId: Number(g.blockId), floorNo: g.floorNo, unitId: Number(g.unitId) }, name: g.unitName, roomCount: g.rooms.length })}
                                     className="p-1.5 rounded-md border border-transparent text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                                     title={`Delete all ${g.rooms.length} room(s) in this unit`}>
