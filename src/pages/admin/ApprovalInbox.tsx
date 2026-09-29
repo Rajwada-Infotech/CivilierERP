@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -1240,6 +1240,7 @@ const ApprovalInbox: React.FC = () => {
 
   const {
     data: allItems = [],
+    dataUpdatedAt,
     isLoading,
     isRefetching,
     refetch,
@@ -1251,6 +1252,26 @@ const ApprovalInbox: React.FC = () => {
   });
 
   const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
+
+  // Approving/rejecting hides a row immediately (before the refetch this
+  // same action triggers has actually landed) by key, keyed on Module +
+  // RecordId. For most modules RecordId is stable forever once acted on,
+  // so that's fine — but civilworkdpr-approval's RecordId is the RUNG id,
+  // which is deliberately the SAME across every rework attempt of that
+  // rung (see approvalInbox.js's own comment on that module). Without
+  // this reset, rejecting attempt 1 permanently hid every later attempt
+  // of the same rung from this session's inbox — including a fully
+  // legitimate attempt 2 that QC re-approved and that genuinely needs
+  // review — since removedKeys never had a reason to forget that key.
+  // Any fresh fetch is authoritative for what's actually pending right
+  // now, so it's always safe to drop the whole overlay once one lands.
+  const lastClearedFetchRef = useRef(dataUpdatedAt);
+  useEffect(() => {
+    if (dataUpdatedAt !== lastClearedFetchRef.current) {
+      lastClearedFetchRef.current = dataUpdatedAt;
+      setRemovedKeys(new Set());
+    }
+  }, [dataUpdatedAt]);
 
   const items = (
     activeModules.length > 0
