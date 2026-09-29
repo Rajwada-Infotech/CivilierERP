@@ -258,7 +258,7 @@ describe("Inter-Company Transfer: validation", () => {
       .set("Authorization", `Bearer ${superAdminToken()}`)
       .send(validPayload());
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/last purchase rate/i);
+    expect(res.body.error).toMatch(/no purchase history/i);
   });
 
   test("prices items via the COMPANY-scoped rate lookup, not project-scoped", async () => {
