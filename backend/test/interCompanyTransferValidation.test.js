@@ -258,7 +258,10 @@ describe("Inter-Company Transfer: validation", () => {
       .set("Authorization", `Bearer ${superAdminToken()}`)
       .send(validPayload());
     expect(res.status).toBe(400);
-    expect(res.body.error).toMatch(/last purchase rate/i);
+    // POST / (create) still hard-fails when any item is unpriced — /preview
+    // is the one that degrades to needsManualRate:true instead so the rest
+    // of the form can still price (see priceItems' own comment).
+    expect(res.body.error).toMatch(/no purchase history found/i);
   });
 
   test("prices items via the COMPANY-scoped rate lookup, not project-scoped", async () => {
