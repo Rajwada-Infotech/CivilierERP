@@ -54,6 +54,15 @@ import { usePageRights } from "@/hooks/usePageRights";
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n ?? 0);
 
+// Rate is stored to 4 decimal places (InterCompanyTransferItems.Rate) and
+// Amount is computed from that full-precision value server-side — showing
+// Rate capped to 2dp via fmtNum made "Rate × Qty" visibly not reconcile
+// with the printed Excl. GST/Total (e.g. a weighted-average rate like
+// 241.525 printed as "241.53"), which read as the GST calc "not adding
+// up" even though the underlying numbers were always correct.
+const fmtRate = (n: number) =>
+  new Intl.NumberFormat("en-IN", { maximumFractionDigits: 4 }).format(n ?? 0);
+
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString("en-IN", {
     day: "2-digit",
@@ -852,7 +861,7 @@ function ICTPreviewModal({
                         <tr key={item.ICTItemId} className="border-b border-border last:border-0 hover:bg-muted/20">
                           <td className="px-3 py-2 text-foreground">{item.ItemName || item.ItemId}</td>
                           <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Quantity)}</td>
-                          <td className="px-3 py-2 text-right font-mono text-muted-foreground">{fmtNum(item.Rate)}</td>
+                          <td className="px-3 py-2 text-right font-mono text-muted-foreground">{fmtRate(item.Rate)}</td>
                           <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Amount)}</td>
                           <td className="px-3 py-2 text-right font-mono text-amber-600 dark:text-amber-400">
                             {gstPct > 0 ? `${gstPct}% = ${fmtNum(gstAmt)}` : "—"}
@@ -2241,7 +2250,7 @@ export default function StockTransfer() {
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between text-[10px] text-muted-foreground">
-                                    <span>Excl. GST: ₹{it.rate.toLocaleString("en-IN")}/unit × {it.qty} = ₹{it.amount.toLocaleString("en-IN")}</span>
+                                    <span>Excl. GST: ₹{fmtRate(it.rate)}/unit × {it.qty} = ₹{it.amount.toLocaleString("en-IN")}</span>
                                   </div>
                                   {gstPct > 0 ? (
                                     <div className="flex items-center justify-between text-[10px] text-amber-600 dark:text-amber-400">
