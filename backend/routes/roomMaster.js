@@ -590,4 +590,48 @@ router.post("/generate-bulk", allowRoles("admin", "super_admin", "dba"), async (
   }
 });
 
+// POST /delete-bulk — Delete rooms hierarchically by level (Project/Block/Floor/Unit)
+router.post("/delete-bulk", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+  const { level, position } = req.body;
+  if (!level || !position) return res.status(400).json({ error: "level and position are required" });
+  
+  const { projectId, blockId, floorNo, unitId } = position;
+  if (!Number.isFinite(projectId) || projectId <= 0) return res.status(400).json({ error: "projectId is required" });
+  
+  try {
+    const pool = getPool();
+    let where = "ProjectId = @ProjectId";
+    const request = pool.request().input("ProjectId", sql.Int, projectId);
+
+    if (level === "BLOCK" || level === "FLOOR" || level === "UNIT") {
+      if (!Number.isFinite(blockId)) return res.status(400).json({ error: "blockId is required for this level" });
+      request.input("BlockId", sql.Int, blockId);
+      where += " AND BlockId = @BlockId";
+    }
+
+    if (level === "FLOOR" || level === "UNIT") {
+      if (floorNo === null) {
+        where += " AND Floor IS NULL";
+      } else {
+        const floorStr = floorNo === 0 ? "G" : String(floorNo);
+        request.input("Floor", sql.NVarChar(50), floorStr);
+        where += " AND Floor = @Floor";
+      }
+    }
+
+    if (level === "UNIT") {
+      if (!Number.isFinite(unitId)) return res.status(400).json({ error: "unitId is required for this level" });
+      request.input("UnitId", sql.Int, unitId);
+      where += " AND UnitId = @UnitId";
+    }
+
+    const result = await request.query(`DELETE FROM dbo.RoomMaster WHERE ${where}`);
+    await bumpFlatMasterCaches();
+    res.json({ message: `Deleted ${result.rowsAffected[0]} room(s) successfully`, count: result.rowsAffected[0] });
+  } catch (err) {
+    console.error("[room-master] POST /delete-bulk error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
