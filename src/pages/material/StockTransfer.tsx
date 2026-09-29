@@ -1336,11 +1336,13 @@ export default function StockTransfer() {
   const [remarks, setRemarks] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
-  // Toggles which figure the Posting Preview leads with per item and in its
-  // Total row. The GL Posting section below always posts incl-GST — that's
-  // the real amount transacted between the two companies — regardless of
-  // this toggle, which is purely a preview display choice.
-  const [interGstMode, setInterGstMode] = useState<"incl" | "excl">("incl");
+  // Whether this Inter-Company Transfer actually applies GST at all — a
+  // real business choice (some inter-company movements aren't a taxable
+  // supply), not just a display preference. false sends ApplyGst: false to
+  // both the preview and the actual create call, which zeroes the GST
+  // component server-side (priceItems in interCompanyTransfer.js) rather
+  // than just hiding it client-side.
+  const [applyGst, setApplyGst] = useState(true);
 
   const { data: godownsData } = useQuery({
     queryKey: ["godowns"],
@@ -1535,6 +1537,7 @@ export default function StockTransfer() {
         // Pass selected company overrides for cross-tagged project godowns
         ...(filterCompanyId ? { SenderCompanyId: Number(filterCompanyId) } : {}),
         ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
+        ApplyGst: applyGst,
         Remarks: remarks || undefined,
         Items: validItems.map((it) => ({
           itemId: it.itemId,
@@ -1619,7 +1622,7 @@ export default function StockTransfer() {
     isFetching: interPreviewLoading,
     error: interPreviewError,
   } = useQuery<InterCompanyTransferPreview>({
-    queryKey: ["ict-preview", fromGodown?.ProjectID, toGodown?.ProjectID, filterCompanyId, toCompanyId, interPreviewKey],
+    queryKey: ["ict-preview", fromGodown?.ProjectID, toGodown?.ProjectID, filterCompanyId, toCompanyId, interPreviewKey, applyGst],
     queryFn: () =>
       previewInterCompanyTransfer({
         SenderProjectId: fromGodown!.ProjectID!,
@@ -1629,6 +1632,7 @@ export default function StockTransfer() {
         // when Pristine Enclave is tagged to Delta Gardens.
         ...(filterCompanyId ? { SenderCompanyId: Number(filterCompanyId) } : {}),
         ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
+        ApplyGst: applyGst,
         Items: interPreviewItems.map((it) => ({
           itemId: it.itemId,
           itemName: it.itemName,
@@ -2061,32 +2065,15 @@ export default function StockTransfer() {
                         <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">
                           Posting Preview
                         </p>
-                        {interPreview && interPreview.items.length > 0 && (
-                          <div className="flex items-center rounded-lg border border-border p-0.5 text-[10px] font-medium shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => setInterGstMode("excl")}
-                              className={`px-2 py-0.5 rounded-md transition-colors ${
-                                interGstMode === "excl"
-                                  ? "bg-primary text-primary-foreground"
-                                  : "text-muted-foreground hover:bg-muted"
-                              }`}
-                            >
-                              Excl. GST
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setInterGstMode("incl")}
-                              className={`px-2 py-0.5 rounded-md transition-colors ${
-                                interGstMode === "incl"
-                                  ? "bg-primary text-primary-foreground"
-                                  : "text-muted-foreground hover:bg-muted"
-                              }`}
-                            >
-                              Incl. GST
-                            </button>
-                          </div>
-                        )}
+                        <label className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground shrink-0 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={applyGst}
+                            onChange={(e) => setApplyGst(e.target.checked)}
+                            className="rounded border-border accent-emerald-600"
+                          />
+                          Apply GST
+                        </label>
                       </div>
                       {interPreviewLoading ? (
                         <p className="text-muted-foreground flex items-center gap-1.5">
@@ -2104,7 +2091,6 @@ export default function StockTransfer() {
                               const gstPct = it.gstPct ?? 0;
                               const gstAmt = it.gstAmount ?? 0;
                               const inclAmt = it.amountInclGst ?? it.amount;
-                              const headlineAmt = interGstMode === "incl" ? inclAmt : it.amount;
                               return (
                                 <div key={it.itemId} className="rounded-md bg-muted/30 border border-border/40 px-3 py-2 space-y-0.5">
                                   <div className="flex items-center justify-between gap-3 text-[11px] font-medium">
@@ -2112,7 +2098,7 @@ export default function StockTransfer() {
                                       {it.itemName || it.itemId} — {it.qty} {it.unit}
                                     </span>
                                     <span className="text-foreground shrink-0">
-                                      ₹{headlineAmt.toLocaleString("en-IN")}
+                                      ₹{inclAmt.toLocaleString("en-IN")}
                                     </span>
                                   </div>
                                   <div className="flex items-center justify-between text-[10px] text-muted-foreground">
@@ -2146,12 +2132,9 @@ export default function StockTransfer() {
                               </div>
                             )}
                             <div className="flex items-center justify-between font-semibold border-t border-border/40 pt-1">
-                              <span className="text-foreground">Total ({interGstMode === "incl" ? "incl." : "excl."} GST)</span>
+                              <span className="text-foreground">Total (incl. GST)</span>
                               <span className="text-foreground">
-                                ₹{(interGstMode === "incl"
-                                  ? (interPreview.totalAmountInclGst ?? interPreview.totalAmount)
-                                  : interPreview.totalAmount
-                                ).toLocaleString("en-IN")}
+                                ₹{(interPreview.totalAmountInclGst ?? interPreview.totalAmount).toLocaleString("en-IN")}
                               </span>
                             </div>
                           </div>

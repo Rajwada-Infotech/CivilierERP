@@ -33,6 +33,10 @@ export interface InterCompanyTransferPayload {
   TransferDate?: string;
   Remarks?: string;
   ReferenceNumber?: string;
+  /** Whether this transfer is a taxable supply at all — defaults to true
+   *  server-side; pass false for a genuine no-GST movement (not just a
+   *  display preference — it zeroes the GST component entirely). */
+  ApplyGst?: boolean;
   Items: InterCompanyTransferItemPayload[];
 }
 
@@ -62,6 +66,7 @@ export interface InterCompanyTransferPreview {
   totalAmount: number;           // excl. GST
   totalGstAmount?: number;
   totalAmountInclGst?: number;
+  applyGst?: boolean;
   senderCompanyId?: number;
   senderCompanyName?: string;
   receiverCompanyId?: number;
@@ -80,6 +85,8 @@ export const previewInterCompanyTransfer = async (payload: {
   /** Optional override — when the selected TO company differs from the
    *  project's primary company_id (cross-tagged project godown). */
   ReceiverCompanyId?: number;
+  /** Whether this transfer is a taxable supply at all — defaults to true. */
+  ApplyGst?: boolean;
   Items: InterCompanyTransferItemPayload[];
 }): Promise<InterCompanyTransferPreview> => {
   const res = await fetchWithAuth(`${BASE}/preview`, {
