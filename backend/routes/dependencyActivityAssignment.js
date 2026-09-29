@@ -336,15 +336,13 @@ router.post(
     const tx = new sql.Transaction(pool);
     try {
       const a = await pool.request().input("rungId", sql.Int, rungId).query(
-        "SELECT Id, Status, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+        "SELECT Id, Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
       );
       if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
       const assignmentId = a.recordset[0].Id;
       if (a.recordset[0].Status !== "COMPLETED") {
         return res.status(400).json({ error: "Only a Completed activity (work dragged to 100%) can be quality-checked." });
       }
-      let approvalLevels = [];
-      try { approvalLevels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { approvalLevels = []; }
 
       const cp = await pool.request().input("aid", sql.Int, assignmentId).query(
         "SELECT Id, FieldName FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @aid ORDER BY SortOrder, Id",
@@ -398,14 +396,16 @@ router.post(
         }
       }
 
-      // Passing QC doesn't immediately finalize the activity if it has an
-      // approval setup configured (ApprovalLevelsJson, from Work
-      // Allocation's mini Approval Setup) — it stays Completed, now
-      // awaiting that named approval chain (see /:rungId/approval below),
-      // and only flips to APPROVED once every level clears. With no levels
-      // configured there's nothing to wait on, so it finalizes immediately,
-      // same as before this workflow existed.
-      const finalStatus = decision === "APPROVED" && approvalLevels.length > 0 ? "COMPLETED" : decision;
+      // Passing QC never finalizes the activity by itself — it only ever
+      // reaches Completed ("QC Passed"), awaiting a distinct Approve action
+      // (see handleApproveLevel below) before it can ever show Approved.
+      // That's true even with no approval levels configured — previously
+      // that case skipped straight to APPROVED here, which meant the
+      // Approved badge could appear the instant QC passed, with no actual
+      // approval having happened. handleApproveLevel below now handles the
+      // no-levels case too (super_admin approves it directly), so there's
+      // always a real approval step to wait on.
+      const finalStatus = decision === "APPROVED" ? "COMPLETED" : decision;
       await new sql.Request(tx)
         .input("aid", sql.Int, assignmentId)
         .input("status", sql.NVarChar(20), finalStatus)
@@ -499,11 +499,16 @@ router.get(
       const alreadyActed = currentLevel
         ? approvals.some((x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId))
         : false;
+      // No levels configured at all is its own case — there's no
+      // currentLevel to check the viewer against, so only a super_admin can
+      // clear this implicit single step (see handleApproveLevel).
       const canApprove =
         status === "COMPLETED" &&
-        currentLevel != null &&
-        !alreadyActed &&
-        (isSuperAdmin || currentLevel.userIds.map(Number).includes(Number(viewerUserId)));
+        (levels.length === 0
+          ? isSuperAdmin
+          : currentLevel != null &&
+            !alreadyActed &&
+            (isSuperAdmin || currentLevel.userIds.map(Number).includes(Number(viewerUserId))));
 
       res.json({
         status,
@@ -546,7 +551,27 @@ async function handleApproveLevel(req, res) {
     }
     let levels = [];
     try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
-    if (!levels.length) return res.status(400).json({ error: "No approval setup is configured for this activity." });
+
+    // No approval setup configured — QC passing still only reached
+    // Completed (see the QC decision route above), so it's still awaiting
+    // one explicit approval. With no named approvers to fall back on, only
+    // a super_admin can clear this implicit single step.
+    if (!levels.length) {
+      if (!isSuperAdmin) {
+        return res.status(403).json({
+          error: "No approval setup is configured for this activity — only a super_admin can approve it directly.",
+        });
+      }
+      await pool.request()
+        .input("aid", sql.Int, assignmentId)
+        .input("by", sql.NVarChar(200), req.user?.email || req.user?.name || "system")
+        .query(`
+          UPDATE dbo.DependencyActivityAssignment
+          SET Status = 'APPROVED', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+          WHERE Id = @aid
+        `);
+      return res.json({ success: true, fullyApproved: true, newStatus: "Approved", level: 1, totalLevels: 0 });
+    }
 
     const approvalsRes = await pool.request().input("aid", sql.Int, assignmentId).query(
       "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
@@ -642,19 +667,29 @@ async function handleRejectLevel(req, res) {
     }
     let levels = [];
     try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
-    if (!levels.length) return res.status(400).json({ error: "No approval setup is configured for this activity." });
 
-    const approvalsRes = await pool.request().input("aid", sql.Int, assignmentId).query(
-      "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
-    );
-    const approvals = approvalsRes.recordset;
-    const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
-    if (currentLevelIndex == null) {
-      return res.status(400).json({ error: "This activity has already cleared every approval level." });
+    // No approval setup configured — mirrors handleApproveLevel's own
+    // no-levels branch: only a super_admin can act on this implicit single
+    // step (no named approver to reject to besides them).
+    if (!levels.length && !isSuperAdmin) {
+      return res.status(403).json({
+        error: "No approval setup is configured for this activity — only a super_admin can act on it directly.",
+      });
     }
-    const currentLevel = levels[currentLevelIndex];
-    if (!isSuperAdmin && !currentLevel.userIds.map(Number).includes(Number(viewerUserId))) {
-      return res.status(403).json({ error: "You're not named as an approver for this step." });
+
+    if (levels.length) {
+      const approvalsRes = await pool.request().input("aid", sql.Int, assignmentId).query(
+        "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
+      );
+      const approvals = approvalsRes.recordset;
+      const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
+      if (currentLevelIndex == null) {
+        return res.status(400).json({ error: "This activity has already cleared every approval level." });
+      }
+      const currentLevel = levels[currentLevelIndex];
+      if (!isSuperAdmin && !currentLevel.userIds.map(Number).includes(Number(viewerUserId))) {
+        return res.status(403).json({ error: "You're not named as an approver for this step." });
+      }
     }
 
     const actor = req.user?.email || req.user?.name || "system";
@@ -718,7 +753,6 @@ router.get(
         FROM dbo.DependencyActivityAssignment daa
         WHERE daa.Status = 'COMPLETED'
           AND daa.IsCurrent = 1
-          AND daa.ApprovalLevelsJson IS NOT NULL AND daa.ApprovalLevelsJson <> '[]'
           AND (
             SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc
             WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC
@@ -741,6 +775,12 @@ router.get(
       for (const c of candidates.recordset) {
         let levels = [];
         try { levels = JSON.parse(c.approvalLevelsJson || "[]"); } catch { levels = []; }
+        // No levels configured — only a super_admin can act on this
+        // implicit single step (see handleApproveLevel's no-levels branch).
+        if (!levels.length) {
+          if (isSuperAdmin) count++;
+          continue;
+        }
         const approvals = approvalsByAssignment.get(c.assignmentId) || [];
         const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
         if (currentLevelIndex == null) continue;

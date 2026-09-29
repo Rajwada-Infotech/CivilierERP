@@ -229,8 +229,13 @@ export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; c
 // which is reachable from any stage, including a terminal one (Completed/
 // Approved), per explicit instruction. Completed is set automatically by
 // dragging the progress bar to 100% (see ActivityDetailModal's
-// ProgressDragBar); Approved/Rework come only from a QC decision; Rework's
-// one way out is manually re-opening it to In Progress to redo the work.
+// ProgressDragBar); a QC decision can only ever land back on Completed
+// ("QC Passed") or fork to Rework — Approved is reachable only from an
+// explicit approval action afterwards (dependencyActivityAssignment.js's
+// handleApproveLevel — a named approver, or a super_admin when no approval
+// levels are configured), never automatically from QC passing on its own.
+// Rework's one way out is manually re-opening it to In Progress to redo
+// the work.
 // A single-element result means "read-only badge, no dropdown" — see
 // AssignmentStatusSelect (only Cancelled itself is truly terminal). Mirrored
 // server-side in dependencyActivityAssignment.js's status route — keep the

@@ -291,10 +291,11 @@ export default function QualityCheck() {
   });
 
   // A Completed activity that already has a passing QC decision has moved
-  // on to the approval workflow (or, with no approval setup configured,
-  // straight to Approved) — it's not this queue's job any more, even
+  // on to the approval step — it's not this queue's job any more, even
   // though its own Status is still literally Completed until that
-  // workflow finishes. See getCompletedAssignments' own comment.
+  // approval lands (a super_admin approves directly when no approval
+  // levels are configured, otherwise the named approval chain does). See
+  // getCompletedAssignments' own comment.
   const rows = useMemo(() => allRows.filter((r) => r.qcStatus !== "APPROVED"), [allRows]);
 
   const filtered = useMemo(() => {
