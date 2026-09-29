@@ -8,6 +8,7 @@ import {
   ASSIGNMENT_STATUS_META as STATUS_META,
   getReportedAssignments,
   getActivityPhotos,
+  startDelayInfo,
   type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
@@ -29,6 +30,8 @@ import {
   ShieldCheck,
   RotateCcw,
   CheckCircle2,
+  Search,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import type { ReportedAssignment } from "@/api/dependencyActivityAssignmentApi";
@@ -54,20 +57,21 @@ const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> 
   ...ASSIGNMENT_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label })),
 ];
 
-// Lean status filter chip — icon + label only, no count. Replaces the
-// earlier GlassCard-based stat tiles, which read as a KPI dashboard when
-// this is just a filter row.
+// Status filter chip — icon, label, and a count badge for how many
+// assigned activities currently sit in that status.
 function StatusTile({
   label,
   icon: Icon,
   accentColor,
   active,
+  count,
   onClick,
 }: {
   label: string;
   icon: LucideIcon;
   accentColor: string;
   active: boolean;
+  count: number;
   onClick: () => void;
 }) {
   return (
@@ -83,6 +87,16 @@ function StatusTile({
     >
       <Icon size={12} />
       {label}
+      <span
+        className="px-1.5 rounded-full text-[10px] font-heading font-semibold leading-4"
+        style={
+          active
+            ? { background: `${accentColor}2e`, color: accentColor }
+            : { background: "var(--muted)", color: "var(--muted-foreground)" }
+        }
+      >
+        {count}
+      </span>
     </button>
   );
 }
@@ -112,6 +126,7 @@ function ActivityPhotosBadge({ rungId }: { rungId: number }) {
 export default function ActivityReporting() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
   const [statusFilter, setStatusFilter] = useState<AssignmentStatus | "ALL">("ALL");
+  const [search, setSearch] = useState("");
   const [detailRow, setDetailRow] = useState<ReportedAssignment | null>(null);
   const [detailTab, setDetailTab] = useState<"overview" | "blueprint" | "photos">("overview");
   const openDetail = (row: ReportedAssignment, tab: "overview" | "blueprint" | "photos" = "overview") => {
@@ -125,10 +140,26 @@ export default function ActivityReporting() {
     enabled: rights.canView,
   });
 
-  const filteredRows = useMemo(
-    () => (statusFilter === "ALL" ? rows : rows.filter((r) => r.status === statusFilter)),
-    [rows, statusFilter],
-  );
+  const filteredRows = useMemo(() => {
+    let out = statusFilter === "ALL" ? rows : rows.filter((r) => r.status === statusFilter);
+    const q = search.trim().toLowerCase();
+    if (q) {
+      out = out.filter((r) =>
+        [r.activityName, r.flatName, r.alias, r.scopePath, r.projectName, r.towerName, r.roomName]
+          .some((v) => (v || "").toLowerCase().includes(q)),
+      );
+    }
+    return out;
+  }, [rows, statusFilter, search]);
+
+  // Per-status counts for the filter row's badges — always computed off
+  // the full, unfiltered set so a tab shows how many activities are in
+  // that status regardless of which one is currently selected.
+  const statusCounts = useMemo(() => {
+    const counts: Partial<Record<AssignmentStatus, number>> = {};
+    for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
+    return counts;
+  }, [rows]);
 
   // Group by dependency chain — every activity raised against the same
   // chain now shows together instead of scattered across the flat list,
@@ -187,28 +218,49 @@ export default function ActivityReporting() {
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-border bg-muted/30">
               <span className="text-sm font-heading font-semibold text-foreground">Assigned Activities</span>
-              {groupedRows.length > 0 && (
-                <button
-                  type="button"
-                  onClick={toggleAllGroups}
-                  className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors"
-                >
-                  {allGroupsExpanded ? (
-                    <>
-                      <ChevronRight size={12} /> Collapse all
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown size={12} /> Expand all
-                    </>
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search flat or activity…"
+                    className="pl-7 pr-7 py-1.5 w-56 text-xs rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-cyan-500/30"
+                  />
+                  {search && (
+                    <button
+                      type="button"
+                      onClick={() => setSearch("")}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    >
+                      <X size={12} />
+                    </button>
                   )}
-                </button>
-              )}
+                </div>
+                {groupedRows.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={toggleAllGroups}
+                    className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors shrink-0"
+                  >
+                    {allGroupsExpanded ? (
+                      <>
+                        <ChevronRight size={12} /> Collapse all
+                      </>
+                    ) : (
+                      <>
+                        <ChevronDown size={12} /> Expand all
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-1.5 px-5 py-3 border-b border-border bg-muted/10">
               {FILTER_OPTIONS.map((opt) => {
                 const meta = STATUS_TILE_META[opt.value];
+                const count = opt.value === "ALL" ? rows.length : (statusCounts[opt.value] ?? 0);
                 return (
                   <StatusTile
                     key={opt.value}
@@ -216,6 +268,7 @@ export default function ActivityReporting() {
                     icon={meta.icon}
                     accentColor={meta.accentColor}
                     active={statusFilter === opt.value}
+                    count={count}
                     onClick={() => setStatusFilter(opt.value)}
                   />
                 );
@@ -230,7 +283,9 @@ export default function ActivityReporting() {
               <div className="p-8 text-center text-sm text-muted-foreground">
                 {rows.length === 0
                   ? "No activities have been assigned yet — click an activity chip in Work Allocation's Link Dependency chain to assign one."
-                  : "No activities match this status."}
+                  : search.trim()
+                    ? `No activities match "${search.trim()}".`
+                    : "No activities match this status."}
               </div>
             ) : (
               groupedRows.map((group) => {
@@ -306,6 +361,21 @@ export default function ActivityReporting() {
                                     <CalendarDays size={11} className="text-muted-foreground shrink-0" />
                                     {row.startDate ? new Date(row.startDate).toLocaleDateString() : "—"}
                                   </span>
+                                  {(() => {
+                                    const delay = startDelayInfo(row.startDate, row.firstReportedAt);
+                                    if (!delay) return null;
+                                    return (
+                                      <span
+                                        className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                                          delay.tone === "on-time"
+                                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                            : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                        }`}
+                                      >
+                                        {delay.label}
+                                      </span>
+                                    );
+                                  })()}
                                 </td>
                                 <td className="px-3 py-3">
                                   {row.materials.length === 0 ? (

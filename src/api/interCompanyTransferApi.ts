@@ -162,6 +162,35 @@ export const getInterCompanyTransfer = async (
   return handleResponse(res);
 };
 
+export interface InterCompanyTransferPostingRow {
+  label: string;
+  side: "debit" | "credit";
+  amount: number;
+}
+
+export interface InterCompanyTransferPostingVoucher {
+  jvNo: string | null;
+  companyName: string | null;
+  rows: InterCompanyTransferPostingRow[];
+}
+
+export interface InterCompanyTransferPosting {
+  docNo: string;
+  status: string;
+  amount: number;
+  senderCompanyName: string | null;
+  receiverCompanyName: string | null;
+  isPosted: boolean;
+  vouchers: InterCompanyTransferPostingVoucher[];
+}
+
+export const getInterCompanyTransferPosting = async (
+  id: number,
+): Promise<InterCompanyTransferPosting> => {
+  const res = await fetchWithAuth(`${BASE}/${id}/posting`);
+  return handleResponse(res);
+};
+
 export const getInterCompanyTransfers = async (params: {
   companyId?: string | number;
   projectId?: string | number;

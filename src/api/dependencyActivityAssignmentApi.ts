@@ -213,9 +213,11 @@ export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 // bearing on the order rows can move through.
 export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; className: string }> = {
   PENDING: { label: "Pending", className: "bg-slate-500/10 text-slate-600 dark:text-slate-400" },
-  // No longer set automatically — assigning an engineer now moves straight
-  // to IN_PROGRESS. Kept in the enum/badge map for old records and manual
-  // overrides only.
+  // Set automatically the moment an engineer is assigned (Work
+  // Allocation) — the activity sits here until that engineer reports
+  // progress for the first time, which is what actually flips it to
+  // IN_PROGRESS (see dependencyActivityAssignment.js's PATCH
+  // /:rungId/status autoStatus branch).
   ALLOCATED: { label: "Allocated", className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
   IN_PROGRESS: { label: "In Progress", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
   HOLD: { label: "Hold", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
@@ -257,6 +259,12 @@ export interface ReportedAssignment {
   startDate: string | null;
   days: number | null;
   endDate: string | null;
+  // The date the assigned engineer actually reported progress for the
+  // first time — set once and never overwritten (see
+  // dependencyActivityAssignment.js's isFirstReport). StartDate is only
+  // ever a tentative plan; (firstReportedAt - startDate) is the real delay
+  // before work began. Null until that first report happens.
+  firstReportedAt: string | null;
   labourSource: SourceType | null;
   materialSource: SourceType | null;
   description: string | null;
@@ -307,6 +315,25 @@ export const getReportedAssignments = async (dependencyMasterId?: number): Promi
   return handleResponse<ReportedAssignment[]>(res);
 };
 
+// StartDate is only ever a tentative plan — the real measure of how
+// promptly work began is (firstReportedAt - startDate), the gap between
+// the plan and the engineer's own first progress report. <= 0 reads as
+// On time (started on or before the planned date); positive is that many
+// days late. Null until there's actually been a first report. Shared by
+// ActivityReporting.tsx's table and ActivityDetailModal's Overview tab.
+export function startDelayInfo(
+  startDate: string | null,
+  firstReportedAt: string | null,
+): { label: string; tone: "on-time" | "late" } | null {
+  if (!startDate || !firstReportedAt) return null;
+  const start = new Date(`${startDate.slice(0, 10)}T00:00:00`);
+  const first = new Date(`${firstReportedAt.slice(0, 10)}T00:00:00`);
+  const diffDays = Math.round((first.getTime() - start.getTime()) / 86_400_000);
+  return diffDays <= 0
+    ? { label: "On time", tone: "on-time" }
+    : { label: `${diffDays} day${diffDays === 1 ? "" : "s"} late`, tone: "late" };
+}
+
 // One assigned engineer confirming their own task — id is
 // dbo.DependencyActivityEngineer.Id (from the Approval Inbox row's
 // RecordId), not the assignment or rung id. Once every engineer on the
@@ -345,6 +372,23 @@ export const updateAssignmentDetail = async (
     body: JSON.stringify(patch),
   });
   return handleResponse<{ success: boolean; status: AssignmentStatus | null; remarks: string | null; progressPercent: number | null }>(res);
+};
+
+// Work Reporting's audit trail — every past progress-bar/Remarks update on
+// this rung, newest first, with who made it and when.
+export interface ProgressLogEntry {
+  id: number;
+  fromProgressPercent: number | null;
+  toProgressPercent: number | null;
+  remarks: string | null;
+  statusAfter: AssignmentStatus | null;
+  loggedBy: string | null;
+  loggedAt: string;
+}
+
+export const getProgressLog = async (rungId: number): Promise<ProgressLogEntry[]> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/progress-log`);
+  return handleResponse<ProgressLogEntry[]>(res);
 };
 
 // ── Blueprint Annotation Workflow ───────────────────────────────────────────

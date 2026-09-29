@@ -47,6 +47,8 @@ import {
   saveRungAssignment,
   getAssignmentAttempts,
   restoreCancelledActivity,
+  getProgressLog,
+  startDelayInfo,
   ASSIGNMENT_STATUS_META,
   type PhotoPhase,
   type ActivityPhotoMeta,
@@ -66,7 +68,7 @@ import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
-import { useCameraCapture } from "@/hooks/useCameraCapture";
+import { useCameraCapture, CAMERA_ERROR_TEXT } from "@/hooks/useCameraCapture";
 import { useAuth } from "@/contexts/AuthContext";
 
 type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "history";
@@ -321,7 +323,14 @@ function PhotosTab({ rungId }: { rungId: number }) {
 
   const openCamera = async () => {
     const ok = await camera.start();
-    if (!ok) fileInputRef.current?.click();
+    if (!ok) {
+      // Used to fall straight to the file picker with zero explanation —
+      // looked exactly like "the camera doesn't work" with no way to tell
+      // permission-denied from no-device from a plain HTTP (non-secure)
+      // deployment, which getUserMedia refuses outright.
+      toast.error(CAMERA_ERROR_TEXT[camera.error ?? "other"]);
+      fileInputRef.current?.click();
+    }
   };
 
   return (
@@ -860,6 +869,21 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
             <CalendarDays size={13} className="text-muted-foreground" />
             {row.startDate ? new Date(row.startDate).toLocaleDateString("en-IN") : "—"}
           </span>
+          {(() => {
+            const delay = startDelayInfo(row.startDate, row.firstReportedAt);
+            if (!delay) return null;
+            return (
+              <span
+                className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                  delay.tone === "on-time"
+                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                }`}
+              >
+                {delay.label}
+              </span>
+            );
+          })()}
         </Field>
         <Field label="End Date">{row.endDate ? new Date(row.endDate).toLocaleDateString("en-IN") : "—"}</Field>
         <Field label="Days">{row.days ?? "—"}</Field>
@@ -912,20 +936,21 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
 
 // ── Progress bar ─────────────────────────────────────────────────────────
 // Docked below the tabbed content, inside the modal — a draggable
-// percent-done bar. Saved on drag-release/click only, not per pixel of
-// movement, same "commit at the end" shape as everything else in this
-// modal that patches the server. Two rules, both enforced here AND
-// server-side (dependencyActivityAssignment.js's PATCH /:rungId/status —
-// never trust the client alone for either):
+// percent-done bar. Dragging only moves the thumb visually now; nothing
+// reaches the server until the engineer explicitly clicks Save, which also
+// logs the change (who, when, from/to %) to the history list right below
+// the bar — every past save is visible there, newest first. Two rules,
+// both enforced here AND server-side (dependencyActivityAssignment.js's
+// PATCH /:rungId/status — never trust the client alone for either):
 //  - One-way ratchet: it can only move forward. Dragging to 45% means the
 //    bar can go on to 50 but never back down to 40 — the track itself is
 //    clamped so the thumb physically can't be pulled below the last saved
 //    value, not just rejected on release.
 //  - Locked once Completed: reaching 100% bundles status: "COMPLETED" into
-//    the same request (what sends the activity to Quality Check), and from
-//    then on the whole bar is frozen — no more dragging at all, forward or
-//    back. A mistaken 100% now goes through QC sending it back for rework
-//    (a fresh attempt), not a drag on this same bar.
+//    the same Save request (what sends the activity to Quality Check), and
+//    from then on the whole bar is frozen — no more dragging at all,
+//    forward or back. A mistaken 100% now goes through QC sending it back
+//    for rework (a fresh attempt), not a drag on this same bar.
 function ProgressDragBar({ row }: { row: ReportedAssignment }) {
   const queryClient = useQueryClient();
   const trackRef = useRef<HTMLDivElement>(null);
@@ -933,11 +958,19 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
   const locked = row.status === "COMPLETED";
   const [percent, setPercent] = useState(saved);
   const [dragging, setDragging] = useState(false);
+  const [showLog, setShowLog] = useState(false);
+  const dirty = percent !== saved;
 
   useEffect(() => {
     if (!dragging) setPercent(saved);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [row.rungId, saved]);
+
+  const { data: log = [], isLoading: logLoading } = useQuery({
+    queryKey: ["activity-progress-log", row.rungId],
+    queryFn: () => getProgressLog(row.rungId),
+    enabled: showLog,
+  });
 
   const mutation = useMutation({
     mutationFn: (patch: { progressPercent: number; status?: AssignmentStatus }) =>
@@ -946,7 +979,9 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
       queryClient.invalidateQueries({ queryKey: ["civilworkdpr-activity-reporting"] });
       queryClient.invalidateQueries({ queryKey: ["civilworkdpr-work-done-saved-flow"] });
       queryClient.invalidateQueries({ queryKey: ["qc-queue"] });
+      queryClient.invalidateQueries({ queryKey: ["activity-progress-log", row.rungId] });
       if (patch.status === "COMPLETED") toast.success("Activity completed — sent to Quality Check.");
+      else toast.success("Progress saved.");
     },
     onError: (err: any) => {
       toast.error(err?.message || "Failed to save progress.");
@@ -984,9 +1019,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
   const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!dragging || locked) return;
     setDragging(false);
-    const next = percentFromClientX(e.clientX);
-    setPercent(next);
-    commit(next);
+    setPercent(percentFromClientX(e.clientX));
   };
 
   return (
@@ -1018,6 +1051,57 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
           style={{ left: `${percent}%`, transition: dragging ? "none" : "left 150ms ease-out" }}
         />
       </div>
+
+      <div className="flex items-center justify-between mt-2.5">
+        <button
+          type="button"
+          onClick={() => setShowLog((v) => !v)}
+          className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <History size={10} /> {showLog ? "Hide" : "Show"} update log
+        </button>
+        {!locked && dirty && (
+          <button
+            type="button"
+            onClick={() => commit(percent)}
+            disabled={mutation.isPending}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-600 text-white text-[11px] font-heading font-semibold hover:bg-cyan-700 disabled:opacity-60 transition-colors"
+          >
+            {mutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
+            Save
+          </button>
+        )}
+      </div>
+
+      {showLog && (
+        <div className="mt-2 rounded-lg border border-border bg-background/60 max-h-40 overflow-y-auto">
+          {logLoading ? (
+            <p className="text-[11px] text-muted-foreground text-center py-3">Loading…</p>
+          ) : log.length === 0 ? (
+            <p className="text-[11px] text-muted-foreground text-center py-3">No updates logged yet.</p>
+          ) : (
+            <div className="divide-y divide-border/60">
+              {log.map((entry) => (
+                <div key={entry.id} className="px-3 py-1.5 text-[11px]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-foreground">
+                      {entry.fromProgressPercent != null && entry.toProgressPercent != null
+                        ? `${entry.fromProgressPercent}% → ${entry.toProgressPercent}%`
+                        : entry.remarks
+                          ? "Remarks updated"
+                          : "Updated"}
+                    </span>
+                    <span className="text-muted-foreground shrink-0">
+                      {new Date(entry.loggedAt).toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                  <p className="text-muted-foreground/80 truncate">{entry.loggedBy || "—"}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
