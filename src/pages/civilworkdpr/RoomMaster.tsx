@@ -1343,11 +1343,8 @@ const RoomMaster: React.FC = () => {
                   });
                   const body = await res.json().catch(() => ({}));
                   if (!res.ok) throw new Error(body.error || "Failed to delete rooms");
-                  if (body.skipped > 0) {
-                    toast.success(body.message);
-                  } else {
-                    toast.success(body.message || "Rooms deleted!");
-                  }
+                  if (body.count === 0 && body.skipped > 0) toast.warning(body.message);
+                  else toast.success(body.message || "Rooms deleted");
                   // Invalidate both caches — room list AND the per-unit room card
                   await queryClient.invalidateQueries({ queryKey: ["room-master"] });
                   await queryClient.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
