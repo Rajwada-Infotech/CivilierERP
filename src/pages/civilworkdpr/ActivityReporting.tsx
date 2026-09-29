@@ -54,20 +54,21 @@ const FILTER_OPTIONS: Array<{ value: AssignmentStatus | "ALL"; label: string }> 
   ...ASSIGNMENT_STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label })),
 ];
 
-// Lean status filter chip — icon + label only, no count. Replaces the
-// earlier GlassCard-based stat tiles, which read as a KPI dashboard when
-// this is just a filter row.
+// Status filter chip — icon, label, and a count badge for how many
+// assigned activities currently sit in that status.
 function StatusTile({
   label,
   icon: Icon,
   accentColor,
   active,
+  count,
   onClick,
 }: {
   label: string;
   icon: LucideIcon;
   accentColor: string;
   active: boolean;
+  count: number;
   onClick: () => void;
 }) {
   return (
@@ -83,6 +84,16 @@ function StatusTile({
     >
       <Icon size={12} />
       {label}
+      <span
+        className="px-1.5 rounded-full text-[10px] font-heading font-semibold leading-4"
+        style={
+          active
+            ? { background: `${accentColor}2e`, color: accentColor }
+            : { background: "var(--muted)", color: "var(--muted-foreground)" }
+        }
+      >
+        {count}
+      </span>
     </button>
   );
 }
@@ -129,6 +140,15 @@ export default function ActivityReporting() {
     () => (statusFilter === "ALL" ? rows : rows.filter((r) => r.status === statusFilter)),
     [rows, statusFilter],
   );
+
+  // Per-status counts for the filter row's badges — always computed off
+  // the full, unfiltered set so a tab shows how many activities are in
+  // that status regardless of which one is currently selected.
+  const statusCounts = useMemo(() => {
+    const counts: Partial<Record<AssignmentStatus, number>> = {};
+    for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
+    return counts;
+  }, [rows]);
 
   // Group by dependency chain — every activity raised against the same
   // chain now shows together instead of scattered across the flat list,
@@ -209,6 +229,7 @@ export default function ActivityReporting() {
             <div className="flex flex-wrap items-center gap-1.5 px-5 py-3 border-b border-border bg-muted/10">
               {FILTER_OPTIONS.map((opt) => {
                 const meta = STATUS_TILE_META[opt.value];
+                const count = opt.value === "ALL" ? rows.length : (statusCounts[opt.value] ?? 0);
                 return (
                   <StatusTile
                     key={opt.value}
@@ -216,6 +237,7 @@ export default function ActivityReporting() {
                     icon={meta.icon}
                     accentColor={meta.accentColor}
                     active={statusFilter === opt.value}
+                    count={count}
                     onClick={() => setStatusFilter(opt.value)}
                   />
                 );

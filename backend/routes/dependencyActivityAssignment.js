@@ -871,6 +871,16 @@ router.patch(
       }
     }
 
+    // An assigned engineer's activity sits at Allocated (or, for legacy
+    // rows, Pending) until they actually report progress for the first
+    // time — this is that moment. Only fires on a pure progress update
+    // (no explicit status in the same request, which stays authoritative)
+    // so it can't fight a manual Hold/Cancel/etc chosen alongside it.
+    let autoStatus = null;
+    if (hasProgress && !hasStatus && (current === "PENDING" || current === "ALLOCATED")) {
+      autoStatus = "IN_PROGRESS";
+    }
+
     if (hasStatus) {
       if (current && current !== status) {
         if (current === "CANCELLED") {
@@ -885,7 +895,12 @@ router.patch(
           if (!(hasProgress && progressPercent === 100)) {
             return res.status(400).json({ error: "Completed is set automatically when work reaches 100%." });
           }
-          if (!MANUAL_STATUSES.has(current)) {
+          // PENDING/ALLOCATED is allowed here too — an engineer's very
+          // first report can go straight to 100% in one drag, bundling
+          // progressPercent and status together (see the comment on this
+          // route) before autoStatus above ever gets a chance to land it
+          // on IN_PROGRESS first.
+          if (!MANUAL_STATUSES.has(current) && current !== "PENDING" && current !== "ALLOCATED") {
             return res.status(400).json({ error: "Only an In Progress or Hold activity can be completed." });
           }
         } else if (current === "REWORK" && status === "IN_PROGRESS") {
@@ -897,8 +912,9 @@ router.patch(
         }
       }
     }
+    const effectiveStatus = hasStatus ? status : autoStatus;
     const setClauses = [];
-    if (hasStatus) setClauses.push("Status = @status");
+    if (effectiveStatus) setClauses.push("Status = @status");
     if (hasRemarks) setClauses.push("Remarks = @remarks");
     if (hasProgress) setClauses.push("ProgressPercent = @progressPercent");
     const capturingPreCancel = hasStatus && status === "CANCELLED" && current && current !== "CANCELLED";
@@ -906,7 +922,7 @@ router.patch(
     const request = pool.request()
       .input("rungId", sql.Int, rungId)
       .input("updatedBy", sql.NVarChar(200), actor);
-    if (hasStatus) request.input("status", sql.NVarChar(20), status);
+    if (effectiveStatus) request.input("status", sql.NVarChar(20), effectiveStatus);
     if (hasRemarks) request.input("remarks", sql.NVarChar(1000), remarks);
     if (hasProgress) request.input("progressPercent", sql.Int, progressPercent);
     if (capturingPreCancel) request.input("preCancelStatus", sql.NVarChar(20), current);
@@ -919,7 +935,7 @@ router.patch(
     if (!result.rowsAffected[0]) {
       return res.status(404).json({ error: "No assignment found for this rung" });
     }
-    res.json({ success: true, status, remarks, progressPercent });
+    res.json({ success: true, status: effectiveStatus, remarks, progressPercent });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
     res.status(500).json({ error: err.message });
@@ -1403,26 +1419,22 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
     }
 
     // Auto status transition, driven purely by whether anyone's assigned:
-    // PENDING (nobody assigned) -> IN_PROGRESS (assigned). Used to detour
-    // through an ALLOCATED "awaiting each engineer's own confirmation" step
-    // (PUT /engineer-approval/:id/confirm), surfaced as an Approval Inbox
-    // entry per engineer — removed in favour of the ApprovalLevelsJson
-    // config above: assigning engineers now starts the work immediately,
-    // and who gets to APPROVE the finished work is whoever this assignment
-    // names (plus super_admin), enforced where that approval action itself
-    // lives (Work Reporting), not here. Only touches PENDING/ALLOCATED/
-    // IN_PROGRESS — once work has moved further along (Hold/Approved/
-    // Rework/Completed), adding/removing an engineer here never regresses
-    // it. ALLOCATED counts as an equivalent starting point to PENDING here
-    // — it's the old pre-confirmation status this replaced, and rows saved
-    // under the old flow are still sitting at ALLOCATED (see migration 485
-    // for the one-time data backfill this mirrors going forward).
+    // PENDING (nobody assigned) -> ALLOCATED (assigned, waiting on them to
+    // actually start) -> IN_PROGRESS only once they report progress for
+    // the first time (see the PATCH /:rungId/status autoStatus branch
+    // above — that's the sole place IN_PROGRESS gets set now). Only
+    // touches PENDING/ALLOCATED/IN_PROGRESS — once work has moved further
+    // along (Hold/Approved/Rework/Completed), adding/removing an engineer
+    // here never regresses it. Unassigning everyone before any report was
+    // ever logged (still ALLOCATED, or a legacy still-PENDING row) drops
+    // it back to PENDING; unassigning after work has actually started
+    // (IN_PROGRESS) also drops back to PENDING — same as before.
     const currentStatusRow = (await pool.request().input("id", sql.Int, assignmentId)
       .query(`SELECT Status FROM dbo.DependencyActivityAssignment WHERE Id = @id`)).recordset[0];
     const currentStatus = currentStatusRow?.Status;
     let nextStatus = null;
-    if (keptEngineerIds.size > 0 && (currentStatus === "PENDING" || currentStatus === "ALLOCATED")) nextStatus = "IN_PROGRESS";
-    else if (keptEngineerIds.size === 0 && currentStatus === "IN_PROGRESS") nextStatus = "PENDING";
+    if (keptEngineerIds.size > 0 && currentStatus === "PENDING") nextStatus = "ALLOCATED";
+    else if (keptEngineerIds.size === 0 && (currentStatus === "ALLOCATED" || currentStatus === "IN_PROGRESS")) nextStatus = "PENDING";
     if (nextStatus) {
       await pool.request().input("id", sql.Int, assignmentId).input("status", sql.NVarChar(20), nextStatus)
         .query(`UPDATE dbo.DependencyActivityAssignment SET Status = @status WHERE Id = @id`);

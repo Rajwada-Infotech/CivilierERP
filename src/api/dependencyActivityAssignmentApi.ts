@@ -213,9 +213,11 @@ export type AssignmentStatus = (typeof ASSIGNMENT_STATUSES)[number];
 // bearing on the order rows can move through.
 export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; className: string }> = {
   PENDING: { label: "Pending", className: "bg-slate-500/10 text-slate-600 dark:text-slate-400" },
-  // No longer set automatically — assigning an engineer now moves straight
-  // to IN_PROGRESS. Kept in the enum/badge map for old records and manual
-  // overrides only.
+  // Set automatically the moment an engineer is assigned (Work
+  // Allocation) — the activity sits here until that engineer reports
+  // progress for the first time, which is what actually flips it to
+  // IN_PROGRESS (see dependencyActivityAssignment.js's PATCH
+  // /:rungId/status autoStatus branch).
   ALLOCATED: { label: "Allocated", className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
   IN_PROGRESS: { label: "In Progress", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
   HOLD: { label: "Hold", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
