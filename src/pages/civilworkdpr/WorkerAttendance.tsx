@@ -481,6 +481,11 @@ export const WorkerAttendanceLogGroups: React.FC<{
 };
 
 // ─── Main page ────────────────────────────────────────────────────────────────
+// Stable fallback for the disabled attendance query: a fresh `[]` default on
+// every render made the status-sync effect below (deps: [attendanceRows])
+// fire on every render and setState a new object, looping forever.
+const NO_ATTENDANCE_ROWS: never[] = [];
+
 const WorkerAttendance: React.FC = () => {
   const rights = usePageRights("civilworkdpr-worker-attendance");
   const queryClient = useQueryClient();
@@ -535,7 +540,7 @@ const WorkerAttendance: React.FC = () => {
   const selectedActivity = activities.find((a: ActivityOption) => a.rungId === rungId) ?? null;
 
   const {
-    data: attendanceRows = [],
+    data: attendanceRows = NO_ATTENDANCE_ROWS,
     isFetching: loadingAttendance,
   } = useQuery({
     queryKey: ["workerAttendanceAttendance", rungId, date],
