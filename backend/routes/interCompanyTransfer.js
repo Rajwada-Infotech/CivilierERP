@@ -220,7 +220,11 @@ async function resolveTransferContext(pool, { senderProjectId, receiverProjectId
 // every project that company owns, not just the one project the stock
 // happens to be leaving from (a sibling project may have bought the same
 // item more recently). Returns excl-GST rate + GST breakdown per item.
-async function priceItems(pool, senderCompanyId, senderCompanyName, items) {
+// applyGst=false is a real business choice (not just a display preference)
+// — some inter-company movements genuinely aren't a taxable supply — so it
+// zeroes the GST component entirely rather than just hiding it: gstPct/
+// gstAmount come back 0 and amountInclGst equals the excl-GST amount.
+async function priceItems(pool, senderCompanyId, senderCompanyName, items, applyGst = true) {
   const pricedItems = [];
   for (const [idx, item] of items.entries()) {
     const itemId = item.itemId || item.ItemId || item.ItemID;
@@ -239,7 +243,7 @@ async function priceItems(pool, senderCompanyId, senderCompanyName, items) {
       throw err;
     }
     const rate     = Number(rateInfo.rate);
-    const gstPct   = Number(rateInfo.gstPct || 0);
+    const gstPct   = applyGst ? Number(rateInfo.gstPct || 0) : 0;
     const baseAmt  = Math.round(qty * rate * 100) / 100;
     const gstAmt   = Math.round(baseAmt * (gstPct / 100) * 100) / 100;
     pricedItems.push({
@@ -363,7 +367,10 @@ async function loadStoredTransferContext(pool, ictRow) {
   return {
     ...ctx,
     pricedItems,
-    totalAmount: Number(ictRow.TotalAmount),
+    // GL posts the real transacted amount, GST included when this transfer
+    // actually applied it (TotalAmountInclGst equals TotalAmount when it
+    // didn't) — falls back to TotalAmount for pre-GST-column rows.
+    totalAmount: Number(ictRow.TotalAmountInclGst ?? ictRow.TotalAmount),
     transferDate: ictRow.TransferDate,
   };
 }
@@ -383,6 +390,9 @@ router.post("/preview", authenticateToken, async (req, res) => {
     const senderCompanyOverrideId = parsePositiveInt(req.body.SenderCompanyId);
     const receiverCompanyOverrideId = parsePositiveInt(req.body.ReceiverCompanyId);
     const items = asItems(req.body.Items || req.body.TransferItems);
+    // Whether this transfer is a taxable supply at all — defaults to true;
+    // pass ApplyGst: false when it genuinely isn't (see priceItems).
+    const applyGst = req.body.ApplyGst !== false;
 
     if (!senderProjectId || !receiverProjectId) {
       return res.status(400).json({ error: "SenderProjectId and ReceiverProjectId are required." });
@@ -418,7 +428,7 @@ router.post("/preview", authenticateToken, async (req, res) => {
       }
     }
 
-    const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items);
+    const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items, applyGst);
     const totalAmount       = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
     const totalGstAmount    = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
     const totalAmountInclGst = Math.round((totalAmount + totalGstAmount) * 100) / 100;
@@ -428,6 +438,7 @@ router.post("/preview", authenticateToken, async (req, res) => {
       totalAmount,
       totalGstAmount,
       totalAmountInclGst,
+      applyGst,
       senderCompanyId,
       senderCompanyName,
       receiverCompanyId,
@@ -451,6 +462,7 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     const items = asItems(req.body.Items || req.body.TransferItems);
     const finYear = req.body.finYear || req.body.FinYear || null;
     const remarks = req.body.Remarks || null;
+    const applyGst = req.body.ApplyGst !== false;
 
     if (!senderProjectId || !receiverProjectId) {
       return res.status(400).json({ error: "SenderProjectId and ReceiverProjectId are required." });
@@ -478,7 +490,7 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       if (r.recordset[0]) receiverCompanyId = receiverCompanyOverrideId;
     }
 
-    const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items);
+    const pricedItems = await priceItems(pool, ctx.sender.CompanyId, ctx.sender.CompanyName, items, applyGst);
     const totalAmount        = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
     const totalGstAmount     = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
     const totalAmountInclGst = Math.round((totalAmount + totalGstAmount) * 100) / 100;

@@ -1331,7 +1331,13 @@ function buildInboxQueries(module) {
         JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
         WHERE daa.IsCurrent = 1
           AND daa.Status = 'COMPLETED'
-          AND daa.ApprovalLevelsJson IS NOT NULL AND daa.ApprovalLevelsJson <> '[]'
+          -- No longer requires ApprovalLevelsJson to be configured — a
+          -- Completed, QC-passed activity with no approval setup still
+          -- needs an explicit approval (handleApproveLevel's no-levels
+          -- branch, super_admin only) before it can show Approved, so it
+          -- belongs in this inbox too. isVisibleToViewer's own
+          -- civilworkdpr-approval check still hides these from anyone but
+          -- super_admin when there are no named levels to be on.
           AND (
             SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc
             WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC

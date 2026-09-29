@@ -27,7 +27,8 @@ export function AssignmentStatusSelect({ rungId, status }: { rungId: number; sta
 
   // Nothing to toggle to — Completed/Approved/Cancelled are no longer
   // manually reachable from here (Completed comes from the progress bar,
-  // Approved/Rework from a QC decision), so this reads as a plain badge.
+  // Rework from a QC or approval decision, Approved only from an explicit
+  // approval action afterwards), so this reads as a plain badge.
   if (options.length <= 1) {
     return (
       <span
