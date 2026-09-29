@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { createPortal } from "react-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   ArrowRight,
@@ -1696,9 +1696,22 @@ export default function StockTransfer() {
   // preview — manualRates holds whatever the user's typed in for those,
   // keyed by itemId, fed back into both the preview and the actual submit.
   const [manualRates, setManualRates] = useState<Record<string, string>>({});
+  // The input itself is bound straight to manualRates (updates every
+  // keystroke, so typing feels instant) — but the actual re-price query only
+  // fires off this debounced copy. Without the debounce, every keystroke
+  // changed the query key, which (a) re-fetched on every character and (b)
+  // flipped interPreviewLoading true, swapping the whole item list — the
+  // very DOM node the input lives in — out for a "Pricing items…" spinner,
+  // unmounting the input and dropping focus after just one character. Same
+  // fix as MaterialExpenseBooking.tsx's debouncedDocNoFilter.
+  const [debouncedManualRates, setDebouncedManualRates] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedManualRates(manualRates), 500);
+    return () => clearTimeout(t);
+  }, [manualRates]);
   const interPreviewItems = items.filter((it) => it.itemId && parseFloat(it.qty) > 0);
   const interPreviewKey = interPreviewItems
-    .map((it) => `${it.itemId}:${it.qty}:${manualRates[it.itemId] || ""}`)
+    .map((it) => `${it.itemId}:${it.qty}:${debouncedManualRates[it.itemId] || ""}`)
     .join(",");
   const {
     data: interPreview,
@@ -1717,7 +1730,7 @@ export default function StockTransfer() {
         ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
         ApplyGst: applyGst,
         Items: interPreviewItems.map((it) => {
-          const manual = parseFloat(manualRates[it.itemId]);
+          const manual = parseFloat(debouncedManualRates[it.itemId]);
           return {
             itemId: it.itemId,
             itemName: it.itemName,
@@ -1732,6 +1745,11 @@ export default function StockTransfer() {
       !!fromGodown?.ProjectID &&
       !!toGodown?.ProjectID &&
       interPreviewItems.length > 0,
+    // Keep showing the last priced list while a re-price is in flight
+    // instead of unmounting it for a loading state — belt-and-suspenders
+    // with the debounce above so the manual-rate input never loses its
+    // place even if a refetch does land mid-typing (blur, tab, etc.).
+    placeholderData: keepPreviousData,
     retry: false,
   });
 
@@ -2167,7 +2185,7 @@ export default function StockTransfer() {
                           Apply GST
                         </label>
                       </div>
-                      {interPreviewLoading ? (
+                      {interPreviewLoading && !interPreview ? (
                         <p className="text-muted-foreground flex items-center gap-1.5">
                           <RefreshCw size={11} className="animate-spin" /> Pricing items…
                         </p>
