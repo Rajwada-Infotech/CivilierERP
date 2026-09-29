@@ -244,16 +244,24 @@ export default function NewContractScreen() {
 
   // Doc type/number is only auto-generated for a brand-new contract — an
   // existing one keeps its already-assigned DocNo (matches web: the field
-  // is readOnly and hidden entirely in edit mode there).
+  // is readOnly and hidden entirely in edit mode there). This IIFE used to
+  // have no try/catch at all — a rejection from either await (network
+  // blip, or a 403 on a doc-type-scoped right) crashed the whole app the
+  // moment this New Contract screen opened. docTypeId/docNo just stay
+  // unset on failure — the backend still accepts the contract without one.
   useEffect(() => {
     if (isEditing) return;
     (async () => {
-      const types = await fetchDocTypes("CON");
-      if (types.length > 0) {
-        const first = types[0];
-        setDocTypeId(first.TypeOfDocId);
-        const preview = await fetchNextDocNumber(first.TypeOfDocId, finYear || undefined);
-        setDocNo(preview);
+      try {
+        const types = await fetchDocTypes("CON");
+        if (types.length > 0) {
+          const first = types[0];
+          setDocTypeId(first.TypeOfDocId);
+          const preview = await fetchNextDocNumber(first.TypeOfDocId, finYear || undefined);
+          setDocNo(preview);
+        }
+      } catch {
+        /* doc-number preview is best-effort — submit still works without it */
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -306,8 +314,14 @@ export default function NewContractScreen() {
 
   const refreshDocNo = async () => {
     if (!docTypeId) return;
-    const preview = await fetchNextDocNumber(docTypeId, finYear || undefined);
-    setDocNo(preview);
+    // Called directly from a Pressable's onPress (never awaited by the
+    // caller) — an unhandled rejection here crashed the whole app on tap.
+    try {
+      const preview = await fetchNextDocNumber(docTypeId, finYear || undefined);
+      setDocNo(preview);
+    } catch {
+      /* best-effort refresh — leave the previous preview showing */
+    }
   };
 
   const selectedContact = contactPersons.find((p) => p.name === contactPerson) ?? null;
