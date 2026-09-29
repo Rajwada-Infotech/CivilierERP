@@ -1,5 +1,6 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import {
   FileText, Upload, DoorOpen, Sparkles, Loader2, CheckCircle2,
@@ -226,8 +227,7 @@ function UnitRoomConfigCard({ unitId }: { unitId: string }) {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "Failed to create rooms");
       toast.success(body.message || "Rooms created");
-      await qc.invalidateQueries({ queryKey: ["room-master-unit-rooms", unitId] });
-      await qc.invalidateQueries({ queryKey: ["room-master"] });
+      await invalidateRoomData(qc);
     } catch (e: any) {
       toast.error(e.message ?? "Failed to create rooms");
     } finally {
@@ -355,8 +355,7 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
       if (!res.ok) throw new Error(body.error || "Failed to generate rooms");
       if (body.failed?.length) toast.warning(body.message);
       else toast.success(body.message || "Rooms generated");
-      await qc.invalidateQueries({ queryKey: ["room-master"] });
-      await qc.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
+      await invalidateRoomData(qc);
     } catch (e: any) {
       toast.error(e.message ?? "Failed to generate rooms");
     } finally {
@@ -979,8 +978,7 @@ const RoomMaster: React.FC = () => {
         throw new Error((await res.json()).error || "Failed to delete room");
       toast.success("Room deleted!");
     }
-    await queryClient.invalidateQueries({ queryKey: ["room-master"] });
-    await queryClient.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
+    await invalidateRoomData(queryClient);
   };
 
   if (isLoading)
@@ -1345,9 +1343,7 @@ const RoomMaster: React.FC = () => {
                   if (!res.ok) throw new Error(body.error || "Failed to delete rooms");
                   if (body.count === 0 && body.skipped > 0) toast.warning(body.message);
                   else toast.success(body.message || "Rooms deleted");
-                  // Invalidate both caches — room list AND the per-unit room card
-                  await queryClient.invalidateQueries({ queryKey: ["room-master"] });
-                  await queryClient.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
+                  await invalidateRoomData(queryClient);
                   setDeletingLevel(null);
                 } catch (e: any) {
                   toast.error(e.message || "Failed to delete rooms");
