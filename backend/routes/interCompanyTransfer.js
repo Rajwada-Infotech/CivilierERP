@@ -706,6 +706,94 @@ router.get("/:id", authenticateToken, async (req, res) => {
   }
 });
 
+// ── GET /:id/posting — the two-sided GL voucher this transfer posts/posted
+// (Dr Inter-Company A/c — receivable / Cr Inter-Company Stock Transfer A/c
+// in the sender's books, mirrored in the receiver's — see
+// postInterCompanyStockTransferToGL), grouped by company same as
+// fundTransfer.js's own /:id/posting. Real entries once Completed;
+// otherwise just tells the UI nothing has posted yet.
+router.get("/:id/posting", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parsePositiveInt(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid id" });
+
+    const ictRes = await pool.request().input("id", sql.Int, id).query(`
+      SELECT ict.ICTId, ict.DocNo, ict.Status,
+             ISNULL(ict.TotalAmountInclGst, ict.TotalAmount) AS Amount,
+             sc.name AS SenderCompanyName, rc.name AS ReceiverCompanyName
+      FROM dbo.InterCompanyTransfer ict
+      LEFT JOIN dbo.enterprise sc ON sc.id = ict.SenderCompanyId
+      LEFT JOIN dbo.enterprise rc ON rc.id = ict.ReceiverCompanyId
+      WHERE ict.ICTId = @id
+    `);
+    if (!ictRes.recordset.length) return res.status(404).json({ error: "Not found" });
+    const ict = ictRes.recordset[0];
+
+    const postedRes = await pool.request().input("id", sql.Int, id).query(`
+      SELECT gle.VoucherNo, gle.CompanyId, gle.DebitAmount, gle.CreditAmount,
+             ah.LHeadName, ent.name AS CompanyName
+      FROM dbo.GeneralLedgerEntry gle
+      JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = gle.LHeadId
+      LEFT JOIN dbo.enterprise ent ON ent.id = gle.CompanyId
+      WHERE gle.SourceType = 'InterCompanyTransfer' AND gle.SourceId = @id AND gle.IsReversed = 0
+      ORDER BY gle.CompanyId, gle.EntryId
+    `);
+    const isPosted = postedRes.recordset.length > 0;
+
+    let vouchers;
+    if (isPosted) {
+      const byCompany = new Map();
+      for (const row of postedRes.recordset) {
+        const key = row.CompanyId ?? "none";
+        if (!byCompany.has(key)) {
+          byCompany.set(key, { jvNo: row.VoucherNo, companyName: row.CompanyName, rows: [] });
+        }
+        byCompany.get(key).rows.push({
+          label: row.LHeadName,
+          side: Number(row.DebitAmount) > 0 ? "debit" : "credit",
+          amount: Number(row.DebitAmount) > 0 ? Number(row.DebitAmount) : Number(row.CreditAmount),
+        });
+      }
+      vouchers = [...byCompany.values()];
+    } else {
+      // Preview only — the real ledger heads are get-or-create'd at posting
+      // time (postInterCompanyStockTransferToGL), so this just names them
+      // generically rather than guessing whether they already exist.
+      vouchers = [
+        {
+          jvNo: null,
+          companyName: ict.SenderCompanyName,
+          rows: [
+            { label: `Inter-Company A/c — ${ict.ReceiverCompanyName || "Receiver"}`, side: "debit", amount: Number(ict.Amount) || 0 },
+            { label: `Inter-Company Stock Transfer — ${ict.SenderCompanyName || "Sender"}`, side: "credit", amount: Number(ict.Amount) || 0 },
+          ],
+        },
+        {
+          jvNo: null,
+          companyName: ict.ReceiverCompanyName,
+          rows: [
+            { label: `Inter-Company Stock Transfer — ${ict.ReceiverCompanyName || "Receiver"}`, side: "debit", amount: Number(ict.Amount) || 0 },
+            { label: `Inter-Company A/c — ${ict.SenderCompanyName || "Sender"}`, side: "credit", amount: Number(ict.Amount) || 0 },
+          ],
+        },
+      ];
+    }
+
+    res.json({
+      docNo: ict.DocNo,
+      status: ict.Status,
+      amount: Number(ict.Amount) || 0,
+      senderCompanyName: ict.SenderCompanyName,
+      receiverCompanyName: ict.ReceiverCompanyName,
+      isPosted,
+      vouchers,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── DELETE /:id — any status is deletable; Completed reverses the stock
 // move and the two-sided GL voucher first, same convention journal-
 // voucher.js's DELETE uses (reversePostingBySource flips IsReversed rather

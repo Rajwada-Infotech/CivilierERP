@@ -68,7 +68,7 @@ import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
-import { useCameraCapture } from "@/hooks/useCameraCapture";
+import { useCameraCapture, CAMERA_ERROR_TEXT } from "@/hooks/useCameraCapture";
 import { useAuth } from "@/contexts/AuthContext";
 
 type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "history";
@@ -323,7 +323,14 @@ function PhotosTab({ rungId }: { rungId: number }) {
 
   const openCamera = async () => {
     const ok = await camera.start();
-    if (!ok) fileInputRef.current?.click();
+    if (!ok) {
+      // Used to fall straight to the file picker with zero explanation —
+      // looked exactly like "the camera doesn't work" with no way to tell
+      // permission-denied from no-device from a plain HTTP (non-secure)
+      // deployment, which getUserMedia refuses outright.
+      toast.error(CAMERA_ERROR_TEXT[camera.error ?? "other"]);
+      fileInputRef.current?.click();
+    }
   };
 
   return (

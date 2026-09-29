@@ -12,6 +12,20 @@ export function classifyCameraError(err: unknown): CameraError {
   return "other";
 }
 
+// Shared across every camera.start() call site so a failure is never just
+// silent — CameraCaptureModal.tsx already used this text; centralized here
+// so ActivityDetailModal.tsx's own "Open camera" button (which used to
+// fall back to a file picker with zero explanation on failure) can show it
+// too.
+export const CAMERA_ERROR_TEXT: Record<CameraError, string> = {
+  denied: "Camera access is blocked. Allow Camera for this site (lock icon in the address bar), then reopen.",
+  "no-device": "No camera was found on this device.",
+  busy: "The camera is in use by another app. Close it and try again.",
+  insecure: "The camera needs a secure (HTTPS) connection.",
+  unsupported: "This browser does not support camera capture.",
+  other: "Camera not available.",
+};
+
 // getUserMedia-backed live camera preview + shutter capture, scoped to
 // whatever component calls it — stop() must run on unmount or the "camera
 // light stays on" bug follows the user around the app (mobile browsers keep
