@@ -365,6 +365,29 @@ async function loadStoredTransferContext(pool, ictRow) {
     receiverProjectId: ictRow.ReceiverProjectId,
   });
 
+  // ictRow.SenderCompanyId/ReceiverCompanyId already carry whatever company
+  // POST / resolved at creation time — including the cross-tag override
+  // (senderCompanyOverrideId/receiverCompanyOverrideId there) for a project
+  // tagged to a company that isn't its primary company_id. resolveTransferContext
+  // above only ever re-derives the project's PRIMARY company via getProject(),
+  // so without this it silently discarded that override at approval time —
+  // the point executeTransfer() actually posts GL — and posted under the
+  // wrong company whenever the two differed.
+  if (ictRow.SenderCompanyId && ictRow.SenderCompanyId !== ctx.sender.CompanyId) {
+    const r = await pool.request().input("Id", sql.Int, ictRow.SenderCompanyId)
+      .query("SELECT id, name FROM dbo.enterprise WHERE id = @Id");
+    if (r.recordset[0]) {
+      ctx.sender = { ...ctx.sender, CompanyId: r.recordset[0].id, CompanyName: r.recordset[0].name };
+    }
+  }
+  if (ictRow.ReceiverCompanyId && ictRow.ReceiverCompanyId !== ctx.receiver.CompanyId) {
+    const r = await pool.request().input("Id", sql.Int, ictRow.ReceiverCompanyId)
+      .query("SELECT id, name FROM dbo.enterprise WHERE id = @Id");
+    if (r.recordset[0]) {
+      ctx.receiver = { ...ctx.receiver, CompanyId: r.recordset[0].id, CompanyName: r.recordset[0].name };
+    }
+  }
+
   const itemRows = await pool.request().input("id", sql.Int, ictRow.ICTId).query(`
     SELECT ItemId, ItemName, UOMCode, Quantity, Rate, Amount, SourceDocNo
     FROM dbo.InterCompanyTransferItems

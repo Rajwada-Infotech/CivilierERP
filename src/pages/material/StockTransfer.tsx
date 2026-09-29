@@ -826,28 +826,6 @@ function ICTPreviewModal({
               </span>
             </div>
 
-            <div className="px-5 pt-3">
-              <span
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
-                  detail.Status === "Completed"
-                    ? "bg-green-500/10 text-green-700 dark:text-green-400 border-green-400/30"
-                    : detail.Status === "Pending"
-                      ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-400/30"
-                      : detail.Status === "Rejected"
-                        ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-400/30"
-                        : "bg-muted text-muted-foreground border-border"
-                }`}
-              >
-                <CheckCircle2 size={11} />
-                {detail.Status === "Completed"
-                  ? `${detail.Status} — every step (Sale Invoice, GRN, Expense Booking, Payment) auto-generated via the Dummy Bank, no manual action required.`
-                  : detail.Status === "Pending"
-                    ? "Pending super_admin approval — the full document chain generates automatically the moment it's approved."
-                    : detail.Status === "Rejected"
-                      ? "Rejected — no documents were generated."
-                      : detail.Status}
-              </span>
-            </div>
 
             <div className="px-5 pt-3 pb-2">
               <p className="text-xs font-semibold text-muted-foreground mb-2">
@@ -1016,9 +994,10 @@ function TransferHistory() {
   });
   const transfers: StockTransfer[] = data?.data ?? [];
 
-  // Inter-company transfers (routed via Dummy Bank) live in a separate
-  // table with their own fully auto-generated document chain — merge them
-  // into the same history view so a completed inter-company transfer is
+  // Inter-company transfers (direct GL voucher between the two companies'
+  // Inter-Company A/c heads, no bank/cash involved) live in a separate
+  // table — merge them into the same history view so a completed
+  // inter-company transfer is
   // actually visible here instead of only appearing in the plain
   // StockTransfers list (which never contained it), so completed transfers
   // don't look like nothing happened.
