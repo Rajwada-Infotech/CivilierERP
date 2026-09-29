@@ -289,8 +289,8 @@ router.post(
       }
 
       // Propagate to units that already have their rooms built: ADD any room
-      // the new composition calls for (e.g. a 2nd Bathroom), never remove
-      // one — an existing room may already have DPR work/blueprints on it.
+      // the new composition calls for (e.g. a 2nd Bathroom), and REMOVE
+      // any unused empty rooms that are no longer in the layout.
       // Units whose rooms haven't been generated yet are left to Room
       // Master's bulk "Generate rooms" action.
       const affected = await pool.request()
@@ -303,8 +303,8 @@ router.post(
                  OR (u.LayoutTypeId IS NULL AND UPPER(REPLACE(LTRIM(RTRIM(u.UnitType)), ' ', '')) = @typeKey))
             AND EXISTS (SELECT 1 FROM dbo.RoomMaster r WHERE r.UnitId = u.Id AND r.IsActive = 1 AND r.RoomCategoryId IS NOT NULL)
         `);
-      const sync = await syncRoomsForUnits(pool, affected.recordset.map((r) => r.Id), { removeUnused: false, createdBy: req.user?.userId || null });
-      if (sync.created || sync.reactivated || sync.renamed) await bumpFlatMasterCaches();
+      const sync = await syncRoomsForUnits(pool, affected.recordset.map((r) => r.Id), { removeUnused: true, createdBy: req.user?.userId || null });
+      if (sync.created || sync.reactivated || sync.renamed || sync.deactivated) await bumpFlatMasterCaches();
       if (sync.failed.length) console.error("[unit-bhk-config] POST /template room sync failures:", sync.failed);
 
       res.json({
@@ -314,6 +314,7 @@ router.post(
           unitsChecked: sync.units,
           unitsUpdated: sync.unitsChanged,
           roomsAdded: sync.created + sync.reactivated,
+          roomsRemoved: sync.deactivated,
           failed: sync.failed.length,
         },
       });
