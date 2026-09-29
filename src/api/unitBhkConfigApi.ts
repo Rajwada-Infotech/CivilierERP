@@ -48,6 +48,7 @@ export interface RoomSyncResult {
   unitsChecked: number;
   unitsUpdated: number;
   roomsAdded: number;
+  roomsRemoved: number;
   failed: number;
 }
 
