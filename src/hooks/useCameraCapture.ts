@@ -116,13 +116,13 @@ export function useCameraCapture() {
     });
   }, []);
 
-  // Runs after every commit where isActive is true, i.e. after React has
-  // actually mounted <video> for a caller that renders it conditionally —
-  // attaches whatever stream is live to whatever video element exists now,
-  // regardless of which one changed. A callback ref (below) covers the
-  // case where the element mounts on the SAME render isActive flips true
-  // (before this effect would otherwise run); this effect is what covers
-  // Strict Mode's extra mount/unmount pass and any later remount.
+  // Runs after every commit — including the one where a caller that only
+  // mounts <video> once isActive is true (ActivityDetailModal.tsx's Photos
+  // tab) actually renders it for the first time. React attaches refs
+  // during the commit phase, strictly before effects run, so by the time
+  // this runs videoRef.current is guaranteed to be the real element,
+  // whether it already existed (CameraCaptureModal.tsx renders <video>
+  // unconditionally) or was just mounted this commit.
   useEffect(() => {
     if (isActive && videoRef.current && streamRef.current && videoRef.current.srcObject !== streamRef.current) {
       videoRef.current.srcObject = streamRef.current;
@@ -130,15 +130,7 @@ export function useCameraCapture() {
     }
   });
 
-  const setVideoRef = useCallback((el: HTMLVideoElement | null) => {
-    videoRef.current = el;
-    if (el && streamRef.current && el.srcObject !== streamRef.current) {
-      el.srcObject = streamRef.current;
-      el.play().catch(() => {});
-    }
-  }, []);
-
   useEffect(() => stop, [stop]);
 
-  return { videoRef: setVideoRef, isActive, unsupported, error, start, stop, capture };
+  return { videoRef, isActive, unsupported, error, start, stop, capture };
 }

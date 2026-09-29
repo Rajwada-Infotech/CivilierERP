@@ -155,7 +155,7 @@ function BlueprintUploadField({
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 async function fetchRooms(): Promise<any[]> {
-  const res = await fetchWithAuth(API);
+  const res = await fetchWithAuth(`${API}?activeOnly=1`);
   if (!res.ok) throw new Error("Failed to fetch rooms");
   return res.json().catch(() => []);
 }
@@ -343,7 +343,7 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
   const handleRun = async () => {
     if (!projectId) return;
     const scope = blockId ? blockOptions.find(([id]) => id === blockId)?.[1] ?? "this block" : "this project";
-    if (!window.confirm(`Generate rooms for all ${unitCount} unit(s) in ${scope} from their Unit Composition layouts? Existing rooms are kept; only missing ones are added.`)) return;
+    if (!window.confirm(`Generate & sync rooms for all ${unitCount} unit(s) in ${scope} from their Unit Composition layouts? Missing rooms are added; unused empty rooms are removed. Rooms with work or blueprints are always kept.`)) return;
     setRunning(true);
     try {
       const res = await fetchWithAuth(`${API}/generate-bulk`, {
@@ -370,7 +370,7 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
       <div className="flex-1 min-w-[14rem]">
         <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Generate Rooms in Bulk</p>
         <p className="text-[11px] text-muted-foreground mt-0.5">
-          Builds every unit's rooms from its Unit Composition layout. Only adds what's missing.
+          Syncs every unit's rooms to its Unit Composition layout — adds missing rooms and removes unused empty ones.
         </p>
       </div>
       <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setBlockId(""); }} className={selectCls}>
@@ -896,6 +896,7 @@ const RoomMaster: React.FC = () => {
   const [viewRoom, setViewRoom] = React.useState<RecordWithId | null>(null);
   const [deletingRoom, setDeletingRoom] = React.useState<RecordWithId | null>(null);
   const [deletingLevel, setDeletingLevel] = React.useState<{ level: string; position: Position & { projectId: number }; name: string; roomCount: number } | null>(null);
+  const [deletingLevelInFlight, setDeletingLevelInFlight] = React.useState(false);
 
   // externalFormPatch injects __units into the form so optionsProvider/render can filter/look up
   const unitsPatch = React.useMemo(() => ({ __units: allUnits }), [allUnits]);
@@ -979,6 +980,7 @@ const RoomMaster: React.FC = () => {
       toast.success("Room deleted!");
     }
     await queryClient.invalidateQueries({ queryKey: ["room-master"] });
+    await queryClient.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
   };
 
   if (isLoading)
@@ -1311,43 +1313,56 @@ const RoomMaster: React.FC = () => {
       </Dialog>
 
       {/* ── Bulk Delete confirm dialog ── */}
-      <Dialog open={!!deletingLevel} onOpenChange={(open) => !open && setDeletingLevel(null)}>
+      <Dialog open={!!deletingLevel} onOpenChange={(open) => { if (!open && !deletingLevelInFlight) setDeletingLevel(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Delete {deletingLevel?.level ? deletingLevel.level.charAt(0) + deletingLevel.level.slice(1).toLowerCase() : 'Level'} Rooms</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground pt-1">
-            Delete all <strong>{deletingLevel?.roomCount}</strong> room(s) in <strong>{deletingLevel?.name}</strong>? This can't be undone.
+            Delete all <strong>{deletingLevel?.roomCount}</strong> room(s) in <strong>{deletingLevel?.name}</strong>?
+            Rooms with work entries or blueprints will be automatically retained.
           </p>
           <DialogFooter className="pt-2">
-            <button onClick={() => setDeletingLevel(null)} className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors">
+            <button
+              onClick={() => setDeletingLevel(null)}
+              disabled={deletingLevelInFlight}
+              className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors disabled:opacity-50"
+            >
               Cancel
             </button>
             <button
+              disabled={deletingLevelInFlight}
               onClick={async () => {
-                if (!deletingLevel) return;
+                if (!deletingLevel || deletingLevelInFlight) return;
+                setDeletingLevelInFlight(true);
                 try {
                   const res = await fetchWithAuth(`${API}/delete-bulk`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ level: deletingLevel.level, position: deletingLevel.position }),
                   });
-                  if (!res.ok) {
-                    const body = await res.json().catch(() => ({}));
-                    throw new Error(body.error || "Failed to delete rooms");
+                  const body = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(body.error || "Failed to delete rooms");
+                  if (body.skipped > 0) {
+                    toast.success(body.message);
+                  } else {
+                    toast.success(body.message || "Rooms deleted!");
                   }
-                  const body = await res.json();
-                  toast.success(body.message || "Rooms deleted!");
+                  // Invalidate both caches — room list AND the per-unit room card
                   await queryClient.invalidateQueries({ queryKey: ["room-master"] });
+                  await queryClient.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
+                  setDeletingLevel(null);
                 } catch (e: any) {
                   toast.error(e.message || "Failed to delete rooms");
                 } finally {
-                  setDeletingLevel(null);
+                  setDeletingLevelInFlight(false);
                 }
               }}
-              className="px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity disabled:opacity-60"
             >
-              Delete All
+              {deletingLevelInFlight ? (
+                <><Loader2 size={13} className="animate-spin" /> Deleting…</>
+              ) : "Delete All"}
             </button>
           </DialogFooter>
         </DialogContent>
