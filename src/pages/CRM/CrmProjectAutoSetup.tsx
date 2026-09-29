@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
 import { CrmShell } from "@/components/crm/CrmShell";
@@ -230,9 +231,7 @@ const CrmProjectAutoSetup: React.FC = () => {
     qc.invalidateQueries({ queryKey: ["crm-payment-plans"] });
     // Flat Master (Civil Work DPR) — generating/editing units here also
     // builds/adjusts their rooms there.
-    qc.invalidateQueries({ queryKey: ["room-master"] });
-    qc.invalidateQueries({ queryKey: ["room-master-units"] });
-    qc.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
+    invalidateRoomData(qc);
   };
 
   const blocksForNames: any[] = status?.blocks || [];

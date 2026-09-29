@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { usePageRights } from "@/hooks/usePageRights";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { getRoomCategoryOptions, type RoomCategory } from "@/api/roomCategoryMasterApi";
 import {
   getBhkTemplate,
@@ -109,6 +110,8 @@ export default function RoomCompositionBuilder() {
       qc.invalidateQueries({ queryKey: ["bhk-template", bhkType] });
       // Room counts/summaries feed the CRM Auto Setup + Unit Master pickers.
       qc.invalidateQueries({ queryKey: LAYOUT_TYPES_QUERY_KEY });
+      // The save just added/removed rooms across every unit of this type.
+      invalidateRoomData(qc);
     } catch (e: any) {
       toast.error(e.message ?? "Save failed");
     } finally {

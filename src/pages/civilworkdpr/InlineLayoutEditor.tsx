@@ -1,5 +1,6 @@
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import { Loader2, Minus, Plus, RotateCcw, Save, X, AlertTriangle } from "lucide-react";
 import type { RoomCategory } from "@/api/roomCategoryMasterApi";
@@ -105,8 +106,7 @@ export function InlineLayoutEditor({
 
   const refresh = () => Promise.all([
     qc.invalidateQueries({ queryKey: ["layout-overrides-project"] }),
-    qc.invalidateQueries({ queryKey: ["room-master"] }),
-    qc.invalidateQueries({ queryKey: ["room-master-unit-rooms"] }),
+    invalidateRoomData(qc),
   ]);
 
   const save = async () => {

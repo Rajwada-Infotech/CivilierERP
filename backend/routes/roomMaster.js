@@ -7,7 +7,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
-const { resolveLayoutType, getLayoutComposition, getEffectiveComposition, syncUnitRooms, syncRoomsForUnits, inferRoomCategoryId, bumpFlatMasterCaches, ROOM_NAME_MAX, ROOM_HAS_WORK } = require("../services/unitLayout");
+const { resolveLayoutType, getLayoutComposition, getEffectiveComposition, syncUnitRooms, syncRoomsForUnits, inferRoomCategoryId, bumpFlatMasterCaches, ROOM_NAME_MAX, ROOM_HAS_WORK, floorLabelOf } = require("../services/unitLayout");
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
@@ -637,11 +637,10 @@ router.post("/delete-bulk", allowRoles("super_admin"), async (req, res) => {
       // floorNo === null or floorNo === -1: both mean "no floor" — CrmProjectAutoSetupFloor
       // uses FloorNo = -1 as a sentinel for units with FloorNo IS NULL in UnitMaster,
       // which are stored with Floor = NULL in RoomMaster.
-      if (floorNo === null || floorNo === undefined || floorNo === -1 || !Number.isFinite(floorNo)) {
+      if (floorNo === null || floorNo === -1 || !Number.isFinite(floorNo)) {
         rWhere += " AND r.Floor IS NULL";
       } else {
-        const floorStr = floorNo === 0 ? "G" : String(floorNo);
-        request.input("Floor", sql.NVarChar(50), floorStr);
+        request.input("Floor", sql.NVarChar(50), floorLabelOf(floorNo));
         rWhere += " AND r.Floor = @Floor";
       }
     }
@@ -656,13 +655,19 @@ router.post("/delete-bulk", allowRoles("super_admin"), async (req, res) => {
     // CRITICAL: mssql/tedious does NOT reliably support DECLARE variables that span across
     // a DELETE and a subsequent SELECT in a single .query() call. Splitting into two
     // separate round-trips gives deterministic, correct results every time.
+    // Active rooms are counted separately: the Room Master tree (and so the
+    // confirm dialog's "Delete N rooms?") only ever shows active rooms, so the
+    // reported deleted/skipped numbers must be about those N. Inactive rooms
+    // (soft-removed by layout sync) are cleaned up too but reported apart.
     const countRes = await request.query(
-      `SELECT COUNT(*) AS TotalTargeted FROM dbo.RoomMaster r WHERE ${rWhere}`
+      `SELECT COUNT(*) AS TotalAll, SUM(CASE WHEN r.IsActive = 1 THEN 1 ELSE 0 END) AS TotalActive
+       FROM dbo.RoomMaster r WHERE ${rWhere}`
     );
-    const totalTargeted = countRes.recordset[0]?.TotalTargeted ?? 0;
+    const totalAll = countRes.recordset[0]?.TotalAll ?? 0;
+    const totalActive = countRes.recordset[0]?.TotalActive ?? 0;
 
-    if (totalTargeted === 0) {
-      return res.json({ message: "No rooms found to delete in this scope.", count: 0, skipped: 0 });
+    if (totalAll === 0) {
+      return res.json({ message: "No rooms found to delete in this scope.", count: 0, skipped: 0, inactiveRemoved: 0 });
     }
 
     // Step 2 — Delete only safe rooms (no work/blueprints) and capture exactly which
@@ -671,18 +676,19 @@ router.post("/delete-bulk", allowRoles("super_admin"), async (req, res) => {
     // stays in sync as new room-level data relations are added in the future.
     const deleteRes = await request.query(`
       DELETE r
-      OUTPUT DELETED.Id
+      OUTPUT DELETED.Id, DELETED.IsActive
       FROM dbo.RoomMaster r
       WHERE ${rWhere} AND (${ROOM_HAS_WORK}) = 0
     `);
 
-    await bumpFlatMasterCaches();
+    if (deleteRes.recordset.length > 0) await bumpFlatMasterCaches();
 
-    const deleted = deleteRes.recordset.length;
-    const skipped = totalTargeted - deleted;
+    const deleted = deleteRes.recordset.filter((row) => row.IsActive).length;
+    const inactiveRemoved = deleteRes.recordset.length - deleted;
+    const skipped = totalActive - deleted;
 
     let msg;
-    if (deleted === 0) {
+    if (deleted === 0 && totalActive > 0) {
       msg = "No empty rooms to delete — all rooms in this scope have work entries or blueprints attached.";
     } else {
       msg = `Deleted ${deleted} room(s) successfully`;
@@ -691,7 +697,7 @@ router.post("/delete-bulk", allowRoles("super_admin"), async (req, res) => {
       }
     }
 
-    res.json({ message: msg, count: deleted, skipped });
+    res.json({ message: msg, count: deleted, skipped, inactiveRemoved });
   } catch (err) {
     console.error("[room-master] POST /delete-bulk error:", err.message);
     res.status(500).json({ error: err.message });
