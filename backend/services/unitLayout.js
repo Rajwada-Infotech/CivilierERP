@@ -856,4 +856,5 @@ module.exports = {
   inferRoomCategoryId,
   bumpFlatMasterCaches,
   ROOM_NAME_MAX,
+  ROOM_HAS_WORK,
 };
