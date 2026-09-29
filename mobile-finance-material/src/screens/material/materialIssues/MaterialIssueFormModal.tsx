@@ -112,12 +112,17 @@ export function MaterialIssueFormModal({
 
   useEffect(() => {
     if (!visible || editingId != null) return;
+    // Both calls used to be unhandled — a rejection from either (network
+    // blip, or a 403 on a doc-type-scoped right) crashed the whole app the
+    // moment this New Material Issue modal opened, since nothing else
+    // catches a promise here. docTypeId/docNo just stay unset on failure —
+    // the backend still accepts the request without a preview.
     fetchDocTypes("ISS").then((types) => {
       if (types[0]) {
         setDocTypeId(types[0].TypeOfDocId);
-        fetchNextDocNumber(types[0].TypeOfDocId, form.finYear || undefined).then(setDocNo);
+        fetchNextDocNumber(types[0].TypeOfDocId, form.finYear || undefined).then(setDocNo).catch(() => {});
       }
-    });
+    }).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, editingId, form.finYear]);
 
