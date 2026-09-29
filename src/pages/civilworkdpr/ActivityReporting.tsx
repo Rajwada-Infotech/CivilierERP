@@ -8,6 +8,7 @@ import {
   ASSIGNMENT_STATUS_META as STATUS_META,
   getReportedAssignments,
   getActivityPhotos,
+  startDelayInfo,
   type AssignmentStatus,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
@@ -360,6 +361,21 @@ export default function ActivityReporting() {
                                     <CalendarDays size={11} className="text-muted-foreground shrink-0" />
                                     {row.startDate ? new Date(row.startDate).toLocaleDateString() : "—"}
                                   </span>
+                                  {(() => {
+                                    const delay = startDelayInfo(row.startDate, row.firstReportedAt);
+                                    if (!delay) return null;
+                                    return (
+                                      <span
+                                        className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                                          delay.tone === "on-time"
+                                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                            : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                        }`}
+                                      >
+                                        {delay.label}
+                                      </span>
+                                    );
+                                  })()}
                                 </td>
                                 <td className="px-3 py-3">
                                   {row.materials.length === 0 ? (

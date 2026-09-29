@@ -259,6 +259,12 @@ export interface ReportedAssignment {
   startDate: string | null;
   days: number | null;
   endDate: string | null;
+  // The date the assigned engineer actually reported progress for the
+  // first time — set once and never overwritten (see
+  // dependencyActivityAssignment.js's isFirstReport). StartDate is only
+  // ever a tentative plan; (firstReportedAt - startDate) is the real delay
+  // before work began. Null until that first report happens.
+  firstReportedAt: string | null;
   labourSource: SourceType | null;
   materialSource: SourceType | null;
   description: string | null;
@@ -308,6 +314,25 @@ export const getReportedAssignments = async (dependencyMasterId?: number): Promi
   const res = await fetchWithAuth(url);
   return handleResponse<ReportedAssignment[]>(res);
 };
+
+// StartDate is only ever a tentative plan — the real measure of how
+// promptly work began is (firstReportedAt - startDate), the gap between
+// the plan and the engineer's own first progress report. <= 0 reads as
+// On time (started on or before the planned date); positive is that many
+// days late. Null until there's actually been a first report. Shared by
+// ActivityReporting.tsx's table and ActivityDetailModal's Overview tab.
+export function startDelayInfo(
+  startDate: string | null,
+  firstReportedAt: string | null,
+): { label: string; tone: "on-time" | "late" } | null {
+  if (!startDate || !firstReportedAt) return null;
+  const start = new Date(`${startDate.slice(0, 10)}T00:00:00`);
+  const first = new Date(`${firstReportedAt.slice(0, 10)}T00:00:00`);
+  const diffDays = Math.round((first.getTime() - start.getTime()) / 86_400_000);
+  return diffDays <= 0
+    ? { label: "On time", tone: "on-time" }
+    : { label: `${diffDays} day${diffDays === 1 ? "" : "s"} late`, tone: "late" };
+}
 
 // One assigned engineer confirming their own task — id is
 // dbo.DependencyActivityEngineer.Id (from the Approval Inbox row's

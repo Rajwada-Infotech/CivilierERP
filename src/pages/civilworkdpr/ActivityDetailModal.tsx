@@ -48,6 +48,7 @@ import {
   getAssignmentAttempts,
   restoreCancelledActivity,
   getProgressLog,
+  startDelayInfo,
   ASSIGNMENT_STATUS_META,
   type PhotoPhase,
   type ActivityPhotoMeta,
@@ -861,6 +862,21 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
             <CalendarDays size={13} className="text-muted-foreground" />
             {row.startDate ? new Date(row.startDate).toLocaleDateString("en-IN") : "—"}
           </span>
+          {(() => {
+            const delay = startDelayInfo(row.startDate, row.firstReportedAt);
+            if (!delay) return null;
+            return (
+              <span
+                className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                  delay.tone === "on-time"
+                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                }`}
+              >
+                {delay.label}
+              </span>
+            );
+          })()}
         </Field>
         <Field label="End Date">{row.endDate ? new Date(row.endDate).toLocaleDateString("en-IN") : "—"}</Field>
         <Field label="Days">{row.days ?? "—"}</Field>

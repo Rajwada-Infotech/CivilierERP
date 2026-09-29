@@ -124,6 +124,7 @@ router.get(
         daa.StartDate AS startDate,
         daa.Days AS days,
         daa.EndDate AS endDate,
+        daa.FirstReportedAt AS firstReportedAt,
         daa.LabourSource AS labourSource,
         daa.MaterialSource AS materialSource,
         daa.Description AS description,
@@ -875,11 +876,16 @@ router.patch(
 
     // An assigned engineer's activity sits at Allocated (or, for legacy
     // rows, Pending) until they actually report progress for the first
-    // time — this is that moment. Only fires on a pure progress update
-    // (no explicit status in the same request, which stays authoritative)
-    // so it can't fight a manual Hold/Cancel/etc chosen alongside it.
+    // time — this is that moment, whether it lands on IN_PROGRESS via
+    // autoStatus below or jumps straight to COMPLETED (drag-to-100% bundles
+    // status: "COMPLETED" into this same request — see the COMPLETED
+    // branch further down). FirstReportedAt captures the actual date work
+    // began, as opposed to StartDate's merely tentative plan — set once and
+    // never overwritten, so (FirstReportedAt - StartDate) is how many days
+    // late (or early/on-time, if <= 0) the activity actually started.
+    const isFirstReport = hasProgress && (current === "PENDING" || current === "ALLOCATED");
     let autoStatus = null;
-    if (hasProgress && !hasStatus && (current === "PENDING" || current === "ALLOCATED")) {
+    if (isFirstReport && !hasStatus) {
       autoStatus = "IN_PROGRESS";
     }
 
@@ -919,6 +925,7 @@ router.patch(
     if (effectiveStatus) setClauses.push("Status = @status");
     if (hasRemarks) setClauses.push("Remarks = @remarks");
     if (hasProgress) setClauses.push("ProgressPercent = @progressPercent");
+    if (isFirstReport) setClauses.push("FirstReportedAt = CAST(SYSDATETIME() AS DATE)");
     const capturingPreCancel = hasStatus && status === "CANCELLED" && current && current !== "CANCELLED";
     if (capturingPreCancel) setClauses.push("PreCancelStatus = @preCancelStatus");
     const request = pool.request()
