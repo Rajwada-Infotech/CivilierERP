@@ -4,6 +4,7 @@ import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Plus, Edit2, Trash2, RotateCcw, AlertTriangle, Tags } from "lucide-react";
@@ -76,6 +77,7 @@ export default function RoomCategoryMaster() {
       if (editing) {
         const r = await updateRoomCategory(editing.id, { ...payload, renameRooms: aliasChanged && renameRooms });
         toast.success(r.roomsRenamed ? `Category updated — ${r.roomsRenamed} room(s) renamed` : "Category updated");
+        if (r.roomsRenamed) invalidateRoomData(qc);
       } else {
         await createRoomCategory(payload);
         toast.success("Category created");
