@@ -787,6 +787,7 @@ export default function MaterialRequest() {
             <ApprovalStatusChain
               table="MaterialRequests"
               recordId={row.original.MRId}
+              fallback={<StatusBadge status={row.original.Status} />}
             />
             {pending &&
               (pending.totalPending > 0 ? (
@@ -1316,6 +1317,16 @@ export default function MaterialRequest() {
                       value={ci.ItemId}
                       onChange={(id) => pickItem(ci._key, id)}
                     />
+                    {/* Surfaces where the Required By Date floor actually
+                        comes from — without this, hitting the "can't be
+                        earlier than X" validation looks like it's coming
+                        from nowhere, since the min-date hint near the date
+                        field itself is easy to miss/scroll past. */}
+                    {Number(itemMap[ci.ItemId]?.DaysOfSupply ?? 0) > 0 && (
+                      <p className="text-[10px] text-muted-foreground">
+                        {Number(itemMap[ci.ItemId].DaysOfSupply)}-day supply lead time
+                      </p>
+                    )}
                   </div>
 
                   {/* UOM selector */}
