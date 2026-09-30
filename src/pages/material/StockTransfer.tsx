@@ -47,6 +47,7 @@ import {
   type TransferGRNSummary,
 } from "@/api/grnApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import { getApprovedMRList, getICTMRPrefill, type ApprovedMRSummary } from "@/api/materialRequestApi";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -78,6 +79,11 @@ interface TItem {
   uom: string;
   availableQty: number;
   remarks: string;
+  /** Set when this line came from a Material Request (inter-company only) —
+   *  the source MaterialRequestItems row. */
+  mrItemId?: number | null;
+  /** Cap for this line's quantity — what's still pending on that MR item. */
+  mrPendingQty?: number | null;
 }
 
 interface AvailableItem {
@@ -306,6 +312,7 @@ function ItemSearchRow({
 
   const qtyNum = parseFloat(item.qty) || 0;
   const overLimit = qtyNum > item.availableQty && item.availableQty > 0;
+  const overMrPending = item.mrPendingQty != null && qtyNum - item.mrPendingQty > 0.0001;
 
   return (
     <div
@@ -418,12 +425,17 @@ function ItemSearchRow({
           placeholder="Qty"
           disabled={!item.itemId}
           className={`w-full px-2 py-2 rounded-lg border text-xs text-foreground bg-background outline-none disabled:opacity-50 ${
-            overLimit ? "border-red-400" : "border-border"
+            overLimit || overMrPending ? "border-red-400" : "border-border"
           }`}
         />
         {overLimit && (
           <p className="text-[10px] text-red-500 mt-0.5">
             Max: {fmtNum(item.availableQty)}
+          </p>
+        )}
+        {overMrPending && (
+          <p className="text-[10px] text-red-500 mt-0.5">
+            Max: {fmtNum(item.mrPendingQty!)} (MR pending)
           </p>
         )}
       </div>
@@ -1409,6 +1421,15 @@ export default function StockTransfer() {
   const [filterProjectId, setFilterProjectId] = useState("");
   const [toCompanyId, setToCompanyId] = useState("");
   const [toProjectId, setToProjectId] = useState("");
+  // Inter-company only — raising this transfer from a Material Request.
+  // Same "prefill items, let the user drop/reduce lines, cap at what's
+  // still pending" pattern as PurchaseOrderMaster's own MR-from-PO picker;
+  // see getICTMRPrefill's own comment for why the MR's Company/Project
+  // land on the Receiver side, not Sender.
+  const [sourceMR, setSourceMR] = useState<{ id: number; docNo: string } | null>(null);
+  const [mrDropdownValue, setMrDropdownValue] = useState("");
+  const [mrDropdownLoading, setMrDropdownLoading] = useState(false);
+  const [mrDropdownError, setMrDropdownError] = useState<string | null>(null);
   const [fromGodownId, setFromGodownId] = useState<number | null>(null);
   const [toGodownId, setToGodownId] = useState<number | null>(null);
   const [items, setItems] = useState<TItem[]>([emptyItem()]);
@@ -1440,6 +1461,15 @@ export default function StockTransfer() {
     queryKey: ["enterprise-options", "P"],
     queryFn: () => getEnterpriseOptions(undefined, "P"),
     staleTime: 120_000,
+  });
+
+  // MRs available to raise an Inter-Company Transfer from — same
+  // approved-list endpoint PurchaseOrderMaster's own MR picker uses.
+  const { data: approvedMRs = [] } = useQuery<ApprovedMRSummary[]>({
+    queryKey: ["ict-approved-mrs"],
+    queryFn: () => getApprovedMRList(),
+    enabled: transferMode === "inter",
+    staleTime: 30_000,
   });
   const allProjects: {
     id: number;
@@ -1573,9 +1603,59 @@ export default function StockTransfer() {
     setItems((prev) => prev.filter((_, i) => i !== idx));
   const addItem = () => setItems((prev) => [...prev, emptyItem()]);
 
+  // Raise this Inter-Company Transfer from a Material Request: prefills the
+  // Receiver company/project (the MR's own — it's the project that asked
+  // for the material) and the item lines, each capped at what's still
+  // pending on that MR item. The user can then remove lines they can't
+  // fulfil right now, or reduce a line's quantity below the cap — either
+  // way, whatever's left off this transfer simply stays pending on the MR
+  // for a later PO or ICT to pick up (see getMRItemFulfillment — nothing
+  // here marks the MR "used up", it's always computed live).
+  const handleMRDropdownSelect = async (mrId: string) => {
+    setMrDropdownValue(mrId);
+    if (!mrId) return;
+    setMrDropdownLoading(true);
+    setMrDropdownError(null);
+    try {
+      const prefill = await getICTMRPrefill(Number(mrId));
+      if (!prefill.items.length) {
+        setMrDropdownError("This Material Request has nothing left pending to transfer.");
+        return;
+      }
+      setItems(
+        prefill.items.map((it) => ({
+          itemId: it.ItemId ?? "",
+          itemName: it.ItemName ?? "",
+          qty: String(it.PendingQty ?? it.Quantity ?? 0),
+          uom: it.UOMName ?? it.UOMCode ?? "",
+          availableQty: 0,
+          remarks: it.Remarks ?? "",
+          mrItemId: it.MRItemId ?? null,
+          mrPendingQty: it.PendingQty ?? null,
+        })),
+      );
+      setSourceMR({ id: prefill.MRId, docNo: prefill.DocNo });
+      if (prefill.CompanyId) setToCompanyId(String(prefill.CompanyId));
+      if (prefill.ProjectId) setToProjectId(String(prefill.ProjectId));
+    } catch (err: any) {
+      setMrDropdownError(err.message ?? "Could not load Material Request.");
+    } finally {
+      setMrDropdownLoading(false);
+    }
+  };
+
+  const clearSourceMR = () => {
+    setSourceMR(null);
+    setMrDropdownValue("");
+    setItems([emptyItem()]);
+  };
+
   const hasOverLimit = items.some(
     (it) =>
       it.itemId && it.availableQty > 0 && parseFloat(it.qty) > it.availableQty,
+  );
+  const hasOverMrPending = items.some(
+    (it) => it.mrItemId != null && it.mrPendingQty != null && (parseFloat(it.qty) || 0) - it.mrPendingQty > 0.0001,
   );
 
   const canTransfer =
@@ -1584,6 +1664,7 @@ export default function StockTransfer() {
     (transferMode === "inter" || fromGodownId !== toGodownId) &&
     items.some((it) => it.itemId && parseFloat(it.qty) > 0) &&
     !hasOverLimit &&
+    !hasOverMrPending &&
     !transferMut.isPending &&
     !interTransferMut.isPending;
 
@@ -1597,6 +1678,7 @@ export default function StockTransfer() {
         qty: parseFloat(it.qty),
         uom: it.uom,
         remarks: it.remarks,
+        mrItemId: it.mrItemId ?? null,
       }));
 
     if (transferMode === "inter") {
@@ -1619,6 +1701,7 @@ export default function StockTransfer() {
         ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
         ApplyGst: applyGst,
         Remarks: remarks || undefined,
+        SourceMRId: sourceMR?.id ?? undefined,
         Items: validItems.map((it) => {
           const manual = parseFloat(manualRates[it.itemId]);
           return {
@@ -1626,6 +1709,7 @@ export default function StockTransfer() {
             itemName: it.itemName,
             uom: it.uom,
             qty: it.qty,
+            mrItemId: it.mrItemId ?? undefined,
             ...(Number.isFinite(manual) && manual > 0 ? { manualRate: manual } : {}),
           };
         }),
@@ -1648,6 +1732,8 @@ export default function StockTransfer() {
     setRemarks("");
     setErrorMsg("");
     setManualRates({});
+    setSourceMR(null);
+    setMrDropdownValue("");
   };
 
   // Collect all project IDs that belong (directly or via tagging) to the TO company.
@@ -1955,6 +2041,49 @@ export default function StockTransfer() {
                         options={toProjectOptions.map((p) => ({ value: String(p.id), label: p.label }))}
                         placeholder={toCompanyId ? "All projects in company" : "Select a company first"}
                       />
+                    </div>
+
+                    {/* Raise from Material Request */}
+                    <div className="space-y-1.5">
+                      <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                        <ClipboardList size={13} /> Raise from Material Request (optional)
+                      </label>
+                      {sourceMR ? (
+                        <div className="flex items-center justify-between gap-2 rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
+                          <span className="flex items-center gap-1.5 font-medium">
+                            <ClipboardList size={14} className="text-primary" />
+                            From MR: {sourceMR.docNo}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={clearSourceMR}
+                            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                          >
+                            <X size={12} /> Clear
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <select
+                            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                            value={mrDropdownValue}
+                            onChange={(e) => handleMRDropdownSelect(e.target.value)}
+                            disabled={mrDropdownLoading}
+                          >
+                            <option value="">
+                              {mrDropdownLoading ? "Loading..." : "Select a Material Request"}
+                            </option>
+                            {approvedMRs.map((mr) => (
+                              <option key={mr.MRId} value={String(mr.MRId)}>
+                                {mr.DocNo} — {mr.ProjectName || mr.CompanyName || ""}
+                              </option>
+                            ))}
+                          </select>
+                          {mrDropdownError && (
+                            <p className="text-xs text-destructive">{mrDropdownError}</p>
+                          )}
+                        </>
+                      )}
                     </div>
                   </>
                 ) : (
