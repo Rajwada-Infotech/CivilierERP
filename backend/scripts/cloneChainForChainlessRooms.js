@@ -11,8 +11,8 @@
 //     refused like the route does
 //   - scope columns follow the format existing chains use, checked against
 //     their own rooms: TowerId = the unit's block, FlatId = the unit, Floor =
-//     whichever of floorLabelOf(FloorNo) / FloorNo the donors store; Alias =
-//     "<unit>/<room>" only if the donors use that shape
+//     whichever of floorLabelOf(FloorNo) / FloorNo the donors store; Alias in
+//     the form this project's chains use (else the most common form overall)
 //
 //   node scripts/cloneChainForChainlessRooms.js --project "Royal Garden"          # dry run
 //   node scripts/cloneChainForChainlessRooms.js --project "Royal Garden" --apply
@@ -53,13 +53,39 @@ async function main() {
     flat: chains.every((c) => c.FlatId === c.UnitId),
     floorLabel: chains.every((c) => String(c.Floor) === String(floorLabelOf(c.FloorNo))),
     floorNo: chains.every((c) => String(c.Floor) === String(c.FloorNo)),
-    alias: chains.every((c) => c.Alias === `${c.UnitName}/${c.RoomName}`),
   };
   console.log(`format learned from ${chains.length} chains: ${JSON.stringify(rule)}`);
-  if (!rule.tower || !rule.flat || !(rule.floorLabel || rule.floorNo) || !rule.alias) {
-    throw new Error("existing chains don't follow one consistent scope/alias format — refusing to guess");
+  if (!rule.tower || !rule.flat || !(rule.floorLabel || rule.floorNo)) {
+    throw new Error("existing chains don't follow one consistent tower/flat/floor format — refusing to guess");
   }
   const floorOf = (fno) => (rule.floorLabel ? String(floorLabelOf(fno)) : String(fno));
+  // Alias format is free text in the app, so it is LEARNED from the existing
+  // chains: for each one, find the separator (read from the alias itself, the
+  // character right after the unit's first segment) and the letter case of the
+  // unit / room parts that rebuild it exactly. Nothing about the format is typed.
+  const CASES = { asIs: (x) => x, upper: (x) => x.toUpperCase(), lower: (x) => x.toLowerCase() };
+  const build = (f, unitName, roomName) => String(unitName).split("/").map(CASES[f.unitCase]).join(f.sep) + f.sep + CASES[f.roomCase](String(roomName));
+  const learn = (c) => {
+    const first = String(c.UnitName).split("/")[0];
+    if (String(c.Alias).toUpperCase().indexOf(first.toUpperCase()) !== 0) return null;
+    const sep = String(c.Alias).charAt(first.length);
+    if (!sep) return null;
+    for (const unitCase of Object.keys(CASES)) for (const roomCase of Object.keys(CASES)) {
+      const f = { sep, unitCase, roomCase };
+      if (build(f, c.UnitName, c.RoomName) === c.Alias) return f;
+    }
+    return null;
+  };
+  const tally = (list) => list.reduce((m, c) => { const f = learn(c); const k = f ? JSON.stringify(f) : "unrecognised"; m[k] = (m[k] || 0) + 1; return m; }, {});
+  const own = chains.filter((c) => c.ProjectId === pid);
+  const counts = tally(own.length ? own : chains);
+  const bestKey = Object.entries(counts).filter(([k]) => k !== "unrecognised").sort((a, b) => b[1] - a[1])[0]?.[0];
+  console.log(`alias formats — all chains: ${JSON.stringify(tally(chains))}${own.length ? `; this project: ${JSON.stringify(counts)}` : "; this project has no chains yet (using the most common)"}`);
+  const odd = chains.filter((c) => !learn(c)).slice(0, 5);
+  if (odd.length) console.log(`   unrecognised examples: ${odd.map((c) => `"${c.Alias}" (unit "${c.UnitName}", room "${c.RoomName}")`).join("; ")}`);
+  if (!bestKey) throw new Error("no alias format could be learned from existing chains — refusing to guess");
+  const aliasFormat = JSON.parse(bestKey);
+  console.log(`   using alias format ${bestKey}, e.g. "${build(aliasFormat, chains[0].UnitName, chains[0].RoomName)}"`);
   const template = new Map(); // categoryId -> donor chain
   const byCat = new Map();
   for (const c of chains) (byCat.get(c.RoomCategoryId) || byCat.set(c.RoomCategoryId, []).get(c.RoomCategoryId)).push(c);
@@ -84,11 +110,12 @@ async function main() {
   console.log(`${APPLY ? "APPLY" : "DRY RUN"} — ${proj[0].name}: ${targets.length} chainless room(s)\n`);
   const totals = { chainsCreated: 0, rungsCreated: 0, noTemplate: 0, problems: 0 };
   const perBlock = new Map();
+  const noTpl = new Map(); // room type -> rooms skipped because no chain of that type exists yet
   let shown = 0;
   for (const t of targets) {
     const donor = template.get(t.RoomCategoryId);
-    if (!donor) { totals.noTemplate++; console.log(`   ${t.UnitName}/${t.RoomName}: no existing chain for this room type — left for Dependency Master`); continue; }
-    const alias = `${t.UnitName}/${t.RoomName}`;
+    if (!donor) { totals.noTemplate++; noTpl.set(t.RoomName.replace(/\s*\d+$/, ""), (noTpl.get(t.RoomName.replace(/\s*\d+$/, "")) || 0) + 1); continue; }
+    const alias = build(aliasFormat, t.UnitName, t.RoomName);
     const tx = pool.transaction();
     await tx.begin();
     try {
