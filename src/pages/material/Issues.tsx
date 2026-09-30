@@ -612,17 +612,17 @@ export default function Issues() {
     setSaved(false);
   };
 
-  // Mirrors the backend's own check (PUT /:id in materialIssues.js) — an
-  // issue that's Pending approval can't be edited there, so the Edit
-  // button must not lead the user into a form that only fails on save.
-  const EDITABLE_STATUSES = ["Draft", "Rejected", "Approved"];
+  // Mirrors the backend's own check (PUT /:id in materialIssues.js) —
+  // editing a Pending (or Approved) issue restarts its approval cycle
+  // rather than being blocked.
+  const EDITABLE_STATUSES = ["Draft", "Pending", "Rejected", "Approved"];
   const isEditableStatus = (status?: string | null) =>
     EDITABLE_STATUSES.includes(status || "Draft");
 
   const handleEdit = (record: any) => {
     if (!isEditableStatus(record.Status)) {
       toast.error(
-        `Cannot edit an issue with status "${record.Status}". Only Draft, Rejected, or Approved issues can be edited.`,
+        `Cannot edit an issue with status "${record.Status}". Only Draft, Pending, Rejected, or Approved issues can be edited.`,
       );
       return;
     }
@@ -828,6 +828,7 @@ export default function Issues() {
           <ApprovalStatusChain
             table="MaterialIssues"
             recordId={row.original.IssueId}
+            fallback={<StatusBadge status={row.original.Status} />}
           />
         </div>
       ),

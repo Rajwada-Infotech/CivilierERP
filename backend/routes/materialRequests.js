@@ -29,7 +29,7 @@ const {
   resolveDocTypeId,
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
-const { transition } = require("../services/approvalService");
+const { transition, writeAuditLog } = require("../services/approvalService");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { poExistsForMR } = require("../utils/materialChainGuard");
@@ -961,12 +961,23 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
     if (!statusCheck.recordset.length)
       return res.status(404).json({ error: "Not found" });
     const currentMRStatus = statusCheck.recordset[0].Status;
-    if (!["Draft", "Approved", "Rejected"].includes(currentMRStatus))
+    if (!["Draft", "Pending", "Approved", "Rejected"].includes(currentMRStatus))
       return res.status(409).json({
-        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Approved, or Rejected requests can be edited.`,
+        error: `Cannot edit a Material Request with status "${currentMRStatus}". Only Draft, Pending, Approved, or Rejected requests can be edited.`,
       });
     const wasApproved = currentMRStatus === "Approved";
     const wasRejected = currentMRStatus === "Rejected";
+    // Editing a Pending request (possibly already partially approved) must
+    // restart its approval cycle the same way wasRejected's resubmit does —
+    // otherwise a level approved against the OLD numbers would still count
+    // toward the edited ones. Can't reuse transition("Pending") for this
+    // like the Rejected case does: it only accepts Draft/Rejected as the
+    // FROM status and throws on an already-Pending record. Instead this
+    // writes the same fresh Level=0/'Pending' audit marker transition()'s
+    // own Pending branch writes — currentCycleCutoffSql (approvalService.js)
+    // only counts approvals whose ActionAt is after the latest such marker,
+    // so this alone is what makes "approved so far" reset to zero.
+    const wasPending = currentMRStatus === "Pending";
     const beforeSnapshot = wasApproved
       ? await snapshotRow(pool, "dbo.MaterialRequests", "MRId", id)
       : null;
@@ -1028,7 +1039,7 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
               RequestDate=@RequestDate, RequiredByDate=@RequiredByDate,
               Priority=@Priority, Reason=@Reason, Remarks=@Remarks,
               Status=COALESCE(@Status, Status), UpdatedBy=@UpdatedBy, UpdatedAt=GETDATE()
-          WHERE MRId=@id AND Status IN ('Draft', 'Approved', 'Rejected')
+          WHERE MRId=@id AND Status IN ('Draft', 'Pending', 'Approved', 'Rejected')
         `);
 
       // Race-condition guard: if another request approved/submitted this MR
@@ -1113,12 +1124,25 @@ router.put("/:id", authenticateToken, requirePageRight("material-request", "edit
       }
     }
 
+    // Already Pending (not via the Rejected resubmit above) — restart the
+    // approval cycle in place, same reasoning as wasRejected's comment
+    // above, just without a Status change since it's Pending already.
+    if (wasPending) {
+      try {
+        await writeAuditLog("MaterialRequests", id, 0, req.user?.role, user, "Pending", null);
+      } catch (resetErr) {
+        console.error("[material-requests] approval-cycle reset after edit failed:", resetErr.message);
+      }
+    }
+
     res.json({
       message: wasApproved
         ? "Material request updated — sent back for approval"
-        : resubmitted
-          ? "Material request updated and re-submitted for approval"
-          : "Material request updated",
+        : wasPending
+          ? "Material request updated — approval restarted from level 1"
+          : resubmitted
+            ? "Material request updated and re-submitted for approval"
+            : "Material request updated",
       reopenedForApproval: wasApproved,
       resubmitted,
     });

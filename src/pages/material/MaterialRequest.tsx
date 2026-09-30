@@ -495,6 +495,7 @@ export default function MaterialRequest() {
       Boolean(
         header.companyId &&
         header.projectId &&
+        header.finYearId &&
         header.requestDate &&
         header.reason.trim(),
       ),
