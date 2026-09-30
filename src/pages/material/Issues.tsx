@@ -59,6 +59,7 @@ const ISSUES_EXPORT_COLUMNS: ExportColumn[] = [
 
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
+import { SearchableSelect } from "@/components/SearchableSelect";
 import {
   fetchNextDocNumber,
   fetchDocTypes,
@@ -1454,33 +1455,17 @@ export default function Issues() {
                       </span>
 
                       <div className="flex-1 min-w-0">
-                        <div className="relative">
-                          <select
-                            value={ci.ItemId}
-                            onChange={(e) => pickItem(ci._key, e.target.value)}
-                            className={`${selectCls} ${isOver ? "border-destructive" : ""}`}
-                          >
-                            <option value="">
-                              {loadingItems ? "Loading…" : "Select item"}
-                            </option>
-                            {(itemOptions as any[]).length === 0 ? (
-                              <option disabled value="">
-                                No items found in {selectedGodown?.name ?? "this godown"}
-                              </option>
-                            ) : (
-                              (itemOptions as any[]).map((item) => (
-                                <option key={item.M_Id} value={String(item.M_Id)}>
-                                  {item.M_Name} — Stock: {Number(item.AvailableStock).toFixed(2)}
-                                  {item.M_Group ? ` · ${item.M_Group}` : ""}
-                                </option>
-                              ))
-                            )}
-                          </select>
-                          <ChevronDown
-                            size={13}
-                            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                          />
-                        </div>
+                        <SearchableSelect
+                          value={ci.ItemId}
+                          onChange={(v) => pickItem(ci._key, v)}
+                          placeholder={loadingItems ? "Loading…" : "Select item"}
+                          searchPlaceholder="Search items…"
+                          className={isOver ? "border-destructive" : ""}
+                          options={(itemOptions as any[]).map((item) => ({
+                            value: String(item.M_Id),
+                            label: `${item.M_Name} — Stock: ${Number(item.AvailableStock).toFixed(2)}${item.M_Group ? ` · ${item.M_Group}` : ""}`,
+                          }))}
+                        />
                       </div>
 
                       <button
