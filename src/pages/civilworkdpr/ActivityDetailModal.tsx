@@ -561,6 +561,11 @@ function BlueprintTab({ rungId, roomId }: { rungId: number; roomId: number }) {
 // Worker Attendance page (src/pages/civilworkdpr/WorkerAttendance.tsx),
 // just pinned to this rung — the natural place to check "who worked on
 // this activity" alongside its Overview/Photos.
+// Stable fallback while the attendance query has no data yet (loading or
+// failed): a fresh `[]` default every render made the status-sync effect
+// below (deps: [attendanceRows]) setState on every render, looping forever.
+const NO_ATTENDANCE_ROWS: never[] = [];
+
 function AttendanceTab({ rungId }: { rungId: number }) {
   const queryClient = useQueryClient();
   const [date, setDate] = useState(todayIso());
@@ -568,7 +573,7 @@ function AttendanceTab({ rungId }: { rungId: number }) {
   const [statusByWorker, setStatusByWorker] = useState<Record<number, AttendanceStatus>>({});
   const [saving, setSaving] = useState(false);
 
-  const { data: attendanceRows = [], isFetching } = useQuery({
+  const { data: attendanceRows = NO_ATTENDANCE_ROWS, isFetching } = useQuery({
     queryKey: ["workerAttendanceAttendance", rungId, date],
     queryFn: () => getAttendance(rungId, date),
     staleTime: 10 * 1000,

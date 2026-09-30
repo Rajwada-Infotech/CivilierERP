@@ -394,6 +394,30 @@ export async function fetchAllReminders(
   });
 }
 
+// useReminders is mounted by several components at once (sidebar, mobile
+// nav, bell, login popup), each of which used to run its own full fetch —
+// every page load fired the same ~7 requests 4 times. Instances now share
+// one in-flight/recent result; a manual refresh always bypasses it.
+const SHARED_TTL_MS = 10_000;
+let shared: { key: string; at: number; promise: Promise<ReminderItem[]> } | null = null;
+
+function fetchRemindersShared(
+  role: string,
+  pagePermissions: { page: string; actions: string[] }[] | undefined,
+  force: boolean,
+): Promise<ReminderItem[]> {
+  const key = `${role}|${JSON.stringify(pagePermissions ?? null)}`;
+  if (!force && shared && shared.key === key && Date.now() - shared.at < SHARED_TTL_MS) {
+    return shared.promise;
+  }
+  const promise = fetchAllReminders(role, pagePermissions);
+  shared = { key, at: Date.now(), promise };
+  promise.catch(() => {
+    if (shared?.promise === promise) shared = null;
+  });
+  return promise;
+}
+
 export function useReminders(options: { pollingInterval?: number } = {}) {
   const { pollingInterval = 0 } = options;
   const { currentUser } = useAuth();
@@ -436,9 +460,10 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
       if (isManual) setLoading(true);
 
       try {
-        const items = await fetchAllReminders(
+        const items = await fetchRemindersShared(
           role,
           currentUser?.pagePermissions,
+          isManual,
         );
         setReminders([...items]);
         failCount.current = 0;
