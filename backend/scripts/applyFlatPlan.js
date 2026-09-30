@@ -12,6 +12,8 @@
 //                                   "rooms": { "Balcony": 2, ... } }, ... } } ],
 // A flat's optional "areas" = { UnitMaster column: value, ... } sets several
 // area fields at once (e.g. carpet + super built-up); each column must exist.
+// A flat's optional "roomsAdjust" = { "Balcony": 1 } — only the plan's difference
+// from the layout's current composition; the rest is read from Unit Composition.
 // A flat's optional "rooms" = its full room list; when it differs from its
 // layout's composition it is saved as a UNIT override (Unit Composition), so
 // only that flat differs and the shared layout type is left alone.
@@ -122,6 +124,17 @@ async function main() {
       // Flat-specific rooms -> UNIT override, only when its effective rooms
       // (layout + any override already in force) differ from the plan.
       let ovrNote = "";
+      // "roomsAdjust": only what the plan adds/removes vs the layout's CURRENT
+      // composition (read from Unit Composition, never typed here).
+      if (want.roomsAdjust && !want.rooms) {
+        const base = await L.getLayoutComposition(pool, t.layoutTypeId);
+        const merged = Object.fromEntries(base.map((c) => [c.alias, c.quantity]));
+        for (const [alias, d] of Object.entries(want.roomsAdjust)) {
+          const key = Object.keys(merged).find((k) => k.trim().toUpperCase() === alias.trim().toUpperCase()) || alias;
+          merged[key] = Math.max(0, (merged[key] || 0) + d);
+        }
+        want.rooms = merged;
+      }
       if (want.rooms) {
         const layout = await L.resolveLayoutType(pool, { layoutTypeId: t.layoutTypeId });
         const { composition } = await L.validateItems(pool, toItems(want.rooms));
