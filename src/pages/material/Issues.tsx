@@ -612,7 +612,20 @@ export default function Issues() {
     setSaved(false);
   };
 
+  // Mirrors the backend's own check (PUT /:id in materialIssues.js) — an
+  // issue that's Pending approval can't be edited there, so the Edit
+  // button must not lead the user into a form that only fails on save.
+  const EDITABLE_STATUSES = ["Draft", "Rejected", "Approved"];
+  const isEditableStatus = (status?: string | null) =>
+    EDITABLE_STATUSES.includes(status || "Draft");
+
   const handleEdit = (record: any) => {
+    if (!isEditableStatus(record.Status)) {
+      toast.error(
+        `Cannot edit an issue with status "${record.Status}". Only Draft, Rejected, or Approved issues can be edited.`,
+      );
+      return;
+    }
     setHeader({
       companyId: String(record.CompanyId ?? ""),
       projectId: String(record.ProjectId ?? ""),
@@ -1752,7 +1765,7 @@ export default function Issues() {
                 >
                   <Printer size={13} /><span className="hidden sm:inline">Print</span>
                 </button>
-                {rights.canEdit && (
+                {rights.canEdit && isEditableStatus(viewingRecord.Status) && (
                   <button
                     onClick={() => { close(); handleEdit(viewingRecord); }}
                     className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
