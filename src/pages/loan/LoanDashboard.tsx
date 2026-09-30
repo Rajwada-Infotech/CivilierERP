@@ -85,7 +85,7 @@ function ChartCardShell({
 }) {
   return (
     <div
-      className="rounded-xl overflow-hidden bw-color-keep"
+      className="rounded-xl overflow-hidden"
       style={{
         background: isDark ? "rgba(15,17,26,0.5)" : "rgba(255,255,255,0.72)",
         border: isDark ? "1px solid rgba(34,197,94,0.15)" : "1px solid rgba(34,197,94,0.18)",
