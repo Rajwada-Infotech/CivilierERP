@@ -64,6 +64,12 @@ export interface InboxItem {
   Status: string;
   ContractorName: string | null;
   SupplierName: string | null;
+  // Resolved project name where that module's table (or one it already
+  // joins) ties to a project — purchase-orders, work-orders, goods-receipt,
+  // expense-booking, material-requests, vehicle-in-out, material-issues,
+  // material-issue-return, debit-note. NULL for everything else (payments,
+  // CRM modules, ...), which have no single project to show.
+  ProjectName: string | null;
   Amount: number | null;
   CreatedBy: string | null;
   ApprovedBy: string | null;
@@ -1038,6 +1044,14 @@ const InboxRow: React.FC<{
           <span className="shrink-0">{fmtDate(item.RecordDate)}</span>
         </div>
 
+        {/* Row 2b: project (only when this module resolves to one) */}
+        {item.ProjectName && (
+          <div className="flex items-center gap-1 text-[11px] text-muted-foreground -mt-1.5">
+            <Building2 size={10} className="shrink-0" />
+            <span className="truncate">{item.ProjectName}</span>
+          </div>
+        )}
+
         {/* Row 3: amount + approved/rejected by */}
         <div className="flex items-center justify-between gap-2">
           <p className="text-xs font-mono font-semibold text-foreground">
@@ -1080,7 +1094,7 @@ const InboxRow: React.FC<{
             return map[m[1]]?.[m[2]] ?? "var(--border)";
           })() }}
         />
-        <div className={`flex-1 grid grid-cols-[190px_100px_1fr_120px_150px_110px_1fr] items-center gap-2 pl-3 pr-4 py-3.5`}>
+        <div className={`flex-1 grid grid-cols-[190px_100px_1fr_130px_120px_150px_110px_1fr] items-center gap-2 pl-3 pr-4 py-3.5`}>
         {/* Col 1 — Module */}
         <div className="flex items-center gap-3 min-w-0">
           <div className={`p-2.5 rounded-xl shrink-0 shadow-sm ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
@@ -1168,14 +1182,26 @@ const InboxRow: React.FC<{
           <p className="text-xs text-foreground truncate">{party}</p>
         )}
 
-        {/* Col 4 — Amount */}
+        {/* Col 4 — Project */}
+        <div className="min-w-0">
+          {item.ProjectName ? (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-foreground truncate max-w-full" title={item.ProjectName}>
+              <Building2 size={10} className="shrink-0 text-muted-foreground" />
+              <span className="truncate">{item.ProjectName}</span>
+            </span>
+          ) : (
+            <span className="text-[10px] text-muted-foreground/50 italic">—</span>
+          )}
+        </div>
+
+        {/* Col 5 — Amount */}
         <div className="inline-flex items-center px-2 py-1 rounded-lg bg-foreground/5 border border-border/60">
           <p className="text-[13px] font-mono font-bold text-foreground tabular-nums">
             {fmtAmount(effectiveAmount)}
           </p>
         </div>
 
-        {/* Col 5 — Approved/Rejected By */}
+        {/* Col 6 — Approved/Rejected By */}
         <div className="flex items-center gap-1.5 min-w-0">
           {approvedBy && (
             <span className="flex items-center gap-1 text-[10px] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
@@ -1192,12 +1218,12 @@ const InboxRow: React.FC<{
           )}
         </div>
 
-        {/* Col 6 — Status */}
+        {/* Col 7 — Status */}
         <div className="flex items-center">
           <StatusBadge status={item.Status} />
         </div>
 
-        {/* Col 7 — Actions */}
+        {/* Col 8 — Actions */}
         <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
           {actions}
         </div>
@@ -1467,11 +1493,12 @@ const ApprovalInbox: React.FC = () => {
               {/* Desktop table header */}
               <div className="hidden md:flex items-center border-b border-border rounded-t-xl bg-muted/40">
                 <div className="w-[3px] shrink-0 self-stretch" />
-                <div className="flex-1 grid grid-cols-[190px_100px_1fr_120px_150px_110px_1fr] gap-2 pl-3 pr-4 py-2.5">
+                <div className="flex-1 grid grid-cols-[190px_100px_1fr_130px_120px_150px_110px_1fr] gap-2 pl-3 pr-4 py-2.5">
                 {[
                   "Module / Ref",
                   "Date",
                   "Party / Transfer",
+                  "Project",
                   "Amount",
                   "Approved/Rejected By",
                   "Status",

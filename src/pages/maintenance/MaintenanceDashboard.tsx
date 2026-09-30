@@ -37,7 +37,7 @@ function DonutCard({
     WebkitBackdropFilter: "blur(16px) saturate(150%)",
   };
   return (
-    <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: `${ACCENT}20` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
           <Icon size={11} style={{ color: ACCENT }} />
@@ -99,7 +99,7 @@ function TrendCard({
     WebkitBackdropFilter: "blur(16px) saturate(150%)",
   };
   return (
-    <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: `${ACCENT}20` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
           <Icon size={11} style={{ color: ACCENT }} />
