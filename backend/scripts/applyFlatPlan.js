@@ -111,12 +111,14 @@ async function main() {
     const lines = [];
     let changed = 0;
     for (const u of units) {
-      const letter = (String(u.UnitName).split("/").pop().match(/([A-Z])$/) || [])[1];
-      const want = b.flats[letter];
+      // A flat is keyed by its full code ("B12") when the spec lists it, else by its letter.
+      const tail = String(u.UnitName).split("/").pop();
+      const want = b.flats[tail] || b.flats[(tail.match(/\d([A-Z])$/) || [])[1]];
       if (!want) continue;
       totals.unitsChecked++;
-      const t = await resolveType(want.type);
-      const typeDiff = u.LayoutTypeId !== t.layoutTypeId || u.UnitType !== t.unitType;
+      // No "type" in the spec = area-only entry: the unit's current type is kept.
+      const t = want.type ? await resolveType(want.type) : { layoutTypeId: u.LayoutTypeId, unitType: u.UnitType };
+      const typeDiff = !!want.type && (u.LayoutTypeId !== t.layoutTypeId || u.UnitType !== t.unitType);
       const areaDiff = areaCol && want.area != null && Number(u.Area) !== Number(want.area);
       const extraAreas = Object.entries(want.areas || {}).filter(([c, v]) => Number(u[`x_${c}`]) !== Number(v));
       const extraNote = extraAreas.length ? ` areas{${extraAreas.map(([c, v]) => `${c}:${u[`x_${c}`] ?? "-"}->${v}`).join(", ")}}` : "";
@@ -166,7 +168,7 @@ async function main() {
       try {
         if (typeDiff || areaDiff || extraAreas.length) {
           const r = tx.request().input("id", sql.Int, u.Id).input("lt", sql.Int, t.layoutTypeId).input("t", sql.NVarChar(100), t.unitType);
-          let set = "LayoutTypeId = @lt, UnitType = @t";
+          let set = typeDiff ? "LayoutTypeId = @lt, UnitType = @t" : "UnitType = UnitType";
           if (areaDiff) { r.input("a", sql.Decimal(18, 2), want.area); set += `, ${areaCol} = @a`; }
           extraAreas.forEach(([c, v], i) => { r.input(`x${i}`, sql.Decimal(18, 2), v); set += `, ${c} = @x${i}`; });
           if (extraAreas.length) totals.extraAreasChanged = (totals.extraAreasChanged || 0) + 1;
@@ -174,7 +176,7 @@ async function main() {
         }
         // Always re-sync: an override saved above may change rooms even for
         // flats whose type/area were already right.
-        const rs = await L.syncUnitRooms(tx, u.Id, { removeUnused: true, createdBy: null });
+        const rs = t.layoutTypeId ? await L.syncUnitRooms(tx, u.Id, { removeUnused: true, createdBy: null }) : {};
         totals.roomsAdded += (rs.created || 0) + (rs.reactivated || 0);
         totals.roomsRemoved += rs.deactivated || 0;
         totals.roomsKeptWithWork += (rs.keptWithWork || []).length;
