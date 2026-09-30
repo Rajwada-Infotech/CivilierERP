@@ -144,6 +144,7 @@ async function main() {
     }
   }
   if (shown > 8) console.log(`   … ${shown - 8} more`);
+  if (noTpl.size) console.log(`\nno existing chain for these room types (left for Dependency Master): ${[...noTpl.entries()].map(([k, n]) => `${k}: ${n}`).join(", ")}`);
   console.log(`\nper block: ${[...perBlock.entries()].map(([b, n]) => `${b}: ${n}`).join(", ") || "-"}`);
   console.log(`\n${APPLY ? "APPLIED" : "WOULD APPLY"}: ${JSON.stringify(totals)}`);
   if (!APPLY) console.log("Dry run — nothing was written.");
