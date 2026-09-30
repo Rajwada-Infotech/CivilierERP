@@ -243,7 +243,13 @@ router.use(requirePageRight("approval-inbox", "view"));
 // and BillingTermsData; only journal-voucher populates JournalVoucherSummary;
 // only work-allocation-engineer (dead — see its own isVisibleToViewer
 // comment) and civilworkdpr-approval populate RungId; nothing currently
-// populates AssigneeUserId.
+// populates AssigneeUserId. ProjectName is overridden per-module below
+// (via .replace() on this constant, same pattern as the two variants right
+// after it) wherever that module's table actually resolves to a project —
+// purchase-orders, work-orders, goods-receipt, expense-booking,
+// material-requests, vehicle-in-out, material-issues,
+// material-issue-return, debit-note; everything else (payments, CRM
+// modules, ...) has no single project to show and stays NULL here.
 const NULL_EXTRA = `
   CAST(NULL AS DECIMAL(18,2)) AS GrnTotalAmount,
   CAST(NULL AS DECIMAL(18,2)) AS GrnBasicAmount,
@@ -254,7 +260,17 @@ const NULL_EXTRA = `
   CAST(NULL AS NVARCHAR(MAX)) AS JournalVoucherSummary,
   CAST(NULL AS INT) AS AssigneeUserId,
   CAST(NULL AS INT) AS RungId,
-  CAST(0 AS BIT) AS NeedsReview,`;
+  CAST(0 AS BIT) AS NeedsReview,
+  CAST(NULL AS NVARCHAR(255)) AS ProjectName,`;
+
+// Swaps in a real ProjectName expression for a module whose table (or a
+// table it already joins) resolves to a project — see NULL_EXTRA's own
+// comment above.
+const withProjectName = (base, expr) =>
+  base.replace(
+    "CAST(NULL AS NVARCHAR(255)) AS ProjectName,",
+    `${expr} AS ProjectName,`,
+  );
 
 // Received Payment variant: a CRM payment (CrmBookingId set) is entered in
 // CRM WITHOUT a deposit bank — Accounts fills the bank on the Received
@@ -289,11 +305,11 @@ function buildInboxQueries(module) {
           CAST(PurchaseOrderID AS NVARCHAR)    AS RecordId,
           PurchaseOrderNo                      AS Reference,
           PODate                               AS RecordDate,
-          Status,
+          dbo.PurchaseOrders.Status,
           CAST(NULL AS NVARCHAR)               AS ContractorName,
           CAST(NULL AS NVARCHAR)               AS SupplierName,
           TotalAmount                          AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "pr_po.name")}
           CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
           ISNULL(CAST(ApprovedBy AS NVARCHAR(255)), '')  AS ApprovedBy,
           ISNULL(CAST(ApprovedAt AS NVARCHAR), '')       AS ApprovedAt,
@@ -301,7 +317,8 @@ function buildInboxQueries(module) {
           ISNULL(CAST(RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
           UpdatedAt                            AS LastModified
         FROM dbo.PurchaseOrders
-        WHERE Status = 'Pending'
+        LEFT JOIN dbo.enterprise pr_po ON pr_po.id = dbo.PurchaseOrders.ProjectId
+        WHERE dbo.PurchaseOrders.Status = 'Pending'
       `);
     }
 
@@ -310,14 +327,14 @@ function buildInboxQueries(module) {
         SELECT
           'work-orders'                        AS Module,
           'Work Order'                         AS ModuleLabel,
-          CAST(Id AS NVARCHAR)                 AS RecordId,
+          CAST(dbo.WorkOrderHeader.Id AS NVARCHAR)     AS RecordId,
           DocumentNumber                       AS Reference,
           DocumentDate                         AS RecordDate,
-          Status,
+          dbo.WorkOrderHeader.Status,
           CAST(NULL AS NVARCHAR)               AS ContractorName,
           CAST(NULL AS NVARCHAR)               AS SupplierName,
           TotalAmount                          AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "pr_wo.name")}
           CAST(CreatedBy AS NVARCHAR(255))     AS CreatedBy,
           ISNULL(CAST(ApprovedBy AS NVARCHAR(255)), '')  AS ApprovedBy,
           ISNULL(CAST(ApprovedAt AS NVARCHAR), '')       AS ApprovedAt,
@@ -325,7 +342,8 @@ function buildInboxQueries(module) {
           ISNULL(CAST(RejectionNote AS NVARCHAR(MAX)), '') AS RejectionNote,
           UpdatedAt                            AS LastModified
         FROM dbo.WorkOrderHeader
-        WHERE Status = 'Pending'
+        LEFT JOIN dbo.enterprise pr_wo ON pr_wo.id = dbo.WorkOrderHeader.ProjectId
+        WHERE dbo.WorkOrderHeader.Status = 'Pending'
       `);
     }
 
@@ -432,6 +450,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS INT)                         AS AssigneeUserId,
           CAST(NULL AS INT)                         AS RungId,
           CAST(0 AS BIT)                         AS NeedsReview,
+          grnpr.name                                AS ProjectName,
           CAST(ISNULL(po.PurchaseOrderNo, '') AS NVARCHAR(255)) AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -469,6 +488,7 @@ function buildInboxQueries(module) {
         FROM dbo.GoodsReceiptNotes grn
         LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
         LEFT JOIN dbo.PurchaseOrders po ON po.PurchaseOrderID = grn.POID
+        LEFT JOIN dbo.enterprise grnpr ON grnpr.id = po.ProjectId
         LEFT JOIN dbo.StockTransfers st ON st.TransferID = grn.SourceTransferID
         LEFT JOIN dbo.Godowns fg ON fg.GodownID = st.FromGodownID
         LEFT JOIN dbo.Godowns tg ON tg.GodownID = st.ToGodownID
@@ -518,6 +538,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS INT)           AS AssigneeUserId,
           CAST(NULL AS INT)           AS RungId,
           CAST(0 AS BIT)                         AS NeedsReview,
+          ebpr.name                   AS ProjectName,
           CAST(ISNULL(u_created.name, CAST(eb.ECreatedBy AS NVARCHAR(255))) AS NVARCHAR(255))  AS CreatedBy,
           CAST(ISNULL(u_approved.name, '') AS NVARCHAR(255))                                    AS ApprovedBy,
           ''                       AS ApprovedAt,
@@ -531,6 +552,7 @@ function buildInboxQueries(module) {
           ON ahm_eb.LHeadId = grn_eb.SupplierID
         LEFT JOIN dbo.users u_created  ON u_created.id = eb.ECreatedBy
         LEFT JOIN dbo.users u_approved ON u_approved.id = eb.EApprovedBy
+        LEFT JOIN dbo.enterprise ebpr ON ebpr.id = TRY_CAST(eb.EProjectName AS INT)
         WHERE eb.EStatus = 'Pending'
           AND NOT (
             ISNULL(eb.ESourceType, '') = 'GRN'
@@ -609,7 +631,7 @@ function buildInboxQueries(module) {
             COALESCE(co.name, '')
           ) AS NVARCHAR(512))                   AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))          AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "pr.name")}
           CAST(mr.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                   AS ApprovedBy,
           ''                                   AS ApprovedAt,
@@ -663,7 +685,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR)                 AS ContractorName,
           ISNULL(v.SupplierName, v.VehicleNo)    AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))            AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "vpr.name")}
           CAST(v.CreatedBy AS NVARCHAR(255))     AS CreatedBy,
           ''                                     AS ApprovedBy,
           ''                                     AS ApprovedAt,
@@ -671,6 +693,7 @@ function buildInboxQueries(module) {
           ''                                     AS RejectionNote,
           v.UpdatedAt                            AS LastModified
         FROM dbo.VehicleInOut v
+        LEFT JOIN dbo.enterprise vpr ON vpr.id = v.ProjectID
         WHERE v.Status = 'Pending'
       `);
     }
@@ -687,7 +710,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR)                                         AS ContractorName,
           ISNULL(mi.IssuedTo, ISNULL(p.name, mi.Reason))                AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))                                    AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "p.name")}
           CAST(mi.CreatedBy AS NVARCHAR(255))                            AS CreatedBy,
           ''                                                             AS ApprovedBy,
           ''                                                             AS ApprovedAt,
@@ -712,7 +735,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR)                                         AS ContractorName,
           ISNULL(mi.DocNo, ISNULL(p.name, ir.Reason))                    AS SupplierName,
           CAST(NULL AS DECIMAL(18,2))                                     AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "p.name")}
           CAST(ir.CreatedBy AS NVARCHAR(255))                             AS CreatedBy,
           ''                                                              AS ApprovedBy,
           ''                                                              AS ApprovedAt,
@@ -748,6 +771,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS INT)                            AS AssigneeUserId,
           CAST(NULL AS INT)                            AS RungId,
           CAST(0 AS BIT)                         AS NeedsReview,
+          CAST(NULL AS NVARCHAR(255))                  AS ProjectName,
           CAST(so.CreatedBy AS NVARCHAR(255))          AS CreatedBy,
           ISNULL((
             SELECT TOP 1 ApproverEmail
@@ -829,6 +853,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS INT)                     AS AssigneeUserId,
           CAST(NULL AS INT)                     AS RungId,
           CAST(0 AS BIT)                         AS NeedsReview,
+          CAST(NULL AS NVARCHAR(255))           AS ProjectName,
           CAST(jv.CreatedBy AS NVARCHAR(255))   AS CreatedBy,
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,
@@ -1151,7 +1176,7 @@ function buildInboxQueries(module) {
           CAST(NULL AS NVARCHAR)                AS ContractorName,
           CONCAT(ISNULL(party.LHeadName, ''), ' — ', ISNULL(eb.EDocNo, '')) AS SupplierName,
           dn.TotalAmount                        AS Amount,
-          ${NULL_EXTRA}
+          ${withProjectName(NULL_EXTRA, "dnpr.name")}
           CAST(ISNULL(u.name, CAST(dn.created_by AS NVARCHAR(255))) AS NVARCHAR(255)) AS CreatedBy,
           ''                                    AS ApprovedBy,
           ''                                    AS ApprovedAt,
@@ -1162,6 +1187,7 @@ function buildInboxQueries(module) {
         LEFT JOIN dbo.AccountHeadMaster party ON party.LHeadId = dn.supplier_id
         LEFT JOIN dbo.ExpenseBooking eb ON eb.Eid = dn.bill_id
         LEFT JOIN dbo.users u ON u.id = dn.created_by
+        LEFT JOIN dbo.enterprise dnpr ON dnpr.id = TRY_CAST(eb.EProjectName AS INT)
         WHERE ISNULL(dn.Status, 'Draft') = 'Pending' AND dn.is_active = 1
       `);
     }
