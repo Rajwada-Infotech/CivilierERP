@@ -70,6 +70,7 @@ async function main() {
   }
   const has = (t, c) => cols.get(t)?.has(c) ?? false;
   const hasFloorTable = cols.has("CrmProjectAutoSetupFloor");
+  const stamp = (t) => (has(t, "UpdatedAt") ? ", UpdatedAt = SYSDATETIME()" : "");
 
   // Columns elsewhere that hold COPIES of names (discovered, not listed by hand).
   const copyCols = (await q(pool, `
@@ -123,7 +124,7 @@ async function main() {
         await syncCopies(proj.name, sp.name);
       }
 
-      const dbBlocks = await q(tx, "SELECT Id, BlockName, IsActive, ProjectTypeId FROM dbo.BlockMaster WHERE ProjectId = @p", { p: [sql.Int, proj.id] });
+      const dbBlocks = await q(tx, `SELECT Id, BlockName, IsActive, ${has("BlockMaster", "ProjectTypeId") ? "ProjectTypeId" : "NULL AS ProjectTypeId"} FROM dbo.BlockMaster WHERE ProjectId = @p`, { p: [sql.Int, proj.id] });
       for (const sb of sp.blocks) {
         const bNames = [sb.name, ...(sb.alsoKnownAs || [])].map(norm);
         const bm = dbBlocks.filter((b) => bNames.includes(norm(b.BlockName)));
@@ -142,7 +143,7 @@ async function main() {
           if (block.BlockName !== sb.name) {
             const uses = (await q(tx, "SELECT COUNT(*) AS n FROM dbo.BlockMaster WHERE BlockName = @b", { b: [sql.NVarChar(200), block.BlockName] }))[0].n;
             log.push(`  RENAME block #${block.Id}: "${block.BlockName}" -> "${sb.name}"`);
-            await tx.request().input("id", sql.Int, block.Id).input("n", sql.NVarChar(200), sb.name).query("UPDATE dbo.BlockMaster SET BlockName = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+            await tx.request().input("id", sql.Int, block.Id).input("n", sql.NVarChar(200), sb.name).query(`UPDATE dbo.BlockMaster SET BlockName = @n${stamp("BlockMaster")} WHERE Id = @id`);
             totals.renameBlock++;
             await syncCopies(block.BlockName, sb.name, { onlyIfUnique: uses });
             block = { ...block, BlockName: sb.name };
@@ -176,7 +177,7 @@ async function main() {
                 const clash = await q(tx, "SELECT Id FROM dbo.UnitMaster WHERE UnitName = @n AND Id <> @id", { n: [sql.NVarChar(200), target], id: [sql.Int, u.Id] });
                 if (clash.length) { log.push(`    !! #${u.Id} ${u.UnitName} -> ${target}: name already used by #${clash[0].Id} — skipped`); totals.problems++; continue; }
                 log.push(`    RENAME unit #${u.Id}: ${u.UnitName} -> ${target}`);
-                await tx.request().input("id", sql.Int, u.Id).input("n", sql.NVarChar(200), target).query("UPDATE dbo.UnitMaster SET UnitName = @n, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+                await tx.request().input("id", sql.Int, u.Id).input("n", sql.NVarChar(200), target).query(`UPDATE dbo.UnitMaster SET UnitName = @n${stamp("UnitMaster")} WHERE Id = @id`);
                 totals.renameUnit++;
                 await syncCopies(u.UnitName, target);
                 await syncCopies(u.UnitName, target, { prefix: true });
@@ -192,7 +193,7 @@ async function main() {
               if (same[0].IsActive) { log.push(`    !! ${target} already exists elsewhere (#${same[0].Id}) — skipped`); totals.problems++; continue; }
               newId = same[0].Id;
               await tx.request().input("id", sql.Int, newId).input("b", sql.Int, block.Id).input("f", sql.Int, floorNo)
-                .query("UPDATE dbo.UnitMaster SET IsActive = 1, BlockId = @b, FloorNo = @f, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+                .query(`UPDATE dbo.UnitMaster SET IsActive = 1, BlockId = @b, FloorNo = @f${stamp("UnitMaster")} WHERE Id = @id`);
               log.push(`    REACTIVATE unit #${newId} ${target}`);
               totals.reactivateUnit++;
             } else {
@@ -233,7 +234,7 @@ async function main() {
               totals.floorRows++;
             } else if (row.UnitCount !== c.n || !row.IsActive) {
               await tx.request().input("id", sql.Int, row.Id).input("n", sql.Int, c.n)
-                .query("UPDATE dbo.CrmProjectAutoSetupFloor SET UnitCount = @n, HasUnits = 1, IsActive = 1, UpdatedAt = SYSDATETIME() WHERE Id = @id");
+                .query(`UPDATE dbo.CrmProjectAutoSetupFloor SET UnitCount = @n, HasUnits = 1, IsActive = 1${stamp("CrmProjectAutoSetupFloor")} WHERE Id = @id`);
               log.push(`    floor row updated: block "${block.BlockName}" floor ${floorLabel(fno)} count ${row.UnitCount} -> ${c.n}`);
               totals.floorRows++;
             }
