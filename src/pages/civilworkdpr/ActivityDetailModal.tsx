@@ -33,6 +33,7 @@ import {
   History,
   ShieldQuestion,
   Lock,
+  CalendarClock,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -48,6 +49,7 @@ import {
   getAssignmentAttempts,
   restoreCancelledActivity,
   getProgressLog,
+  getDailyLog,
   startDelayInfo,
   ASSIGNMENT_STATUS_META,
   type PhotoPhase,
@@ -55,6 +57,7 @@ import {
   type ReportedAssignment,
   type AssignmentCheckpoint,
   type AssignmentStatus,
+  type DailyLogEntry,
 } from "@/api/dependencyActivityAssignmentApi";
 import { CheckpointDailyUpdates } from "./CheckpointDailyUpdates";
 import {
@@ -71,7 +74,7 @@ import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 import { useCameraCapture, CAMERA_ERROR_TEXT } from "@/hooks/useCameraCapture";
 import { useAuth } from "@/contexts/AuthContext";
 
-type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "history";
+type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "daily-log" | "history";
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(`${dateStr}T00:00:00`);
@@ -1177,6 +1180,118 @@ function HistoryTab({ rungId }: { rungId: number }) {
   );
 }
 
+// ── Daily Log tab ────────────────────────────────────────────────────────
+// One permanent snapshot per day this activity was reported on (see the
+// PATCH /:rungId/status route's MERGE) — newest first. Photos for a day are
+// fetched lazily on expand since most days won't be opened.
+function DailyLogDayPhotos({ rungId, logDate }: { rungId: number; logDate: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["activity-photos", rungId, logDate],
+    queryFn: () => getActivityPhotos(rungId, logDate),
+  });
+  const [lightboxPhoto, setLightboxPhoto] = useState<ActivityPhotoMeta | null>(null);
+  const all = [...(data?.before ?? []), ...(data?.after ?? [])];
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-4">
+        <Loader2 size={14} className="animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+  if (all.length === 0) {
+    return <p className="text-[11px] text-muted-foreground/70 flex items-center gap-1 py-1"><ImageOff size={11} /> No photos logged this day</p>;
+  }
+  return (
+    <>
+      <div className="flex flex-wrap gap-2 pt-1">
+        {all.map((p) => (
+          <PhotoThumb key={p.id} rungId={rungId} photo={p} onOpen={() => setLightboxPhoto(p)} onDeleted={() => {}} />
+        ))}
+      </div>
+      {lightboxPhoto && <PhotoLightbox rungId={rungId} photo={lightboxPhoto} onClose={() => setLightboxPhoto(null)} />}
+    </>
+  );
+}
+
+function DailyLogTab({ rungId }: { rungId: number }) {
+  const { data: entries = [], isLoading } = useQuery({
+    queryKey: ["activity-daily-log", rungId],
+    queryFn: () => getDailyLog(rungId),
+  });
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-10 text-muted-foreground gap-2">
+        <Loader2 size={16} className="animate-spin" /> Loading daily log…
+      </div>
+    );
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+        <CalendarClock size={22} className="text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">No daily entries logged yet — saving progress or remarks today creates one.</p>
+      </div>
+    );
+  }
+
+  const todayStr = todayIso();
+
+  return (
+    <div className="flex flex-col gap-2">
+      {entries.map((entry) => {
+        const isToday = entry.logDate === todayStr;
+        const isOpen = expanded === entry.logDate;
+        return (
+          <div key={entry.id} className="rounded-xl border border-border bg-muted/10 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setExpanded(isOpen ? null : entry.logDate)}
+              className="w-full flex items-center gap-3 px-3.5 py-2.5 text-left hover:bg-muted/30 transition-colors"
+            >
+              <div className="flex flex-col items-start shrink-0 w-24">
+                <span className="text-sm font-heading font-semibold text-foreground">
+                  {new Date(entry.logDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}
+                </span>
+                {isToday && (
+                  <span className="text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                    Today
+                  </span>
+                )}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs text-foreground truncate">{entry.remarks || <span className="text-muted-foreground italic">No remarks</span>}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-2">
+                  {entry.progressPercent != null && (
+                    <span className="flex items-center gap-1">
+                      <TrendingUp size={10} /> {entry.progressPercent}%
+                    </span>
+                  )}
+                  {entry.photoCount > 0 && (
+                    <span className="flex items-center gap-1">
+                      <CameraIcon size={10} /> {entry.photoCount}
+                    </span>
+                  )}
+                  {entry.updatedBy && <span>· {entry.updatedBy}</span>}
+                </p>
+              </div>
+              {isOpen ? <ChevronLeft size={14} className="rotate-90 text-muted-foreground shrink-0" /> : <ChevronRight size={14} className="text-muted-foreground shrink-0" />}
+            </button>
+            {isOpen && (
+              <div className="px-3.5 pb-3 border-t border-border">
+                <DailyLogDayPhotos rungId={rungId} logDate={entry.logDate} />
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Restore (Cancelled only, super_admin only) ──────────────────────────
 // Bringing a Cancelled activity back is a rare, deliberate override — kept
 // out of the plain status dropdown (that badge stays terminal once
@@ -1268,6 +1383,7 @@ const TABS: Array<{ id: DetailTab; label: string; icon: LucideIcon }> = [
   { id: "photos", label: "Photos", icon: CameraIcon },
   { id: "attendance", label: "Attendance", icon: Users2 },
   { id: "checkpoints", label: "Checkpoints", icon: ListChecks },
+  { id: "daily-log", label: "Daily Log", icon: CalendarClock },
   { id: "history", label: "History", icon: History },
 ];
 
@@ -1357,6 +1473,7 @@ export default function ActivityDetailModal({
               {tab === "photos" && <PhotosTab rungId={row.rungId} />}
               {tab === "attendance" && <AttendanceTab rungId={row.rungId} />}
               {tab === "checkpoints" && <CheckpointsTab rungId={row.rungId} />}
+              {tab === "daily-log" && <DailyLogTab rungId={row.rungId} />}
               {tab === "history" && <HistoryTab rungId={row.rungId} />}
             </div>
 

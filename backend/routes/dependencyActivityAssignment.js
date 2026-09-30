@@ -964,6 +964,38 @@ router.patch(
         `);
     }
 
+    // Logbook: today's entry — reuses this same route's own validation
+    // (ratchet, Completed-lock, first-report) rather than a parallel write
+    // path, so DependencyActivityDailyLog always mirrors exactly what this
+    // request just committed to the live assignment. Only ever written for
+    // TODAY (never backdated, never a future date) — "today's entry" is
+    // the one actively editable thing; once the day passes, whatever got
+    // saved here is that day's permanent record, and tomorrow's edits
+    // start a fresh row rather than overwriting it. A Remarks-only save
+    // still needs the current ProgressPercent to persist alongside it (and
+    // vice versa) since a day's row is one whole snapshot, not two
+    // independently-optional halves.
+    if (hasProgress || hasRemarks) {
+      const finalRes = await pool.request().input("rungId", sql.Int, rungId).query(
+        "SELECT ProgressPercent, Remarks FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+      );
+      const final = finalRes.recordset[0] || {};
+      await pool.request()
+        .input("rungId", sql.Int, rungId)
+        .input("progressPercent", sql.Int, final.ProgressPercent ?? null)
+        .input("remarks", sql.NVarChar(1000), final.Remarks ?? null)
+        .input("by", sql.NVarChar(200), actor).query(`
+          MERGE dbo.DependencyActivityDailyLog AS target
+          USING (VALUES (@rungId, CAST(SYSDATETIME() AS DATE))) AS src (RungId, LogDate)
+            ON target.DependencyMasterActivityId = src.RungId AND target.LogDate = src.LogDate
+          WHEN MATCHED THEN
+            UPDATE SET ProgressPercent = @progressPercent, Remarks = @remarks, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+          WHEN NOT MATCHED THEN
+            INSERT (DependencyMasterActivityId, LogDate, ProgressPercent, Remarks, CreatedBy)
+            VALUES (src.RungId, src.LogDate, @progressPercent, @remarks, @by);
+        `);
+    }
+
     res.json({ success: true, status: effectiveStatus, remarks, progressPercent });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
@@ -995,6 +1027,38 @@ router.get(
       res.json(r.recordset);
     } catch (err) {
       console.error("[dependency-activity-assignment] GET /:rungId/progress-log error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// GET /:rungId/daily-log — the actual logbook: one row per day this
+// activity was ever reported on (see the PATCH /:rungId/status MERGE that
+// writes these), each a permanent snapshot of that day's Progress% and
+// Remarks, plus how many photos were taken that day. Newest first;
+// read-only — a day's row is only ever written by that same day's own
+// PATCH, never edited retroactively from here.
+router.get(
+  "/:rungId/daily-log",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "view"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    try {
+      const pool = await getPool();
+      const r = await pool.request().input("rungId", sql.Int, rungId).query(`
+        SELECT dl.Id AS id, dl.LogDate AS logDate, dl.ProgressPercent AS progressPercent,
+               dl.Remarks AS remarks, dl.CreatedBy AS createdBy, dl.UpdatedBy AS updatedBy,
+               dl.UpdatedAt AS updatedAt,
+               (SELECT COUNT(*) FROM dbo.ActivityPhoto ap WHERE ap.DependencyMasterActivityId = @rungId AND ap.LogDate = dl.LogDate) AS photoCount
+        FROM dbo.DependencyActivityDailyLog dl
+        WHERE dl.DependencyMasterActivityId = @rungId
+        ORDER BY dl.LogDate DESC
+      `);
+      res.json(r.recordset);
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /:rungId/daily-log error:", err.message);
       res.status(500).json({ error: err.message });
     }
   },
@@ -1878,13 +1942,19 @@ router.get("/:rungId/blueprint-annotation/history", authMiddleware, async (req, 
 router.get("/:rungId/photos", authMiddleware, async (req, res) => {
   const rungId = parseInt(req.params.rungId, 10);
   if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+  // Optional day filter for the Daily Log tab — omit to keep the existing
+  // "every photo ever taken for this activity" behavior every other caller
+  // (the aggregate photo-count badge, Quality Check) already relies on.
+  const date = typeof req.query.date === "string" && DATE_RE.test(req.query.date) ? req.query.date : null;
   try {
     const pool = await getPool();
-    const result = await pool.request().input("rungId", sql.Int, rungId).query(`
+    const request = pool.request().input("rungId", sql.Int, rungId);
+    if (date) request.input("date", sql.Date, date);
+    const result = await request.query(`
       SELECT Id AS id, Phase AS phase, FileName AS fileName, MimeType AS mimeType,
-             Note AS note, CapturedBy AS capturedBy, CapturedAt AS capturedAt
+             Note AS note, CapturedBy AS capturedBy, CapturedAt AS capturedAt, LogDate AS logDate
       FROM dbo.ActivityPhoto
-      WHERE DependencyMasterActivityId = @rungId
+      WHERE DependencyMasterActivityId = @rungId ${date ? "AND LogDate = @date" : ""}
       ORDER BY CapturedAt DESC
     `);
     const before = result.recordset.filter((p) => p.phase === "before");
@@ -1950,9 +2020,9 @@ router.post("/:rungId/photos", authMiddleware, requireAnyPageRight(["civilworkdp
       .input("Note", sql.NVarChar(500), req.body.note ? String(req.body.note).slice(0, 500) : null)
       .input("CapturedBy", sql.NVarChar(200), actor).query(`
         INSERT INTO dbo.ActivityPhoto
-          (DependencyMasterActivityId, Phase, FileName, MimeType, FileData, Note, CapturedBy, CapturedAt)
+          (DependencyMasterActivityId, Phase, FileName, MimeType, FileData, Note, CapturedBy, CapturedAt, LogDate)
         OUTPUT INSERTED.Id
-        VALUES (@rungId, @Phase, @FileName, @MimeType, @FileData, @Note, @CapturedBy, SYSDATETIME())
+        VALUES (@rungId, @Phase, @FileName, @MimeType, @FileData, @Note, @CapturedBy, SYSDATETIME(), CAST(SYSDATETIME() AS DATE))
       `);
     res.status(201).json({ id: insertRes.recordset[0].Id });
   } catch (err) {
