@@ -1,19 +1,24 @@
-// Gives each active room that has NO DPR chain — in a unit whose other rooms
-// do have chains (the project's pattern) — a copy of the chain of its closest
-// identical sibling: same block, same flat letter, same room name/category,
-// nearest floor. Written exactly as POST /dependency-master writes a chain:
-//   DependencyMaster row -> one DependencyMasterActivity rung per step
-//   (donor's order, ActivityId, WorkType) -> one stub DependencyActivityAssignment
-//   per rung (Status defaults to PENDING, migration 487).
-// Nothing is typed here: steps come from the donor chain; ProjectId / TowerId /
-// Floor / FlatId are copied from a chain already on the target unit (the
-// project's own stored format); the Alias follows the donor's "<unit>/<room>"
-// shape, and a room that already has a chain is refused like the route does.
+// Gives every active room that has NO DPR chain the chain its room type uses
+// everywhere else. The template is learned from the chains that already
+// exist — nothing is typed here:
+//   - per room category, the most-used step sequence (ordered ActivityId +
+//     WorkType) and the chain's WorkType; a chain in the same project is
+//     preferred as the donor, else any project's
+//   - the new chain is written exactly as POST /dependency-master writes one:
+//     DependencyMaster row -> one DependencyMasterActivity rung per donor step
+//     (same order) -> one stub DependencyActivityAssignment per rung (Status
+//     defaults to PENDING, migration 487); a room that already has a chain is
+//     refused like the route does
+//   - scope columns follow the format existing chains use, checked against
+//     their own rooms: TowerId = the unit's block, FlatId = the unit, Floor =
+//     whichever of floorLabelOf(FloorNo) / FloorNo the donors store; Alias =
+//     "<unit>/<room>" only if the donors use that shape
 //
-//   node scripts/cloneChainForChainlessRooms.js --project "Luxuria"          # dry run
-//   node scripts/cloneChainForChainlessRooms.js --project "Luxuria" --apply
+//   node scripts/cloneChainForChainlessRooms.js --project "Royal Garden"          # dry run
+//   node scripts/cloneChainForChainlessRooms.js --project "Royal Garden" --apply
 
 const { connectDB, getPool, sql, closeDB } = require("../db");
+const { floorLabelOf } = require("../services/unitLayout");
 
 const arg = (n) => { const i = process.argv.indexOf(n); return i >= 0 ? process.argv[i + 1] : null; };
 const APPLY = process.argv.includes("--apply");
@@ -33,52 +38,86 @@ async function main() {
   if (proj.length !== 1) throw new Error(`${proj.length} projects named "${PROJECT}"`);
   const pid = proj[0].id;
 
-  const rooms = await q(pool, `
-    SELECT r.Id, r.UnitId, r.RoomName, r.RoomCategoryId, u.UnitName, u.BlockId, u.FloorNo,
-      (SELECT TOP 1 dm.Id FROM dbo.DependencyMaster dm WHERE dm.RoomId = r.Id) AS ChainId
-    FROM dbo.RoomMaster r JOIN dbo.UnitMaster u ON u.Id = r.UnitId AND u.IsActive = 1
-    WHERE r.ProjectId = @p AND r.IsActive = 1`, { p: [sql.Int, pid] });
-  const chainedUnits = new Set(rooms.filter((r) => r.ChainId).map((r) => r.UnitId));
-  const letter = (n) => (String(n).split("/").pop().match(/\d([A-Z])$/) || [])[1];
-  const targets = rooms.filter((r) => !r.ChainId && chainedUnits.has(r.UnitId));
+  // ── learn the template per room category from existing chains ──
+  const chains = await q(pool, `
+    SELECT d.Id, d.ProjectId, d.TowerId, d.Floor, d.FlatId, d.Alias, d.WorkType, r.RoomCategoryId, r.RoomName,
+           u.UnitName, u.BlockId, u.FloorNo, u.Id AS UnitId,
+      (SELECT STRING_AGG(CONCAT(x.ActivityId, ':', ISNULL(x.WorkType, '')), ',') WITHIN GROUP (ORDER BY x.SequenceNo)
+         FROM dbo.DependencyMasterActivity x WHERE x.DependencyMasterId = d.Id) AS Seq
+    FROM dbo.DependencyMaster d JOIN dbo.RoomMaster r ON r.Id = d.RoomId JOIN dbo.UnitMaster u ON u.Id = r.UnitId
+    WHERE d.IsActive = 1 AND r.RoomCategoryId IS NOT NULL`);
+  if (!chains.length) throw new Error("no existing chains to learn from");
+  // Stored-format rules, verified against every existing chain.
+  const rule = {
+    tower: chains.every((c) => c.TowerId === c.BlockId),
+    flat: chains.every((c) => c.FlatId === c.UnitId),
+    floorLabel: chains.every((c) => String(c.Floor) === String(floorLabelOf(c.FloorNo))),
+    floorNo: chains.every((c) => String(c.Floor) === String(c.FloorNo)),
+    alias: chains.every((c) => c.Alias === `${c.UnitName}/${c.RoomName}`),
+  };
+  console.log(`format learned from ${chains.length} chains: ${JSON.stringify(rule)}`);
+  if (!rule.tower || !rule.flat || !(rule.floorLabel || rule.floorNo) || !rule.alias) {
+    throw new Error("existing chains don't follow one consistent scope/alias format — refusing to guess");
+  }
+  const floorOf = (fno) => (rule.floorLabel ? String(floorLabelOf(fno)) : String(fno));
+  const template = new Map(); // categoryId -> donor chain
+  const byCat = new Map();
+  for (const c of chains) (byCat.get(c.RoomCategoryId) || byCat.set(c.RoomCategoryId, []).get(c.RoomCategoryId)).push(c);
+  for (const [cat, cs] of byCat) {
+    const freq = new Map();
+    for (const c of cs) freq.set(`${c.WorkType}|${c.Seq}`, (freq.get(`${c.WorkType}|${c.Seq}`) || 0) + 1);
+    const top = [...freq.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const pool2 = cs.filter((c) => `${c.WorkType}|${c.Seq}` === top);
+    template.set(cat, pool2.find((c) => c.ProjectId === pid) || pool2[0]);
+    const share = Math.round((100 * freq.get(top)) / cs.length);
+    if (share < 100) console.log(`   note: category ${cat} — template used by ${share}% of its chains`);
+  }
 
-  console.log(`${APPLY ? "APPLY" : "DRY RUN"} — ${proj[0].name}: ${targets.length} chainless room(s) in units that follow the chain pattern\n`);
-  const totals = { chainsCreated: 0, rungsCreated: 0, noDonor: 0, problems: 0 };
+  // ── targets: active rooms of active units in this project with no chain ──
+  const targets = await q(pool, `
+    SELECT r.Id, r.RoomName, r.RoomCategoryId, u.Id AS UnitId, u.UnitName, u.BlockId, u.FloorNo, b.BlockName
+    FROM dbo.RoomMaster r JOIN dbo.UnitMaster u ON u.Id = r.UnitId AND u.IsActive = 1 JOIN dbo.BlockMaster b ON b.Id = u.BlockId
+    WHERE r.ProjectId = @p AND r.IsActive = 1 AND r.RoomCategoryId IS NOT NULL
+      AND NOT EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = r.Id)
+    ORDER BY b.BlockName, u.FloorNo, u.UnitName, r.RoomName`, { p: [sql.Int, pid] });
+
+  console.log(`${APPLY ? "APPLY" : "DRY RUN"} — ${proj[0].name}: ${targets.length} chainless room(s)\n`);
+  const totals = { chainsCreated: 0, rungsCreated: 0, noTemplate: 0, problems: 0 };
+  const perBlock = new Map();
+  let shown = 0;
   for (const t of targets) {
-    const donors = rooms.filter((d) => d.ChainId && d.BlockId === t.BlockId && d.RoomCategoryId === t.RoomCategoryId && d.RoomName === t.RoomName && letter(d.UnitName) === letter(t.UnitName))
-      .sort((a, b) => Math.abs(a.FloorNo - t.FloorNo) - Math.abs(b.FloorNo - t.FloorNo) || a.FloorNo - b.FloorNo);
-    const donor = donors[0];
-    if (!donor) { totals.noDonor++; console.log(`   ${t.UnitName}/${t.RoomName}: no identical sibling with a chain — left for Dependency Master`); continue; }
-    const dm = (await q(pool, "SELECT Id, Alias, WorkType FROM dbo.DependencyMaster WHERE Id = @i", { i: [sql.Int, donor.ChainId] }))[0];
-    const rungs = await q(pool, "SELECT ActivityId, SequenceNo, WorkType FROM dbo.DependencyMasterActivity WHERE DependencyMasterId = @i ORDER BY SequenceNo", { i: [sql.Int, dm.Id] });
-    const ref = (await q(pool, "SELECT TOP 1 ProjectId, TowerId, Floor, FlatId FROM dbo.DependencyMaster WHERE FlatId = @f AND IsActive = 1", { f: [sql.Int, t.UnitId] }))[0];
-    const alias = dm.Alias === `${donor.UnitName}/${donor.RoomName}` ? `${t.UnitName}/${t.RoomName}` : null;
-    if (!alias) { totals.problems++; console.log(`   !! ${t.UnitName}/${t.RoomName}: donor alias "${dm.Alias}" isn't "<unit>/<room>" — left for Dependency Master`); continue; }
+    const donor = template.get(t.RoomCategoryId);
+    if (!donor) { totals.noTemplate++; console.log(`   ${t.UnitName}/${t.RoomName}: no existing chain for this room type — left for Dependency Master`); continue; }
+    const alias = `${t.UnitName}/${t.RoomName}`;
     const tx = pool.transaction();
     await tx.begin();
     try {
-      // Same guard as the route: one chain per room.
       const dupe = await tx.request().input("r", sql.Int, t.Id).query("SELECT TOP 1 Id FROM dbo.DependencyMaster WHERE RoomId = @r");
       if (dupe.recordset.length) throw new Error("room already has a chain");
-      const ins = await tx.request().input("P", sql.Int, ref.ProjectId).input("T", sql.Int, ref.TowerId).input("Fl", sql.NVarChar(50), ref.Floor)
-        .input("F", sql.Int, ref.FlatId).input("R", sql.Int, t.Id).input("A", sql.NVarChar(200), alias).input("W", sql.NVarChar(20), dm.WorkType).input("By", sql.NVarChar(300), ACTOR)
+      const ins = await tx.request().input("P", sql.Int, pid).input("T", sql.Int, t.BlockId).input("Fl", sql.NVarChar(50), floorOf(t.FloorNo))
+        .input("F", sql.Int, t.UnitId).input("R", sql.Int, t.Id).input("A", sql.NVarChar(200), alias).input("W", sql.NVarChar(20), donor.WorkType).input("By", sql.NVarChar(300), ACTOR)
         .query(`INSERT INTO dbo.DependencyMaster (ProjectId, TowerId, Floor, FlatId, RoomId, Alias, WorkType, CreatedBy, CreatedAt)
                 OUTPUT INSERTED.Id AS id VALUES (@P, @T, @Fl, @F, @R, @A, @W, @By, SYSDATETIME())`);
       const newId = ins.recordset[0].id;
-      for (const g of rungs) {
-        const ri = await tx.request().input("D", sql.Int, newId).input("Ac", sql.Int, g.ActivityId).input("S", sql.Int, g.SequenceNo).input("W", sql.NVarChar(20), g.WorkType)
-          .query(`INSERT INTO dbo.DependencyMasterActivity (DependencyMasterId, ActivityId, SequenceNo, WorkType) OUTPUT INSERTED.Id AS id VALUES (@D, @Ac, @S, @W)`);
-        await tx.request().input("rungId", sql.Int, ri.recordset[0].id).input("by", sql.NVarChar(200), ACTOR)
-          .query("INSERT INTO dbo.DependencyActivityAssignment (DependencyMasterActivityId, CreatedBy) VALUES (@rungId, @by)");
-      }
+      // Rungs copied from the donor in its order, then one stub per new rung.
+      const rungs = await tx.request().input("D", sql.Int, donor.Id).input("N", sql.Int, newId).query(`
+        INSERT INTO dbo.DependencyMasterActivity (DependencyMasterId, ActivityId, SequenceNo, WorkType)
+        OUTPUT INSERTED.Id AS id
+        SELECT @N, x.ActivityId, x.SequenceNo, x.WorkType FROM dbo.DependencyMasterActivity x WHERE x.DependencyMasterId = @D ORDER BY x.SequenceNo`);
+      await tx.request().input("N", sql.Int, newId).input("by", sql.NVarChar(200), ACTOR).query(`
+        INSERT INTO dbo.DependencyActivityAssignment (DependencyMasterActivityId, CreatedBy)
+        SELECT x.Id, @by FROM dbo.DependencyMasterActivity x WHERE x.DependencyMasterId = @N`);
       if (APPLY) await tx.commit(); else await tx.rollback();
-      totals.chainsCreated++; totals.rungsCreated += rungs.length;
-      console.log(`   ${alias}: copy of chain #${dm.Id} "${dm.Alias}" (${rungs.length} steps, PENDING stubs)`);
+      totals.chainsCreated++; totals.rungsCreated += rungs.recordset.length;
+      perBlock.set(t.BlockName, (perBlock.get(t.BlockName) || 0) + 1);
+      if (shown++ < 8) console.log(`   ${alias}: copy of chain #${donor.Id} "${donor.Alias}" (${rungs.recordset.length} steps, PENDING stubs)`);
     } catch (e) {
       try { await tx.rollback(); } catch (_) { /* ignore */ }
-      totals.problems++; console.log(`   !! ${t.UnitName}/${t.RoomName}: ${e.message}`);
+      totals.problems++; console.log(`   !! ${alias}: ${e.message}`);
     }
   }
+  if (shown > 8) console.log(`   … ${shown - 8} more`);
+  console.log(`\nper block: ${[...perBlock.entries()].map(([b, n]) => `${b}: ${n}`).join(", ") || "-"}`);
   console.log(`\n${APPLY ? "APPLIED" : "WOULD APPLY"}: ${JSON.stringify(totals)}`);
   if (!APPLY) console.log("Dry run — nothing was written.");
   await closeDB();
