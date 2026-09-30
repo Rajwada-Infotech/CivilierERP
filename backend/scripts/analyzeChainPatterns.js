@@ -16,11 +16,13 @@ async function main() {
 
   console.log("== 1. COVERAGE (active rooms vs rooms with a chain) ==");
   const cov = await q(`
-    SELECT LTRIM(RTRIM(e.name)) AS Project, COUNT(*) AS Rooms,
-      SUM(CASE WHEN EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = r.Id AND d.IsActive = 1) THEN 1 ELSE 0 END) AS Chained
-    FROM dbo.RoomMaster r JOIN dbo.UnitMaster u ON u.Id = r.UnitId AND u.IsActive = 1
-    JOIN dbo.enterprise e ON e.id = r.ProjectId
-    WHERE r.IsActive = 1 GROUP BY LTRIM(RTRIM(e.name)) ORDER BY 1`);
+    SELECT Project, COUNT(*) AS Rooms, SUM(HasChain) AS Chained FROM (
+      SELECT LTRIM(RTRIM(e.name)) AS Project,
+        CASE WHEN EXISTS (SELECT 1 FROM dbo.DependencyMaster d WHERE d.RoomId = r.Id AND d.IsActive = 1) THEN 1 ELSE 0 END AS HasChain
+      FROM dbo.RoomMaster r JOIN dbo.UnitMaster u ON u.Id = r.UnitId AND u.IsActive = 1
+      JOIN dbo.enterprise e ON e.id = r.ProjectId
+      WHERE r.IsActive = 1) x
+    GROUP BY Project ORDER BY Project`);
   for (const c of cov) console.log(`   ${c.Project.padEnd(20)} rooms ${String(c.Rooms).padStart(5)}   with chain ${String(c.Chained).padStart(5)}   missing ${c.Rooms - c.Chained}`);
 
   console.log("\n== 2. STEP SEQUENCES IN USE, per room category ==");
