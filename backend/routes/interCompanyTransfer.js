@@ -20,6 +20,7 @@ const { transition } = require("../services/approvalService");
 const { getLastPurchaseRateByCompany } = require("../services/lastPurchaseRate");
 const { postInterCompanyStockTransferToGL } = require("../services/interCompanyStockTransferGL");
 const { reversePostingBySource } = require("../services/generalLedger");
+const { getMRItemFulfillment, recomputeMRFulfillment } = require("../services/materialRequestFulfillment");
 
 // Idempotent schema migration — adds GST columns if missing (safe to run every
 // startup; IF NOT EXISTS pattern avoids errors on already-updated DBs).
@@ -283,6 +284,10 @@ async function priceItems(pool, senderCompanyId, senderCompanyName, items, apply
       amountInclGst: Math.round((baseAmt + gstAmt) * 100) / 100,
       sourceDocNo,
       needsManualRate,
+      // Which MaterialRequestItems row this line came from, when the ICT
+      // was raised from an MR — same passthrough purchaseOrders.js's own
+      // item mapping does for its own mrItemId.
+      mrItemId: item.mrItemId ?? item.MRItemId ?? null,
     });
   }
   return pricedItems;
@@ -508,6 +513,7 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     const finYear = req.body.finYear || req.body.FinYear || null;
     const remarks = req.body.Remarks || null;
     const applyGst = req.body.ApplyGst !== false;
+    const sourceMRId = parsePositiveInt(req.body.SourceMRId);
 
     if (!senderProjectId || !receiverProjectId) {
       return res.status(400).json({ error: "SenderProjectId and ReceiverProjectId are required." });
@@ -542,6 +548,46 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
         error: `No purchase history found for ${unpriced.map((i) => i.itemName || i.itemId).join(", ")} under ${ctx.sender.CompanyName} — enter a rate manually for ${unpriced.length === 1 ? "it" : "them"} before submitting.`,
       });
     }
+
+    // Raised from a Material Request — same rules purchaseOrders.js already
+    // enforces for PO-from-MR (see its POST / handler): only an Approved or
+    // Partially Fulfilled MR can be a source, and no line can claim more
+    // than what's actually still pending on that MR item, across whatever
+    // mix of prior POs/ICTs already drew against it. A partial pick here —
+    // fewer items, or less than the full pending qty on a kept item — just
+    // leaves the rest pending for a later PO or ICT off the same MR; there's
+    // no separate "remaining qty" column to update, getMRItemFulfillment
+    // (and recomputeMRFulfillment below) always recompute it live.
+    let sourceMRDocNo = null;
+    if (sourceMRId) {
+      const mrCheck = await pool.request().input("MRId", sql.Int, sourceMRId)
+        .query("SELECT DocNo, Status FROM dbo.MaterialRequests WHERE MRId = @MRId");
+      if (!mrCheck.recordset.length) {
+        return res.status(404).json({ error: "Source Material Request not found." });
+      }
+      const mrRow = mrCheck.recordset[0];
+      if (!["Approved", "Partially Fulfilled"].includes(mrRow.Status)) {
+        return res.status(400).json({
+          error: `Cannot create an Inter-Company Transfer: Material Request is "${mrRow.Status}". Only Approved or Partially Fulfilled Material Requests can be used.`,
+        });
+      }
+      sourceMRDocNo = mrRow.DocNo;
+
+      const mrItemsWithMrItemId = pricedItems.filter((i) => i.mrItemId);
+      if (mrItemsWithMrItemId.length > 0) {
+        const fulfillment = await getMRItemFulfillment(pool, sourceMRId);
+        const pendingByItem = new Map(fulfillment.map((f) => [f.MRItemId, f]));
+        for (const i of mrItemsWithMrItemId) {
+          const f = pendingByItem.get(parseInt(i.mrItemId, 10));
+          if (f && i.qty - f.PendingQty > 0.0001) {
+            return res.status(400).json({
+              error: `Cannot transfer ${i.qty} of "${i.itemName || f.ItemName}" — only ${f.PendingQty} still pending on Material Request.`,
+            });
+          }
+        }
+      }
+    }
+
     const totalAmount        = Math.round(pricedItems.reduce((s, i) => s + i.amount, 0) * 100) / 100;
     const totalGstAmount     = Math.round(pricedItems.reduce((s, i) => s + (i.gstAmount || 0), 0) * 100) / 100;
     const totalAmountInclGst = Math.round((totalAmount + totalGstAmount) * 100) / 100;
@@ -576,14 +622,18 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
         .input("TotalAmountInclGst", sql.Decimal(18, 2), totalAmountInclGst)
         .input("Remarks", sql.NVarChar(500), remarks)
         .input("DocTypeId", sql.Int, ictDocTypeId)
-        .input("CreatedBy", sql.NVarChar(150), createdBy).query(`
+        .input("CreatedBy", sql.NVarChar(150), createdBy)
+        .input("SourceMRId", sql.Int, sourceMRId || null)
+        .input("SourceMRDocNo", sql.NVarChar(100), sourceMRDocNo).query(`
           INSERT INTO dbo.InterCompanyTransfer
             (DocNo, TransferDate, SenderProjectId, SenderCompanyId, ReceiverProjectId, ReceiverCompanyId,
-             Status, TotalAmount, TotalGstAmount, TotalAmountInclGst, Remarks, DocTypeId, CreatedBy)
+             Status, TotalAmount, TotalGstAmount, TotalAmountInclGst, Remarks, DocTypeId, CreatedBy,
+             SourceMRId, SourceMRDocNo)
           OUTPUT INSERTED.ICTId
           VALUES
             (@DocNo, @TransferDate, @SenderProjectId, @SenderCompanyId, @ReceiverProjectId, @ReceiverCompanyId,
-             'Draft', @TotalAmount, @TotalGstAmount, @TotalAmountInclGst, @Remarks, @DocTypeId, @CreatedBy)
+             'Draft', @TotalAmount, @TotalGstAmount, @TotalAmountInclGst, @Remarks, @DocTypeId, @CreatedBy,
+             @SourceMRId, @SourceMRDocNo)
         `);
       ictId = header.recordset[0].ICTId;
 
@@ -600,13 +650,14 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
           .input("GstAmount", sql.Decimal(18, 2), item.gstAmount || 0)
           .input("AmountInclGst", sql.Decimal(18, 2), item.amountInclGst || item.amount)
           .input("SourceDocNo", sql.NVarChar(100), item.sourceDocNo)
-          .input("SortOrder", sql.Int, idx).query(`
+          .input("SortOrder", sql.Int, idx)
+          .input("MRItemId", sql.Int, item.mrItemId ? parseInt(item.mrItemId, 10) : null).query(`
             INSERT INTO dbo.InterCompanyTransferItems
               (ICTId, ItemId, ItemName, UOMCode, Quantity, Rate, Amount,
-               GstPct, GstAmount, AmountInclGst, SourceDocNo, SortOrder)
+               GstPct, GstAmount, AmountInclGst, SourceDocNo, SortOrder, MRItemId)
             VALUES
               (@ICTId, @ItemId, @ItemName, @UOMCode, @Quantity, @Rate, @Amount,
-               @GstPct, @GstAmount, @AmountInclGst, @SourceDocNo, @SortOrder)
+               @GstPct, @GstAmount, @AmountInclGst, @SourceDocNo, @SortOrder, @MRItemId)
           `);
       }
 
@@ -623,6 +674,20 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
       await transition("inter-company-transfer", ictId, "Pending", createdBy, req.user?.role);
     } catch (submitErr) {
       console.warn("ICT auto-submit failed (non-fatal):", submitErr.message);
+    }
+
+    // Recompute the source MR's fulfillment (Approved -> Partially Fulfilled
+    // -> Completed) now that this ICT's items (with their MRItemId links)
+    // are committed — same fire-and-forget pattern purchaseOrders.js's own
+    // POST / uses for the identical PO-from-MR case.
+    if (sourceMRId) {
+      (async () => {
+        try {
+          await recomputeMRFulfillment(pool, sourceMRId, createdBy);
+        } catch (e) {
+          console.error("MR status update failed:", e.message);
+        }
+      })();
     }
 
     await bumpCacheVersion("stock-transfers");
@@ -728,6 +793,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
              ict.Remarks, ict.SaleOrderId, ict.SaleInvoiceId, ict.ReceivedPaymentId,
              ict.PurchaseOrderId, ict.GRNId, ict.ExpenseBookingId, ict.NewPaymentId,
              ict.DocTypeId, ict.CreatedBy, ict.CreatedAt,
+             ict.SourceMRId, ict.SourceMRDocNo,
              sp.name AS SenderProjectName,     sc.name AS SenderCompanyName,
              rp.name AS ReceiverProjectName,   rc.name AS ReceiverCompanyName
       FROM dbo.InterCompanyTransfer ict
@@ -744,7 +810,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
              ISNULL(GstPct, 0)       AS GstPct,
              ISNULL(GstAmount, 0)    AS GstAmount,
              ISNULL(AmountInclGst, Amount) AS AmountInclGst,
-             SourceDocNo,
+             SourceDocNo, MRItemId,
              ISNULL(SortOrder, 0)   AS SortOrder
       FROM dbo.InterCompanyTransferItems
       WHERE ICTId = @id
@@ -917,6 +983,16 @@ router.delete("/:id", authenticateToken, requirePageRight("stock-transfers", "de
       bumpCacheVersion("balance-sheet"),
       bumpCacheVersion("account-head-master"),
     ]);
+
+    // Release whatever this deleted ICT had reserved against its source MR
+    // — same pattern purchaseOrders.js's own DELETE /:id uses.
+    if (ictRow.SourceMRId) {
+      try {
+        await recomputeMRFulfillment(pool, ictRow.SourceMRId, null);
+      } catch (e) {
+        console.error("MR status update failed:", e.message);
+      }
+    }
 
     res.json({
       message:

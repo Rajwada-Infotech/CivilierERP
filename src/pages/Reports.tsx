@@ -354,7 +354,7 @@ const ALL_REPORTS: ReportDef[] = [
   },
   {
     id: "expense-register",
-    label: "Expense Register",
+    label: "Invoice Report",
     description: "Every booked invoice/expense, with GL head and GST breakup",
     icon: Receipt,
     color: "#0d9488",
@@ -505,6 +505,8 @@ const ALL_REPORTS: ReportDef[] = [
       },
       { header: "GL Name", accessor: (r) => (r.LHeadName ?? "—") as string },
       { header: "Group", accessor: (r) => (r.GroupName ?? "—") as string },
+      { header: "Company", accessor: (r) => (r.CompanyName ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.ProjectName ?? "—") as string },
       {
         header: "Expense Type",
         accessor: (r) => (r.ExpenseType ?? "—") as string,
@@ -568,6 +570,8 @@ const ALL_REPORTS: ReportDef[] = [
         accessor: (r) => (r.JVDate ? String(r.JVDate).slice(0, 10) : "—"),
       },
       { header: "Narration", accessor: (r) => (r.Narration ?? "—") as string },
+      { header: "Company", accessor: (r) => (r.CompanyName ?? "—") as string },
+      { header: "Project", accessor: (r) => (r.ProjectName ?? "—") as string },
       { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
       { header: "Status", accessor: "Status" },
     ],
@@ -2454,13 +2458,15 @@ const LedgerReportGroups: React.FC<{
 
             {!collapsed && (
               <div className="overflow-x-auto bg-muted/5">
-                <table className="w-full text-xs min-w-[860px]">
+                <table className="w-full text-xs min-w-[1140px]">
                   <thead>
                     <tr className="text-muted-foreground uppercase tracking-wide text-[10px] font-heading">
                       <th className="text-left pl-11 pr-3 py-2">Date</th>
                       <th className="text-left px-3 py-2">Source</th>
                       <th className="text-left px-3 py-2">Doc No</th>
                       <th className="text-left px-3 py-2">Paid To</th>
+                      <th className="text-left px-3 py-2">Company</th>
+                      <th className="text-left px-3 py-2">Project</th>
                       <th className="text-left px-3 py-2">Narration</th>
                       <th className="text-right px-3 py-2">Debit</th>
                       <th className="text-right px-4 sm:px-5 py-2">Credit</th>
@@ -2482,6 +2488,12 @@ const LedgerReportGroups: React.FC<{
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap text-foreground max-w-[180px] truncate" title={(r.PaidTo as string) ?? ""}>
                           {(r.PaidTo as string) || "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-foreground max-w-[140px] truncate" title={(r.CompanyName as string) ?? ""}>
+                          {(r.CompanyName as string) || "—"}
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap text-foreground max-w-[140px] truncate" title={(r.ProjectName as string) ?? ""}>
+                          {(r.ProjectName as string) || "—"}
                         </td>
                         <td className="px-3 py-2 text-foreground max-w-[280px] truncate" title={(r.Narration as string) ?? ""}>
                           {(r.Narration as string) ?? "—"}

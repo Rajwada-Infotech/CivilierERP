@@ -196,6 +196,7 @@ router.get("/transactions", async (req, res) => {
         gle.Narration, gle.SourceType, gle.SourceId,
         ahm.LHeadId, ISNULL(ahm.DisplayName, ahm.LHeadName) AS LHeadName, ahm.LBelongsTo AS GroupId,
         ag.Name AS GroupName,
+        co.name AS CompanyName, pr.name AS ProjectName,
         np.DocNo        AS NewPaymentDocNo,
         rp.RPDocNo      AS ReceivedPaymentDocNo,
         jv.JVNo         AS JournalVoucherNo,
@@ -233,6 +234,8 @@ router.get("/transactions", async (req, res) => {
       LEFT JOIN dbo.GoodsReceiptNotes grn
         ON gle.SourceType IN ('GRN', 'GRNPosting') AND grn.GRNID = gle.SourceId
       LEFT JOIN dbo.AccountHeadMaster grnSupplier ON grnSupplier.LHeadId = grn.SupplierID
+      LEFT JOIN dbo.enterprise co ON co.id = gle.CompanyId
+      LEFT JOIN dbo.enterprise pr ON pr.id = gle.ProjectId
       WHERE gle.IsReversed = 0
         AND (@From IS NULL OR gle.VoucherDate >= @From)
         AND (@To IS NULL OR gle.VoucherDate <= @To)

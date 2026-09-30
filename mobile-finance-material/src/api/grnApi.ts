@@ -7,8 +7,10 @@
 // sourcing IS the core of what a GRN does, not an extra worth trimming.
 // Deferred to web-only: the Posting tab (GL journal preview + auto-post —
 // same call as Payment's mobile port not auto-posting to GL), the quality
-// debit-note flow, DocumentChainPanel/LinkedExpenseBookings, Stock-Transfer
-// sourcing, CSV import (a stub on web too)/export, and print.
+// debit-note flow, DocumentChainPanel/LinkedExpenseBookings, CSV import
+// (a stub on web too)/export, and print. Stock-Transfer sourcing (creating
+// a GRN FROM a Stock Transfer, and showing which GRNs a transfer already
+// has) is now ported too — see createGRNFromTransfer/getGRNsByTransfer.
 import { fetchWithAuth } from "@/services/fetchWithAuth";
 
 const BASE = "/api/grns";
@@ -305,3 +307,55 @@ export function buildGRNLineItemsFromRemaining(items: RemainingPOItem[]): GRNIte
       };
     });
 }
+
+// ─── GRN from Stock Transfer ────────────────────────────────────────────────
+// RN port of src/api/grnApi.ts's own "GRN from Stock Transfer" section —
+// same two endpoints, same shapes. Web's own "Make GRN" modal never sends
+// supplierId (no supplier picker on it at all), which is what keeps this
+// safe: backend/services/generalLedger.js's postGRNApproval bails out
+// without crediting stock a second time when a GRN has no SupplierID — the
+// stock was already credited once by the originating Transfer's own IN
+// entry (see stockTransferApi.ts's header comment). Mirror that choice
+// here too — don't add a supplier field to the mobile "Make GRN" sheet.
+
+export interface GRNFromTransferPayload {
+  remarks?: string;
+}
+
+export interface GRNFromTransferResult {
+  message: string;
+  grnId: number;
+  grnNo: string;
+  docNo: string;
+  sourceTransferDocNo: string;
+  toGodownName: string;
+}
+
+export const createGRNFromTransfer = async (
+  transferId: number,
+  payload: GRNFromTransferPayload = {},
+): Promise<GRNFromTransferResult> => {
+  const res = await fetchWithAuth(`${BASE}/from-transfer/${transferId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await parseError(res, "Failed to create GRN from transfer"));
+  return res.json().catch(() => ({}));
+};
+
+export interface TransferGRNSummary {
+  GRNID: number;
+  GRNNo: string;
+  DocNo: string;
+  GRNDate: string;
+  Status: string;
+  TotalAmount: number;
+  SourceTransferDocNo: string;
+}
+
+export const getGRNsByTransfer = async (transferId: number): Promise<TransferGRNSummary[]> => {
+  const res = await fetchWithAuth(`${BASE}/by-transfer/${transferId}`);
+  if (!res.ok) throw new Error(await parseError(res, "Failed to fetch GRNs for transfer"));
+  return normalizeArray<TransferGRNSummary>(await res.json().catch(() => []));
+};

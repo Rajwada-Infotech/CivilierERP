@@ -24,6 +24,9 @@ export interface InterCompanyTransferItemPayload {
   /** Only needed when the preview comes back with needsManualRate for this
    *  item (no purchase history found anywhere under the sending company). */
   manualRate?: number;
+  /** Set when this line came from a Material Request — the source
+   *  MaterialRequestItems row (see SourceMRId on the transfer payload). */
+  mrItemId?: number | null;
 }
 
 export interface InterCompanyTransferPayload {
@@ -40,6 +43,9 @@ export interface InterCompanyTransferPayload {
    *  server-side; pass false for a genuine no-GST movement (not just a
    *  display preference — it zeroes the GST component entirely). */
   ApplyGst?: boolean;
+  /** Set when this transfer was raised from a Material Request — see
+   *  materialRequestApi.ts's getICTMRPrefill. */
+  SourceMRId?: number;
   Items: InterCompanyTransferItemPayload[];
 }
 

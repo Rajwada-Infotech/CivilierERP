@@ -30,11 +30,17 @@ export interface JournalVoucherSummary {
   JVNo: string | null;
   JVDate: string;
   Narration: string | null;
+  CompanyId?: number | null;
+  ProjectId?: number | null;
   CompanyName?: string | null;
   ProjectName?: string | null;
   Status: "Draft" | "Pending" | "Approved" | "Rejected";
   TotalAmount: number | null;
   PostedToGL?: boolean;
+}
+
+export interface JournalVoucherDetail extends JournalVoucherSummary {
+  lines: JournalVoucherLine[];
 }
 
 export interface JournalVoucherLedgerOption {
@@ -57,6 +63,11 @@ export const getJournalVouchers = async (): Promise<JournalVoucherSummary[]> => 
   return handleResponse<JournalVoucherSummary[]>(res);
 };
 
+export const getJournalVoucher = async (id: number): Promise<JournalVoucherDetail> => {
+  const res = await fetchWithAuth(`${BASE}/${id}`);
+  return handleResponse<JournalVoucherDetail>(res);
+};
+
 export const getJournalVoucherLedgerOptions = async (): Promise<JournalVoucherLedgerOption[]> => {
   const res = await fetchWithAuth(`${BASE}/ledger-options`);
   return handleResponse<JournalVoucherLedgerOption[]>(res);
@@ -68,6 +79,20 @@ export const createJournalVoucher = async (payload: JournalVoucherPayload) => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+  return handleResponse(res);
+};
+
+export const updateJournalVoucher = async (id: number, payload: JournalVoucherPayload) => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return handleResponse(res);
+};
+
+export const deleteJournalVoucher = async (id: number) => {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   return handleResponse(res);
 };
 

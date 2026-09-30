@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -127,17 +127,15 @@ export default function WorkDone() {
   // chain, shows the room each chain is already scoped to, and collapses
   // status to a single Pending/Done read so it's a fast glance, not a
   // management table.
+  // getDependencyMasters now returns each chain's full activity ladder
+  // inline (see dependencyMaster.js's GET /) — this used to also fire one
+  // GET /:id per chain via useQueries, which at production scale (1000+
+  // chains) blew through the route's rate limit and left this page unable
+  // to load at all.
   const { data: allChains = [] } = useQuery({
     queryKey: ["civilworkdpr-work-done-all-chains"],
     queryFn: getDependencyMasters,
     enabled: rights.canView,
-  });
-  const chainDetailQueries = useQueries({
-    queries: (allChains as DependencyMasterListRow[]).map((c) => ({
-      queryKey: ["civilworkdpr-work-done-dependency-detail", String(c.id)],
-      queryFn: () => getDependencyMaster(c.id),
-      enabled: rights.canView,
-    })),
   });
   const { data: allAssignments = [] } = useQuery({
     queryKey: ["civilworkdpr-work-done-saved-flow"],
@@ -533,9 +531,8 @@ export default function WorkDone() {
 
                       {!collapsed && (
                         <div className="divide-y divide-border">
-                          {group.chains.map(({ chain, index }) => {
-                            const detail = chainDetailQueries[index]?.data;
-                            const rungs = detail?.activities ?? [];
+                          {group.chains.map(({ chain }) => {
+                            const rungs = chain.activities ?? [];
                             return (
                               <div key={chain.id} className="px-5 py-4 space-y-2.5">
                                 <div>

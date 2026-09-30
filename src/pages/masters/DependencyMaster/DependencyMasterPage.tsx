@@ -188,6 +188,7 @@ export default function DependencyMasterPage() {
             canDelete={rights.canDelete}
             onEdit={(row) => navigate(`/masters/dependency/${row.id}/edit`)}
             onDelete={(row) => setDeleteTarget(row)}
+            forceExpand={!!search.trim()}
           />
         )}
       </EngineeringShell>

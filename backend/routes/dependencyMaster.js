@@ -145,7 +145,29 @@ router.get("/", authMiddleware, async (req, res) => {
       LEFT JOIN dbo.RoomMaster   rm ON rm.Id = dm.RoomId
       ORDER BY dm.Id DESC
     `);
-    res.json(r.recordset);
+
+    // Every rung for every chain, in one query — callers that need the full
+    // activity ladder per chain (e.g. Work Done's chain browser) used to
+    // fire one GET /:id per row via useQueries, which at production scale
+    // (1000+ chains) blew straight through this route's rate limit (429s)
+    // and left the page unable to load at all. Attaching the ladder here
+    // means the whole list, with every chain's activities, is one request.
+    const activitiesRes = await pool.request().query(`
+      SELECT dma.DependencyMasterId, dma.Id AS rungId, dma.ActivityId AS activityId,
+             am.activity_name AS activityName, dma.SequenceNo AS sequenceNo, dma.WorkType AS workType
+      FROM dbo.DependencyMasterActivity dma
+      JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+      ORDER BY dma.DependencyMasterId, dma.SequenceNo ASC
+    `);
+    const activitiesByChain = new Map();
+    for (const row of activitiesRes.recordset) {
+      const { DependencyMasterId, ...rung } = row;
+      if (!activitiesByChain.has(DependencyMasterId)) activitiesByChain.set(DependencyMasterId, []);
+      activitiesByChain.get(DependencyMasterId).push(rung);
+    }
+    const rows = r.recordset.map((row) => ({ ...row, activities: activitiesByChain.get(row.id) || [] }));
+
+    res.json(rows);
   } catch (err) {
     console.error("[GET /dependency-master]", err);
     res.status(500).json({ error: err.message });
