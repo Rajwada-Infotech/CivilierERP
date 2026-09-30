@@ -16,6 +16,7 @@
 //
 //   node scripts/cloneChainForChainlessRooms.js --project "Royal Garden"          # dry run
 //   node scripts/cloneChainForChainlessRooms.js --project "Royal Garden" --apply
+//   node scripts/cloneChainForChainlessRooms.js --all            # every project with rooms, read from the DB
 
 const { connectDB, getPool, sql, closeDB } = require("../db");
 const { floorLabelOf } = require("../services/unitLayout");
@@ -26,7 +27,8 @@ const ACTOR = "cloneChainForChainlessRooms";
 
 async function main() {
   const PROJECT = arg("--project");
-  if (!PROJECT) throw new Error('pass --project "<name>"');
+  const ALL = process.argv.includes("--all");
+  if (!PROJECT && !ALL) throw new Error('pass --project "<name>" or --all');
   await connectDB();
   const pool = getPool();
   const q = async (db, s, p = {}) => {
@@ -34,9 +36,14 @@ async function main() {
     for (const [k, [t, v]] of Object.entries(p)) r.input(k, t, v);
     return (await r.query(s)).recordset;
   };
-  const proj = await q(pool, "SELECT id, name FROM dbo.enterprise WHERE business_type = 'P' AND LTRIM(RTRIM(name)) = @n", { n: [sql.NVarChar(255), PROJECT] });
-  if (proj.length !== 1) throw new Error(`${proj.length} projects named "${PROJECT}"`);
-  const pid = proj[0].id;
+  // Projects come from the database: one named project, or (--all) every
+  // project that has active rooms on active units.
+  const projects = PROJECT
+    ? await q(pool, "SELECT id, LTRIM(RTRIM(name)) AS name FROM dbo.enterprise WHERE business_type = 'P' AND LTRIM(RTRIM(name)) = @n", { n: [sql.NVarChar(255), PROJECT] })
+    : await q(pool, `SELECT e.id, LTRIM(RTRIM(e.name)) AS name FROM dbo.enterprise e WHERE e.business_type = 'P'
+        AND EXISTS (SELECT 1 FROM dbo.RoomMaster r JOIN dbo.UnitMaster u ON u.Id = r.UnitId AND u.IsActive = 1 WHERE r.ProjectId = e.id AND r.IsActive = 1)
+        ORDER BY LTRIM(RTRIM(e.name))`);
+  if (!projects.length || (PROJECT && projects.length !== 1)) throw new Error(`${projects.length} matching project(s)`);
 
   // ── learn the template per room category from existing chains ──
   const chains = await q(pool, `
@@ -77,13 +84,19 @@ async function main() {
     return null;
   };
   const tally = (list) => list.reduce((m, c) => { const f = learn(c); const k = f ? JSON.stringify(f) : "unrecognised"; m[k] = (m[k] || 0) + 1; return m; }, {});
+  const grand = { chainsCreated: 0, rungsCreated: 0, noTemplate: 0, problems: 0 };
+  for (const P of projects) {
+  const pid = P.id;
+  const proj = [P];
+  console.log(`
+=== ${P.name}`);
   const own = chains.filter((c) => c.ProjectId === pid);
   const counts = tally(own.length ? own : chains);
   const bestKey = Object.entries(counts).filter(([k]) => k !== "unrecognised").sort((a, b) => b[1] - a[1])[0]?.[0];
   console.log(`alias formats — all chains: ${JSON.stringify(tally(chains))}${own.length ? `; this project: ${JSON.stringify(counts)}` : "; this project has no chains yet (using the most common)"}`);
   const odd = chains.filter((c) => !learn(c)).slice(0, 5);
   if (odd.length) console.log(`   unrecognised examples: ${odd.map((c) => `"${c.Alias}" (unit "${c.UnitName}", room "${c.RoomName}")`).join("; ")}`);
-  if (!bestKey) throw new Error("no alias format could be learned from existing chains — refusing to guess");
+  if (!bestKey) { console.log("   !! no alias format could be learned from existing chains — project skipped"); grand.problems++; continue; }
   const aliasFormat = JSON.parse(bestKey);
   console.log(`   using alias format ${bestKey}, e.g. "${build(aliasFormat, chains[0].UnitName, chains[0].RoomName)}"`);
   const template = new Map(); // categoryId -> donor chain
@@ -147,6 +160,10 @@ async function main() {
   if (noTpl.size) console.log(`\nno existing chain for these room types (left for Dependency Master): ${[...noTpl.entries()].map(([k, n]) => `${k}: ${n}`).join(", ")}`);
   console.log(`\nper block: ${[...perBlock.entries()].map(([b, n]) => `${b}: ${n}`).join(", ") || "-"}`);
   console.log(`\n${APPLY ? "APPLIED" : "WOULD APPLY"}: ${JSON.stringify(totals)}`);
+  for (const k of Object.keys(grand)) grand[k] += totals[k];
+  }
+  if (projects.length > 1) console.log(`
+ALL ${projects.length} PROJECTS — ${APPLY ? "APPLIED" : "WOULD APPLY"}: ${JSON.stringify(grand)}`);
   if (!APPLY) console.log("Dry run — nothing was written.");
   await closeDB();
   process.exit(0);
