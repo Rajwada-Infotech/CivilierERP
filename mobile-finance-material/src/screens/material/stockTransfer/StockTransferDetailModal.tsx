@@ -1,8 +1,7 @@
 // RN port of StockTransfer.tsx's TransferPreviewModal — single scroll, no
-// tabs (web has none either). No "Make GRN from Transfer" section: that's
-// a separate documentation bolt-on into the GRN module (and a latent
-// double-stock-posting risk per the web research — see
-// stockTransferApi.ts), not part of a plain Stock Transfer record.
+// tabs (web has none either). "Make GRN from Transfer" lives on the list
+// card (StockTransferListScreen.tsx), same as web keeps it in the table
+// row rather than the preview dialog — see MakeGRNFromTransferModal.tsx.
 import { useQuery } from "@tanstack/react-query";
 import { View, Text, Modal, Pressable, ScrollView, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";

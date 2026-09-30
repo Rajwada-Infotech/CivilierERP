@@ -2,12 +2,17 @@
 // width the same way FinanceDashboardScreen mirrors FinanceDashboard.tsx:
 // stat tiles (2-col grid, web's grid-cols-2 sm:grid-cols-4 collapse),
 // Totals (stacked), Recent GRNs + Recent POs (row lists in place of web's
-// <DataTable>s), Quick Actions grid. Not yet ported: the drill-down modals
-// behind each stat tile (Item Master / GRN / PO / Expenses / Stock /
-// Issues / Requests lists), Recent Expenses/Issues/Requests panels, PO
-// Status Breakdown, Material Requests breakdown, and Top Items — same
-// "one page at a time" scoping as the rest of this app. Tapping a stat
-// tile or quick action for something not built yet shows the standard
+// <DataTable>s), Quick Actions grid. "Pending Expenses"/"Expense Booking"
+// now route to InvoiceScreen (the mobile port of MaterialExpenseBooking.tsx)
+// and "Inventory" routes to StockScreen — both screens already existed,
+// they just weren't wired up from here. Still not built on mobile at all:
+// the drill-down modals behind Item Master/GRN/PO/Stock/Issues/Requests
+// (web's own per-tile detail popovers, not full screens), Recent
+// Expenses/Issues/Requests panels, PO Status Breakdown, Material Requests
+// breakdown, Top Items, and the Item/UOM/T&C master-data screens (no
+// mobile equivalent exists for any of the three — same "masters stay
+// web-only" convention as admin/**) — same "one page at a time" scoping
+// as the rest of this app. Tapping one of those still shows the standard
 // "not built on mobile yet" alert.
 import { useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, Alert } from "react-native";
@@ -172,6 +177,7 @@ export default function MaterialDashboardScreen() {
   const goToMaterialRequest = () => navigation.navigate("MaterialRequest");
   const goToMaterialIssues = () => navigation.navigate("MaterialIssues");
   const goToStock = () => navigation.navigate("Stock");
+  const goToExpenses = () => navigation.navigate("Invoice");
   const [refreshing, setRefreshing] = useState(false);
 
   const { data, isLoading, isError, refetch, isFetching, dataUpdatedAt } = useQuery<MaterialDashboardData>({
@@ -239,7 +245,7 @@ export default function MaterialDashboardScreen() {
               <StatTile label="Total Items" value={fmtNum(data?.items.count ?? 0)} sub={`${data?.items.groupCount ?? 0} item groups`} icon={Package} accent="#10b981" onPress={() => notBuiltYet("Item Master")} />
               <StatTile label="GRNs This Month" value={fmtNum(data?.grns.thisMonth ?? 0)} sub={`${data?.grns.today ?? 0} today · ${fmtRupees(data?.grns.thisMonthValue ?? 0)}`} icon={Truck} accent="#3b82f6" onPress={() => goToGRN()} />
               <StatTile label="Open POs" value={fmtNum(data?.purchaseOrders.open ?? 0)} sub={`${fmtRupees(data?.purchaseOrders.openValue ?? 0)} outstanding`} icon={ShoppingCart} accent="#f59e0b" onPress={() => goToPurchaseOrder()} />
-              <StatTile label="Pending Expenses" value={fmtNum(data?.expenses.pending ?? 0)} sub={`${fmtRupees(data?.expenses.pendingAmount ?? 0)} pending`} icon={Receipt} accent="#ef4444" onPress={() => notBuiltYet("Expenses")} />
+              <StatTile label="Pending Expenses" value={fmtNum(data?.expenses.pending ?? 0)} sub={`${fmtRupees(data?.expenses.pendingAmount ?? 0)} pending`} icon={Receipt} accent="#ef4444" onPress={() => goToExpenses()} />
               <StatTile label="Net Stock" value={fmtNum((data?.stock.totalIn ?? 0) - (data?.stock.totalOut ?? 0))} sub={`${fmtNum(data?.stock.uniqueItems ?? 0)} items tracked`} icon={Layers} accent="#14b8a6" onPress={() => goToStock()} />
               <StatTile label="Material Issues" value={fmtNum(data?.materialIssues.thisMonth ?? 0)} sub={`${data?.materialIssues.today ?? 0} today`} icon={PackageCheck} accent="#f97316" onPress={() => goToMaterialIssues()} />
               <StatTile label="Material Requests" value={fmtNum(data?.materialRequests.total ?? 0)} sub={`${data?.materialRequests.pending ?? 0} pending`} icon={Send} accent="#6366f1" onPress={() => goToMaterialRequest()} wide />
@@ -287,9 +293,9 @@ export default function MaterialDashboardScreen() {
               <QuickAction label="Purchase Order" icon={ShoppingCart} onPress={() => goToPurchaseOrder()} />
               <QuickAction label="Issues" icon={PackageCheck} onPress={() => goToMaterialIssues()} />
               <QuickAction label="Material Request" icon={Send} onPress={() => goToMaterialRequest()} />
-              <QuickAction label="Expense Booking" icon={Receipt} onPress={() => notBuiltYet("Expense Booking")} />
+              <QuickAction label="Expense Booking" icon={Receipt} onPress={() => goToExpenses()} />
               <QuickAction label="UOM Master" icon={Ruler} onPress={() => notBuiltYet("UOM Master")} />
-              <QuickAction label="Inventory" icon={ClipboardList} onPress={() => notBuiltYet("Inventory")} />
+              <QuickAction label="Inventory" icon={ClipboardList} onPress={() => goToStock()} />
               <QuickAction label="T&C Master" icon={FileText} onPress={() => notBuiltYet("T&C Master")} />
             </View>
           </View>

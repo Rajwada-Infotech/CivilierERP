@@ -8,17 +8,18 @@ import { useMemo, useState } from "react";
 import { View, Text, ScrollView, Pressable, ActivityIndicator, RefreshControl, TextInput, Modal, Alert } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Scale, Plus, Search, X, Check, RefreshCw, FileText, Clock, CheckCircle2, AlertCircle, Trash2, ChevronDown,
+  Scale, Plus, Search, X, Check, RefreshCw, FileText, Clock, CheckCircle2, AlertCircle, Trash2, ChevronDown, Pencil,
 } from "lucide-react-native";
 import {
-  getJournalVouchers, getJournalVoucherLedgerOptions, createJournalVoucher,
-  approveJournalVoucher, rejectJournalVoucher,
+  getJournalVouchers, getJournalVoucher, getJournalVoucherLedgerOptions, createJournalVoucher,
+  updateJournalVoucher, deleteJournalVoucher, approveJournalVoucher, rejectJournalVoucher,
   type JournalVoucherSummary, type JournalVoucherLedgerOption, type JournalVoucherLine,
 } from "@/api/journalVoucherApi";
 import { fetchCompanyOptions, fetchProjectOptions } from "@/api/newPaymentApi";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { SectionLabel } from "@/components/home/SectionLabel";
+import { usePageRights } from "@/hooks/usePageRights";
 
 const ACCENT = "#6467f2";
 
@@ -92,9 +93,10 @@ function StatTile({ label, value, icon: Icon, accent }: { label: string; value: 
 }
 
 function VoucherCard({
-  v, onApprove, onReject, acting,
+  v, onApprove, onReject, acting, onEdit, onDelete, canEdit, canDelete, editLoading,
 }: {
   v: JournalVoucherSummary; onApprove: () => void; onReject: () => void; acting: "approve" | "reject" | null;
+  onEdit: () => void; onDelete: () => void; canEdit: boolean; canDelete: boolean; editLoading: boolean;
 }) {
   return (
     <View className="rounded-xl p-3.5 mb-2.5" style={{ backgroundColor: `${colors.card}b3`, borderWidth: 1, borderColor: `${colors.border}80` }}>
@@ -124,16 +126,30 @@ function VoucherCard({
           <StatusPill status={v.Status} />
           <GLPill status={v.Status} posted={v.PostedToGL} />
         </View>
-        {v.Status === "Pending" && (
-          <View className="flex-row items-center gap-1.5">
-            <Pressable onPress={onApprove} disabled={!!acting} className="p-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: "#10b98140" }}>
-              {acting === "approve" ? <ActivityIndicator size="small" color="#10b981" /> : <Check size={13} color="#10b981" />}
+        <View className="flex-row items-center gap-1.5">
+          {v.Status === "Pending" && (
+            <>
+              <Pressable onPress={onApprove} disabled={!!acting} className="p-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: "#10b98140" }}>
+                {acting === "approve" ? <ActivityIndicator size="small" color="#10b981" /> : <Check size={13} color="#10b981" />}
+              </Pressable>
+              <Pressable onPress={onReject} disabled={!!acting} className="p-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: "#ef444440" }}>
+                {acting === "reject" ? <ActivityIndicator size="small" color="#ef4444" /> : <X size={13} color="#ef4444" />}
+              </Pressable>
+            </>
+          )}
+          {/* Editing a Pending JV would fight the approval workflow already in
+           * progress on it — same rule the web page's own edit button uses. */}
+          {v.Status !== "Pending" && canEdit && (
+            <Pressable onPress={onEdit} disabled={editLoading} hitSlop={6} className="p-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: colors.border }}>
+              {editLoading ? <ActivityIndicator size="small" color={colors.mutedForeground} /> : <Pencil size={13} color={colors.mutedForeground} />}
             </Pressable>
-            <Pressable onPress={onReject} disabled={!!acting} className="p-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: "#ef444440" }}>
-              {acting === "reject" ? <ActivityIndicator size="small" color="#ef4444" /> : <X size={13} color="#ef4444" />}
+          )}
+          {canDelete && (
+            <Pressable onPress={onDelete} hitSlop={6} className="p-1.5 rounded-lg" style={{ borderWidth: 1, borderColor: "#ef444440" }}>
+              <Trash2 size={13} color="#ef4444" />
             </Pressable>
-          </View>
-        )}
+          )}
+        </View>
       </View>
     </View>
   );
@@ -171,10 +187,15 @@ function OptionSheet({
 
 export default function JournalVoucherScreen() {
   const qc = useQueryClient();
+  const rights = usePageRights("journal-voucher");
   const [search, setSearch] = useState("");
   const [refreshing, setRefreshing] = useState(false);
   const [acting, setActing] = useState<{ id: number; action: "approve" | "reject" } | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  // Edit reuses the same bottom sheet as New — editingId set means Save
+  // calls updateJournalVoucher instead of createJournalVoucher, same as web.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editLoadingId, setEditLoadingId] = useState<number | null>(null);
 
   const { data: vouchers = [], isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["journal-vouchers"],
@@ -232,6 +253,51 @@ export default function JournalVoucherScreen() {
     setProjectId("");
     setProjectLabel("");
     setLines([emptyLine(), emptyLine()]);
+    setEditingId(null);
+  };
+
+  // Loads the full record (list rows don't carry LHeadId per line) and
+  // opens the same sheet used for New, same pattern as web's startEdit.
+  const startEdit = async (v: JournalVoucherSummary) => {
+    setEditLoadingId(v.JVID);
+    try {
+      const full = await getJournalVoucher(v.JVID);
+      setJvDate((full.JVDate || "").slice(0, 10) || new Date().toISOString().slice(0, 10));
+      setNarration(full.Narration || "");
+      setCompanyId(full.CompanyId ? String(full.CompanyId) : "");
+      setCompanyLabel(full.CompanyName || "");
+      setProjectId(full.ProjectId ? String(full.ProjectId) : "");
+      setProjectLabel(full.ProjectName || "");
+      setLines(
+        (full.lines || []).map((l) => ({
+          _id: Math.random().toString(36).slice(2) + Date.now().toString(36),
+          LineID: l.LineID,
+          LHeadId: l.LHeadId,
+          DebitAmount: l.DebitAmount,
+          CreditAmount: l.CreditAmount,
+          Narration: l.Narration || "",
+        })),
+      );
+      setEditingId(v.JVID);
+      setFormOpen(true);
+    } catch (err: any) {
+      Alert.alert("Couldn't load voucher", err?.message ?? `Failed to load Journal Voucher #${v.JVID}`);
+    } finally {
+      setEditLoadingId(null);
+    }
+  };
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteJournalVoucher(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["journal-vouchers"] }),
+    onError: (e: Error) => Alert.alert("Delete failed", e.message),
+  });
+
+  const confirmDelete = (v: JournalVoucherSummary) => {
+    Alert.alert("Delete Journal Voucher?", "This action cannot be undone.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => deleteMutation.mutate(v.JVID) },
+    ]);
   };
 
   const updateLine = (id: string, patch: Partial<LineUI>) => setLines((prev) => prev.map((l) => (l._id === id ? { ...l, ...patch } : l)));
@@ -243,19 +309,21 @@ export default function JournalVoucherScreen() {
       if (!companyId) throw new Error("Select the Company this voucher belongs to.");
       if (!totals.balanced) throw new Error("Debit and Credit totals must match before saving.");
       if (lines.some((l) => !l.LHeadId)) throw new Error("Every line requires an account head.");
-      return createJournalVoucher({
+      const payload = {
         JVDate: jvDate,
         Narration: narration,
         CompanyId: Number(companyId),
         ProjectId: projectId ? Number(projectId) : null,
         lines,
-      });
+      };
+      return editingId ? updateJournalVoucher(editingId, payload) : createJournalVoucher(payload);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["journal-vouchers"] });
+      const wasEditing = !!editingId;
       setFormOpen(false);
       resetForm();
-      Alert.alert("Journal Voucher created", "Submitted for approval.");
+      Alert.alert(wasEditing ? "Journal Voucher updated" : "Journal Voucher created", wasEditing ? undefined : "Submitted for approval.");
     },
     onError: (e: Error) => Alert.alert("Save failed", e.message),
   });
@@ -318,14 +386,16 @@ export default function JournalVoucherScreen() {
         </Pressable>
       </View>
 
-      <Pressable
-        onPress={() => setFormOpen(true)}
-        className="flex-row items-center justify-center gap-1.5 rounded-xl mt-3 mb-1"
-        style={{ backgroundColor: ACCENT, paddingVertical: 11 }}
-      >
-        <Plus size={14} color="#fff" />
-        <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>New Journal Voucher</Text>
-      </Pressable>
+      {rights.canCreate && (
+        <Pressable
+          onPress={() => { resetForm(); setFormOpen(true); }}
+          className="flex-row items-center justify-center gap-1.5 rounded-xl mt-3 mb-1"
+          style={{ backgroundColor: ACCENT, paddingVertical: 11 }}
+        >
+          <Plus size={14} color="#fff" />
+          <Text style={{ color: "#fff", fontSize: 12.5, fontFamily: fonts.heading.semibold }}>New Journal Voucher</Text>
+        </Pressable>
+      )}
 
       {isError && (
         <View className="mt-3 flex-row items-center gap-2 px-4 py-2.5 rounded-xl" style={{ backgroundColor: `${colors.destructive}1a`, borderWidth: 1, borderColor: `${colors.destructive}33` }}>
@@ -378,21 +448,28 @@ export default function JournalVoucherScreen() {
               acting={acting?.id === v.JVID ? acting.action : null}
               onApprove={() => approveMutation.mutate(v.JVID)}
               onReject={() => rejectMutation.mutate(v.JVID)}
+              onEdit={() => startEdit(v)}
+              onDelete={() => confirmDelete(v)}
+              canEdit={rights.canEdit}
+              canDelete={rights.canDelete}
+              editLoading={editLoadingId === v.JVID}
             />
           ))}
         </View>
       )}
 
-      {/* ── New JV bottom sheet ── */}
-      <Modal visible={formOpen} transparent animationType="fade" onRequestClose={() => setFormOpen(false)}>
-        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }} onPress={() => setFormOpen(false)}>
+      {/* ── New/Edit JV bottom sheet ── */}
+      <Modal visible={formOpen} transparent animationType="fade" onRequestClose={() => { setFormOpen(false); resetForm(); }}>
+        <Pressable style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }} onPress={() => { setFormOpen(false); resetForm(); }}>
           <Pressable onPress={() => {}} style={{ backgroundColor: colors.card, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "88%", borderWidth: 1, borderColor: colors.border }}>
             <View className="flex-row items-center justify-between px-4 py-3.5" style={{ borderBottomWidth: 1, borderBottomColor: colors.border }}>
               <View>
-                <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>New Journal Voucher</Text>
+                <Text style={{ color: colors.foreground, fontSize: 14, fontFamily: fonts.heading.semibold }}>
+                  {editingId ? "Edit Journal Voucher" : "New Journal Voucher"}
+                </Text>
                 <Text style={{ color: `${colors.mutedForeground}99`, fontSize: 10, fontFamily: fonts.body.regular, marginTop: 1 }}>Debit total must equal credit total.</Text>
               </View>
-              <Pressable onPress={() => setFormOpen(false)} hitSlop={8}><X size={16} color={colors.mutedForeground} /></Pressable>
+              <Pressable onPress={() => { setFormOpen(false); resetForm(); }} hitSlop={8}><X size={16} color={colors.mutedForeground} /></Pressable>
             </View>
 
             <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
@@ -535,7 +612,7 @@ export default function JournalVoucherScreen() {
                 style={{ backgroundColor: ACCENT, paddingVertical: 13, opacity: saveMutation.isPending || !totals.balanced ? 0.5 : 1 }}
               >
                 {saveMutation.isPending ? <ActivityIndicator color="#fff" /> : (
-                  <Text style={{ color: "#fff", fontSize: 13.5, fontFamily: fonts.heading.semibold }}>Save & Submit</Text>
+                  <Text style={{ color: "#fff", fontSize: 13.5, fontFamily: fonts.heading.semibold }}>{editingId ? "Save Changes" : "Save & Submit"}</Text>
                 )}
               </Pressable>
             </ScrollView>
