@@ -10,6 +10,8 @@
 //   "blocks": [ { "name": "IRIS", "floors": [1,17],
 //                 "flats": { "A": { "type": "3 BHK", "area": 1379,
 //                                   "rooms": { "Balcony": 2, ... } }, ... } } ],
+// A flat's optional "areas" = { UnitMaster column: value, ... } sets several
+// area fields at once (e.g. carpet + super built-up); each column must exist.
 // A flat's optional "rooms" = its full room list; when it differs from its
 // layout's composition it is saved as a UNIT override (Unit Composition), so
 // only that flat differs and the shared layout type is left alone.
@@ -92,12 +94,16 @@ async function main() {
     totals.overridesSaved++;
   }
 
+  const extraCols = [...new Set(spec.blocks.flatMap((b) => Object.values(b.flats).flatMap((f) => Object.keys(f.areas || {}))))];
+  for (const c of extraCols) {
+    if (!/^\w+$/.test(c) || !(await one(pool, "SELECT 1 AS x FROM sys.columns WHERE object_id = OBJECT_ID('dbo.UnitMaster') AND name = @c", { c: [sql.NVarChar(128), c] })).length) throw new Error(`UnitMaster has no column ${c}`);
+  }
   // 2. Types + areas, then rooms, one transaction per unit.
   for (const b of spec.blocks) {
     const bid = blockId(b.name);
     const [ff, ft] = b.floors;
     const units = await one(pool, `
-      SELECT Id, UnitName, FloorNo, UnitType, LayoutTypeId${areaCol ? `, ${areaCol} AS Area` : ""}
+      SELECT Id, UnitName, FloorNo, UnitType, LayoutTypeId${areaCol ? `, ${areaCol} AS Area` : ""}${extraCols.map((c) => `, ${c} AS x_${c}`).join("")}
       FROM dbo.UnitMaster WHERE BlockId = @b AND IsActive = 1 AND FloorNo BETWEEN @ff AND @ft`,
       { b: [sql.Int, bid], ff: [sql.Int, ff], ft: [sql.Int, ft] });
     const lines = [];
@@ -110,7 +116,9 @@ async function main() {
       const t = await resolveType(want.type);
       const typeDiff = u.LayoutTypeId !== t.layoutTypeId || u.UnitType !== t.unitType;
       const areaDiff = areaCol && want.area != null && Number(u.Area) !== Number(want.area);
-      if (!typeDiff && !areaDiff) { totals.unchanged++; }
+      const extraAreas = Object.entries(want.areas || {}).filter(([c, v]) => Number(u[`x_${c}`]) !== Number(v));
+      const extraNote = extraAreas.length ? ` areas{${extraAreas.map(([c, v]) => `${c}:${u[`x_${c}`] ?? "-"}->${v}`).join(", ")}}` : "";
+      if (!typeDiff && !areaDiff && !extraAreas.length) { totals.unchanged++; }
       // Flat-specific rooms -> UNIT override, only when its effective rooms
       // (layout + any override already in force) differ from the plan.
       let ovrNote = "";
@@ -143,10 +151,12 @@ async function main() {
       const tx = pool.transaction();
       await tx.begin();
       try {
-        if (typeDiff || areaDiff) {
+        if (typeDiff || areaDiff || extraAreas.length) {
           const r = tx.request().input("id", sql.Int, u.Id).input("lt", sql.Int, t.layoutTypeId).input("t", sql.NVarChar(100), t.unitType);
           let set = "LayoutTypeId = @lt, UnitType = @t";
           if (areaDiff) { r.input("a", sql.Decimal(18, 2), want.area); set += `, ${areaCol} = @a`; }
+          extraAreas.forEach(([c, v], i) => { r.input(`x${i}`, sql.Decimal(18, 2), v); set += `, ${c} = @x${i}`; });
+          if (extraAreas.length) totals.extraAreasChanged = (totals.extraAreasChanged || 0) + 1;
           await r.query(`UPDATE dbo.UnitMaster SET ${set} WHERE Id = @id`);
         }
         // Always re-sync: an override saved above may change rooms even for
@@ -157,9 +167,9 @@ async function main() {
         totals.roomsKeptWithWork += (rs.keptWithWork || []).length;
         if (typeDiff) totals.typeChanged++;
         if (areaDiff) totals.areaChanged++;
-        if (typeDiff || areaDiff || rs.created || rs.deactivated || ovrNote) {
+        if (typeDiff || areaDiff || extraAreas.length || rs.created || rs.deactivated || ovrNote) {
           changed++;
-          lines.push(`   ${u.UnitName}: ${u.UnitType || "-"}/${u.Area ?? "-"} -> ${t.unitType}/${want.area ?? "-"}  rooms +${(rs.created || 0) + (rs.reactivated || 0)} -${rs.deactivated || 0}${(rs.keptWithWork || []).length ? ` KEPT(work): ${rs.keptWithWork.length}` : ""}${ovrNote}`);
+          lines.push(`   ${u.UnitName}: ${u.UnitType || "-"}/${u.Area ?? "-"} -> ${t.unitType}/${want.area ?? "-"}  rooms +${(rs.created || 0) + (rs.reactivated || 0)} -${rs.deactivated || 0}${(rs.keptWithWork || []).length ? ` KEPT(work): ${rs.keptWithWork.length}` : ""}${extraNote}${ovrNote}`);
         }
         if (APPLY) await tx.commit(); else await tx.rollback();
       } catch (e) {
