@@ -146,7 +146,12 @@ export const CivilWorkDprShell: React.FC<CivilWorkDprShellProps> = ({
       </motion.div>
 
       {/* ── Page content ────────────────────────────────────────────────── */}
-      <div className={fillHeight ? "relative z-10 flex-1 min-h-0 flex flex-col" : "relative z-10 space-y-5"}>{children}</div>
+      {/* overflow-x-hidden here is the backstop: a wide descendant (e.g.
+          Reporting's per-chain activity table, several columns wide) should
+          only ever scroll within its own overflow-x-auto wrapper, never
+          push this whole page wider and scroll the viewport sideways on a
+          narrow phone screen. */}
+      <div className={fillHeight ? "relative z-10 flex-1 min-h-0 flex flex-col overflow-x-hidden" : "relative z-10 space-y-5 overflow-x-hidden"}>{children}</div>
     </div>
   );
 };

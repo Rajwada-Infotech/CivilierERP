@@ -106,7 +106,21 @@ export function AddWorkerDialog({
 
   const { data: contractors = [] } = useQuery({
     queryKey: ["worker-attendance-contractors"],
-    queryFn: () => fetchWithAuth("/api/account-head/options?type=C").then((r) => r.json().catch(() => [])),
+    // Never let a non-array reach the <select>'s own .map() below — the old
+    // `.then((r) => r.json().catch(() => []))` never checked r.ok, so any
+    // error response (a JSON body of {error: "..."}, not an array) parsed
+    // fine and got treated as the options list. `contractors.map` then
+    // threw during render with no local error boundary, which the route's
+    // own RouteErrorBoundary caught by replacing the whole page with
+    // ErrorPage — a near-black full-screen fallback in this app's dark
+    // theme, which is what looked like "Add Worker crashes and blacks out
+    // the screen."
+    queryFn: async () => {
+      const r = await fetchWithAuth("/api/account-head/options?type=C");
+      if (!r.ok) return [];
+      const body = await r.json().catch(() => []);
+      return Array.isArray(body) ? body : [];
+    },
     enabled: open,
     staleTime: 5 * 60 * 1000,
   });

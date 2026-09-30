@@ -22,11 +22,27 @@ const GAP = 6;
 const MAX_PANEL = 320;
 const SEARCH_BAR = 46;
 
-// A searchable dropdown that is aware of where it sits on screen: the panel
-// is portalled to document.body (so no ancestor's overflow can clip it),
-// opens upward when there is more room above the trigger than below, sizes
-// its list to the space actually available, stays inside the viewport
-// horizontally, and follows the trigger if the page scrolls or resizes.
+// A searchable dropdown that is aware of where it sits on screen. The panel
+// portals to the nearest open Radix Dialog's own content element when one
+// exists, `document.body` otherwise — NOT always straight to body, which
+// is what broke this inside a dialog: Radix's focus trap and scroll lock
+// both decide what's "inside" the dialog by DOM containment
+// (`dialogContentEl.contains(target)`), and a plain `createPortal(...,
+// document.body)` panel is a sibling of the dialog's own portal, not a
+// descendant — so the trap kept yanking focus back out of the search
+// input (typing didn't register) and the scroll lock refused to let the
+// list scroll (see react-remove-scroll's handleScroll, which walks up
+// from the event target and only allows it through if that walk stays
+// inside the locked ref). Portaling into the dialog's own content element
+// makes the panel a genuine descendant, so both mechanisms treat it as
+// part of the dialog and leave it alone. Position math then has to be
+// relative to that container's own box, not the viewport — DialogContent
+// carries a CSS transform (its centering translate), which makes it the
+// containing block for any `position: fixed` descendant, the same way it
+// already was for the viewport when portaled to a plain `document.body`.
+function findPositioningContainer(el: HTMLElement | null): HTMLElement {
+  return (el?.closest('[role="dialog"]') as HTMLElement | null) ?? document.body;
+}
 export function SearchableSelect({
   options,
   value,
@@ -114,22 +130,36 @@ export function SearchableSelect({
 
   let panel: React.ReactNode = null;
   if (open && rect) {
-    const spaceBelow = window.innerHeight - rect.bottom - GAP - 8;
-    const spaceAbove = rect.top - GAP - 8;
+    const containerEl = findPositioningContainer(triggerRef.current);
+    const inDialog = containerEl !== document.body;
+    // Bounds of whatever position:fixed actually resolves against — the
+    // dialog's own box when portaled into one (see findPositioningContainer's
+    // comment on why that's the containing block once a transform is
+    // involved), or the plain viewport otherwise.
+    const bounds = inDialog
+      ? containerEl.getBoundingClientRect()
+      : ({ top: 0, left: 0, right: window.innerWidth, bottom: window.innerHeight, width: window.innerWidth, height: window.innerHeight } as DOMRect);
+
+    const relTop = rect.top - bounds.top;
+    const relBottom = rect.bottom - bounds.top;
+    const relLeft = rect.left - bounds.left;
+
+    const spaceBelow = bounds.height - relBottom - GAP - 8;
+    const spaceAbove = relTop - GAP - 8;
     // Open toward whichever side actually has more room — a trigger near
     // the bottom of a scrolled dialog (e.g. right after "Add Item" scrolls
-    // a new row into view) could have "enough" room by the old MIN_PANEL
-    // threshold while still being cramped compared to the space above.
+    // a new row into view) could have "enough" room by a fixed threshold
+    // while still being cramped compared to the space above.
     const openUp = spaceAbove > spaceBelow;
-    // No floor here — clamping to a MIN_PANEL minimum used to let the panel
-    // claim more height than physically exists on that side, rendering it
-    // past the viewport edge with no way to reach the clipped part (nothing
+    // No floor here — clamping to a minimum used to let the panel claim
+    // more height than physically exists on that side, rendering it past
+    // the container's edge with no way to reach the clipped part (nothing
     // scrolls a `position: fixed` element into view). Worst case now is a
     // shorter-than-ideal but fully reachable list.
     const available = Math.max(60, openUp ? spaceAbove : spaceBelow);
     const panelMax = Math.min(MAX_PANEL, available);
     const width = Math.max(rect.width, 260);
-    const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8));
+    const left = Math.min(Math.max(8, relLeft), Math.max(8, bounds.width - width - 8));
 
     panel = createPortal(
       <div
@@ -139,7 +169,7 @@ export function SearchableSelect({
           left,
           width,
           zIndex: 9999,
-          ...(openUp ? { bottom: window.innerHeight - rect.top + GAP } : { top: rect.bottom + GAP }),
+          ...(openUp ? { bottom: bounds.height - relTop + GAP } : { top: relBottom + GAP }),
         }}
         className="rounded-lg border border-border bg-popover text-popover-foreground shadow-2xl overflow-hidden"
       >
@@ -179,7 +209,7 @@ export function SearchableSelect({
           )}
         </div>
       </div>,
-      document.body,
+      containerEl,
     );
   }
 

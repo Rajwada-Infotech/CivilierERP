@@ -105,16 +105,26 @@ export function ScopeLocationTree<T extends ScopeLocatable>({
       return next;
     });
 
+  // Indent step is intentionally small and capped — at the old 20px/level
+  // (up to 100px by Room depth) plus a page shell with no horizontal
+  // overflow guard, a wide leaf (Reporting's activity table in particular)
+  // forced the WHOLE PAGE to widen and scroll sideways on a narrow phone
+  // screen, not just the leaf content within its own box. min-w-0 on every
+  // level of this flex chain is what actually stops that — Tailwind's
+  // default flex-item min-width is `auto` (grow-to-fit-content), so
+  // without it a wide descendant keeps demanding its full natural width
+  // all the way up the tree regardless of any indentation.
+  const INDENT = 14;
   const renderNode = (node: TreeNode<T>, depth: number) => {
     const Level = LEVELS[depth];
     const expanded = isOpen(node.key);
     return (
-      <div key={node.key} className={depth === 0 ? "rounded-xl border border-border/60 bg-card" : ""}>
+      <div key={node.key} className={`min-w-0 ${depth === 0 ? "rounded-xl border border-border/60 bg-card" : ""}`}>
         <button
           type="button"
           onClick={() => toggle(node.key)}
-          className="w-full flex items-center gap-2 py-2 pr-3 text-left hover:bg-muted/40 rounded-lg transition-colors"
-          style={{ paddingLeft: 12 + depth * 20 }}
+          className="w-full min-w-0 flex items-center gap-2 py-2 pr-3 text-left hover:bg-muted/40 rounded-lg transition-colors"
+          style={{ paddingLeft: 12 + depth * INDENT }}
         >
           <ChevronRight
             size={14}
@@ -130,10 +140,10 @@ export function ScopeLocationTree<T extends ScopeLocatable>({
         </button>
 
         {expanded && (
-          <div className={depth === 0 ? "pb-2" : ""}>
+          <div className={`min-w-0 ${depth === 0 ? "pb-2" : ""}`}>
             {node.children.map((c) => renderNode(c, depth + 1))}
             {node.items.length > 0 && (
-              <div className="py-1 pr-2" style={{ paddingLeft: 12 + (depth + 1) * 20 }}>
+              <div className="min-w-0 py-1 pr-2" style={{ paddingLeft: 12 + (depth + 1) * INDENT }}>
                 {renderLeaf(node.items)}
               </div>
             )}
