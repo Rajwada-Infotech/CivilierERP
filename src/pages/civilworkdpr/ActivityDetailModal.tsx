@@ -392,9 +392,9 @@ function PhotosTab({ rungId }: { rungId: number }) {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground bg-background hover:bg-muted transition-colors"
             >
-              <Upload size={11} /> Upload instead
+              <Upload size={13} /> Upload instead
             </button>
           </div>
         )}
