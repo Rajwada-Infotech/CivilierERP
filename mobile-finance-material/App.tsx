@@ -8,6 +8,7 @@ import { AuthProvider } from "@/auth/AuthContext";
 import RootNavigator from "@/navigation/RootNavigator";
 import { UpdateGate } from "@/updater/UpdateGate";
 import { useAppFonts } from "@/theme/fonts";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export default function App() {
   const [fontsLoaded] = useAppFonts();
@@ -22,12 +23,14 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <RootNavigator />
-        </AuthProvider>
-      </QueryClientProvider>
-      <UpdateGate appKey="finance-material" />
+      <ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <RootNavigator />
+          </AuthProvider>
+        </QueryClientProvider>
+        <UpdateGate appKey="finance-material" />
+      </ErrorBoundary>
       <StatusBar style="light" />
     </SafeAreaProvider>
   );

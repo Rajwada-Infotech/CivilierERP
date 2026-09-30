@@ -44,13 +44,6 @@ export function unitTypeOptions(types: LayoutType[], current?: string | null): {
   return opts;
 }
 
-export interface RoomSyncResult {
-  unitsChecked: number;
-  unitsUpdated: number;
-  roomsAdded: number;
-  failed: number;
-}
-
 export interface RoomCompositionRow {
   roomCategoryId: number;
   quantity: number;
@@ -112,6 +105,10 @@ export const removeLayoutType = (typeKey: string) =>
 export const getBhkTemplate = (bhkType: BhkType) =>
   fetchWithAuth(`${BASE}/template/${encodeURIComponent(bhkType)}`).then((r) => handle<BhkTemplateDetail>(r));
 
+// Deliberately never touches an already-built room — see the route's own
+// comment (backend/routes/unitBhkConfig.js). Room Master's own
+// project-scoped "Generate rooms" is the only thing that builds/reconciles
+// actual rooms from this composition.
 export const saveBhkTemplate = (
   bhkType: BhkType,
   payload: { composition: { roomCategoryId: number; quantity: number }[] },
@@ -120,7 +117,7 @@ export const saveBhkTemplate = (
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  }).then((r) => handle<{ success: boolean; configId: number; roomSync?: RoomSyncResult }>(r));
+  }).then((r) => handle<{ success: boolean; configId: number }>(r));
 
 // Work Allocation page's Room dropdown source — generated {alias} {index}
 // instances for the given Unit, resolved via its own UnitType against the

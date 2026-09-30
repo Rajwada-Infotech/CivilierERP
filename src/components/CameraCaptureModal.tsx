@@ -2,16 +2,7 @@ import React from "react";
 import { createPortal } from "react-dom";
 import { Camera as CameraIcon, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
-import { useCameraCapture, type CameraError } from "@/hooks/useCameraCapture";
-
-const CAMERA_ERROR_TEXT: Record<CameraError, string> = {
-  denied: "Camera access is blocked. Allow Camera for this site (lock icon in the address bar), then reopen.",
-  "no-device": "No camera was found on this device.",
-  busy: "The camera is in use by another app. Close it and try again.",
-  insecure: "The camera needs a secure (HTTPS) connection.",
-  unsupported: "This browser does not support camera capture.",
-  other: "Camera not available.",
-};
+import { useCameraCapture, CAMERA_ERROR_TEXT } from "@/hooks/useCameraCapture";
 
 // Live device-camera capture in a modal. Draws the shutter frame to a canvas,
 // downscales it to `maxDim` on the long edge and encodes JPEG at `quality`,

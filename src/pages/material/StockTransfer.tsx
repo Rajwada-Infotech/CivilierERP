@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { createPortal } from "react-dom";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   ArrowRight,
@@ -22,6 +22,7 @@ import {
   ChevronDown,
   FileText,
   Eye,
+  BookOpen,
 } from "lucide-react";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getInventoryMaster } from "@/api/inventoryMasterApi";
@@ -35,6 +36,8 @@ import {
   previewInterCompanyTransfer,
   getInterCompanyTransfers,
   getInterCompanyTransfer,
+  deleteInterCompanyTransfer,
+  getInterCompanyTransferPosting,
   type InterCompanyTransferSummary,
   type InterCompanyTransferPreview,
 } from "@/api/interCompanyTransferApi";
@@ -50,6 +53,15 @@ import { usePageRights } from "@/hooks/usePageRights";
 
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n ?? 0);
+
+// Rate is stored to 4 decimal places (InterCompanyTransferItems.Rate) and
+// Amount is computed from that full-precision value server-side — showing
+// Rate capped to 2dp via fmtNum made "Rate × Qty" visibly not reconcile
+// with the printed Excl. GST/Total (e.g. a weighted-average rate like
+// 241.525 printed as "241.53"), which read as the GST calc "not adding
+// up" even though the underlying numbers were always correct.
+const fmtRate = (n: number) =>
+  new Intl.NumberFormat("en-IN", { maximumFractionDigits: 4 }).format(n ?? 0);
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString("en-IN", {
@@ -734,9 +746,17 @@ function ICTPreviewModal({
   ictId: number;
   onClose: () => void;
 }) {
-  const { data: detail, isLoading } = useQuery({
+  const { data: detail, isLoading, isError } = useQuery({
     queryKey: ["inter-company-transfer", ictId],
     queryFn: () => getInterCompanyTransfer(ictId),
+    retry: 1,
+  });
+
+  const [tab, setTab] = useState<"details" | "posting">("details");
+  const { data: posting, isLoading: postingLoading } = useQuery({
+    queryKey: ["inter-company-transfer-posting", ictId],
+    queryFn: () => getInterCompanyTransferPosting(ictId),
+    enabled: tab === "posting",
   });
 
   const DOC_LINKS = detail
@@ -777,11 +797,33 @@ function ICTPreviewModal({
           </button>
         </div>
 
-        {isLoading || !detail ? (
+        {!isLoading && !isError && detail && (
+          <div className="flex items-center gap-1 px-5 pt-3 border-b border-border">
+            {(["details", "posting"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`px-3 py-1.5 text-xs font-semibold border-b-2 -mb-px transition-colors capitalize ${
+                  tab === t
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t === "posting" ? "Posting" : "Details"}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {isLoading ? (
           <div className="px-5 py-10 text-center text-xs text-muted-foreground">
             Loading…
           </div>
-        ) : (
+        ) : isError || !detail ? (
+          <div className="px-5 py-10 text-center text-xs text-destructive">
+            Could not load transfer details. Please try again or open the full record.
+          </div>
+        ) : tab === "details" ? (
           <>
             <div className="px-5 pt-4 flex items-center gap-2 text-xs">
               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-orange-500/10 text-orange-600 border border-orange-400/20">
@@ -793,28 +835,6 @@ function ICTPreviewModal({
               </span>
             </div>
 
-            <div className="px-5 pt-3">
-              <span
-                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium border ${
-                  detail.Status === "Completed"
-                    ? "bg-green-500/10 text-green-700 dark:text-green-400 border-green-400/30"
-                    : detail.Status === "Pending"
-                      ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-400/30"
-                      : detail.Status === "Rejected"
-                        ? "bg-red-500/10 text-red-700 dark:text-red-400 border-red-400/30"
-                        : "bg-muted text-muted-foreground border-border"
-                }`}
-              >
-                <CheckCircle2 size={11} />
-                {detail.Status === "Completed"
-                  ? `${detail.Status} — every step (Sale Invoice, GRN, Expense Booking, Payment) auto-generated via the Dummy Bank, no manual action required.`
-                  : detail.Status === "Pending"
-                    ? "Pending super_admin approval — the full document chain generates automatically the moment it's approved."
-                    : detail.Status === "Rejected"
-                      ? "Rejected — no documents were generated."
-                      : detail.Status}
-              </span>
-            </div>
 
             <div className="px-5 pt-3 pb-2">
               <p className="text-xs font-semibold text-muted-foreground mb-2">
@@ -827,19 +847,42 @@ function ICTPreviewModal({
                       <th className="px-3 py-2 text-left font-medium text-muted-foreground">Item</th>
                       <th className="px-3 py-2 text-right font-medium text-muted-foreground">Qty</th>
                       <th className="px-3 py-2 text-right font-medium text-muted-foreground">Rate</th>
-                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Amount</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Excl. GST</th>
+                      <th className="px-3 py-2 text-right font-medium text-amber-600 dark:text-amber-400">GST</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Incl. GST</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {detail.items.map((item) => (
-                      <tr key={item.ICTItemId} className="border-b border-border last:border-0 hover:bg-muted/20">
-                        <td className="px-3 py-2 text-foreground">{item.ItemName || item.ItemId}</td>
-                        <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Quantity)}</td>
-                        <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Rate)}</td>
-                        <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Amount)}</td>
-                      </tr>
-                    ))}
+                    {detail.items.map((item) => {
+                      const gstPct = item.GstPct ?? 0;
+                      const gstAmt = item.GstAmount ?? 0;
+                      const inclAmt = item.AmountInclGst ?? item.Amount;
+                      return (
+                        <tr key={item.ICTItemId} className="border-b border-border last:border-0 hover:bg-muted/20">
+                          <td className="px-3 py-2 text-foreground">{item.ItemName || item.ItemId}</td>
+                          <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Quantity)}</td>
+                          <td className="px-3 py-2 text-right font-mono text-muted-foreground">{fmtRate(item.Rate)}</td>
+                          <td className="px-3 py-2 text-right font-mono">{fmtNum(item.Amount)}</td>
+                          <td className="px-3 py-2 text-right font-mono text-amber-600 dark:text-amber-400">
+                            {gstPct > 0 ? `${gstPct}% = ${fmtNum(gstAmt)}` : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono font-semibold">{fmtNum(inclAmt)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
+                  <tfoot className="bg-muted/30 border-t border-border">
+                    <tr>
+                      <td colSpan={3} className="px-3 py-2 text-right text-muted-foreground font-medium">Total</td>
+                      <td className="px-3 py-2 text-right font-mono">{fmtNum(detail.TotalAmount)}</td>
+                      <td className="px-3 py-2 text-right font-mono text-amber-600 dark:text-amber-400">
+                        {(detail.TotalGstAmount ?? 0) > 0 ? `+${fmtNum(detail.TotalGstAmount!)}` : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono font-bold text-foreground">
+                        {fmtNum(detail.TotalAmountInclGst ?? detail.TotalAmount)}
+                      </td>
+                    </tr>
+                  </tfoot>
                 </table>
               </div>
             </div>
@@ -867,7 +910,73 @@ function ICTPreviewModal({
                 </p>
               </div>
             )}
+
           </>
+        ) : postingLoading || !posting ? (
+          <div className="px-5 py-10 text-center text-xs text-muted-foreground">
+            Loading posting details…
+          </div>
+        ) : (
+          <div className="px-5 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
+            <div className="flex items-center gap-2">
+              <BookOpen size={13} className="text-primary" />
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Journal Entry — Inter-Company Transfer Posting
+              </span>
+            </div>
+
+            {posting.vouchers.map((v, vi) => {
+              const totalDebit = v.rows.filter((r) => r.side === "debit").reduce((s, r) => s + r.amount, 0);
+              const totalCredit = v.rows.filter((r) => r.side === "credit").reduce((s, r) => s + r.amount, 0);
+              return (
+                <div key={vi} className="rounded-lg border border-border overflow-hidden">
+                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-3 py-2 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                    <span>
+                      {v.companyName ? `${v.companyName} — ` : ""}Account
+                      {v.jvNo ? ` · ${v.jvNo}` : ""}
+                    </span>
+                    <span className="text-right">Debit</span>
+                    <span className="text-right">Credit</span>
+                  </div>
+                  {v.rows.map((row, ri) => (
+                    <div key={ri} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-3 py-2 border-b border-border/50 last:border-0 items-center gap-2 text-xs">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
+                        <span className="text-foreground truncate">{row.label}</span>
+                      </div>
+                      <span className="text-right font-mono text-emerald-700 dark:text-emerald-400">
+                        {row.side === "debit" ? fmtNum(row.amount) : ""}
+                      </span>
+                      <span className="text-right font-mono text-rose-600 dark:text-rose-400">
+                        {row.side === "credit" ? fmtNum(row.amount) : ""}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-3 py-2 bg-muted/30 border-t-2 border-border text-xs font-bold gap-2">
+                    <span className="uppercase tracking-widest text-muted-foreground text-[9px]">Total</span>
+                    <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtNum(totalDebit)}</span>
+                    <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtNum(totalCredit)}</span>
+                  </div>
+                </div>
+              );
+            })}
+
+            {posting.isPosted ? (
+              <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
+                <CheckCircle2 size={12} className="text-emerald-500 shrink-0" />
+                <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                  Posted to General Ledger. Entries are visible in the Trial Balance.
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                <AlertCircle size={12} className="text-muted-foreground shrink-0" />
+                <p className="text-[11px] text-muted-foreground">
+                  Not yet posted — this is a preview of what will post once the transfer is approved.
+                </p>
+              </div>
+            )}
+          </div>
         )}
 
         <div className="px-5 py-3 border-t border-border flex justify-end bg-muted/20">
@@ -894,9 +1003,10 @@ function TransferHistory() {
   });
   const transfers: StockTransfer[] = data?.data ?? [];
 
-  // Inter-company transfers (routed via Dummy Bank) live in a separate
-  // table with their own fully auto-generated document chain — merge them
-  // into the same history view so a completed inter-company transfer is
+  // Inter-company transfers (direct GL voucher between the two companies'
+  // Inter-Company A/c heads, no bank/cash involved) live in a separate
+  // table — merge them into the same history view so a completed
+  // inter-company transfer is
   // actually visible here instead of only appearing in the plain
   // StockTransfers list (which never contained it), so completed transfers
   // don't look like nothing happened.
@@ -913,6 +1023,23 @@ function TransferHistory() {
     useState<StockTransfer | null>(null);
   const [previewIctId, setPreviewIctId] = useState<number | null>(null);
   const [successGrnNo, setSuccessGrnNo] = useState<string | null>(null);
+  // Inter-Company Transfer amounts include GST by default — the actual
+  // money that moves between the two companies — with a toggle to switch
+  // that single-figure column to the excl-GST base amount instead.
+  const [ictGstMode, setIctGstMode] = useState<"incl" | "excl">("incl");
+  const [ictDeleteError, setIctDeleteError] = useState("");
+
+  const qc = useQueryClient();
+  const deleteIctMut = useMutation({
+    mutationFn: deleteInterCompanyTransfer,
+    onSuccess: () => {
+      setIctDeleteError("");
+      qc.invalidateQueries({ queryKey: ["inter-company-transfer-list"] });
+      qc.invalidateQueries({ queryKey: ["stock-transfers"] });
+      qc.invalidateQueries({ queryKey: ["inventory-master"] });
+    },
+    onError: (e: Error) => setIctDeleteError(e.message),
+  });
   // Track which transfers already have a GRN (transferId → GRN summary[])
   const [grnMap, setGrnMap] = useState<Record<number, TransferGRNSummary[]>>(
     {},
@@ -978,6 +1105,19 @@ function TransferHistory() {
         <ICTPreviewModal ictId={previewIctId} onClose={() => setPreviewIctId(null)} />
       )}
 
+      {ictDeleteError && (
+        <div className="mb-3 flex items-center gap-2 rounded-xl border border-red-400/30 bg-red-500/10 px-4 py-3 text-sm text-red-700 dark:text-red-400">
+          <X size={15} />
+          {ictDeleteError}
+          <button
+            onClick={() => setIctDeleteError("")}
+            className="ml-auto p-0.5 hover:opacity-60 transition-opacity"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {successGrnNo && (
         <div className="mb-3 flex items-center gap-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-700 dark:text-emerald-400">
           <CheckCircle2 size={15} />
@@ -1002,17 +1142,45 @@ function TransferHistory() {
               Recent godown-to-godown stock movements
             </p>
           </div>
-          <button
-            onClick={() => {
-              refetch();
-              refetchIct();
-            }}
-            disabled={isFetching || isFetchingIct}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={12} className={isFetching || isFetchingIct ? "animate-spin" : ""} />{" "}
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            {ictTransfers.length > 0 && (
+              <div className="flex items-center rounded-lg border border-border p-0.5 text-[10px] font-medium">
+                <button
+                  onClick={() => setIctGstMode("excl")}
+                  title="Show Inter-Company amounts excl. GST"
+                  className={`px-2 py-1 rounded-md transition-colors ${
+                    ictGstMode === "excl"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Excl. GST
+                </button>
+                <button
+                  onClick={() => setIctGstMode("incl")}
+                  title="Show Inter-Company amounts incl. GST"
+                  className={`px-2 py-1 rounded-md transition-colors ${
+                    ictGstMode === "incl"
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  Incl. GST
+                </button>
+              </div>
+            )}
+            <button
+              onClick={() => {
+                refetch();
+                refetchIct();
+              }}
+              disabled={isFetching || isFetchingIct}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw size={12} className={isFetching || isFetchingIct ? "animate-spin" : ""} />{" "}
+              Refresh
+            </button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
@@ -1022,7 +1190,10 @@ function TransferHistory() {
                   { label: "Doc No", cls: "" },
                   { label: "Date", cls: "hidden sm:table-cell" },
                   { label: "Route", cls: "hidden sm:table-cell" },
-                  { label: "Items", cls: "hidden md:table-cell" },
+                  {
+                    label: ictTransfers.length > 0 ? `Items / Amount (${ictGstMode === "incl" ? "Incl." : "Excl."} GST)` : "Items",
+                    cls: "hidden md:table-cell",
+                  },
                   { label: "Status", cls: "" },
                   { label: "", cls: "" },
                 ].map(({ label, cls }) => (
@@ -1086,7 +1257,11 @@ function TransferHistory() {
                           </div>
                         </td>
                         <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap hidden md:table-cell">
-                          {fmtNum(t.TotalAmount)}
+                          {fmtNum(
+                            ictGstMode === "incl"
+                              ? (t.TotalAmountInclGst ?? t.TotalAmount)
+                              : t.TotalAmount,
+                          )}
                         </td>
                         <td className="px-3 py-2.5">
                           {t.Status === "Completed" ? (
@@ -1120,6 +1295,23 @@ function TransferHistory() {
                             >
                               <Eye size={12} />
                             </button>
+                            {rights.canDelete && (
+                              <button
+                                onClick={() => {
+                                  const msg =
+                                    t.Status === "Completed"
+                                      ? `Delete ${t.DocNo}? This reverses the stock movement (${t.SenderProjectName} → ${t.ReceiverProjectName}) and the two-sided GL voucher it posted. This cannot be undone.`
+                                      : `Delete ${t.DocNo}? This request never moved stock or posted to GL, so nothing to reverse — it will just be removed.`;
+                                  if (!window.confirm(msg)) return;
+                                  deleteIctMut.mutate(t.ICTId);
+                                }}
+                                disabled={deleteIctMut.isPending}
+                                title={t.Status === "Completed" ? "Delete — reverses stock & GL" : "Delete"}
+                                className="p-1.5 rounded-lg border border-border hover:bg-red-500/10 hover:text-red-500 hover:border-red-400/40 transition-colors disabled:opacity-50"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1223,6 +1415,13 @@ export default function StockTransfer() {
   const [remarks, setRemarks] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
+  // Whether this Inter-Company Transfer actually applies GST at all — a
+  // real business choice (some inter-company movements aren't a taxable
+  // supply), not just a display preference. false sends ApplyGst: false to
+  // both the preview and the actual create call, which zeroes the GST
+  // component server-side (priceItems in interCompanyTransfer.js) rather
+  // than just hiding it client-side.
+  const [applyGst, setApplyGst] = useState(true);
 
   const { data: godownsData } = useQuery({
     queryKey: ["godowns"],
@@ -1249,13 +1448,27 @@ export default function StockTransfer() {
     tagged_company_ids?: string | null;
   }[] = projectsData ?? [];
 
+  // Collect all project IDs that belong (directly or via tagging) to the FROM company.
+  const fromCompanyProjectIds = useMemo(() => {
+    if (!filterCompanyId) return new Set<string>();
+    return new Set(
+      allProjects
+        .filter((p) => projectBelongsToCompany(p, filterCompanyId))
+        .map((p) => String(p.id)),
+    );
+  }, [allProjects, filterCompanyId]);
+
   const companyGodowns = useMemo(() => {
     return allGodowns.filter((g) => {
-      if (filterCompanyId && String(g.EnterpriseID ?? "") !== filterCompanyId)
-        return false;
-      return true;
+      if (!filterCompanyId) return true;
+      // 1. Godown is directly owned by the company
+      if (String(g.EnterpriseID ?? "") === filterCompanyId) return true;
+      // 2. Godown is linked to a project that belongs/is tagged to the company
+      if (g.ProjectID != null && fromCompanyProjectIds.has(String(g.ProjectID)))
+        return true;
+      return false;
     });
-  }, [allGodowns, filterCompanyId]);
+  }, [allGodowns, filterCompanyId, fromCompanyProjectIds]);
 
   // The dedicated godown auto-created for the selected project (if any).
   const projectGodown = useMemo(() => {
@@ -1273,6 +1486,7 @@ export default function StockTransfer() {
     if (!filterCompanyId) return allProjects;
     return allProjects.filter((p) => projectBelongsToCompany(p, filterCompanyId));
   }, [allProjects, filterCompanyId]);
+
 
   // Auto-fill the source godown with the project's own godown once one is selected.
   useEffect(() => {
@@ -1343,6 +1557,7 @@ export default function StockTransfer() {
       setToGodownId(null);
       setItems([emptyItem()]);
       setRemarks("");
+      setManualRates({});
       qc.invalidateQueries({ queryKey: ["inventory-master"] });
       qc.invalidateQueries({ queryKey: ["stock-transfers"] });
       setTimeout(() => setSuccessMsg(""), 6000);
@@ -1399,13 +1614,21 @@ export default function StockTransfer() {
       interTransferMut.mutate({
         SenderProjectId: senderProjectId,
         ReceiverProjectId: receiverProjectId,
+        // Pass selected company overrides for cross-tagged project godowns
+        ...(filterCompanyId ? { SenderCompanyId: Number(filterCompanyId) } : {}),
+        ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
+        ApplyGst: applyGst,
         Remarks: remarks || undefined,
-        Items: validItems.map((it) => ({
-          itemId: it.itemId,
-          itemName: it.itemName,
-          uom: it.uom,
-          qty: it.qty,
-        })),
+        Items: validItems.map((it) => {
+          const manual = parseFloat(manualRates[it.itemId]);
+          return {
+            itemId: it.itemId,
+            itemName: it.itemName,
+            uom: it.uom,
+            qty: it.qty,
+            ...(Number.isFinite(manual) && manual > 0 ? { manualRate: manual } : {}),
+          };
+        }),
       });
       return;
     }
@@ -1424,13 +1647,34 @@ export default function StockTransfer() {
     setItems([emptyItem()]);
     setRemarks("");
     setErrorMsg("");
+    setManualRates({});
   };
+
+  // Collect all project IDs that belong (directly or via tagging) to the TO company.
+  const toCompanyProjectIds = useMemo(() => {
+    if (!toCompanyId) return new Set<string>();
+    return new Set(
+      allProjects
+        .filter((p) => projectBelongsToCompany(p, toCompanyId))
+        .map((p) => String(p.id)),
+    );
+  }, [allProjects, toCompanyId]);
 
   const toCompanyGodowns = useMemo(() => {
     if (transferMode === "intra") return companyGodowns;
-    if (!toCompanyId) return allGodowns.filter((g) => g.EnterpriseID != null && String(g.EnterpriseID) !== filterCompanyId);
-    return allGodowns.filter((g) => String(g.EnterpriseID ?? "") === toCompanyId);
-  }, [allGodowns, transferMode, toCompanyId, filterCompanyId, companyGodowns]);
+    if (!toCompanyId)
+      return allGodowns.filter(
+        (g) => g.EnterpriseID != null && String(g.EnterpriseID) !== filterCompanyId,
+      );
+    return allGodowns.filter((g) => {
+      // 1. Godown is directly owned by the TO company
+      if (String(g.EnterpriseID ?? "") === toCompanyId) return true;
+      // 2. Godown is linked to a project tagged to the TO company
+      if (g.ProjectID != null && toCompanyProjectIds.has(String(g.ProjectID)))
+        return true;
+      return false;
+    });
+  }, [allGodowns, transferMode, toCompanyId, filterCompanyId, companyGodowns, toCompanyProjectIds]);
 
   // The dedicated godown auto-created for the selected receiver project (if any).
   const toProjectGodown = useMemo(() => {
@@ -1447,6 +1691,7 @@ export default function StockTransfer() {
     }
   }, [toProjectGodown]);
 
+
   const fromGodown =
     companyGodowns.find((g) => g.GodownID === fromGodownId) || null;
   const toGodown =
@@ -1455,32 +1700,73 @@ export default function StockTransfer() {
   // Posting preview — prices the current item lines at the sender company's
   // most recent purchase rate so the user can see exactly what will post
   // (which company gets debited/credited and how much) before submitting.
+  // An item with no purchase history anywhere under the sending company
+  // comes back with needsManualRate: true instead of failing the whole
+  // preview — manualRates holds whatever the user's typed in for those,
+  // keyed by itemId, fed back into both the preview and the actual submit.
+  const [manualRates, setManualRates] = useState<Record<string, string>>({});
+  // The input itself is bound straight to manualRates (updates every
+  // keystroke, so typing feels instant) — but the actual re-price query only
+  // fires off this debounced copy. Without the debounce, every keystroke
+  // changed the query key, which (a) re-fetched on every character and (b)
+  // flipped interPreviewLoading true, swapping the whole item list — the
+  // very DOM node the input lives in — out for a "Pricing items…" spinner,
+  // unmounting the input and dropping focus after just one character. Same
+  // fix as MaterialExpenseBooking.tsx's debouncedDocNoFilter.
+  const [debouncedManualRates, setDebouncedManualRates] = useState<Record<string, string>>({});
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedManualRates(manualRates), 500);
+    return () => clearTimeout(t);
+  }, [manualRates]);
   const interPreviewItems = items.filter((it) => it.itemId && parseFloat(it.qty) > 0);
-  const interPreviewKey = interPreviewItems.map((it) => `${it.itemId}:${it.qty}`).join(",");
+  const interPreviewKey = interPreviewItems
+    .map((it) => `${it.itemId}:${it.qty}:${debouncedManualRates[it.itemId] || ""}`)
+    .join(",");
   const {
     data: interPreview,
     isFetching: interPreviewLoading,
     error: interPreviewError,
   } = useQuery<InterCompanyTransferPreview>({
-    queryKey: ["ict-preview", fromGodown?.ProjectID, toGodown?.ProjectID, interPreviewKey],
+    queryKey: ["ict-preview", fromGodown?.ProjectID, toGodown?.ProjectID, filterCompanyId, toCompanyId, interPreviewKey, applyGst],
     queryFn: () =>
       previewInterCompanyTransfer({
         SenderProjectId: fromGodown!.ProjectID!,
         ReceiverProjectId: toGodown!.ProjectID!,
-        Items: interPreviewItems.map((it) => ({
-          itemId: it.itemId,
-          itemName: it.itemName,
-          uom: it.uom,
-          qty: parseFloat(it.qty),
-        })),
+        // Pass the user-selected companies so the preview labels (and GL
+        // posting on submit) reflect Delta Gardens, not Yashvi Construction,
+        // when Pristine Enclave is tagged to Delta Gardens.
+        ...(filterCompanyId ? { SenderCompanyId: Number(filterCompanyId) } : {}),
+        ...(toCompanyId ? { ReceiverCompanyId: Number(toCompanyId) } : {}),
+        ApplyGst: applyGst,
+        Items: interPreviewItems.map((it) => {
+          const manual = parseFloat(debouncedManualRates[it.itemId]);
+          return {
+            itemId: it.itemId,
+            itemName: it.itemName,
+            uom: it.uom,
+            qty: parseFloat(it.qty),
+            ...(Number.isFinite(manual) && manual > 0 ? { manualRate: manual } : {}),
+          };
+        }),
       }),
     enabled:
       transferMode === "inter" &&
       !!fromGodown?.ProjectID &&
       !!toGodown?.ProjectID &&
       interPreviewItems.length > 0,
+    // Keep showing the last priced list while a re-price is in flight
+    // instead of unmounting it for a loading state — belt-and-suspenders
+    // with the debounce above so the manual-rate input never loses its
+    // place even if a refetch does land mid-typing (blur, tab, etc.).
+    placeholderData: keepPreviousData,
     retry: false,
   });
+
+  // Blocks submit while any priced item is still waiting on a manual rate
+  // — only meaningful for inter-company transfers, which are the only ones
+  // that price off purchase history at all.
+  const hasUnpricedItems =
+    transferMode === "inter" && !!interPreview?.items.some((it) => it.needsManualRate);
 
   const companyOptions = (enterprisesData ?? []).map((e) => ({
     value: String(e.id),
@@ -1894,10 +2180,21 @@ export default function StockTransfer() {
                   </div>
                   {transferMode === "inter" && (
                     <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-xs space-y-2">
-                      <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">
-                        Posting Preview
-                      </p>
-                      {interPreviewLoading ? (
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">
+                          Posting Preview
+                        </p>
+                        <label className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground shrink-0 cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={applyGst}
+                            onChange={(e) => setApplyGst(e.target.checked)}
+                            className="rounded border-border accent-emerald-600"
+                          />
+                          Apply GST
+                        </label>
+                      </div>
+                      {interPreviewLoading && !interPreview ? (
                         <p className="text-muted-foreground flex items-center gap-1.5">
                           <RefreshCw size={11} className="animate-spin" /> Pricing items…
                         </p>
@@ -1907,30 +2204,103 @@ export default function StockTransfer() {
                         </p>
                       ) : interPreview && interPreview.items.length > 0 ? (
                         <>
-                          <div className="space-y-1">
-                            {interPreview.items.map((it) => (
-                              <div key={it.itemId} className="flex items-center justify-between gap-3 text-[11px]">
-                                <span className="text-foreground truncate">
-                                  {it.itemName || it.itemId} — {it.qty} {it.unit}
-                                </span>
-                                <span className="text-muted-foreground shrink-0">
-                                  ₹{it.rate.toLocaleString("en-IN")}/unit (excl. GST) = ₹{it.amount.toLocaleString("en-IN")}
+                          {/* Per-item breakdown */}
+                          <div className="space-y-2">
+                            {interPreview.items.map((it) => {
+                              const gstPct = it.gstPct ?? 0;
+                              const gstAmt = it.gstAmount ?? 0;
+                              const inclAmt = it.amountInclGst ?? it.amount;
+                              if (it.needsManualRate) {
+                                return (
+                                  <div key={it.itemId} className="rounded-md bg-amber-500/5 border border-amber-400/30 px-3 py-2 space-y-1.5">
+                                    <div className="flex items-center justify-between gap-3 text-[11px] font-medium">
+                                      <span className="text-foreground truncate">
+                                        {it.itemName || it.itemId} — {it.qty} {it.unit}
+                                      </span>
+                                    </div>
+                                    <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                                      No purchase history found under this company — enter a rate to price this item.
+                                    </p>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[11px] text-muted-foreground">₹</span>
+                                      <input
+                                        type="number"
+                                        min="0.01"
+                                        step="any"
+                                        value={manualRates[it.itemId] ?? ""}
+                                        onChange={(e) =>
+                                          setManualRates((prev) => ({ ...prev, [it.itemId]: e.target.value }))
+                                        }
+                                        placeholder="Rate per unit"
+                                        className="w-32 px-2 py-1 rounded-md border border-amber-400/40 bg-background text-xs text-foreground outline-none focus:ring-2 focus:ring-amber-500/30"
+                                      />
+                                      <span className="text-[10px] text-muted-foreground">per {it.unit}</span>
+                                    </div>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div key={it.itemId} className="rounded-md bg-muted/30 border border-border/40 px-3 py-2 space-y-0.5">
+                                  <div className="flex items-center justify-between gap-3 text-[11px] font-medium">
+                                    <span className="text-foreground truncate">
+                                      {it.itemName || it.itemId} — {it.qty} {it.unit}
+                                    </span>
+                                    <span className="text-foreground shrink-0">
+                                      ₹{inclAmt.toLocaleString("en-IN")}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                                    <span>Excl. GST: ₹{fmtRate(it.rate)}/unit × {it.qty} = ₹{it.amount.toLocaleString("en-IN")}</span>
+                                  </div>
+                                  {gstPct > 0 ? (
+                                    <div className="flex items-center justify-between text-[10px] text-amber-600 dark:text-amber-400">
+                                      <span>GST @ {gstPct}%</span>
+                                      <span>+ ₹{gstAmt.toLocaleString("en-IN")}</span>
+                                    </div>
+                                  ) : (
+                                    <div className="text-[10px] text-muted-foreground/60">GST: N/A (0%)</div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Totals summary */}
+                          <div className="border-t border-border/60 pt-2 space-y-1 text-[11px]">
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">Subtotal (excl. GST)</span>
+                              <span className="font-mono">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
+                            </div>
+                            {(interPreview.totalGstAmount ?? 0) > 0 && (
+                              <div className="flex items-center justify-between">
+                                <span className="text-amber-600 dark:text-amber-400">GST</span>
+                                <span className="font-mono text-amber-600 dark:text-amber-400">
+                                  + ₹{(interPreview.totalGstAmount!).toLocaleString("en-IN")}
                                 </span>
                               </div>
-                            ))}
-                          </div>
-                          <div className="border-t border-border/60 pt-2 space-y-1">
-                            <div className="flex items-center justify-between text-[11px]">
-                              <span className="text-muted-foreground">
-                                {interPreview.senderCompanyName} — Inter-Company A/c debited (receivable from {interPreview.receiverCompanyName})
+                            )}
+                            <div className="flex items-center justify-between font-semibold border-t border-border/40 pt-1">
+                              <span className="text-foreground">Total (incl. GST)</span>
+                              <span className="text-foreground">
+                                ₹{(interPreview.totalAmountInclGst ?? interPreview.totalAmount).toLocaleString("en-IN")}
                               </span>
-                              <span className="font-semibold text-foreground">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
                             </div>
-                            <div className="flex items-center justify-between text-[11px]">
+                          </div>
+
+                          {/* GL posting lines */}
+                          <div className="border-t border-border/60 pt-2 space-y-1 text-[10px]">
+                            <p className="text-muted-foreground/60 uppercase tracking-wider text-[9px] font-semibold">GL Posting</p>
+                            <div className="flex items-center justify-between">
                               <span className="text-muted-foreground">
-                                {interPreview.receiverCompanyName} — Inter-Company A/c credited (payable to {interPreview.senderCompanyName})
+                                {interPreview.senderCompanyName} — Inter-Company A/c debited
                               </span>
-                              <span className="font-semibold text-foreground">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
+                              <span className="font-semibold">₹{(interPreview.totalAmountInclGst ?? interPreview.totalAmount).toLocaleString("en-IN")}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-muted-foreground">
+                                {interPreview.receiverCompanyName} — Inter-Company A/c credited
+                              </span>
+                              <span className="font-semibold">₹{(interPreview.totalAmountInclGst ?? interPreview.totalAmount).toLocaleString("en-IN")}</span>
                             </div>
                           </div>
                         </>
@@ -1955,7 +2325,7 @@ export default function StockTransfer() {
                       {rights.canCreate && (
                       <button
                         onClick={handleTransfer}
-                        disabled={!canTransfer}
+                        disabled={!canTransfer || hasUnpricedItems}
                         className="flex-1 sm:flex-none whitespace-nowrap flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-sm"
                       >
                         {transferMut.isPending || interTransferMut.isPending ? (

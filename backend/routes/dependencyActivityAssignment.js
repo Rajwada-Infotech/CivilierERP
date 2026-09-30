@@ -124,6 +124,7 @@ router.get(
         daa.StartDate AS startDate,
         daa.Days AS days,
         daa.EndDate AS endDate,
+        daa.FirstReportedAt AS firstReportedAt,
         daa.LabourSource AS labourSource,
         daa.MaterialSource AS materialSource,
         daa.Description AS description,
@@ -336,15 +337,13 @@ router.post(
     const tx = new sql.Transaction(pool);
     try {
       const a = await pool.request().input("rungId", sql.Int, rungId).query(
-        "SELECT Id, Status, ApprovalLevelsJson FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+        "SELECT Id, Status FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
       );
       if (!a.recordset.length) return res.status(404).json({ error: "No assignment found for this activity." });
       const assignmentId = a.recordset[0].Id;
       if (a.recordset[0].Status !== "COMPLETED") {
         return res.status(400).json({ error: "Only a Completed activity (work dragged to 100%) can be quality-checked." });
       }
-      let approvalLevels = [];
-      try { approvalLevels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { approvalLevels = []; }
 
       const cp = await pool.request().input("aid", sql.Int, assignmentId).query(
         "SELECT Id, FieldName FROM dbo.DependencyActivityCheckpoint WHERE AssignmentId = @aid ORDER BY SortOrder, Id",
@@ -398,14 +397,16 @@ router.post(
         }
       }
 
-      // Passing QC doesn't immediately finalize the activity if it has an
-      // approval setup configured (ApprovalLevelsJson, from Work
-      // Allocation's mini Approval Setup) — it stays Completed, now
-      // awaiting that named approval chain (see /:rungId/approval below),
-      // and only flips to APPROVED once every level clears. With no levels
-      // configured there's nothing to wait on, so it finalizes immediately,
-      // same as before this workflow existed.
-      const finalStatus = decision === "APPROVED" && approvalLevels.length > 0 ? "COMPLETED" : decision;
+      // Passing QC never finalizes the activity by itself — it only ever
+      // reaches Completed ("QC Passed"), awaiting a distinct Approve action
+      // (see handleApproveLevel below) before it can ever show Approved.
+      // That's true even with no approval levels configured — previously
+      // that case skipped straight to APPROVED here, which meant the
+      // Approved badge could appear the instant QC passed, with no actual
+      // approval having happened. handleApproveLevel below now handles the
+      // no-levels case too (super_admin approves it directly), so there's
+      // always a real approval step to wait on.
+      const finalStatus = decision === "APPROVED" ? "COMPLETED" : decision;
       await new sql.Request(tx)
         .input("aid", sql.Int, assignmentId)
         .input("status", sql.NVarChar(20), finalStatus)
@@ -499,11 +500,16 @@ router.get(
       const alreadyActed = currentLevel
         ? approvals.some((x) => x.levelId === currentLevel.id && Number(x.approverUserId) === Number(viewerUserId))
         : false;
+      // No levels configured at all is its own case — there's no
+      // currentLevel to check the viewer against, so only a super_admin can
+      // clear this implicit single step (see handleApproveLevel).
       const canApprove =
         status === "COMPLETED" &&
-        currentLevel != null &&
-        !alreadyActed &&
-        (isSuperAdmin || currentLevel.userIds.map(Number).includes(Number(viewerUserId)));
+        (levels.length === 0
+          ? isSuperAdmin
+          : currentLevel != null &&
+            !alreadyActed &&
+            (isSuperAdmin || currentLevel.userIds.map(Number).includes(Number(viewerUserId))));
 
       res.json({
         status,
@@ -546,7 +552,27 @@ async function handleApproveLevel(req, res) {
     }
     let levels = [];
     try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
-    if (!levels.length) return res.status(400).json({ error: "No approval setup is configured for this activity." });
+
+    // No approval setup configured — QC passing still only reached
+    // Completed (see the QC decision route above), so it's still awaiting
+    // one explicit approval. With no named approvers to fall back on, only
+    // a super_admin can clear this implicit single step.
+    if (!levels.length) {
+      if (!isSuperAdmin) {
+        return res.status(403).json({
+          error: "No approval setup is configured for this activity — only a super_admin can approve it directly.",
+        });
+      }
+      await pool.request()
+        .input("aid", sql.Int, assignmentId)
+        .input("by", sql.NVarChar(200), req.user?.email || req.user?.name || "system")
+        .query(`
+          UPDATE dbo.DependencyActivityAssignment
+          SET Status = 'APPROVED', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+          WHERE Id = @aid
+        `);
+      return res.json({ success: true, fullyApproved: true, newStatus: "Approved", level: 1, totalLevels: 0 });
+    }
 
     const approvalsRes = await pool.request().input("aid", sql.Int, assignmentId).query(
       "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
@@ -642,19 +668,29 @@ async function handleRejectLevel(req, res) {
     }
     let levels = [];
     try { levels = JSON.parse(a.recordset[0].ApprovalLevelsJson || "[]"); } catch { levels = []; }
-    if (!levels.length) return res.status(400).json({ error: "No approval setup is configured for this activity." });
 
-    const approvalsRes = await pool.request().input("aid", sql.Int, assignmentId).query(
-      "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
-    );
-    const approvals = approvalsRes.recordset;
-    const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
-    if (currentLevelIndex == null) {
-      return res.status(400).json({ error: "This activity has already cleared every approval level." });
+    // No approval setup configured — mirrors handleApproveLevel's own
+    // no-levels branch: only a super_admin can act on this implicit single
+    // step (no named approver to reject to besides them).
+    if (!levels.length && !isSuperAdmin) {
+      return res.status(403).json({
+        error: "No approval setup is configured for this activity — only a super_admin can act on it directly.",
+      });
     }
-    const currentLevel = levels[currentLevelIndex];
-    if (!isSuperAdmin && !currentLevel.userIds.map(Number).includes(Number(viewerUserId))) {
-      return res.status(403).json({ error: "You're not named as an approver for this step." });
+
+    if (levels.length) {
+      const approvalsRes = await pool.request().input("aid", sql.Int, assignmentId).query(
+        "SELECT LevelId AS levelId, ApproverUserId AS approverUserId FROM dbo.DependencyActivityApproval WHERE AssignmentId = @aid",
+      );
+      const approvals = approvalsRes.recordset;
+      const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
+      if (currentLevelIndex == null) {
+        return res.status(400).json({ error: "This activity has already cleared every approval level." });
+      }
+      const currentLevel = levels[currentLevelIndex];
+      if (!isSuperAdmin && !currentLevel.userIds.map(Number).includes(Number(viewerUserId))) {
+        return res.status(403).json({ error: "You're not named as an approver for this step." });
+      }
     }
 
     const actor = req.user?.email || req.user?.name || "system";
@@ -718,7 +754,6 @@ router.get(
         FROM dbo.DependencyActivityAssignment daa
         WHERE daa.Status = 'COMPLETED'
           AND daa.IsCurrent = 1
-          AND daa.ApprovalLevelsJson IS NOT NULL AND daa.ApprovalLevelsJson <> '[]'
           AND (
             SELECT TOP 1 qc.Decision FROM dbo.DependencyActivityQc qc
             WHERE qc.AssignmentId = daa.Id ORDER BY qc.QcAt DESC, qc.Id DESC
@@ -741,6 +776,12 @@ router.get(
       for (const c of candidates.recordset) {
         let levels = [];
         try { levels = JSON.parse(c.approvalLevelsJson || "[]"); } catch { levels = []; }
+        // No levels configured — only a super_admin can act on this
+        // implicit single step (see handleApproveLevel's no-levels branch).
+        if (!levels.length) {
+          if (isSuperAdmin) count++;
+          continue;
+        }
         const approvals = approvalsByAssignment.get(c.assignmentId) || [];
         const currentLevelIndex = firstUnsatisfiedLevelIndex(levels, approvals);
         if (currentLevelIndex == null) continue;
@@ -814,10 +855,12 @@ router.patch(
     const MANUAL_STATUSES = new Set(["IN_PROGRESS", "HOLD"]);
     let current = null;
     let currentProgress = null;
-    if (hasStatus || hasProgress) {
+    let assignmentId = null;
+    if (hasStatus || hasProgress || hasRemarks) {
       const cur = await pool.request().input("rungId", sql.Int, rungId).query(
-        "SELECT Status, ProgressPercent FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
+        "SELECT Id, Status, ProgressPercent FROM dbo.DependencyActivityAssignment WHERE DependencyMasterActivityId = @rungId AND IsCurrent = 1",
       );
+      assignmentId = cur.recordset[0]?.Id ?? null;
       current = cur.recordset[0]?.Status;
       currentProgress = cur.recordset[0]?.ProgressPercent;
     }
@@ -829,6 +872,21 @@ router.patch(
       if (currentProgress != null && progressPercent < currentProgress) {
         return res.status(400).json({ error: "Work Done can only move forward, not backward." });
       }
+    }
+
+    // An assigned engineer's activity sits at Allocated (or, for legacy
+    // rows, Pending) until they actually report progress for the first
+    // time — this is that moment, whether it lands on IN_PROGRESS via
+    // autoStatus below or jumps straight to COMPLETED (drag-to-100% bundles
+    // status: "COMPLETED" into this same request — see the COMPLETED
+    // branch further down). FirstReportedAt captures the actual date work
+    // began, as opposed to StartDate's merely tentative plan — set once and
+    // never overwritten, so (FirstReportedAt - StartDate) is how many days
+    // late (or early/on-time, if <= 0) the activity actually started.
+    const isFirstReport = hasProgress && (current === "PENDING" || current === "ALLOCATED");
+    let autoStatus = null;
+    if (isFirstReport && !hasStatus) {
+      autoStatus = "IN_PROGRESS";
     }
 
     if (hasStatus) {
@@ -845,7 +903,12 @@ router.patch(
           if (!(hasProgress && progressPercent === 100)) {
             return res.status(400).json({ error: "Completed is set automatically when work reaches 100%." });
           }
-          if (!MANUAL_STATUSES.has(current)) {
+          // PENDING/ALLOCATED is allowed here too — an engineer's very
+          // first report can go straight to 100% in one drag, bundling
+          // progressPercent and status together (see the comment on this
+          // route) before autoStatus above ever gets a chance to land it
+          // on IN_PROGRESS first.
+          if (!MANUAL_STATUSES.has(current) && current !== "PENDING" && current !== "ALLOCATED") {
             return res.status(400).json({ error: "Only an In Progress or Hold activity can be completed." });
           }
         } else if (current === "REWORK" && status === "IN_PROGRESS") {
@@ -857,16 +920,18 @@ router.patch(
         }
       }
     }
+    const effectiveStatus = hasStatus ? status : autoStatus;
     const setClauses = [];
-    if (hasStatus) setClauses.push("Status = @status");
+    if (effectiveStatus) setClauses.push("Status = @status");
     if (hasRemarks) setClauses.push("Remarks = @remarks");
     if (hasProgress) setClauses.push("ProgressPercent = @progressPercent");
+    if (isFirstReport) setClauses.push("FirstReportedAt = CAST(SYSDATETIME() AS DATE)");
     const capturingPreCancel = hasStatus && status === "CANCELLED" && current && current !== "CANCELLED";
     if (capturingPreCancel) setClauses.push("PreCancelStatus = @preCancelStatus");
     const request = pool.request()
       .input("rungId", sql.Int, rungId)
       .input("updatedBy", sql.NVarChar(200), actor);
-    if (hasStatus) request.input("status", sql.NVarChar(20), status);
+    if (effectiveStatus) request.input("status", sql.NVarChar(20), effectiveStatus);
     if (hasRemarks) request.input("remarks", sql.NVarChar(1000), remarks);
     if (hasProgress) request.input("progressPercent", sql.Int, progressPercent);
     if (capturingPreCancel) request.input("preCancelStatus", sql.NVarChar(20), current);
@@ -879,12 +944,61 @@ router.patch(
     if (!result.rowsAffected[0]) {
       return res.status(404).json({ error: "No assignment found for this rung" });
     }
-    res.json({ success: true, status, remarks, progressPercent });
+
+    // Audit trail for Work Reporting — who touched the progress bar or
+    // Remarks, and when. Status-only moves (Hold/Cancel from the dropdown)
+    // aren't logged here; those already show up in the rework/QC history.
+    if (hasProgress || hasRemarks) {
+      await pool.request()
+        .input("assignmentId", sql.Int, assignmentId)
+        .input("fromProgress", sql.Int, hasProgress ? currentProgress : null)
+        .input("toProgress", sql.Int, hasProgress ? progressPercent : null)
+        .input("remarks", sql.NVarChar(1000), hasRemarks ? remarks : null)
+        .input("statusAfter", sql.NVarChar(20), effectiveStatus || current)
+        .input("loggedBy", sql.NVarChar(200), actor)
+        .query(`
+          INSERT INTO dbo.DependencyActivityProgressLog
+            (AssignmentId, FromProgressPercent, ToProgressPercent, Remarks, StatusAfter, LoggedBy)
+          VALUES
+            (@assignmentId, @fromProgress, @toProgress, @remarks, @statusAfter, @loggedBy)
+        `);
+    }
+
+    res.json({ success: true, status: effectiveStatus, remarks, progressPercent });
   } catch (err) {
     console.error("[dependency-activity-assignment] PATCH /:rungId/status error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+// GET /:rungId/progress-log — Work Reporting's audit trail: every past
+// progress-bar/Remarks update on this rung's CURRENT attempt, newest
+// first, with who made it and when. Read-only — nothing here is acted on.
+router.get(
+  "/:rungId/progress-log",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done"], "view"),
+  async (req, res) => {
+    const rungId = parseInt(req.params.rungId, 10);
+    if (!Number.isFinite(rungId)) return res.status(400).json({ error: "Invalid rungId" });
+    try {
+      const pool = await getPool();
+      const r = await pool.request().input("rungId", sql.Int, rungId).query(`
+        SELECT pl.Id AS id, pl.FromProgressPercent AS fromProgressPercent,
+               pl.ToProgressPercent AS toProgressPercent, pl.Remarks AS remarks,
+               pl.StatusAfter AS statusAfter, pl.LoggedBy AS loggedBy, pl.LoggedAt AS loggedAt
+        FROM dbo.DependencyActivityProgressLog pl
+        JOIN dbo.DependencyActivityAssignment daa ON daa.Id = pl.AssignmentId
+        WHERE daa.DependencyMasterActivityId = @rungId AND daa.IsCurrent = 1
+        ORDER BY pl.LoggedAt DESC, pl.Id DESC
+      `);
+      res.json(r.recordset);
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /:rungId/progress-log error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // POST /:rungId/restore — bring a Cancelled activity back. super_admin
 // only, deliberately checked by role directly rather than a page right —
@@ -1363,26 +1477,22 @@ router.post("/:rungId", authMiddleware, requireAnyPageRight(["civilworkdpr-activ
     }
 
     // Auto status transition, driven purely by whether anyone's assigned:
-    // PENDING (nobody assigned) -> IN_PROGRESS (assigned). Used to detour
-    // through an ALLOCATED "awaiting each engineer's own confirmation" step
-    // (PUT /engineer-approval/:id/confirm), surfaced as an Approval Inbox
-    // entry per engineer — removed in favour of the ApprovalLevelsJson
-    // config above: assigning engineers now starts the work immediately,
-    // and who gets to APPROVE the finished work is whoever this assignment
-    // names (plus super_admin), enforced where that approval action itself
-    // lives (Work Reporting), not here. Only touches PENDING/ALLOCATED/
-    // IN_PROGRESS — once work has moved further along (Hold/Approved/
-    // Rework/Completed), adding/removing an engineer here never regresses
-    // it. ALLOCATED counts as an equivalent starting point to PENDING here
-    // — it's the old pre-confirmation status this replaced, and rows saved
-    // under the old flow are still sitting at ALLOCATED (see migration 485
-    // for the one-time data backfill this mirrors going forward).
+    // PENDING (nobody assigned) -> ALLOCATED (assigned, waiting on them to
+    // actually start) -> IN_PROGRESS only once they report progress for
+    // the first time (see the PATCH /:rungId/status autoStatus branch
+    // above — that's the sole place IN_PROGRESS gets set now). Only
+    // touches PENDING/ALLOCATED/IN_PROGRESS — once work has moved further
+    // along (Hold/Approved/Rework/Completed), adding/removing an engineer
+    // here never regresses it. Unassigning everyone before any report was
+    // ever logged (still ALLOCATED, or a legacy still-PENDING row) drops
+    // it back to PENDING; unassigning after work has actually started
+    // (IN_PROGRESS) also drops back to PENDING — same as before.
     const currentStatusRow = (await pool.request().input("id", sql.Int, assignmentId)
       .query(`SELECT Status FROM dbo.DependencyActivityAssignment WHERE Id = @id`)).recordset[0];
     const currentStatus = currentStatusRow?.Status;
     let nextStatus = null;
-    if (keptEngineerIds.size > 0 && (currentStatus === "PENDING" || currentStatus === "ALLOCATED")) nextStatus = "IN_PROGRESS";
-    else if (keptEngineerIds.size === 0 && currentStatus === "IN_PROGRESS") nextStatus = "PENDING";
+    if (keptEngineerIds.size > 0 && currentStatus === "PENDING") nextStatus = "ALLOCATED";
+    else if (keptEngineerIds.size === 0 && (currentStatus === "ALLOCATED" || currentStatus === "IN_PROGRESS")) nextStatus = "PENDING";
     if (nextStatus) {
       await pool.request().input("id", sql.Int, assignmentId).input("status", sql.NVarChar(20), nextStatus)
         .query(`UPDATE dbo.DependencyActivityAssignment SET Status = @status WHERE Id = @id`);

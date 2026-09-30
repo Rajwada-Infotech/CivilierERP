@@ -1,5 +1,6 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { usePageRights } from "@/hooks/usePageRights";
@@ -486,9 +487,7 @@ const UnitMaster: React.FC = () => {
     }
     await queryClient.invalidateQueries({ queryKey: ["unit-master"] });
     // Flat Master — a unit add/edit/delete builds/adjusts/removes its rooms.
-    queryClient.invalidateQueries({ queryKey: ["room-master"] });
-    queryClient.invalidateQueries({ queryKey: ["room-master-units"] });
-    queryClient.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
+    invalidateRoomData(queryClient);
   };
 
   if (isLoading)

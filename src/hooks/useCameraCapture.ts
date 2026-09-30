@@ -12,6 +12,20 @@ export function classifyCameraError(err: unknown): CameraError {
   return "other";
 }
 
+// Shared across every camera.start() call site so a failure is never just
+// silent — CameraCaptureModal.tsx already used this text; centralized here
+// so ActivityDetailModal.tsx's own "Open camera" button (which used to
+// fall back to a file picker with zero explanation on failure) can show it
+// too.
+export const CAMERA_ERROR_TEXT: Record<CameraError, string> = {
+  denied: "Camera access is blocked. Allow Camera for this site (lock icon in the address bar), then reopen.",
+  "no-device": "No camera was found on this device.",
+  busy: "The camera is in use by another app. Close it and try again.",
+  insecure: "The camera needs a secure (HTTPS) connection.",
+  unsupported: "This browser does not support camera capture.",
+  other: "Camera not available.",
+};
+
 // getUserMedia-backed live camera preview + shutter capture, scoped to
 // whatever component calls it — stop() must run on unmount or the "camera
 // light stays on" bug follows the user around the app (mobile browsers keep
@@ -61,10 +75,17 @@ export function useCameraCapture() {
         }
       }
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
+      // Attaching srcObject here only works when the caller renders <video>
+      // unconditionally (CameraCaptureModal.tsx does). A caller that only
+      // mounts <video> once isActive is true (ActivityDetailModal.tsx's
+      // Photos tab) has videoRef.current still null at this exact point —
+      // the element doesn't exist yet, since setIsActive(true) below is
+      // what causes React to render it. That silently dropped the stream
+      // and never called play(), leaving a permanently black video panel
+      // even though the camera really was granted and running (the "camera
+      // opens but shows black" bug). The effect further down re-attaches
+      // once isActive flips and the element has actually mounted, so this
+      // hook works correctly either way the caller structures its JSX.
       setIsActive(true);
       return true;
     } catch (err) {
@@ -94,6 +115,20 @@ export function useCameraCapture() {
       canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.9);
     });
   }, []);
+
+  // Runs after every commit — including the one where a caller that only
+  // mounts <video> once isActive is true (ActivityDetailModal.tsx's Photos
+  // tab) actually renders it for the first time. React attaches refs
+  // during the commit phase, strictly before effects run, so by the time
+  // this runs videoRef.current is guaranteed to be the real element,
+  // whether it already existed (CameraCaptureModal.tsx renders <video>
+  // unconditionally) or was just mounted this commit.
+  useEffect(() => {
+    if (isActive && videoRef.current && streamRef.current && videoRef.current.srcObject !== streamRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+      videoRef.current.play().catch(() => {});
+    }
+  });
 
   useEffect(() => stop, [stop]);
 

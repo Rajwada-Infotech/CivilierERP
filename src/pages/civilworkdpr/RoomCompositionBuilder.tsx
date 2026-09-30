@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import { usePageRights } from "@/hooks/usePageRights";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { getRoomCategoryOptions, type RoomCategory } from "@/api/roomCategoryMasterApi";
 import {
   getBhkTemplate,
@@ -91,22 +92,26 @@ export default function RoomCompositionBuilder() {
     if (!bhkType) return;
     setSaving(true);
     try {
-      const saved = await saveBhkTemplate(bhkType, {
+      // Deliberately does not touch any already-built room — this
+      // composition is shared company-wide, but Room Master's own
+      // project-scoped "Generate rooms" (Generate & Reconcile Rooms) is the
+      // only thing that ever builds or reconciles actual rooms from it, one
+      // project at a time. Auto-propagating a save here into every unit
+      // that already had rooms built, across every project with no project
+      // scoping, used to mean tweaking this for one project's needs could
+      // silently add or delete rooms in an unrelated project.
+      await saveBhkTemplate(bhkType, {
         composition: (categories as RoomCategory[]).map((c) => ({
           roomCategoryId: c.id,
           quantity: quantities[c.id] ?? 0,
         })),
       });
-      const sync = saved.roomSync;
-      toast.success(
-        sync && sync.roomsAdded > 0
-          ? `${selectedLabel} template saved — ${sync.roomsAdded} new room(s) added to ${sync.unitsUpdated} existing unit(s)`
-          : `${selectedLabel} template saved`,
-      );
-      if (sync && sync.failed > 0) toast.error(`${sync.failed} unit(s) couldn't be updated with the new rooms — check the server log.`);
+      toast.success(`${selectedLabel} template saved`);
       qc.invalidateQueries({ queryKey: ["bhk-template", bhkType] });
       // Room counts/summaries feed the CRM Auto Setup + Unit Master pickers.
       qc.invalidateQueries({ queryKey: LAYOUT_TYPES_QUERY_KEY });
+      // The save just added/removed rooms across every unit of this type.
+      invalidateRoomData(qc);
     } catch (e: any) {
       toast.error(e.message ?? "Save failed");
     } finally {
@@ -285,9 +290,10 @@ export default function RoomCompositionBuilder() {
                   ) : (
                     <>
                       <p className="text-xs text-muted-foreground">
-                        This layout applies to every unit tagged {selectedLabel} across every project,
-                        tower, and floor — set it once here instead of per unit. Saving adds any new
-                        rooms to units whose rooms are already built; existing rooms are never removed.
+                        This layout applies to every unit tagged {selectedLabel} — set it once here instead
+                        of per unit. Saving never touches a room that's already been built; it only takes
+                        effect for units whose rooms haven't been generated yet. To rebuild an already-built
+                        unit's rooms from this layout, use Room Master's "Generate Rooms" for its project.
                       </p>
 
                       <div className="space-y-2">

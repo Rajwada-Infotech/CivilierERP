@@ -7,7 +7,7 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
-const { resolveLayoutType, getLayoutComposition, getEffectiveComposition, syncUnitRooms, syncRoomsForUnits, inferRoomCategoryId, bumpFlatMasterCaches, ROOM_NAME_MAX } = require("../services/unitLayout");
+const { resolveLayoutType, getLayoutComposition, getEffectiveComposition, syncUnitRooms, syncRoomsForUnits, inferRoomCategoryId, bumpFlatMasterCaches, ROOM_NAME_MAX, ROOM_HAS_WORK, floorLabelOf } = require("../services/unitLayout");
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const BLUEPRINT_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/jpg", "image/png"]);
@@ -516,12 +516,12 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
 
     // Shared with CRM generate-units / Unit Master (services/unitLayout.js):
     // matches by room category count, reactivates a soft-deleted room before
-    // inserting a new one, never removes anything here.
+    // inserting a new one, and safely removes empty surplus rooms.
     const tx = pool.transaction();
     await tx.begin();
     let r;
     try {
-      r = await syncUnitRooms(tx, unitId, { removeUnused: false, createdBy });
+      r = await syncUnitRooms(tx, unitId, { removeUnused: true, createdBy });
       await tx.commit();
     } catch (e) {
       try { await tx.rollback(); } catch (_) { /* already rolled back */ }
@@ -537,11 +537,18 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
     }
 
     const created = r.created + r.reactivated;
-    if (created > 0 || r.renamed > 0) await bumpFlatMasterCaches();
+    if (created > 0 || r.renamed > 0 || r.deactivated > 0) await bumpFlatMasterCaches();
+    
+    let msg = "Every room from this layout already exists";
+    if (created > 0 && r.deactivated > 0) msg = `${created} room(s) generated and ${r.deactivated} unused room(s) removed`;
+    else if (created > 0) msg = `${created} room(s) generated from ${r.layout.label} layout`;
+    else if (r.deactivated > 0) msg = `${r.deactivated} unused room(s) removed`;
+
     res.json({
-      message: created > 0 ? `${created} room(s) generated from ${r.layout.label} layout` : "Every room from this layout already exists",
+      message: msg,
       createdCount: created,
       renamedCount: r.renamed,
+      removedCount: r.deactivated,
       total: r.layout.roomCount,
     });
   } catch (err) {
@@ -552,10 +559,10 @@ router.post("/generate/:unitId", allowRoles("admin", "super_admin", "dba"), asyn
 
 // POST /generate-bulk — { ProjectId, BlockId? }: builds the rooms of every
 // active unit in the project (or one block of it) from each unit's own
-// layout, same add-only rule as POST /generate/:unitId. For backfilling
-// units that existed before rooms were generated automatically (new units
-// get theirs at creation). Idempotent — re-running only fills gaps. Units
-// with no layout type / no composition are skipped and counted.
+// layout. Removes unused empty rooms automatically.
+// For backfilling units that existed before rooms were generated automatically
+// (new units get theirs at creation). Idempotent — re-running only fills gaps.
+// Units with no layout type / no composition are skipped and counted.
 router.post("/generate-bulk", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   const projectId = parseInt(req.body?.ProjectId, 10);
   const blockId = req.body?.BlockId != null && req.body.BlockId !== "" ? parseInt(req.body.BlockId, 10) : null;
@@ -570,22 +577,129 @@ router.post("/generate-bulk", allowRoles("admin", "super_admin", "dba"), async (
       where += " AND u.BlockId = @bid";
     }
     const units = await request.query(`SELECT u.Id FROM dbo.UnitMaster u WHERE ${where} ORDER BY u.BlockId, u.FloorNo, u.UnitName`);
-    const totals = await syncRoomsForUnits(pool, units.recordset.map((u) => u.Id), { removeUnused: false, createdBy: req.user?.userId || null });
-    if (totals.created || totals.reactivated || totals.renamed) await bumpFlatMasterCaches();
+    const totals = await syncRoomsForUnits(pool, units.recordset.map((u) => u.Id), { removeUnused: true, createdBy: req.user?.userId || null });
+    if (totals.created || totals.reactivated || totals.renamed || totals.deactivated) await bumpFlatMasterCaches();
     if (totals.failed.length) console.error("[room-master] POST /generate-bulk failures:", totals.failed);
     const added = totals.created + totals.reactivated;
+    const removed = totals.deactivated;
+    
+    let baseMsg = `${added} room(s) generated across ${totals.unitsChanged} unit(s)`;
+    if (added > 0 && removed > 0) baseMsg = `${added} room(s) generated and ${removed} removed across ${totals.unitsChanged} unit(s)`;
+    else if (removed > 0) baseMsg = `${removed} room(s) removed across ${totals.unitsChanged} unit(s)`;
+    
     res.json({
-      message: `${added} room(s) generated across ${totals.unitsChanged} unit(s)`
+      message: baseMsg
         + (totals.skippedNoLayout ? ` — ${totals.skippedNoLayout} unit(s) skipped (no Unit Type / no layout defined)` : "")
         + (totals.failed.length ? ` — ${totals.failed.length} unit(s) failed` : ""),
       unitsChecked: totals.units,
       unitsUpdated: totals.unitsChanged,
       roomsAdded: added,
+      roomsRemoved: removed,
       skippedNoLayout: totals.skippedNoLayout,
       failed: totals.failed,
     });
   } catch (err) {
     console.error("[room-master] POST /generate-bulk error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /delete-bulk — Delete rooms hierarchically by level (Project/Block/Floor/Unit).
+// Rooms that have work entries or blueprints attached are automatically skipped (retained)
+// rather than blocking the entire operation — the response tells the caller exactly how many
+// were deleted vs skipped.
+router.post("/delete-bulk", allowRoles("super_admin"), async (req, res) => {
+  const { level, position } = req.body;
+  if (!level || !position) return res.status(400).json({ error: "level and position are required" });
+
+  // Parse all IDs as integers — guards against string values sent by the client
+  // (Number.isFinite("5") === false, so we must coerce first, same as every other route).
+  const projectId = parseInt(position.projectId, 10);
+  const blockId   = position.blockId  != null && position.blockId  !== "" ? parseInt(position.blockId,  10) : null;
+  const floorNo   = position.floorNo  != null ? Number(position.floorNo) : null;
+  const unitId    = position.unitId   != null && position.unitId   !== "" ? parseInt(position.unitId,   10) : null;
+
+  if (!Number.isFinite(projectId) || projectId <= 0)
+    return res.status(400).json({ error: "projectId is required" });
+
+  try {
+    const pool = getPool();
+    let rWhere = "r.ProjectId = @ProjectId";
+    const request = pool.request().input("ProjectId", sql.Int, projectId);
+
+    if (level === "BLOCK" || level === "FLOOR" || level === "UNIT") {
+      if (!Number.isFinite(blockId)) return res.status(400).json({ error: "blockId is required for this level" });
+      request.input("BlockId", sql.Int, blockId);
+      rWhere += " AND r.BlockId = @BlockId";
+    }
+
+    if (level === "FLOOR" || level === "UNIT") {
+      // floorNo === null or floorNo === -1: both mean "no floor" — CrmProjectAutoSetupFloor
+      // uses FloorNo = -1 as a sentinel for units with FloorNo IS NULL in UnitMaster,
+      // which are stored with Floor = NULL in RoomMaster.
+      if (floorNo === null || floorNo === -1 || !Number.isFinite(floorNo)) {
+        rWhere += " AND r.Floor IS NULL";
+      } else {
+        request.input("Floor", sql.NVarChar(50), floorLabelOf(floorNo));
+        rWhere += " AND r.Floor = @Floor";
+      }
+    }
+
+    if (level === "UNIT") {
+      if (!Number.isFinite(unitId)) return res.status(400).json({ error: "unitId is required for this level" });
+      request.input("UnitId", sql.Int, unitId);
+      rWhere += " AND r.UnitId = @UnitId";
+    }
+
+    // Step 1 — Count total rooms in scope (separate query).
+    // CRITICAL: mssql/tedious does NOT reliably support DECLARE variables that span across
+    // a DELETE and a subsequent SELECT in a single .query() call. Splitting into two
+    // separate round-trips gives deterministic, correct results every time.
+    // Active rooms are counted separately: the Room Master tree (and so the
+    // confirm dialog's "Delete N rooms?") only ever shows active rooms, so the
+    // reported deleted/skipped numbers must be about those N. Inactive rooms
+    // (soft-removed by layout sync) are cleaned up too but reported apart.
+    const countRes = await request.query(
+      `SELECT COUNT(*) AS TotalAll, SUM(CASE WHEN r.IsActive = 1 THEN 1 ELSE 0 END) AS TotalActive
+       FROM dbo.RoomMaster r WHERE ${rWhere}`
+    );
+    const totalAll = countRes.recordset[0]?.TotalAll ?? 0;
+    const totalActive = countRes.recordset[0]?.TotalActive ?? 0;
+
+    if (totalAll === 0) {
+      return res.json({ message: "No rooms found to delete in this scope.", count: 0, skipped: 0, inactiveRemoved: 0 });
+    }
+
+    // Step 2 — Delete only safe rooms (no work/blueprints) and capture exactly which
+    // rows were removed via OUTPUT DELETED (far more reliable than @@ROWCOUNT after SELECT).
+    // ROOM_HAS_WORK is the shared macro exported from services/unitLayout.js — it automatically
+    // stays in sync as new room-level data relations are added in the future.
+    const deleteRes = await request.query(`
+      DELETE r
+      OUTPUT DELETED.Id, DELETED.IsActive
+      FROM dbo.RoomMaster r
+      WHERE ${rWhere} AND (${ROOM_HAS_WORK}) = 0
+    `);
+
+    if (deleteRes.recordset.length > 0) await bumpFlatMasterCaches();
+
+    const deleted = deleteRes.recordset.filter((row) => row.IsActive).length;
+    const inactiveRemoved = deleteRes.recordset.length - deleted;
+    const skipped = totalActive - deleted;
+
+    let msg;
+    if (deleted === 0 && totalActive > 0) {
+      msg = "No empty rooms to delete — all rooms in this scope have work entries or blueprints attached.";
+    } else {
+      msg = `Deleted ${deleted} room(s) successfully`;
+      if (skipped > 0) {
+        msg += ` — ${skipped} room(s) were retained because they have work entries or blueprints attached.`;
+      }
+    }
+
+    res.json({ message: msg, count: deleted, skipped, inactiveRemoved });
+  } catch (err) {
+    console.error("[room-master] POST /delete-bulk error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

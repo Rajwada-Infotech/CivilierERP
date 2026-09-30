@@ -1,5 +1,6 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { invalidateRoomData } from "@/lib/roomQueries";
 import { toast } from "sonner";
 import {
   FileText, Upload, DoorOpen, Sparkles, Loader2, CheckCircle2,
@@ -9,12 +10,12 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { getProjectOverrides } from "@/api/unitLayoutOverrideApi";
 import { getLayoutTypes, LAYOUT_TYPES_QUERY_KEY, type LayoutType } from "@/api/unitBhkConfigApi";
 import { getRoomCategoryOptions, type RoomCategory } from "@/api/roomCategoryMasterApi";
-import {
-  resolveLayout, compositionText, roomTotal,
+import { resolveLayout, compositionText, roomTotal,
   type Level, type Position, type LayoutOverrideRow,
 } from "@/lib/layoutResolve";
 import { InlineLayoutEditor, type NodeType } from "./InlineLayoutEditor";
 import { usePageRights } from "@/hooks/usePageRights";
+import { useAuth } from "@/contexts/AuthContext";
 import { safeHtml } from "@/utils/escapeHtml";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
 import {
@@ -155,7 +156,7 @@ function BlueprintUploadField({
 
 // ── API helpers ────────────────────────────────────────────────────────────────
 async function fetchRooms(): Promise<any[]> {
-  const res = await fetchWithAuth(API);
+  const res = await fetchWithAuth(`${API}?activeOnly=1`);
   if (!res.ok) throw new Error("Failed to fetch rooms");
   return res.json().catch(() => []);
 }
@@ -226,8 +227,7 @@ function UnitRoomConfigCard({ unitId }: { unitId: string }) {
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || "Failed to create rooms");
       toast.success(body.message || "Rooms created");
-      await qc.invalidateQueries({ queryKey: ["room-master-unit-rooms", unitId] });
-      await qc.invalidateQueries({ queryKey: ["room-master"] });
+      await invalidateRoomData(qc);
     } catch (e: any) {
       toast.error(e.message ?? "Failed to create rooms");
     } finally {
@@ -343,7 +343,7 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
   const handleRun = async () => {
     if (!projectId) return;
     const scope = blockId ? blockOptions.find(([id]) => id === blockId)?.[1] ?? "this block" : "this project";
-    if (!window.confirm(`Generate rooms for all ${unitCount} unit(s) in ${scope} from their Unit Composition layouts? Existing rooms are kept; only missing ones are added.`)) return;
+    if (!window.confirm(`Generate & sync rooms for all ${unitCount} unit(s) in ${scope} from their Unit Composition layouts? Missing rooms are added; unused empty rooms are removed. Rooms with work or blueprints are always kept.`)) return;
     setRunning(true);
     try {
       const res = await fetchWithAuth(`${API}/generate-bulk`, {
@@ -355,8 +355,7 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
       if (!res.ok) throw new Error(body.error || "Failed to generate rooms");
       if (body.failed?.length) toast.warning(body.message);
       else toast.success(body.message || "Rooms generated");
-      await qc.invalidateQueries({ queryKey: ["room-master"] });
-      await qc.invalidateQueries({ queryKey: ["room-master-unit-rooms"] });
+      await invalidateRoomData(qc);
     } catch (e: any) {
       toast.error(e.message ?? "Failed to generate rooms");
     } finally {
@@ -370,7 +369,7 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
       <div className="flex-1 min-w-[14rem]">
         <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Generate Rooms in Bulk</p>
         <p className="text-[11px] text-muted-foreground mt-0.5">
-          Builds every unit's rooms from its Unit Composition layout. Only adds what's missing.
+          Syncs every unit's rooms to its Unit Composition layout — adds missing rooms and removes unused empty ones.
         </p>
       </div>
       <select value={projectId} onChange={(e) => { setProjectId(e.target.value); setBlockId(""); }} className={selectCls}>
@@ -409,10 +408,10 @@ type UnitRoomGroup = {
 
 // One collapsible level of the Room Records tree (Project / Block / Floor),
 // indented by depth, with its rolled-up unit and room counts.
-function TreeRow({ depth, expanded, onToggle, icon, label, units, rooms, strong = false, custom = false, chips, onEditLayout, editing = false }: {
+function TreeRow({ depth, expanded, onToggle, icon, label, units, rooms, strong = false, custom = false, chips, onEditLayout, editing = false, onDeleteLevel }: {
   depth: number; expanded: boolean; onToggle: () => void; icon: React.ReactNode;
   label: string; units: number; rooms: number; strong?: boolean;
-  custom?: boolean; chips?: React.ReactNode; onEditLayout?: () => void; editing?: boolean;
+  custom?: boolean; chips?: React.ReactNode; onEditLayout?: () => void; editing?: boolean; onDeleteLevel?: () => void;
 }) {
   return (
     <div className={`flex items-center hover:bg-muted/20 transition-colors ${strong ? "bg-muted/10" : ""}`}>
@@ -432,7 +431,16 @@ function TreeRow({ depth, expanded, onToggle, icon, label, units, rooms, strong 
           <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rooms} room{rooms === 1 ? "" : "s"}</span>
         </span>
       </button>
-      {onEditLayout ? <EditLayoutButton onClick={onEditLayout} active={editing} /> : <span className="w-[92px] shrink-0" />}
+      <div className="mr-3 flex items-center gap-1 shrink-0 w-[124px] justify-end">
+        {onEditLayout && <EditLayoutButton onClick={onEditLayout} active={editing} />}
+        {onDeleteLevel && rooms > 0 && (
+          <button type="button" onClick={onDeleteLevel}
+            className="p-1.5 rounded-md border border-transparent text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            title={`Delete all ${rooms} room(s) in this level`}>
+            <Trash2 size={13} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }
@@ -449,7 +457,7 @@ function CustomBadge() {
 function EditLayoutButton({ onClick, active = false }: { onClick: () => void; active?: boolean }) {
   return (
     <button type="button" onClick={onClick} aria-expanded={active}
-      className={`mr-3 shrink-0 inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md border transition-colors ${
+      className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md border transition-colors ${
         active ? "border-cyan-500 text-cyan-600 dark:text-cyan-400 bg-cyan-500/10" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
       title="View / set this level's room layout">
       <LayoutGrid size={11} /> Layout
@@ -642,6 +650,8 @@ const roomViewFields: {
 // ── Component ─────────────────────────────────────────────────────────────────
 const RoomMaster: React.FC = () => {
   const rights = usePageRights("civilworkdpr-room-master");
+  const { currentUser } = useAuth();
+  const canBulkDelete = currentUser?.role === "super_admin";
   const queryClient = useQueryClient();
 
   const {
@@ -884,6 +894,8 @@ const RoomMaster: React.FC = () => {
   };
   const [viewRoom, setViewRoom] = React.useState<RecordWithId | null>(null);
   const [deletingRoom, setDeletingRoom] = React.useState<RecordWithId | null>(null);
+  const [deletingLevel, setDeletingLevel] = React.useState<{ level: string; position: Position & { projectId: number }; name: string; roomCount: number } | null>(null);
+  const [deletingLevelInFlight, setDeletingLevelInFlight] = React.useState(false);
 
   // externalFormPatch injects __units into the form so optionsProvider/render can filter/look up
   const unitsPatch = React.useMemo(() => ({ __units: allUnits }), [allUnits]);
@@ -966,7 +978,7 @@ const RoomMaster: React.FC = () => {
         throw new Error((await res.json()).error || "Failed to delete room");
       toast.success("Room deleted!");
     }
-    await queryClient.invalidateQueries({ queryKey: ["room-master"] });
+    await invalidateRoomData(queryClient);
   };
 
   if (isLoading)
@@ -1066,7 +1078,8 @@ const RoomMaster: React.FC = () => {
                       icon={<FolderTree size={13} className="text-violet-500 shrink-0" />} label={p.name} units={p.unitCount} rooms={p.roomCount} strong
                       custom={isCustom.project(pos.projectId)} chips={<LayoutChips items={chipsFor(types, pos, "PROJECT")} />}
                       editing={editing?.key === p.key}
-                      onEditLayout={() => toggleEditor({ key: p.key, level: "PROJECT", position: pos, types })} />
+                      onEditLayout={() => toggleEditor({ key: p.key, level: "PROJECT", position: pos, types })}
+                      onDeleteLevel={canBulkDelete ? () => setDeletingLevel({ level: "PROJECT", position: pos, name: p.name, roomCount: p.roomCount }) : undefined} />
                   );
                 })()}
                 {editorFor(p.key)}
@@ -1080,7 +1093,8 @@ const RoomMaster: React.FC = () => {
                           icon={<Building size={13} className="text-sky-500 shrink-0" />} label={`Block ${b.name}`} units={b.unitCount} rooms={b.roomCount}
                           custom={isCustom.block(b.blockIdNum)} chips={<LayoutChips items={chipsFor(types, pos, "BLOCK")} />}
                           editing={editing?.key === b.key}
-                          onEditLayout={() => toggleEditor({ key: b.key, level: "BLOCK", position: pos, types })} />
+                          onEditLayout={() => toggleEditor({ key: b.key, level: "BLOCK", position: pos, types })}
+                          onDeleteLevel={canBulkDelete ? () => setDeletingLevel({ level: "BLOCK", position: pos, name: `Block ${b.name}`, roomCount: b.roomCount }) : undefined} />
                       );
                     })()}
                     {editorFor(b.key)}
@@ -1089,15 +1103,17 @@ const RoomMaster: React.FC = () => {
                         {(() => {
                           const pos = { projectId: Number(p.key.slice(2)), blockId: b.blockIdNum, floorNo: f.floorNo };
                           const types = typesOf(f.units);
+                          const floorLabelText = f.floorNo == null ? "No floor" : f.floorNo === 0 ? "Ground Floor" : `Floor ${f.floorNo}`;
                           return (
                             <TreeRow depth={2} expanded={expandedUnits.has(f.key)} onToggle={() => toggleUnit(f.key)}
                               icon={<Layers size={13} className="text-amber-500 shrink-0" />}
-                              label={f.floorNo == null ? "No floor" : f.floorNo === 0 ? "Ground Floor" : `Floor ${f.floorNo}`}
+                              label={floorLabelText}
                               units={f.unitCount} rooms={f.roomCount}
                               custom={isCustom.floor(b.blockIdNum, f.floorNo)}
                               chips={f.floorNo == null ? undefined : <LayoutChips items={chipsFor(types, pos, "FLOOR")} />}
                               editing={editing?.key === f.key}
-                              onEditLayout={f.floorNo == null ? undefined : () => toggleEditor({ key: f.key, level: "FLOOR", position: pos, types })} />
+                              onEditLayout={f.floorNo == null ? undefined : () => toggleEditor({ key: f.key, level: "FLOOR", position: pos, types })}
+                              onDeleteLevel={canBulkDelete ? () => setDeletingLevel({ level: "FLOOR", position: pos, name: floorLabelText, roomCount: f.roomCount }) : undefined} />
                           );
                         })()}
                         {editorFor(f.key)}
@@ -1142,13 +1158,22 @@ const RoomMaster: React.FC = () => {
                                   );
                                 })()}
                               </button>
-                              {g.bhkType && typeByLabel.get(g.bhkType) ? (
-                                <EditLayoutButton active={editing?.key === g.key} onClick={() => toggleEditor({
-                                  key: g.key, level: "UNIT",
-                                  position: { projectId: Number(g.projectId), blockId: Number(g.blockId), floorNo: g.floorNo, unitId: Number(g.unitId) },
-                                  types: typesOf([g]),
-                                })} />
-                              ) : <span className="w-[92px] shrink-0" />}
+                              <div className="mr-3 flex items-center gap-1 shrink-0 w-[124px] justify-end">
+                                {g.bhkType && typeByLabel.get(g.bhkType) && (
+                                  <EditLayoutButton active={editing?.key === g.key} onClick={() => toggleEditor({
+                                    key: g.key, level: "UNIT",
+                                    position: { projectId: Number(g.projectId), blockId: Number(g.blockId), floorNo: g.floorNo, unitId: Number(g.unitId) },
+                                    types: typesOf([g]),
+                                  })} />
+                                )}
+                                {canBulkDelete && g.rooms.length > 0 && (
+                                  <button type="button" onClick={() => setDeletingLevel({ level: "UNIT", position: { projectId: Number(g.projectId), blockId: Number(g.blockId), floorNo: g.floorNo, unitId: Number(g.unitId) }, name: g.unitName, roomCount: g.rooms.length })}
+                                    className="p-1.5 rounded-md border border-transparent text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                    title={`Delete all ${g.rooms.length} room(s) in this unit`}>
+                                    <Trash2 size={13} />
+                                  </button>
+                                )}
+                              </div>
                               </div>
                               {editorFor(g.key)}
 
@@ -1280,6 +1305,57 @@ const RoomMaster: React.FC = () => {
               className="px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity"
             >
               Delete
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Bulk Delete confirm dialog ── */}
+      <Dialog open={!!deletingLevel} onOpenChange={(open) => { if (!open && !deletingLevelInFlight) setDeletingLevel(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete {deletingLevel?.level ? deletingLevel.level.charAt(0) + deletingLevel.level.slice(1).toLowerCase() : 'Level'} Rooms</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground pt-1">
+            Delete all <strong>{deletingLevel?.roomCount}</strong> room(s) in <strong>{deletingLevel?.name}</strong>?
+            Rooms with work entries or blueprints will be automatically retained.
+          </p>
+          <DialogFooter className="pt-2">
+            <button
+              onClick={() => setDeletingLevel(null)}
+              disabled={deletingLevelInFlight}
+              className="px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              disabled={deletingLevelInFlight}
+              onClick={async () => {
+                if (!deletingLevel || deletingLevelInFlight) return;
+                setDeletingLevelInFlight(true);
+                try {
+                  const res = await fetchWithAuth(`${API}/delete-bulk`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ level: deletingLevel.level, position: deletingLevel.position }),
+                  });
+                  const body = await res.json().catch(() => ({}));
+                  if (!res.ok) throw new Error(body.error || "Failed to delete rooms");
+                  if (body.count === 0 && body.skipped > 0) toast.warning(body.message);
+                  else toast.success(body.message || "Rooms deleted");
+                  await invalidateRoomData(queryClient);
+                  setDeletingLevel(null);
+                } catch (e: any) {
+                  toast.error(e.message || "Failed to delete rooms");
+                } finally {
+                  setDeletingLevelInFlight(false);
+                }
+              }}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-destructive text-destructive-foreground hover:opacity-90 transition-opacity disabled:opacity-60"
+            >
+              {deletingLevelInFlight ? (
+                <><Loader2 size={13} className="animate-spin" /> Deleting…</>
+              ) : "Delete All"}
             </button>
           </DialogFooter>
         </DialogContent>
