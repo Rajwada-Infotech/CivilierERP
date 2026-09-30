@@ -391,6 +391,26 @@ export const getProgressLog = async (rungId: number): Promise<ProgressLogEntry[]
   return handleResponse<ProgressLogEntry[]>(res);
 };
 
+// The actual logbook — one permanent snapshot per day this activity was
+// ever reported on (written by the PATCH /:rungId/status route's own
+// MERGE, see its comment). Read-only here; a day's row is only ever
+// written by that same day's own save.
+export interface DailyLogEntry {
+  id: number;
+  logDate: string;
+  progressPercent: number | null;
+  remarks: string | null;
+  createdBy: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
+  photoCount: number;
+}
+
+export const getDailyLog = async (rungId: number): Promise<DailyLogEntry[]> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/daily-log`);
+  return handleResponse<DailyLogEntry[]>(res);
+};
+
 // ── Blueprint Annotation Workflow ───────────────────────────────────────────
 // Scoped per (rung, room, context) — see migration 345/346's own comments
 // for why: two activities in the same chain sharing a room's blueprint
@@ -469,6 +489,9 @@ export interface ActivityPhotoMeta {
   note: string | null;
   capturedBy: string | null;
   capturedAt: string;
+  /** The day this photo was taken for — see the Daily Log tab. Null on
+   *  photos uploaded before that column existed. */
+  logDate: string | null;
 }
 
 export interface ActivityPhotos {
@@ -482,8 +505,11 @@ export interface ActivityPhotoData {
   dataBase64: string;
 }
 
-export const getActivityPhotos = async (rungId: number): Promise<ActivityPhotos> => {
-  const res = await fetchWithAuth(`${BASE}/${rungId}/photos`);
+// `date` (YYYY-MM-DD) scopes to just that day's photos — used by the Daily
+// Log tab to show one day's uploads; omit for the full "every photo ever
+// taken for this activity" gallery every other caller already relies on.
+export const getActivityPhotos = async (rungId: number, date?: string): Promise<ActivityPhotos> => {
+  const res = await fetchWithAuth(`${BASE}/${rungId}/photos${date ? `?date=${date}` : ""}`);
   return handleResponse<ActivityPhotos>(res);
 };
 
