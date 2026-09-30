@@ -645,6 +645,11 @@ export default function VehicleInOut() {
     Record<number, vehApi.VehicleInOutItemQuality | "">
   >({});
 
+  // Optional free-text brand per PO line item, keyed the same way as
+  // receivedQtyByItem/photoByItem/qualityByItem — reset/prefilled alongside
+  // them everywhere those are. Not mandatory.
+  const [brandByItem, setBrandByItem] = useState<Record<number, string>>({});
+
   // Quality-rejection debit note modal — raised against a single received
   // line item (VehicleInOutItemID) from the view modal.
   const [debitNoteItem, setDebitNoteItem] = useState<any>(null);
@@ -842,6 +847,7 @@ export default function VehicleInOut() {
     setReceivedQtyByItem({});
     setPhotoByItem({});
     setQualityByItem({});
+    setBrandByItem({});
     setErrors({});
     setSearchParams(
       (prev) => {
@@ -867,6 +873,7 @@ export default function VehicleInOut() {
       setReceivedQtyByItem({});
       setPhotoByItem({});
       setQualityByItem({});
+      setBrandByItem({});
       toast.success(`Vehicle In/Out ${res.docNo} created`);
     },
     onError: (err: any) =>
@@ -886,6 +893,7 @@ export default function VehicleInOut() {
       setReceivedQtyByItem({});
       setPhotoByItem({});
       setQualityByItem({});
+      setBrandByItem({});
       toast.success("Record updated");
     },
     onError: (err: any) => toast.error(err.message || "Failed to update"),
@@ -930,9 +938,10 @@ export default function VehicleInOut() {
           receivedQty: parseFloat(raw) || 0,
           photoBase64: photoByItem[Number(poItemId)] || null,
           quality: qualityByItem[Number(poItemId)] || null,
+          brand: brandByItem[Number(poItemId)]?.trim() || null,
         }))
         .filter((it) => it.receivedQty > 0),
-    [receivedQtyByItem, photoByItem, qualityByItem],
+    [receivedQtyByItem, photoByItem, qualityByItem, brandByItem],
   );
 
   // ── Validate ──────────────────────────────────────────────────────────────────
@@ -998,6 +1007,7 @@ export default function VehicleInOut() {
     setReceivedQtyByItem({});
     setPhotoByItem({});
     setQualityByItem({});
+    setBrandByItem({});
     setEditingId(null);
     setShowForm(false);
     setErrors({});
@@ -1046,6 +1056,13 @@ export default function VehicleInOut() {
       Array.isArray(full.Items)
         ? Object.fromEntries(
             full.Items.filter((it: any) => it.Quality).map((it: any) => [it.POItemId, it.Quality]),
+          )
+        : {},
+    );
+    setBrandByItem(
+      Array.isArray(full.Items)
+        ? Object.fromEntries(
+            full.Items.filter((it: any) => it.Brand).map((it: any) => [it.POItemId, it.Brand]),
           )
         : {},
     );
@@ -1367,6 +1384,7 @@ export default function VehicleInOut() {
                     setReceivedQtyByItem({});
                     setPhotoByItem({});
                     setQualityByItem({});
+                    setBrandByItem({});
                     setErrors({});
                   }}
                   className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
@@ -1448,6 +1466,7 @@ export default function VehicleInOut() {
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
                           setQualityByItem({});
+                          setBrandByItem({});
                         }}
                         className={`${inpSel} ${errors.companyId ? "border-destructive/60" : ""}`}
                       >
@@ -1499,6 +1518,7 @@ export default function VehicleInOut() {
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
                           setQualityByItem({});
+                          setBrandByItem({});
                         }}
                         className={`${inpSel} ${errors.projectId ? "border-destructive/60" : ""}`}
                       >
@@ -1653,6 +1673,7 @@ export default function VehicleInOut() {
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
                           setQualityByItem({});
+                          setBrandByItem({});
                         }}
                         className={`${inpSel} ${errors.poId ? "border-destructive/60" : ""}`}
                       >
@@ -1770,6 +1791,7 @@ export default function VehicleInOut() {
                               <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Remaining</th>
                               <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">UOM</th>
                               <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Qty This Lot</th>
+                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Brand</th>
                               <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Quality</th>
                               <th className="px-4 py-2 text-center text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Photo</th>
                             </tr>
@@ -1843,6 +1865,21 @@ export default function VehicleInOut() {
                                       className={`w-24 px-2 py-1.5 rounded-lg border bg-background text-right font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary ${
                                         overLimit ? "border-destructive text-destructive" : "border-border"
                                       } ${it.remainingQty === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+                                    />
+                                  </td>
+                                  <td className="px-4 py-2.5">
+                                    <input
+                                      type="text"
+                                      value={brandByItem[it.poItemId] ?? ""}
+                                      onChange={(e) =>
+                                        setBrandByItem((prev) => ({
+                                          ...prev,
+                                          [it.poItemId]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="Optional"
+                                      maxLength={100}
+                                      className="w-28 px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                                     />
                                   </td>
                                   <td className="px-4 py-2.5">
@@ -2100,6 +2137,7 @@ export default function VehicleInOut() {
                       setReceivedQtyByItem({});
                       setPhotoByItem({});
                       setQualityByItem({});
+                      setBrandByItem({});
                       setEditingId(null);
                       setErrors({});
                     }}
@@ -2483,6 +2521,11 @@ export default function VehicleInOut() {
                               <td className="px-3 py-2 font-medium text-foreground">
                                 <span className="inline-flex items-center gap-1.5">
                                   {it.ItemName || "—"}
+                                  {it.Brand && (
+                                    <span className="text-[10px] font-normal text-muted-foreground">
+                                      ({it.Brand})
+                                    </span>
+                                  )}
                                   {it.Quality && (
                                     <span
                                       className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wide border ${

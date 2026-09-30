@@ -34,6 +34,8 @@ export interface VehicleInOutLineItem {
   PhotoBase64: string | null;
   /** Quick inspection grade for this line, set at entry time. */
   Quality: VehicleInOutItemQuality | null;
+  /** Optional free-text brand for this line, set at entry time. */
+  Brand: string | null;
 }
 
 /** A PO line item together with how much has already been received across
@@ -103,6 +105,8 @@ export interface VehicleInOutPayload {
     receivedQty: number;
     photoBase64?: string | null;
     quality?: VehicleInOutItemQuality | null;
+    /** Optional, non-mandatory — not sourced from the PO item. */
+    brand?: string | null;
   }[];
 }
 

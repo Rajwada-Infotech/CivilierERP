@@ -223,6 +223,10 @@ async function validateVehicleInOutItems(pool, poId, items, excludeVehicleInOutI
       // Quick inspection grade for this line — independent of the formal
       // quality-rejection debit note flow.
       quality: VALID_QUALITIES.has(it.quality) ? it.quality : null,
+      // Optional free-text brand for this line, captured at entry time —
+      // not sourced from the PO item, since the same ordered item can
+      // arrive under different brands lot to lot.
+      brand: typeof it.brand === "string" && it.brand.trim() ? it.brand.trim().slice(0, 100) : null,
     }))
     .filter((it) => it.poItemId && it.receivedQty > 0);
 
@@ -269,11 +273,12 @@ async function saveVehicleInOutItems(pool, vehicleInOutId, validatedItems) {
       .input("UomName", sql.NVarChar(50), line.po.uomName || null)
       .input("ReceivedQty", sql.Decimal(18, 3), line.receivedQty)
       .input("PhotoBase64", sql.NVarChar(sql.MAX), line.photoBase64 || null)
-      .input("Quality", sql.NVarChar(20), line.quality || null).query(`
+      .input("Quality", sql.NVarChar(20), line.quality || null)
+      .input("Brand", sql.NVarChar(100), line.brand || null).query(`
         INSERT INTO dbo.VehicleInOutItems
-          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality)
+          (VehicleInOutID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand)
         VALUES
-          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty, @PhotoBase64, @Quality)
+          (@VehicleInOutID, @POItemId, @ItemId, @ItemName, @UomName, @ReceivedQty, @PhotoBase64, @Quality, @Brand)
       `);
   }
 }
@@ -540,7 +545,7 @@ router.get("/:id", async (req, res) => {
     const record = result.recordset[0];
     record.Attachments = await getAttachmentsFor(pool, id);
     const itemsResult = await pool.request().input("ItemsID", sql.Int, id).query(`
-      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, PhotoBase64, Quality, Brand
       FROM dbo.VehicleInOutItems
       WHERE VehicleInOutID = @ItemsID
     `);
@@ -663,7 +668,7 @@ router.get("/:id/items", async (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: "Invalid id" });
     const result = await pool.request().input("ID", sql.Int, id).query(`
-      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty
+      SELECT VehicleInOutItemID, POItemId, ItemId, ItemName, UomName, ReceivedQty, Brand
       FROM dbo.VehicleInOutItems
       WHERE VehicleInOutID = @ID
     `);
