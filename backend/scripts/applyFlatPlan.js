@@ -8,7 +8,11 @@
 // Spec:
 // { "project": "Royal Garden", "areaColumn": "BuiltUpAreaSqFt",
 //   "blocks": [ { "name": "IRIS", "floors": [1,17],
-//                 "flats": { "A": { "type": "3 BHK", "area": 1379 }, ... } } ],
+//                 "flats": { "A": { "type": "3 BHK", "area": 1379,
+//                                   "rooms": { "Balcony": 2, ... } }, ... } } ],
+// A flat's optional "rooms" = its full room list; when it differs from its
+// layout's composition it is saved as a UNIT override (Unit Composition), so
+// only that flat differs and the shared layout type is left alone.
 //   "overrides": [ { "block": "DAFFODIL", "type": "4 BHK",
 //                    "rooms": { "Bedroom": 3, "Master Bedroom": 1, ... } } ] }
 //
@@ -60,6 +64,14 @@ async function main() {
   console.log(`${APPLY ? "APPLY" : "DRY RUN"} — ${proj[0].name} (#${pid}), area column: ${areaCol || "(not set)"}\n`);
   const totals = { unitsChecked: 0, typeChanged: 0, areaChanged: 0, unchanged: 0, overridesSaved: 0, roomsAdded: 0, roomsRemoved: 0, roomsKeptWithWork: 0, problems: 0 };
 
+  const toItems = (rooms) => Object.entries(rooms).map(([alias, qty]) => {
+    const c = cats.find((x) => x.Alias.trim().toUpperCase() === alias.trim().toUpperCase());
+    if (!c) throw new Error(`room category "${alias}" not found`);
+    return { roomCategoryId: c.Id, quantity: qty };
+  });
+  const sameComp = (a, b) => JSON.stringify(a.map((c) => [c.categoryId, c.quantity])) === JSON.stringify(b.map((c) => [c.categoryId, c.quantity]));
+  totals.unitOverrides = 0;
+
   // 1. Overrides first, so the room sync below already uses them.
   const cats = await one(pool, "SELECT Id, Alias FROM dbo.RoomCategoryMaster WHERE IsActive = 1");
   for (const o of spec.overrides || []) {
@@ -99,6 +111,35 @@ async function main() {
       const typeDiff = u.LayoutTypeId !== t.layoutTypeId || u.UnitType !== t.unitType;
       const areaDiff = areaCol && want.area != null && Number(u.Area) !== Number(want.area);
       if (!typeDiff && !areaDiff) { totals.unchanged++; }
+      // Flat-specific rooms -> UNIT override, only when its effective rooms
+      // (layout + any override already in force) differ from the plan.
+      let ovrNote = "";
+      if (want.rooms) {
+        const layout = await L.resolveLayoutType(pool, { layoutTypeId: t.layoutTypeId });
+        const { composition } = await L.validateItems(pool, toItems(want.rooms));
+        const unitRef = { Id: u.Id, ProjectId: pid, BlockId: bid, FloorNo: u.FloorNo };
+        const eff = await L.getEffectiveComposition(pool, unitRef, layout);
+        const global = await L.getLayoutComposition(pool, layout.id);
+        if (!sameComp(eff.composition, composition)) {
+          if (sameComp(global, composition)) {
+            ovrNote = " [plan rooms = standard layout; existing override left for review]";
+          } else {
+            ovrNote = ` [UNIT override: ${composition.map((c) => `${c.alias} x${c.quantity}`).join(", ")}]`;
+            totals.unitOverrides++;
+            if (APPLY) {
+              const s = { layout, ScopeLevel: "UNIT", ProjectId: pid, BlockId: bid, FloorFrom: null, FloorTo: null, UnitId: u.Id };
+              const { all } = await L.validateItems(pool, toItems(want.rooms));
+              // saveOverride scopes by the unit's CURRENT layout, so the type
+              // must already be the plan's before the override is saved.
+              if (typeDiff) {
+                await pool.request().input("id", sql.Int, u.Id).input("lt", sql.Int, t.layoutTypeId).input("t", sql.NVarChar(100), t.unitType)
+                  .query("UPDATE dbo.UnitMaster SET LayoutTypeId = @lt, UnitType = @t WHERE Id = @id");
+              }
+              await L.saveOverride(pool, s, all, ACTOR);
+            }
+          }
+        }
+      }
       const tx = pool.transaction();
       await tx.begin();
       try {
@@ -116,9 +157,9 @@ async function main() {
         totals.roomsKeptWithWork += (rs.keptWithWork || []).length;
         if (typeDiff) totals.typeChanged++;
         if (areaDiff) totals.areaChanged++;
-        if (typeDiff || areaDiff || rs.created || rs.deactivated) {
+        if (typeDiff || areaDiff || rs.created || rs.deactivated || ovrNote) {
           changed++;
-          lines.push(`   ${u.UnitName}: ${u.UnitType || "-"}/${u.Area ?? "-"} -> ${t.unitType}/${want.area ?? "-"}  rooms +${(rs.created || 0) + (rs.reactivated || 0)} -${rs.deactivated || 0}${(rs.keptWithWork || []).length ? ` KEPT(work): ${rs.keptWithWork.length}` : ""}`);
+          lines.push(`   ${u.UnitName}: ${u.UnitType || "-"}/${u.Area ?? "-"} -> ${t.unitType}/${want.area ?? "-"}  rooms +${(rs.created || 0) + (rs.reactivated || 0)} -${rs.deactivated || 0}${(rs.keptWithWork || []).length ? ` KEPT(work): ${rs.keptWithWork.length}` : ""}${ovrNote}`);
         }
         if (APPLY) await tx.commit(); else await tx.rollback();
       } catch (e) {
