@@ -1,4 +1,4 @@
--- 497-ict-source-mr-link.sql
+-- 498-ict-source-mr-link.sql
 -- Lets an Inter-Company Stock Transfer be raised from a Material Request,
 -- same linkage shape migration 056 already added for PurchaseOrders
 -- (SourceMRId/SourceMRDocNo on the header, MRItemId on the line items) —
@@ -62,4 +62,4 @@ BEGIN
 END;
 GO
 
-PRINT '497-ict-source-mr-link completed.';
+PRINT '498-ict-source-mr-link completed.';
