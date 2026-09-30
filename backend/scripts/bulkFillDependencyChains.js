@@ -175,13 +175,28 @@ async function main() {
       const newId = insertRes.recordset[0].id;
 
       for (let i = 0; i < c.activities.length; i++) {
-        await tx.request()
+        const rungRes = await tx.request()
           .input("DependencyMasterId", sql.Int, newId)
           .input("ActivityId", sql.Int, c.activities[i].ActivityId)
           .input("SequenceNo", sql.Int, i + 1)
           .input("WorkType", sql.NVarChar(20), c.activities[i].WorkType).query(`
             INSERT INTO dbo.DependencyMasterActivity (DependencyMasterId, ActivityId, SequenceNo, WorkType)
+            OUTPUT INSERTED.Id AS id
             VALUES (@DependencyMasterId, @ActivityId, @SequenceNo, @WorkType)
+          `);
+        // A stub assignment row (Status defaults to PENDING) up front — same
+        // as dependencyMaster.js's own POST / route does for a rung created
+        // through the UI. Without this, the rung is invisible to Work
+        // Reporting (its GET / INNER JOINs on this table), even though it
+        // still shows up in Work Allocation's chain browser via that page's
+        // own client-side "PENDING" fallback for a missing row — see
+        // migration 487's comment, and backfillMissingActivityAssignments.js
+        // which fixed the gap this left for Luxuria's first bulk run.
+        await tx.request()
+          .input("rungId", sql.Int, rungRes.recordset[0].id)
+          .input("by", sql.NVarChar(200), actor).query(`
+            INSERT INTO dbo.DependencyActivityAssignment (DependencyMasterActivityId, CreatedBy)
+            VALUES (@rungId, @by)
           `);
       }
       await tx.commit();

@@ -20,7 +20,6 @@ interface Props {
 
 const GAP = 6;
 const MAX_PANEL = 320;
-const MIN_PANEL = 140;
 const SEARCH_BAR = 46;
 
 // A searchable dropdown that is aware of where it sits on screen: the panel
@@ -117,8 +116,17 @@ export function SearchableSelect({
   if (open && rect) {
     const spaceBelow = window.innerHeight - rect.bottom - GAP - 8;
     const spaceAbove = rect.top - GAP - 8;
-    const openUp = spaceBelow < MIN_PANEL && spaceAbove > spaceBelow;
-    const available = Math.max(MIN_PANEL, openUp ? spaceAbove : spaceBelow);
+    // Open toward whichever side actually has more room — a trigger near
+    // the bottom of a scrolled dialog (e.g. right after "Add Item" scrolls
+    // a new row into view) could have "enough" room by the old MIN_PANEL
+    // threshold while still being cramped compared to the space above.
+    const openUp = spaceAbove > spaceBelow;
+    // No floor here — clamping to a MIN_PANEL minimum used to let the panel
+    // claim more height than physically exists on that side, rendering it
+    // past the viewport edge with no way to reach the clipped part (nothing
+    // scrolls a `position: fixed` element into view). Worst case now is a
+    // shorter-than-ideal but fully reachable list.
+    const available = Math.max(60, openUp ? spaceAbove : spaceBelow);
     const panelMax = Math.min(MAX_PANEL, available);
     const width = Math.max(rect.width, 260);
     const left = Math.min(Math.max(8, rect.left), Math.max(8, window.innerWidth - width - 8));
