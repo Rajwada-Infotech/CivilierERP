@@ -1,20 +1,23 @@
 // RN port of StockTransfer.tsx's TransferHistory table (plain Stock
-// Transfers only — Inter-Company Transfer rows and the "Make GRN" flow are
-// out of scope, see stockTransferApi.ts). No Edit/Delete actions exist at
-// all: the backend has no PUT/DELETE route for StockTransfers, a transfer
-// executes immediately and is immutable, so the only row action is View.
+// Transfers only — Inter-Company Transfer rows are out of scope, see
+// stockTransferApi.ts). No Edit/Delete actions exist at all: the backend
+// has no PUT/DELETE route for StockTransfers, a transfer executes
+// immediately and is immutable, so the only row actions are View and
+// "Make GRN" (ported — see MakeGRNFromTransferModal.tsx).
 import { useMemo, useState } from "react";
-import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl } from "react-native";
+import { View, Text, FlatList, Pressable, ActivityIndicator, RefreshControl, Alert } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useInfiniteQuery } from "@tanstack/react-query";
-import { Repeat, Plus, Eye, ShieldOff, AlertCircle, ArrowRight } from "lucide-react-native";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Repeat, Plus, Eye, ShieldOff, AlertCircle, ArrowRight, FileText } from "lucide-react-native";
 import { colors } from "@/theme/colors";
 import { fonts } from "@/theme/fonts";
 import { usePageRights } from "@/hooks/usePageRights";
 import { getStockTransfers, type StockTransfer } from "@/api/stockTransferApi";
+import { getGRNsByTransfer } from "@/api/grnApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { StockTransferFormModal } from "./stockTransfer/StockTransferFormModal";
 import { StockTransferDetailModal } from "./stockTransfer/StockTransferDetailModal";
+import { MakeGRNFromTransferModal } from "./stockTransfer/MakeGRNFromTransferModal";
 
 const PAGE_SIZE = 15;
 
@@ -24,7 +27,23 @@ function fmtDate(d: string | null | undefined) {
   return isNaN(dt.getTime()) ? d : dt.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 }
 
-function TransferCard({ transfer, onView }: { transfer: StockTransfer; onView: () => void }) {
+function TransferCard({
+  transfer, onView, onMakeGRN, canMakeGRN,
+}: {
+  transfer: StockTransfer; onView: () => void; onMakeGRN: () => void; canMakeGRN: boolean;
+}) {
+  // Fetched per-card (not one useEffect loop over the whole list) so a
+  // FlatList's own windowing keeps the number of in-flight requests bounded
+  // to what's actually rendered, the way DependencyMaster's chain browser
+  // should have from the start (see backend/routes/dependencyMaster.js's
+  // GET / — the fix for that page's own version of this same N+1 pattern).
+  const { data: linkedGRNs = [] } = useQuery({
+    queryKey: ["transfer-grns", transfer.TransferID],
+    queryFn: () => getGRNsByTransfer(transfer.TransferID),
+    staleTime: 30_000,
+  });
+  const hasGRN = linkedGRNs.length > 0;
+
   return (
     <Pressable onPress={onView} className="rounded-2xl p-3.5 mb-2.5" style={{ backgroundColor: `${colors.card}80`, borderWidth: 1, borderColor: `${colors.border}99` }}>
       <View className="flex-row items-start justify-between gap-2 mb-2">
@@ -42,7 +61,27 @@ function TransferCard({ transfer, onView }: { transfer: StockTransfer; onView: (
 
       <View className="flex-row items-center justify-between pt-2" style={{ borderTopWidth: 1, borderTopColor: `${colors.border}80` }}>
         <Text style={{ color: colors.mutedForeground, fontSize: 10.5 }}>{(transfer.TransferItems ?? []).length} item{(transfer.TransferItems ?? []).length === 1 ? "" : "s"}</Text>
-        <View className="flex-row items-center gap-1"><Eye size={13} color={colors.mutedForeground} /></View>
+        <View className="flex-row items-center gap-2">
+          {hasGRN ? (
+            <View className="flex-row items-center gap-1 px-2 py-1 rounded-md" style={{ backgroundColor: `${colors.muted}80`, borderWidth: 1, borderColor: colors.border }}>
+              <FileText size={9} color={colors.mutedForeground} />
+              <Text style={{ color: colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.body.medium }}>
+                {linkedGRNs.length > 1 ? `${linkedGRNs.length} GRNs` : (linkedGRNs[0].GRNNo || linkedGRNs[0].DocNo)}
+              </Text>
+            </View>
+          ) : canMakeGRN ? (
+            <Pressable
+              onPress={(e) => { e.stopPropagation(); onMakeGRN(); }}
+              hitSlop={6}
+              className="flex-row items-center gap-1 px-2 py-1 rounded-md"
+              style={{ borderWidth: 1, borderColor: "#10b98166", backgroundColor: "#10b9810d" }}
+            >
+              <FileText size={10} color="#10b981" />
+              <Text style={{ color: "#10b981", fontSize: 9.5, fontFamily: fonts.body.medium }}>Make GRN</Text>
+            </Pressable>
+          ) : null}
+          <Eye size={13} color={colors.mutedForeground} />
+        </View>
       </View>
     </Pressable>
   );
@@ -50,10 +89,12 @@ function TransferCard({ transfer, onView }: { transfer: StockTransfer; onView: (
 
 export default function StockTransferListScreen() {
   const insets = useSafeAreaInsets();
+  const qc = useQueryClient();
   const rights = usePageRights("stock-transfers");
   const [refreshing, setRefreshing] = useState(false);
   const [viewingId, setViewingId] = useState<number | null>(null);
   const [formOpen, setFormOpen] = useState(false);
+  const [grnTransfer, setGrnTransfer] = useState<StockTransfer | null>(null);
 
   const {
     data, isLoading, isError, fetchNextPage, hasNextPage, isFetchingNextPage, refetch,
@@ -123,7 +164,14 @@ export default function StockTransferListScreen() {
           onEndReachedThreshold={0.4}
           onEndReached={() => { if (hasNextPage && !isFetchingNextPage) fetchNextPage(); }}
           ListHeaderComponent={ListHeader}
-          renderItem={({ item }) => <TransferCard transfer={item} onView={() => setViewingId(item.TransferID)} />}
+          renderItem={({ item }) => (
+            <TransferCard
+              transfer={item}
+              onView={() => setViewingId(item.TransferID)}
+              onMakeGRN={() => setGrnTransfer(item)}
+              canMakeGRN={rights.canCreate}
+            />
+          )}
           ListEmptyComponent={
             <View className="items-center py-16">
               <AlertCircle size={20} color={`${colors.mutedForeground}80`} />
@@ -138,6 +186,16 @@ export default function StockTransferListScreen() {
 
       <StockTransferFormModal visible={formOpen} onClose={() => setFormOpen(false)} />
       <StockTransferDetailModal recordId={viewingId} onClose={() => setViewingId(null)} />
+      <MakeGRNFromTransferModal
+        transfer={grnTransfer}
+        onClose={() => setGrnTransfer(null)}
+        onSuccess={(grnNo) => {
+          const transferId = grnTransfer?.TransferID;
+          setGrnTransfer(null);
+          if (transferId != null) qc.invalidateQueries({ queryKey: ["transfer-grns", transferId] });
+          Alert.alert("GRN created", `${grnNo} was created from this transfer.`);
+        }}
+      />
     </View>
   );
 }
