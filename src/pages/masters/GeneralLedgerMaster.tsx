@@ -249,7 +249,13 @@ const GeneralLedgerMaster: React.FC = () => {
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("");
   const [page, setPage] = useState(1);
-  const limit = 10;
+  // Chart of accounts is bounded/human-curated (hundreds, not the
+  // hundreds-of-thousands a real transactional table can reach) — one
+  // request for "basically everything" (backend caps at 2000) instead of
+  // 10-at-a-time, so DataTable's own pagination below is the only paging
+  // control a user sees instead of two disagreeing ones stacked on each
+  // other.
+  const limit = 2000;
   const [sortField] = useState<
     "LHeadName" | "LHeadCode" | "GroupName"
   >("LHeadName");
@@ -329,7 +335,6 @@ const GeneralLedgerMaster: React.FC = () => {
     () => ledgersData?.data ?? [],
     [ledgersData],
   );
-  const totalPages = Math.max(ledgersData?.totalPages ?? 1, 1);
   const totalRecords = ledgersData?.total ?? ledgers.length;
 
   // ── Local UI state ─────────────────────────────────────────────────────────
@@ -795,27 +800,6 @@ const GeneralLedgerMaster: React.FC = () => {
               row.original.LHeadId === editingId ? "bg-primary/5" : ""
             }
           />
-          </div>
-          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
-            <span className="text-xs text-muted-foreground">
-              Page {page} of {totalPages}
-            </span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setPage((p) => Math.max(p - 1, 1))}
-                disabled={page <= 1}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Previous
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
-                disabled={page >= totalPages}
-                className="rounded-lg border border-border px-3 py-1.5 text-xs font-heading text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
-              >
-                Next
-              </button>
-            </div>
           </div>
         </div>
       </FinanceShell>
