@@ -2550,7 +2550,7 @@ const CrmApplication: React.FC = () => {
               )}
               {isPlottedProject && selectedPlots.length > 0 && (
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs">
-                  <p className="font-semibold text-foreground flex items-center gap-1.5 mb-1"><MapIcon size={12} className="text-primary" /> Plots & Price</p>
+                  <p className="font-semibold text-foreground flex items-center gap-1.5 mb-1"><MapPin size={12} className="text-primary" /> Plots & Price</p>
                   <p className="text-muted-foreground">{selectedPlots.map((plot: any) => plot.PlotName).join(", ")} · {selectedPlots.reduce((sum: number, plot: any) => sum + (Number(plot.AreaSqFt) || 0), 0).toLocaleString("en-IN")} sqft combined</p>
                 </div>
               )}
