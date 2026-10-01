@@ -73,8 +73,10 @@ import {
   Package,
   MessageCircle,
   Printer,
+  FileDown,
 } from "lucide-react";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
+import { downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
@@ -1231,6 +1233,49 @@ export default function VehicleInOut() {
       win.focus();
       win.print();
     };
+  };
+
+  // Same content as handlePrintVehicleRec above, as a downloaded .pdf
+  // instead of the browser's print dialog — built from the same fields so
+  // the two can never show different data for the same record.
+  const handleGeneratePdfVehicleRec = (rec: any) => {
+    const toastId = toast.loading("Generating PDF...");
+    const sections = [
+      {
+        title: "Overview",
+        fields: [
+          { label: "Company", value: rec.CompanyName || "—" },
+          { label: "Project", value: rec.ProjectName || "—" },
+          { label: "Supplier", value: rec.SupplierName || "—" },
+          { label: "PO No", value: rec.PONumber || "—" },
+          { label: "Vehicle No", value: rec.VehicleNo || "—" },
+          { label: "Challan No", value: rec.ChallanNo || "—" },
+          { label: "Entry Time", value: rec.EntryTime ? new Date(rec.EntryTime).toLocaleString("en-IN") : "—" },
+          { label: "Exit Time", value: rec.ExitTime ? new Date(rec.ExitTime).toLocaleString("en-IN") : "—" },
+        ],
+      },
+      ...(Array.isArray(rec.Items) && rec.Items.length > 0
+        ? [{
+            title: `Items (${rec.Items.length})`,
+            fields: rec.Items.map((it: any, i: number) => ({
+              label: `${i + 1}. ${it.ItemName ?? "—"}${it.Brand ? ` (${it.Brand})` : ""}`,
+              value: `${it.ReceivedQty ?? it.Quantity ?? "—"} ${it.UomName ?? ""}`.trim(),
+            })),
+          }]
+        : []),
+      ...(rec.Remarks ? [{ title: "Remarks", fields: [{ label: "Remarks", value: rec.Remarks }] }] : []),
+    ];
+
+    downloadMasterPreviewPdf({
+      title: rec.DocNo || "—",
+      subtitle: "Vehicle In/Out",
+      code: rec.DocNo,
+      status: rec.Status,
+      sections,
+      filename: `${(rec.DocNo || rec.VehicleInOutID || "vehicle-in-out").replace(/[^\w-]+/g, "_")}.pdf`,
+    })
+      .then(() => toast.success("PDF downloaded", { id: toastId }))
+      .catch(() => toast.error("Could not generate PDF", { id: toastId }));
   };
 
   // ── Camera capture ───────────────────────────────────────────────────────────
@@ -2655,6 +2700,12 @@ export default function VehicleInOut() {
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-sm font-medium hover:bg-muted/80 transition-colors"
                   >
                     <Printer size={13} /> Print
+                  </button>
+                  <button
+                    onClick={() => handleGeneratePdfVehicleRec(viewingRec)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-sm font-medium hover:bg-muted/80 transition-colors"
+                  >
+                    <FileDown size={13} /> Generate PDF
                   </button>
                   {rights.canEdit && (
                     <button
