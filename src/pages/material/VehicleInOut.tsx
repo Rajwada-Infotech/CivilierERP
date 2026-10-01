@@ -293,6 +293,7 @@ function VehicleCard({
   onView,
   onEdit,
   onDelete,
+  onGeneratePdf,
   canEdit = true,
   canDelete = true,
 }: {
@@ -300,6 +301,7 @@ function VehicleCard({
   onView: (r: any) => void;
   onEdit: (r: any) => void;
   onDelete: (id: number) => void;
+  onGeneratePdf: (r: any) => void;
   canEdit?: boolean;
   canDelete?: boolean;
 }) {
@@ -385,6 +387,13 @@ function VehicleCard({
         >
           <Eye size={15} />
         </button>
+        <button
+          onClick={() => onGeneratePdf(rec)}
+          className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-lg transition-colors"
+          title="Generate PDF"
+        >
+          <FileDown size={15} />
+        </button>
         {canEdit && (
           <button
             onClick={() => onEdit(rec)}
@@ -445,6 +454,7 @@ const buildEmpty = (activeFinYear?: string) => ({
 let _onView: (r: any) => void = () => {};
 let _onEdit: (r: any) => void = () => {};
 let _onDelete: (id: number) => void = () => {};
+let _onGeneratePdf: (r: any) => void = () => {};
 let _canEdit = true;
 let _canDelete = true;
 
@@ -564,6 +574,13 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
               title="View details"
             >
               <Eye size={15} />
+            </button>
+            <button
+              onClick={() => _onGeneratePdf(rec)}
+              className="p-1 rounded text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+              title="Generate PDF"
+            >
+              <FileDown size={15} />
             </button>
             {_canEdit && (
               <button
@@ -1238,8 +1255,23 @@ export default function VehicleInOut() {
   // Same content as handlePrintVehicleRec above, as a downloaded .pdf
   // instead of the browser's print dialog — built from the same fields so
   // the two can never show different data for the same record.
-  const handleGeneratePdfVehicleRec = (rec: any) => {
+  //
+  // The list/grid row (list query's SELECT) never carries Items — only
+  // GET /:id does — so a rec passed straight from the grid's Actions
+  // column here always lacks Items. Refetch the full record so the PDF
+  // includes Received Items regardless of whether this was triggered from
+  // the grid row or the already-fully-loaded view modal.
+  const handleGeneratePdfVehicleRec = async (recIn: any) => {
     const toastId = toast.loading("Generating PDF...");
+    let rec = recIn;
+    if (!Array.isArray(recIn.Items) && recIn.VehicleInOutID) {
+      try {
+        rec = await vehApi.getVehicleInOut(recIn.VehicleInOutID);
+      } catch {
+        // fall back to whatever was passed in — PDF still generates,
+        // just without the Items section.
+      }
+    }
     const sections = [
       {
         title: "Overview",
@@ -1258,7 +1290,7 @@ export default function VehicleInOut() {
         ? [{
             title: `Items (${rec.Items.length})`,
             fields: rec.Items.map((it: any, i: number) => ({
-              label: `${i + 1}. ${it.ItemName ?? "—"}${it.Brand ? ` (${it.Brand})` : ""}`,
+              label: `${i + 1}. ${it.ItemName ?? "—"}${it.Brand ? ` (${it.Brand})` : ""}${it.Quality ? ` [${it.Quality}]` : ""}`,
               value: `${it.ReceivedQty ?? it.Quantity ?? "—"} ${it.UomName ?? ""}`.trim(),
             })),
           }]
@@ -1277,6 +1309,7 @@ export default function VehicleInOut() {
       .then(() => toast.success("PDF downloaded", { id: toastId }))
       .catch(() => toast.error("Could not generate PDF", { id: toastId }));
   };
+  _onGeneratePdf = handleGeneratePdfVehicleRec;
 
   // ── Camera capture ───────────────────────────────────────────────────────────
   // Shared modal, two targets: capturingPoItemId set → the item's photo is
@@ -2332,6 +2365,7 @@ export default function VehicleInOut() {
                               onView={_onView}
                               onEdit={_onEdit}
                               onDelete={_onDelete}
+                              onGeneratePdf={_onGeneratePdf}
                               canEdit={rights.canEdit}
                               canDelete={rights.canDelete}
                             />
