@@ -416,6 +416,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     const overviewFields: { label: string; value?: string | number | boolean | null }[] = [
       { label: usesRungDetail ? "Start Date" : "Date", value: fmtDate(item.RecordDate) },
       { label: "Party", value: party },
+      ...(item.ProjectName ? [{ label: "Project", value: item.ProjectName }] : []),
       { label: "Created By", value: item.CreatedBy || "—" },
       usesRungDetail
         ? { label: "End Date", value: fmtDate(rungDetail?.assignment?.endDate ?? null) }
@@ -639,6 +640,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                 <FormField label={usesRungDetail ? "Start Date" : "Date"} value={fmtDate(item.RecordDate)} />
                 <FormField label="Party" value={party} />
+                {item.ProjectName && <FormField label="Project" value={item.ProjectName} />}
                 <FormField label="Created By" value={item.CreatedBy || "—"} />
                 {usesRungDetail ? (
                   <FormField label="End Date" value={fmtDate(rungDetail?.assignment?.endDate ?? null)} />
