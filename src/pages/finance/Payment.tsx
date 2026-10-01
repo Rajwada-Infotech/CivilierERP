@@ -4746,6 +4746,7 @@ const Payment: React.FC = () => {
                           <ApprovalStatusChain
                             table="NewPayment"
                             recordId={rec.id}
+                            fallback={<StatusBadge status={rec.status} />}
                           />
                         </div>
                         <div className="flex items-center gap-1.5">

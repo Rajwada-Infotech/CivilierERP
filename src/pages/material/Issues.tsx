@@ -939,6 +939,7 @@ export default function Issues() {
                 searchable={false}
                 paginated={false}
                 emptyMessage="No material issues found. Click 'New Issue' to create one."
+                getRowId={(r: any) => String(r.IssueId)}
               />
               {totalPages > 1 && (
                 <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">

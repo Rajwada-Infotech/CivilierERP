@@ -17,6 +17,7 @@ import {
 import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { Button } from "@/components/ui/button";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
 import { printStatusLabel } from "@/utils/printStatus";
 import {
   Hammer,
@@ -1347,7 +1348,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
       header: "Status",
       cell: ({ getValue, row }) => (
         <div>
-          <ApprovalStatusChain table="WorkDone" recordId={row.original.ID} />
+          <ApprovalStatusChain table="WorkDone" recordId={row.original.ID} fallback={<StatusBadge status={getValue() as string} />} />
         </div>
       ),
     },
@@ -1504,6 +1505,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                   searchable
                   paginated
                   emptyMessage="No work done entries found."
+                  getRowId={(r: any) => String(r.ID)}
                 />
               )}
             </div>

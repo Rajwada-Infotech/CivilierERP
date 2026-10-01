@@ -580,6 +580,7 @@ export default function Contract() {
                 paginated={false}
                 emptyMessage="No contracts yet. Click 'New Contract' to create one."
                 columns={columns}
+                getRowId={(r: any) => String(r.ContractId)}
               />
             </CardContent>
           </Card>

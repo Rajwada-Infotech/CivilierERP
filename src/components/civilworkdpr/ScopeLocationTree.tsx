@@ -39,7 +39,7 @@ const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "bas
 const floorRank = (f: string) => (f === "G" ? -1 : Number.isFinite(Number(f)) ? Number(f) : Number.MAX_SAFE_INTEGER);
 const floorLabel = (f: string) => (!f ? "No floor" : f === "G" ? "Ground Floor" : `Floor ${f}`);
 
-function buildTree<T extends ScopeLocatable>(rows: T[]): TreeNode<T>[] {
+function buildTree<T extends ScopeLocatable>(rows: T[], getCount: (item: T) => number): TreeNode<T>[] {
   const root = new Map<string, TreeNode<T>>();
   const child = (map: Map<string, TreeNode<T>>, key: string, label: string) => {
     let n = map.get(key);
@@ -56,7 +56,8 @@ function buildTree<T extends ScopeLocatable>(rows: T[]): TreeNode<T>[] {
     const u = child(kidMap(f), `${f.key}/u${r.flatId}`, r.flatName || `Unit ${r.flatId}`);
     const rm = child(kidMap(u), `${u.key}/r${r.roomId}`, r.roomName || `Room ${r.roomId}`);
     rm.items.push(r);
-    for (const n of [p, b, f, u, rm]) n.count++;
+    const c = getCount(r);
+    for (const n of [p, b, f, u, rm]) n.count += c;
   }
 
   const finish = (map: Map<string, TreeNode<T>>, depth: number): TreeNode<T>[] => {
@@ -88,12 +89,19 @@ interface Props<T extends ScopeLocatable> {
    *  caller that's already filtered `rows` down to search matches, so a hit
    *  nested under a collapsed node isn't hidden from view. */
   forceExpand?: boolean;
+  /** How much one row of `rows` counts for at every level above it —
+   *  defaults to 1 per row (the original behaviour, every existing caller
+   *  unaffected). Pass this when `rows` is already a server-side
+   *  aggregate (one row per room with an activityCount, say) rather than
+   *  one row per actual item, so the tree's badges show the real total
+   *  instead of the number of summary rows. */
+  getCount?: (item: T) => number;
 }
 
 export function ScopeLocationTree<T extends ScopeLocatable>({
-  rows, renderLeaf, countLabel, countLabelPlural = `${countLabel}s`, forceExpand = false,
+  rows, renderLeaf, countLabel, countLabelPlural = `${countLabel}s`, forceExpand = false, getCount = () => 1,
 }: Props<T>) {
-  const tree = useMemo(() => buildTree(rows), [rows]);
+  const tree = useMemo(() => buildTree(rows, getCount), [rows, getCount]);
   // Projects start open so the page never looks empty; deeper levels start closed.
   const [open, setOpen] = useState<Set<string>>(() => new Set(tree.map((n) => n.key)));
 

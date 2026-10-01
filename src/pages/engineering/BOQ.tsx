@@ -1831,7 +1831,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
             >
               {record.BoqNo || record.DocNo}
             </span>
-            <ApprovalStatusChain table="BOQ" recordId={record.BoqID} />
+            <ApprovalStatusChain table="BOQ" recordId={record.BoqID} fallback={<StatusBadge status={record.Status} />} />
           </div>
 
           {/* Right-side actions */}
@@ -2692,6 +2692,7 @@ export default function BOQ() {
                     searchable={false}
                     paginated={false}
                     emptyMessage="No BOQs found. Adjust your filters or create a new one."
+                    getRowId={(r: any) => String(r.BoqID)}
                   />
                   {totalPages > 1 && (
                     <div className="flex items-center justify-between border-t p-4 text-sm">

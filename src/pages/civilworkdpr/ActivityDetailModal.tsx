@@ -401,11 +401,16 @@ function PhotosTab({ rungId }: { rungId: number }) {
             </button>
           </div>
         )}
+        {/* No `capture` attribute here — on mobile browsers that forces the
+            OS straight into the camera app, skipping the gallery/file
+            picker entirely, which is exactly backwards for a button whose
+            whole point is "let me pick an existing photo instead." Desktop
+            ignores `capture` either way, which is why this only ever broke
+            on phones. */}
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
           multiple
           className="hidden"
           onChange={(e) => {
