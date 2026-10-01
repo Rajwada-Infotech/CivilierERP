@@ -13,6 +13,7 @@ import { getLayoutTypes, unitTypeOptions, LAYOUT_TYPES_QUERY_KEY, type LayoutTyp
 
 const PLOT_API = "/api/plot-master";
 const SETUP_API = "/api/crm/project-auto-setup";
+const FACING_API = "/api/plot-facing-master";
 const ALL = "__all__";
 
 type Plot = {
@@ -24,6 +25,16 @@ type Plot = {
   LockBookingNo?: string | null; LockApplicationNo?: string | null; LockHoldId?: number | null; AdjacentPlotCount?: number;
 };
 type ConstructedAssetKind = { Id: number; Code: string; Name: string; SortOrder?: number; IsActive?: boolean };
+// Plot facing is master data (dbo.PlotFacingMaster), not a typed string, so
+// "North"/"north"/"N" cannot all coexist and a facing premium has somewhere
+// to live. Managed from inside this page rather than a separate screen.
+type PlotFacing = { Id: number; Code: string; Name: string; PremiumPercent: number; SortOrder?: number; IsActive?: boolean; PlotCount?: number };
+
+async function fetchFacings(all = false): Promise<PlotFacing[]> {
+  const response = await fetchWithAuth(`${FACING_API}${all ? "?all=1" : ""}`);
+  if (!response.ok) return [];
+  return response.json().catch(() => []);
+}
 
 async function fetchPlots(): Promise<Plot[]> {
   const response = await fetchWithAuth(PLOT_API);
@@ -72,11 +83,48 @@ const CrmPlotMaster: React.FC = () => {
   const [savingAssetKind, setSavingAssetKind] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [facingsOpen, setFacingsOpen] = useState(false);
+  const [facingDraft, setFacingDraft] = useState<Partial<PlotFacing>>({});
+  const [savingFacing, setSavingFacing] = useState(false);
   const [detailPlot, setDetailPlot] = useState<Plot | null>(null);
   const [plotDraft, setPlotDraft] = useState<Record<string, any>>({});
   const [savingPlot, setSavingPlot] = useState(false);
   const [creatingPlot, setCreatingPlot] = useState(false);
   const { data: plots = [], isLoading, error, refetch, isFetching } = useQuery({ queryKey: ["plot-master"], queryFn: fetchPlots, staleTime: 30_000 });
+  // Active facings feed the edit dropdown; the manage dialog asks for all so
+  // a deactivated one is still visible to re-enable.
+  const { data: facings = [] } = useQuery({ queryKey: ["plot-facings"], queryFn: () => fetchFacings(false), staleTime: 5 * 60_000 });
+  const { data: allFacings = [] } = useQuery({ queryKey: ["plot-facings", "all"], queryFn: () => fetchFacings(true), enabled: facingsOpen });
+
+  const saveFacing = async () => {
+    const code = String(facingDraft.Code || "").trim().toUpperCase();
+    const name = String(facingDraft.Name || "").trim();
+    if (!code || !name) { toast.error("Code and name are both required"); return; }
+    setSavingFacing(true);
+    try {
+      const editing = facingDraft.Id != null;
+      const response = await fetchWithAuth(editing ? `${FACING_API}/${facingDraft.Id}` : FACING_API, {
+        method: editing ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...facingDraft, Code: code, Name: name }),
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Could not save the facing");
+      toast.success(editing ? "Facing updated" : "Facing added");
+      setFacingDraft({});
+      queryClient.invalidateQueries({ queryKey: ["plot-facings"] });
+    } catch (e: any) { toast.error(e.message); } finally { setSavingFacing(false); }
+  };
+
+  const removeFacing = async (facing: PlotFacing) => {
+    try {
+      const response = await fetchWithAuth(`${FACING_API}/${facing.Id}`, { method: "DELETE" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || "Could not remove the facing");
+      toast.success("Facing removed");
+      queryClient.invalidateQueries({ queryKey: ["plot-facings"] });
+    } catch (e: any) { toast.error(e.message); }
+  };
   const { data: layoutTypes = [] } = useQuery<LayoutType[]>({ queryKey: LAYOUT_TYPES_QUERY_KEY, queryFn: getLayoutTypes, staleTime: 60_000 });
   const { data: constructedAssetKinds = [] } = useQuery<ConstructedAssetKind[]>({ queryKey: ["constructed-asset-kinds"], queryFn: fetchConstructedAssetKinds, staleTime: 60_000 });
   const { data: managedAssetKinds = [] } = useQuery<ConstructedAssetKind[]>({ queryKey: ["constructed-asset-kinds", "manage"], queryFn: fetchManagedConstructedAssetKinds, staleTime: 30_000 });
@@ -246,12 +294,91 @@ const CrmPlotMaster: React.FC = () => {
         <div className={`${viewMode === "map" ? "hidden " : ""}border border-border rounded-lg overflow-x-auto`}>
           <table className="w-full min-w-[980px] text-sm"><thead className="bg-muted/50 text-muted-foreground text-xs"><tr><th className="w-10 px-3 py-2 text-left"><input type="checkbox" checked={selectable.length > 0 && selectable.every((plot) => selectedIds.includes(plot.Id))} onChange={toggleAll} aria-label="Select available plots" /></th><th className="px-3 py-2 text-left font-medium">Plot</th><th className="px-3 py-2 text-left font-medium">Project / Block</th><th className="px-3 py-2 text-left font-medium">Survey</th><th className="px-3 py-2 text-right font-medium">Area</th><th className="px-3 py-2 text-right font-medium">Rate</th><th className="px-3 py-2 text-left font-medium">Attributes</th><th className="px-3 py-2 text-left font-medium">Status</th><th className="px-3 py-2 text-right font-medium">Actions</th></tr></thead><tbody>{isLoading ? <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">Loading plots...</td></tr> : error ? <tr><td colSpan={9} className="p-8 text-center text-destructive">Could not load Plot Master.</td></tr> : filtered.length === 0 ? <tr><td colSpan={9} className="p-8 text-center text-muted-foreground">No plots match these filters.</td></tr> : filtered.map((plot) => { const status = plotStatus(plot); const canSelect = status.label === "Available"; return <tr key={plot.Id} className="border-t border-border hover:bg-muted/30"><td className="px-3 py-2"><input type="checkbox" disabled={!canSelect} checked={selectedIds.includes(plot.Id)} onChange={() => togglePlot(plot)} aria-label={`Select ${plot.PlotName}`} /></td><td className="px-3 py-2 font-medium">{plot.PlotName}<span className="block text-[11px] text-muted-foreground">{plot.PlotNo}</span></td><td className="px-3 py-2">{plot.ProjectName}<span className="block text-[11px] text-muted-foreground">{plot.BlockName}</span></td><td className="px-3 py-2 text-muted-foreground">{plot.SurveyNo || "-"}</td><td className="px-3 py-2 text-right tabular-nums">{plot.AreaSqFt ? `${Number(plot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "-"}</td><td className="px-3 py-2 text-right tabular-nums">{plot.RatePerSqFt ? `Rs. ${Number(plot.RatePerSqFt).toLocaleString("en-IN")}` : "-"}</td><td className="px-3 py-2 text-xs text-muted-foreground">{[plot.Facing, plot.IsCornerPlot ? "Corner" : "", plot.RoadWidthFt ? `${plot.RoadWidthFt} ft road` : ""].filter(Boolean).join(" · ") || "-"}</td><td className="px-3 py-2"><span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ${status.cls}`}>{status.label}</span></td><td className="px-3 py-2"><div className="flex justify-end gap-1"><button onClick={() => openView(plot)} className="p-1.5 rounded hover:bg-muted" title="View plot"><Eye size={15} /></button>{rights.canEdit && <button onClick={() => openEdit(plot)} disabled={!canSelect} className="p-1.5 rounded hover:bg-muted disabled:opacity-35" title={canSelect ? "Edit plot" : "Only available plots can be edited"}><Pencil size={15} /></button>}{rights.canDelete && <button onClick={() => deletePlot(plot)} disabled={!canSelect} className="p-1.5 rounded text-destructive hover:bg-destructive/10 disabled:opacity-35" title={canSelect ? "Delete plot" : "Only available plots can be deleted"}><Trash2 size={15} /></button>}</div></td></tr>; })}</tbody></table>
         </div>
+      {/* Facing master, managed in place. Deliberately a dialog on this page
+          rather than its own screen: a facing has no meaning outside plots, and
+          a separate master page would be one more thing to find and permission
+          for a list of eight rows. */}
+      <Dialog open={facingsOpen} onOpenChange={(open) => { setFacingsOpen(open); if (!open) setFacingDraft({}); }}>
+        <DialogContent accent="crm" className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Settings2 size={17} className="text-primary" /> Plot facings</DialogTitle>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              The premium is added to a plot&apos;s rate, so what a direction is worth lives here rather than in pricing code.
+            </p>
+          </DialogHeader>
+
+          <div className="rounded-lg border border-border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-muted-foreground text-xs">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Code</th>
+                  <th className="px-3 py-2 text-left font-medium">Name</th>
+                  <th className="px-3 py-2 text-right font-medium">Premium %</th>
+                  <th className="px-3 py-2 text-right font-medium">Plots</th>
+                  <th className="px-3 py-2 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allFacings.map((facing) => (
+                  <tr key={facing.Id} className={`border-t border-border ${facing.IsActive === false ? "opacity-50" : ""}`}>
+                    <td className="px-3 py-2 font-mono text-xs">{facing.Code}</td>
+                    <td className="px-3 py-2">{facing.Name}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{Number(facing.PremiumPercent) || 0}%</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{facing.PlotCount ?? 0}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex justify-end gap-1">
+                        <button onClick={() => setFacingDraft(facing)} className="p-1.5 rounded hover:bg-muted" title="Edit"><Pencil size={14} /></button>
+                        {/* Disabled with a reason rather than hidden, so it is
+                            clear the facing is in use rather than unremovable. */}
+                        <button onClick={() => removeFacing(facing)} disabled={(facing.PlotCount ?? 0) > 0}
+                          title={(facing.PlotCount ?? 0) > 0 ? `In use by ${facing.PlotCount} plot(s)` : "Remove"}
+                          className="p-1.5 rounded text-destructive hover:bg-destructive/10 disabled:opacity-35"><Trash2 size={14} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {allFacings.length === 0 && <tr><td colSpan={5} className="p-6 text-center text-muted-foreground">No facings defined yet.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-4 items-end pt-2">
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">Code</label>
+              <input value={facingDraft.Code || ""} onChange={(event) => setFacingDraft((draft) => ({ ...draft, Code: event.target.value.toUpperCase() }))}
+                placeholder="NE" className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm font-mono" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">Name</label>
+              <input value={facingDraft.Name || ""} onChange={(event) => setFacingDraft((draft) => ({ ...draft, Name: event.target.value }))}
+                placeholder="North-East" className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-muted-foreground">Premium %</label>
+              <input type="number" step="0.001" value={facingDraft.PremiumPercent ?? ""} onChange={(event) => setFacingDraft((draft) => ({ ...draft, PremiumPercent: event.target.value as any }))}
+                className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm tabular-nums" />
+            </div>
+            <button onClick={saveFacing} disabled={savingFacing}
+              className="h-9 px-3 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">
+              {savingFacing ? "Saving..." : facingDraft.Id != null ? "Update" : "Add facing"}
+            </button>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-3 border-t border-border">
+            {facingDraft.Id != null && (
+              <button onClick={() => setFacingDraft({})} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">New instead</button>
+            )}
+            <button onClick={() => setFacingsOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Close</button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       </CrmShell>
       <Dialog open={convertOpen} onOpenChange={setConvertOpen}><DialogContent accent="crm" className="max-w-md"><DialogHeader><DialogTitle className="flex items-center gap-2"><CheckCircle2 size={17} className="text-emerald-600" /> Convert plots to Unit Master</DialogTitle></DialogHeader><div className="space-y-3"><div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3 text-sm"><p className="font-medium">{selectedPlots.map((plot) => plot.PlotName).join(", ")}</p><p className="mt-1 text-xs text-muted-foreground">{selectedPlots[0]?.ProjectName} · {selectedPlots[0]?.BlockName} · {totalArea.toLocaleString("en-IN")} sq ft combined area</p></div><div><label className="text-xs text-muted-foreground block mb-1">Constructed unit name</label><input autoFocus value={unitName} onChange={(event) => setUnitName(event.target.value)} className="w-full h-9 rounded-lg border border-border bg-background px-3 text-sm" /></div><div><label className="text-xs text-muted-foreground block mb-1">Unit type</label><Select value={unitType || undefined} onValueChange={setUnitType}><SelectTrigger><SelectValue placeholder="Select a configured unit type" /></SelectTrigger><SelectContent>{unitTypeOptionsForConversion.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div><div><label className="text-xs text-muted-foreground block mb-1">Constructed asset kind</label><Select value={unitKind || undefined} onValueChange={setUnitKind}><SelectTrigger><SelectValue placeholder="Select a configured asset kind" /></SelectTrigger><SelectContent>{constructedAssetKinds.map((kind) => <SelectItem key={kind.Id} value={kind.Code}>{kind.Name}</SelectItem>)}</SelectContent></Select></div><p className="text-xs text-muted-foreground flex gap-1.5"><Lock size={13} className="shrink-0" /> The source plots remain in Plot Master as converted history and can no longer be booked or edited as plots.</p><div className="flex justify-end gap-2 pt-1"><button onClick={() => setConvertOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button><button onClick={convert} disabled={converting || !unitName.trim() || !unitType || !unitKind} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40">{converting ? "Converting..." : "Create Unit Master record"}</button></div></div></DialogContent></Dialog>
       <Dialog open={adjacencyOpen} onOpenChange={setAdjacencyOpen}><DialogContent accent="crm" className="max-w-lg"><DialogHeader><DialogTitle className="flex items-center gap-2"><Network size={17} className="text-primary" /> Plot neighbours</DialogTitle></DialogHeader><div className="space-y-3"><p className="text-sm"><span className="font-medium">{adjacencySource?.PlotName}</span><span className="text-muted-foreground"> can be combined only with the selected neighbouring plots.</span></p><div className="max-h-72 overflow-y-auto divide-y divide-border rounded-lg border border-border">{adjacencyCandidates.length ? adjacencyCandidates.map((plot) => <label key={plot.Id} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm hover:bg-muted/40"><input type="checkbox" checked={adjacentIds.includes(plot.Id)} onChange={() => setAdjacentIds((ids) => ids.includes(plot.Id) ? ids.filter((id) => id !== plot.Id) : [...ids, plot.Id])} /><span className="font-medium">{plot.PlotName}</span><span className="ml-auto text-xs text-muted-foreground">{plot.AreaSqFt ? `${Number(plot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "Area not set"}</span></label>) : <p className="p-4 text-sm text-muted-foreground">No eligible plots in this block.</p>}</div><div className="flex justify-end gap-2"><button onClick={() => setAdjacencyOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button><button onClick={saveAdjacency} disabled={savingAdjacency} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">{savingAdjacency ? "Saving..." : "Save neighbours"}</button></div></div></DialogContent></Dialog>
       <Dialog open={assetKindsOpen} onOpenChange={setAssetKindsOpen}><DialogContent accent="crm" className="max-w-2xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><Settings2 size={17} className="text-primary" /> Constructed asset kinds</DialogTitle></DialogHeader><div className="grid gap-4 md:grid-cols-[1fr_280px]"><div className="max-h-80 overflow-y-auto divide-y divide-border rounded-lg border border-border">{managedAssetKinds.map((kind) => <button key={kind.Id} onClick={() => editAssetKind(kind)} className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted/40"><span className="font-medium">{kind.Name}</span><span className="text-xs text-muted-foreground">{kind.Code}</span><span className="ml-auto text-xs text-muted-foreground">{kind.IsActive === false ? "Inactive" : "Active"}</span></button>)}</div><div className="space-y-3"><div><label className="mb-1 block text-xs text-muted-foreground">Name</label><input value={assetKindDraft.Name} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, Name: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div><div><label className="mb-1 block text-xs text-muted-foreground">Code</label><input value={assetKindDraft.Code} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, Code: event.target.value.toUpperCase() }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div><div><label className="mb-1 block text-xs text-muted-foreground">Sort order</label><input type="number" min="0" max="9999" value={assetKindDraft.SortOrder} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, SortOrder: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div>{assetKindDraft.Id > 0 && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={assetKindDraft.IsActive} onChange={(event) => setAssetKindDraft((draft) => ({ ...draft, IsActive: event.target.checked }))} /> Active</label>}<div className="flex justify-end gap-2"><button onClick={() => editAssetKind()} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">New</button><button onClick={saveAssetKind} disabled={savingAssetKind || !assetKindDraft.Name.trim() || !assetKindDraft.Code.trim()} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">{savingAssetKind ? "Saving..." : "Save"}</button></div></div></div></DialogContent></Dialog>
       <Dialog open={detailOpen} onOpenChange={setDetailOpen}><DialogContent accent="crm" className="max-w-xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><Eye size={17} className="text-primary" /> {detailPlot?.PlotName || "Plot details"}</DialogTitle></DialogHeader>{detailPlot && <div className="space-y-4 text-sm"><div className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg border border-border p-3"><div><p className="text-xs text-muted-foreground">Project / Block</p><p>{detailPlot.ProjectName} / {detailPlot.BlockName}</p></div><div><p className="text-xs text-muted-foreground">Status</p><p>{plotStatus(detailPlot).label}</p></div><div><p className="text-xs text-muted-foreground">Plot number</p><p>{detailPlot.PlotNo}</p></div><div><p className="text-xs text-muted-foreground">Survey number</p><p>{detailPlot.SurveyNo || "-"}</p></div></div><div className="grid grid-cols-2 gap-x-6 gap-y-3"><div><p className="text-xs text-muted-foreground">Area</p><p>{detailPlot.AreaSqFt ? `${Number(detailPlot.AreaSqFt).toLocaleString("en-IN")} sq ft` : "-"}</p></div><div><p className="text-xs text-muted-foreground">Rate</p><p>{detailPlot.RatePerSqFt ? `Rs. ${Number(detailPlot.RatePerSqFt).toLocaleString("en-IN")} / sq ft` : "-"}</p></div><div><p className="text-xs text-muted-foreground">Dimensions</p><p>{detailPlot.PlotWidthFt || "-"} ft x {detailPlot.PlotDepthFt || "-"} ft</p></div><div><p className="text-xs text-muted-foreground">Facing / road</p><p>{detailPlot.Facing || "-"}{detailPlot.RoadWidthFt ? ` / ${detailPlot.RoadWidthFt} ft` : ""}</p></div><div><p className="text-xs text-muted-foreground">Guideline rate</p><p>{detailPlot.GuidelineRatePerSqFt ? `Rs. ${Number(detailPlot.GuidelineRatePerSqFt).toLocaleString("en-IN")}` : "-"}</p></div><div><p className="text-xs text-muted-foreground">Neighbours</p><p>{detailPlot.AdjacentPlotCount || 0}</p></div></div>{detailPlot.ConvertedUnitId && <div className="rounded-lg border border-violet-500/30 bg-violet-500/5 p-3"><p className="text-xs text-muted-foreground">Converted Unit Master record</p><p className="font-medium">{detailPlot.ConvertedUnitName || `Unit #${detailPlot.ConvertedUnitId}`}</p></div>}<div className="flex justify-end gap-2"><button onClick={() => setDetailOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Close</button>{rights.canEdit && plotStatus(detailPlot).label === "Available" && <button onClick={() => { setDetailOpen(false); openEdit(detailPlot); }} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90"><Pencil size={13} /> Edit</button>}</div></div>}</DialogContent></Dialog>
-      <Dialog open={editOpen} onOpenChange={setEditOpen}><DialogContent accent="crm" className="max-w-2xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><Pencil size={17} className="text-primary" /> Edit plot</DialogTitle></DialogHeader><div className="grid gap-3 sm:grid-cols-2"><div><label className="mb-1 block text-xs text-muted-foreground">Plot number</label><input value={plotDraft.PlotNo || ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, PlotNo: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div><div><label className="mb-1 block text-xs text-muted-foreground">Plot name</label><input value={plotDraft.PlotName || ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, PlotName: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div><div><label className="mb-1 block text-xs text-muted-foreground">Survey number</label><input value={plotDraft.SurveyNo || ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, SurveyNo: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div><div><label className="mb-1 block text-xs text-muted-foreground">Facing</label><input value={plotDraft.Facing || ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, Facing: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div>{[["AreaSqFt", "Area (sq ft)"], ["RatePerSqFt", "Rate per sq ft"], ["PlotWidthFt", "Width (ft)"], ["PlotDepthFt", "Depth (ft)"], ["RoadWidthFt", "Road width (ft)"], ["GuidelineRatePerSqFt", "Guideline rate / sq ft"]].map(([field, label]) => <div key={field}><label className="mb-1 block text-xs text-muted-foreground">{label}</label><input type="number" min="0" step="0.01" value={plotDraft[field] ?? ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, [field]: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div>)}<label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" checked={plotDraft.IsCornerPlot === true} onChange={(event) => setPlotDraft((draft) => ({ ...draft, IsCornerPlot: event.target.checked }))} /> Corner plot</label></div><div className="flex justify-end gap-2 pt-4"><button onClick={() => setEditOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button><button onClick={savePlot} disabled={savingPlot || !plotDraft.PlotNo?.trim() || !plotDraft.PlotName?.trim()} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">{savingPlot ? "Saving..." : "Save changes"}</button></div></DialogContent></Dialog>
+      <Dialog open={editOpen} onOpenChange={setEditOpen}><DialogContent accent="crm" className="max-w-2xl"><DialogHeader><DialogTitle className="flex items-center gap-2"><Pencil size={17} className="text-primary" /> Edit plot</DialogTitle></DialogHeader><div className="grid gap-3 sm:grid-cols-2"><div><label className="mb-1 block text-xs text-muted-foreground">Plot number</label><input value={plotDraft.PlotNo || ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, PlotNo: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div><div><label className="mb-1 block text-xs text-muted-foreground">Plot name</label><input value={plotDraft.PlotName || ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, PlotName: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div><div><label className="mb-1 block text-xs text-muted-foreground">Survey number</label><input value={plotDraft.SurveyNo || ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, SurveyNo: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div><div><div className="mb-1 flex items-center justify-between"><label className="block text-xs text-muted-foreground">Facing</label>{rights.canEdit && <button type="button" onClick={() => setFacingsOpen(true)} className="text-[11px] text-primary hover:underline">Manage</button>}</div><select value={plotDraft.Facing || ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, Facing: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm"><option value="">Not set</option>{facings.map((facing) => <option key={facing.Id} value={facing.Code}>{facing.Name}{Number(facing.PremiumPercent) ? ` (+${facing.PremiumPercent}%)` : ""}</option>)}{/* A plot saved before this became a master may hold a code no longer listed. Showing it keeps the current value visible instead of silently resetting the field to "Not set" on the next save. */}{plotDraft.Facing && !facings.some((facing) => facing.Code === plotDraft.Facing) && <option value={plotDraft.Facing}>{plotDraft.Facing} (not in master)</option>}</select></div>{[["AreaSqFt", "Area (sq ft)"], ["RatePerSqFt", "Rate per sq ft"], ["PlotWidthFt", "Width (ft)"], ["PlotDepthFt", "Depth (ft)"], ["RoadWidthFt", "Road width (ft)"], ["GuidelineRatePerSqFt", "Guideline rate / sq ft"]].map(([field, label]) => <div key={field}><label className="mb-1 block text-xs text-muted-foreground">{label}</label><input type="number" min="0" step="0.01" value={plotDraft[field] ?? ""} onChange={(event) => setPlotDraft((draft) => ({ ...draft, [field]: event.target.value }))} className="h-9 w-full rounded-lg border border-border bg-background px-3 text-sm" /></div>)}<label className="flex items-center gap-2 self-end pb-2 text-sm"><input type="checkbox" checked={plotDraft.IsCornerPlot === true} onChange={(event) => setPlotDraft((draft) => ({ ...draft, IsCornerPlot: event.target.checked }))} /> Corner plot</label></div><div className="flex justify-end gap-2 pt-4"><button onClick={() => setEditOpen(false)} className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted">Cancel</button><button onClick={savePlot} disabled={savingPlot || !plotDraft.PlotNo?.trim() || !plotDraft.PlotName?.trim()} className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg bg-primary hover:bg-primary/90 disabled:opacity-40">{savingPlot ? "Saving..." : "Save changes"}</button></div></DialogContent></Dialog>
     </>
   );
 };
