@@ -123,6 +123,14 @@ export function ScopeLocationTree<T extends ScopeLocatable>({
   // without it a wide descendant keeps demanding its full natural width
   // all the way up the tree regardless of any indentation.
   const INDENT = 14;
+  // Capped at 3 levels' worth — Project>Block>Floor>Unit>Room is 5 deep, and
+  // indenting every level the full amount (12 + 5*14 = 82px) ate almost a
+  // quarter of a 375px phone screen before the actual activity content even
+  // started, which is what made everything below it look so cramped. Depths
+  // past the cap reuse the same indent; the icon/label/border-and-background
+  // per level still shows the hierarchy without needing more horizontal
+  // space for it.
+  const indentFor = (depth: number) => 12 + Math.min(depth, 3) * INDENT;
   const renderNode = (node: TreeNode<T>, depth: number) => {
     const Level = LEVELS[depth];
     const expanded = isOpen(node.key);
@@ -132,14 +140,14 @@ export function ScopeLocationTree<T extends ScopeLocatable>({
           type="button"
           onClick={() => toggle(node.key)}
           className="w-full min-w-0 flex items-center gap-2 py-2 pr-3 text-left hover:bg-muted/40 rounded-lg transition-colors"
-          style={{ paddingLeft: 12 + depth * INDENT }}
+          style={{ paddingLeft: indentFor(depth) }}
         >
           <ChevronRight
             size={14}
             className={`text-muted-foreground/60 shrink-0 transition-transform duration-200 ${expanded ? "rotate-90" : ""}`}
           />
           <Level.icon size={14} className={`${Level.color} shrink-0`} />
-          <span className={`truncate ${depth === 0 ? "text-sm font-heading font-semibold" : "text-sm"} text-foreground`}>
+          <span className={`min-w-0 truncate ${depth === 0 ? "text-sm font-heading font-semibold" : "text-sm"} text-foreground`}>
             {node.label}
           </span>
           <span className="ml-auto text-[0.625rem] font-mono text-muted-foreground shrink-0">
@@ -151,7 +159,7 @@ export function ScopeLocationTree<T extends ScopeLocatable>({
           <div className={`min-w-0 ${depth === 0 ? "pb-2" : ""}`}>
             {node.children.map((c) => renderNode(c, depth + 1))}
             {node.items.length > 0 && (
-              <div className="min-w-0 py-1 pr-2" style={{ paddingLeft: 12 + (depth + 1) * INDENT }}>
+              <div className="min-w-0 py-1 pr-2" style={{ paddingLeft: indentFor(depth + 1) }}>
                 {renderLeaf(node.items)}
               </div>
             )}
