@@ -2624,6 +2624,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                 searchable={false}
                 paginated={false}
                 emptyMessage="No purchase orders found. Click 'New PO' to create one."
+                getRowId={(r: any) => String(r._id)}
                 columns={[
                   {
                     id: "poNumber",

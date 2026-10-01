@@ -3078,6 +3078,7 @@ export default function GRN() {
                             searchable={false}
                             paginated={false}
                             emptyMessage="No GRNs found."
+                            getRowId={(r: any) => String(r.GRNID)}
                           />
                         </div>
                       )}

@@ -2315,6 +2315,7 @@ export default function VehicleInOut() {
                             searchable={false}
                             paginated={false}
                             emptyMessage="No Vehicle In/Out records."
+                            getRowId={(r: any) => String(r.VehicleInOutID)}
                           />
                         </div>
                       </>

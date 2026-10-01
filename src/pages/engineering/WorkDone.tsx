@@ -1505,6 +1505,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                   searchable
                   paginated
                   emptyMessage="No work done entries found."
+                  getRowId={(r: any) => String(r.ID)}
                 />
               )}
             </div>
