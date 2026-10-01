@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CivilWorkDprShell } from "@/components/civilworkdpr/CivilWorkDprShell";
@@ -7,9 +7,11 @@ import {
   ASSIGNMENT_STATUSES,
   ASSIGNMENT_STATUS_META as STATUS_META,
   getReportedAssignments,
+  getActivityScopeSummary,
   getActivityPhotos,
   startDelayInfo,
   type AssignmentStatus,
+  type ScopeSummaryRoom,
 } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
@@ -287,6 +289,39 @@ function ChainGroupList({
   );
 }
 
+// ScopeLocationTree only calls renderLeaf for an expanded room node, so this
+// fetch — scoped to that one room's rungs via GET /?roomId= — only ever
+// fires once the user actually opens that node, instead of the page
+// loading every IsCurrent activity in the system up front (the production
+// bottleneck at 342,000+ rows this whole tree rework exists to fix).
+function RoomActivities({
+  room,
+  statusFilter,
+  openDetail,
+}: {
+  room: ScopeSummaryRoom;
+  statusFilter: AssignmentStatus | "ALL";
+  openDetail: (row: ReportedAssignment, tab?: "overview" | "blueprint" | "photos") => void;
+}) {
+  const { data: items = [], isLoading } = useQuery({
+    queryKey: ["civilworkdpr-activity-reporting-room", room.roomId, statusFilter],
+    queryFn: () =>
+      getReportedAssignments({
+        roomId: room.roomId,
+        status: statusFilter !== "ALL" ? statusFilter : undefined,
+      }),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground py-4">
+        <Loader2 size={12} className="animate-spin" /> Loading…
+      </div>
+    );
+  }
+  return <ChainGroupList items={items} openDetail={openDetail} />;
+}
+
 export default function ActivityReporting() {
   const rights = usePageRights("civilworkdpr-activity-reporting");
   const [statusFilter, setStatusFilter] = useState<AssignmentStatus | "ALL">("ALL");
@@ -298,32 +333,31 @@ export default function ActivityReporting() {
     setDetailTab(tab);
   };
 
-  const { data: rows = [], isLoading } = useQuery({
-    queryKey: ["civilworkdpr-activity-reporting"],
-    queryFn: () => getReportedAssignments(),
+  // Debounced so the search box doesn't fire a fresh GROUP BY over the
+  // whole (342,000+ row, in production) table on every keystroke.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  // The tree, its per-room counts, and the status-tile counts all come from
+  // one cheap server-side aggregate — the actual per-activity rows for a
+  // room are only ever fetched on demand, by RoomActivities, once that
+  // room's node is expanded (see its own comment above).
+  const { data: summary, isLoading } = useQuery({
+    queryKey: ["civilworkdpr-activity-reporting-summary", statusFilter, debouncedSearch],
+    queryFn: () =>
+      getActivityScopeSummary({
+        status: statusFilter !== "ALL" ? statusFilter : undefined,
+        search: debouncedSearch || undefined,
+      }),
     enabled: rights.canView,
   });
 
-  const filteredRows = useMemo(() => {
-    let out = statusFilter === "ALL" ? rows : rows.filter((r) => r.status === statusFilter);
-    const q = search.trim().toLowerCase();
-    if (q) {
-      out = out.filter((r) =>
-        [r.activityName, r.flatName, r.alias, r.scopePath, r.projectName, r.towerName, r.roomName]
-          .some((v) => (v || "").toLowerCase().includes(q)),
-      );
-    }
-    return out;
-  }, [rows, statusFilter, search]);
-
-  // Per-status counts for the filter row's badges — always computed off
-  // the full, unfiltered set so a tab shows how many activities are in
-  // that status regardless of which one is currently selected.
-  const statusCounts = useMemo(() => {
-    const counts: Partial<Record<AssignmentStatus, number>> = {};
-    for (const r of rows) counts[r.status] = (counts[r.status] ?? 0) + 1;
-    return counts;
-  }, [rows]);
+  const rooms = summary?.rooms ?? [];
+  const statusCounts = summary?.statusCounts ?? {};
+  const total = summary?.total ?? 0;
 
   return (
     <>
@@ -371,7 +405,7 @@ export default function ActivityReporting() {
             <div className="flex flex-wrap items-center gap-1.5 px-5 py-3 border-b border-border bg-muted/10">
               {FILTER_OPTIONS.map((opt) => {
                 const meta = STATUS_TILE_META[opt.value];
-                const count = opt.value === "ALL" ? rows.length : (statusCounts[opt.value] ?? 0);
+                const count = opt.value === "ALL" ? total : (statusCounts[opt.value] ?? 0);
                 return (
                   <StatusTile
                     key={opt.value}
@@ -390,21 +424,25 @@ export default function ActivityReporting() {
               <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-14">
                 <Loader2 size={14} className="animate-spin" /> Loading…
               </div>
-            ) : filteredRows.length === 0 ? (
+            ) : rooms.length === 0 ? (
               <div className="p-8 text-center text-sm text-muted-foreground">
-                {rows.length === 0
+                {total === 0
                   ? "No activities have been assigned yet — click an activity chip in Work Allocation's Link Dependency chain to assign one."
-                  : search.trim()
-                    ? `No activities match "${search.trim()}".`
+                  : debouncedSearch
+                    ? `No activities match "${debouncedSearch}".`
                     : "No activities match this status."}
               </div>
             ) : (
               <div className="p-4">
                 <ScopeLocationTree
-                  rows={filteredRows}
+                  rows={rooms}
                   countLabel="activity"
                   countLabelPlural="activities"
-                  renderLeaf={(items) => <ChainGroupList items={items} openDetail={openDetail} />}
+                  getCount={(r) => r.activityCount}
+                  forceExpand={!!debouncedSearch}
+                  renderLeaf={(items) => (
+                    <RoomActivities room={items[0]} statusFilter={statusFilter} openDetail={openDetail} />
+                  )}
                 />
               </div>
             )}

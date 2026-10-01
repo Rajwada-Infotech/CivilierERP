@@ -309,10 +309,63 @@ export interface ReportedAssignment {
   materials: { name: string; quantity: number; uom: string | null }[];
 }
 
-export const getReportedAssignments = async (dependencyMasterId?: number): Promise<ReportedAssignment[]> => {
-  const url = dependencyMasterId ? `${BASE}?dependencyMasterId=${dependencyMasterId}` : BASE;
-  const res = await fetchWithAuth(url);
+// roomId is the one that matters at production scale — scopes to a single
+// room's activities (typically a handful) instead of ever fetching every
+// IsCurrent activity in the system. See getActivityScopeSummary below for
+// how Reporting now builds its location tree without needing this at all
+// until a room is actually expanded.
+export const getReportedAssignments = async (params?: {
+  dependencyMasterId?: number;
+  // A ScopeSummaryRoom's roomId is `null` for the "No room" bucket — pass
+  // that through as-is (not just omitted) so the request scopes to rungs
+  // with no room at all, instead of falling through to "every activity".
+  roomId?: number | null;
+  status?: AssignmentStatus;
+}): Promise<ReportedAssignment[]> => {
+  const qs = new URLSearchParams();
+  if (params?.dependencyMasterId) qs.set("dependencyMasterId", String(params.dependencyMasterId));
+  if (params && "roomId" in params && params.roomId !== undefined) {
+    qs.set("roomId", params.roomId === null ? "null" : String(params.roomId));
+  }
+  if (params?.status) qs.set("status", params.status);
+  const query = qs.toString();
+  const res = await fetchWithAuth(query ? `${BASE}?${query}` : BASE);
   return handleResponse<ReportedAssignment[]>(res);
+};
+
+// ── Scope summary ────────────────────────────────────────────────────────
+// Builds Reporting's Project > Tower > Floor > Unit > Room tree and its
+// status-tile counts from cheap server-side GROUP BYs instead of fetching
+// every activity in the system to count client-side — see the backend
+// route's own comment for why that stopped being viable at production
+// scale (342,000+ rows).
+export interface ScopeSummaryRoom {
+  projectId: number;
+  projectName: string | null;
+  towerId: number;
+  towerName: string | null;
+  floor: string;
+  flatId: number;
+  flatName: string | null;
+  roomId: number | null;
+  roomName: string | null;
+  activityCount: number;
+}
+export interface ActivityScopeSummary {
+  statusCounts: Partial<Record<AssignmentStatus, number>>;
+  total: number;
+  rooms: ScopeSummaryRoom[];
+}
+export const getActivityScopeSummary = async (params?: {
+  status?: AssignmentStatus;
+  search?: string;
+}): Promise<ActivityScopeSummary> => {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.search) qs.set("search", params.search);
+  const query = qs.toString();
+  const res = await fetchWithAuth(`${BASE}/scope-summary${query ? `?${query}` : ""}`);
+  return handleResponse<ActivityScopeSummary>(res);
 };
 
 // StartDate is only ever a tentative plan — the real measure of how
