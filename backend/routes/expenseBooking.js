@@ -774,6 +774,11 @@ router.get("/options", async (req, res) => {
           eb.Eid                          AS value,
           ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))) AS docNo,
           COALESCE(proj.name, eb.EProjectName, '') AS projectName,
+          -- Raw numeric project id, not just its display name — the "merge
+          -- invoices into one payment" picker (migration 501) groups
+          -- candidates by exact project match, and two differently-named
+          -- projects could otherwise collide on an identical display string.
+          TRY_CAST(eb.EProjectName AS INT) AS projectId,
           ISNULL(eb.EName, '')            AS partyName,
           -- Supplier name: GRN -> GRN's supplier; PO/WO_PO -> the PO's own
           -- SupplierID; WORK_DONE -> the WorkDone's contractor. Direct/manual

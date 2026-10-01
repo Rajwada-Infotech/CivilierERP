@@ -84,6 +84,7 @@ import type {
   ChainSummary,
   BookingFilters,
   GRNRef,
+  MergedInvoiceSelection,
 } from "./payment/types";
 import { PAYMENT_MODES } from "./payment/types";
 import { EXPORT_COLUMNS, MODE_STYLE } from "./payment/constants";
@@ -831,7 +832,10 @@ const Payment: React.FC = () => {
     // if any, was already withheld when the JV itself was posted, so this
     // payment must not ask for (or apply) TDS of its own — see the matching
     // fix in backend/routes/newPayment.js.
-    if ((form.expenseRef && !selectedContract) || form.jvLineId || !form.partyId || !form.company) {
+    // A merged payment (migration 501) is the same "already handled, don't
+    // ask again" case as a plain invoice-linked payment — see the matching
+    // guard in validate() above.
+    if ((form.expenseRef && !selectedContract) || form.jvLineId || form.mergedInvoices.length > 0 || !form.partyId || !form.company) {
       setTdsEligibility(null);
       return;
     }
@@ -1057,6 +1061,7 @@ const Payment: React.FC = () => {
     setSelectedContract(null);
     setLinkedGRNs([]);
     setSelectedJVLine(line);
+    setForm((prev) => (prev.mergedInvoices.length ? { ...prev, mergedInvoices: [] } : prev));
     const companyOpt = companyOptions.find((c) => c.id === line.CompanyId);
     const projectOpt = projectOptions.find((p) => p.id === line.ProjectId);
     const companyLabel = companyOpt?.label || line.CompanyName || String(line.CompanyId || "");
@@ -1132,6 +1137,7 @@ const Payment: React.FC = () => {
     const purpose = `Payment to ${contract.ContactPerson || "Contractor"} for ${contract.Reason || contract.NatureOfContract || "contract work"}`;
     setSelectedContract(contract);
     setLinkedGRNs([]);
+    setForm((prev) => (prev.mergedInvoices.length ? { ...prev, mergedInvoices: [] } : prev));
     // Resolve Company/Project against the actual dropdown option lists
     // rather than trusting the contract's own denormalized name strings —
     // the Company/Project <select>s match by exact label string, and a
@@ -1426,6 +1432,10 @@ const Payment: React.FC = () => {
 
   const handleExpenseSelect = useCallback(
     async (expenseId: string, amountOverride?: number) => {
+      // Picking a single invoice (or clearing) always drops a prior "merge
+      // invoices" selection — composes correctly with every setForm call
+      // below since they're all functional updaters applied in sequence.
+      setForm((prev) => (prev.mergedInvoices.length ? { ...prev, mergedInvoices: [] } : prev));
       // Reset known total paid unless this is a Pay Remaining call (amountOverride set)
       if (amountOverride == null) setFormKnownTotalPaid(null);
       if (!expenseId) {
@@ -1828,6 +1838,50 @@ const Payment: React.FC = () => {
     [expenseOptions, companyOptions],
   );
 
+  // "Merge invoices into one payment" — the picker already enforces same
+  // company/project/supplier client-side; the backend re-validates all of
+  // it (and resolves the authoritative amounts) regardless when saved.
+  const handleMergeConfirm = useCallback(
+    (selected: ExpenseOption[]) => {
+      setFormKnownTotalPaid(null);
+      setFormKnownTdsAmount(null);
+      const mergedInvoices: MergedInvoiceSelection[] = selected.map((o) => {
+        const payable = o.amount != null ? Math.max(0, o.amount - (o.tdsAmount ?? 0)) : 0;
+        const due = o.remainingAmount != null && o.remainingAmount > 0 && o.remainingAmount < payable
+          ? o.remainingAmount
+          : payable;
+        return { expenseBookingId: o.expenseBookingId ?? Number(o.id), docNo: o.docNo || o.label, amount: due };
+      });
+      const total = mergedInvoices.reduce((s, m) => s + m.amount, 0);
+      const anchor = selected[0];
+      setForm((prev) => ({
+        ...prev,
+        expenseId: "",
+        expenseRef: "",
+        parentDocNo: "",
+        rootExBDocNo: "",
+        mergedInvoices,
+        amount: total,
+        project: anchor?.projectName || prev.project,
+        company: (() => {
+          const name = anchor?.companyName;
+          if (name && name.trim()) return name.trim();
+          const matched = companyOptions.find((c) => c.id === anchor?.companyId);
+          return matched?.label || String(anchor?.companyId ?? prev.company);
+        })(),
+        partyId: anchor?.supplierId ?? null,
+        paidTo: anchor?.supplierName || prev.paidTo,
+      }));
+    },
+    [companyOptions],
+  );
+  const handleMergeClear = useCallback(() => {
+    setForm((prev) => ({ ...prev, mergedInvoices: [] }));
+  }, []);
+  const mergedSummary = form.mergedInvoices.length > 0
+    ? { count: form.mergedInvoices.length, totalAmount: form.mergedInvoices.reduce((s, m) => s + m.amount, 0), label: form.mergedInvoices.length === 1 ? form.mergedInvoices[0].docNo : `${form.mergedInvoices.length} invoices` }
+    : null;
+
   // Auto-select the matching invoice for re-issue once expenseOptions loads
   useEffect(() => {
     if (!reissueCtx || !expenseOptions.length || form.expenseId) return;
@@ -2099,7 +2153,14 @@ const Payment: React.FC = () => {
       }
     }
 
-    if ((!form.expenseRef || selectedContract) && tdsEligibility?.thresholdMet && !form.tdsId) {
+    // A merged payment (migration 501) is the invoice-linked case too, just
+    // several invoices at once — every one of them already had its own TDS
+    // withheld individually when THAT invoice was posted, so (unlike a
+    // genuine direct/no-invoice payment) it never needs a fresh TDS pick
+    // here. Without this guard, merging cleared form.expenseRef and this
+    // check misread that as "no invoice linked, TDS due" for a payment that
+    // in fact settles several TDS-already-handled invoices.
+    if (form.mergedInvoices.length === 0 && (!form.expenseRef || selectedContract) && tdsEligibility?.thresholdMet && !form.tdsId) {
       toast.error("TDS is due on this payment — please select a TDS.");
       return false;
     }
@@ -2157,6 +2218,13 @@ const Payment: React.FC = () => {
       partyId: form.partyId ?? null,
       bankId: form.bankId ?? null,
       amount: form.amount ?? 0,
+      // "Merge invoices into one payment" (migration 501) — the backend
+      // re-resolves company/project/party/amount from these ids itself
+      // (never trusts the client's own values for a merge), so what's sent
+      // above for those fields only matters for the non-merged case.
+      ExpenseBookingIds: form.mergedInvoices.length > 0
+        ? form.mergedInvoices.map((m) => m.expenseBookingId)
+        : undefined,
       // Extended payment fields (passed through for backend processing)
       // NewPayment.PBankName is NOT NULL — `form.bankName || null` sent a
       // hard NULL (violating that constraint) any time bankName happened
@@ -2630,6 +2698,9 @@ const Payment: React.FC = () => {
                           selectedJVLine={selectedJVLine}
                           onJVLineSelect={handleJVLineSelect}
                           onJVLineClear={clearJVLineLink}
+                          onMergeConfirm={handleMergeConfirm}
+                          mergedSummary={mergedSummary}
+                          onMergeClear={handleMergeClear}
                         />
                         <div className="flex items-center gap-2 pt-1">
                           {filteredOptions.length === 0 && !loadingExpense && (
@@ -3154,6 +3225,29 @@ const Payment: React.FC = () => {
                 );
               })()}
 
+              {/* ── Merged Invoices breakdown ── ("merge invoices into one
+                  payment" — the amount paid is one combined total, but each
+                  invoice's own due amount stays visible here, same as how
+                  the GL posting itself breaks the Dr-Supplier leg down per
+                  invoice instead of one lump line.) */}
+              {form.mergedInvoices.length > 0 && (
+                <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-primary flex items-center gap-1.5">
+                      <Layers size={9} /> Merged Invoices ({form.mergedInvoices.length})
+                    </p>
+                    <span className="font-mono text-xs font-bold text-foreground">{formatINR(form.mergedInvoices.reduce((s, m) => s + m.amount, 0))}</span>
+                  </div>
+                  <div className="divide-y divide-border/60">
+                    {form.mergedInvoices.map((m) => (
+                      <div key={m.expenseBookingId} className="flex items-center justify-between gap-2 py-1.5">
+                        <span className="font-mono text-[0.6875rem] text-foreground truncate">{m.docNo}</span>
+                        <span className="font-mono text-[0.6875rem] font-semibold text-foreground shrink-0">{formatINR(m.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* ── On A/C Adjustment context banner ── */}
               {oaAdjustCtx && (

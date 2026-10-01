@@ -104,7 +104,18 @@ export interface ExpenseOption {
   expenseBookingId?: number;
   docNo?: string;
   projectName?: string;
+  /** Raw numeric project id (not just its display name) — the "merge
+   *  invoices into one payment" picker groups candidates by exact project
+   *  match, since two differently-named projects could collide on an
+   *  identical display string. */
+  projectId?: number | null;
   supplierName?: string;
+  /** Resolved supplier/contractor LHeadId behind supplierName — GRN's
+   *  supplier, the PO/WO's own SupplierID, WorkDone's contractor, or the
+   *  booking's direct LHeadId, whichever applies (see expenseBooking.js's
+   *  /options route). Used to group "same supplier" candidates for the
+   *  "merge invoices into one payment" picker. */
+  supplierId?: number | null;
   partyName?: string;
   partyId?: number | null;
   amount?: number;
@@ -232,6 +243,22 @@ export interface PaymentRecord {
   // when picked from the Payment form's "Journal Vouchers" tab. Stored as
   // JVLineId on NewPayment; resolves the same LHeadId into partyId below.
   jvLineId: number | null;
+  // "Merge invoices into one payment" (migration 501) — when non-empty,
+  // this payment settles ALL of these ExpenseBooking invoices at once
+  // (full remaining balance each) instead of the single expenseRef above.
+  // Populated by ExpenseBookingPicker's merge mode; the ids and total are
+  // re-validated server-side regardless.
+  mergedInvoices: MergedInvoiceSelection[];
+}
+
+/** One invoice folded into a "merge invoices" payment — see
+ *  PaymentRecord.mergedInvoices and ExpenseBookingPicker's onMergeConfirm. */
+export interface MergedInvoiceSelection {
+  expenseBookingId: number;
+  docNo: string;
+  /** This invoice's own due amount (gross − TDS − already paid), full
+   *  settlement — merging never partially pays a subset. */
+  amount: number;
 }
 
 export const PAYMENT_MODES = [

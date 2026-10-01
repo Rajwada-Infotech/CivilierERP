@@ -51,6 +51,7 @@ export function blankForm(): Omit<PaymentRecord, "id"> {
     contractId: "",
     partyId: null,
     jvLineId: null,
+    mergedInvoices: [],
     expenseHeadAllocations: [],
     tdsId: null,
     tdsNature: null,
@@ -119,6 +120,10 @@ export function dbToRecord(item: DbPayment): PaymentRecord {
     contractId: String((item as { ContractId?: number }).ContractId ?? ""),
     partyId: (item as any).PPartyId ?? null,
     jvLineId: (item as any).JVLineId ?? null,
+    // Editing a merged payment isn't supported yet — it always loads back
+    // in with no merge selection (its PExpenseRef-less, multi-invoice link
+    // rows still exist and post correctly, just aren't re-editable here).
+    mergedInvoices: [],
     expenseHeadAllocations: Array.isArray((item as any).EExpenseHeadAllocations)
       ? (item as any).EExpenseHeadAllocations.map((a: any) => ({
           _key: `eha-${a.allocationId}`,
