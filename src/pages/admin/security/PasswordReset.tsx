@@ -421,7 +421,7 @@ export default function PasswordReset() {
       >
 
         {/* ── Stats row ── */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {[
             { icon: Users,     label: "Total Users",    value: allUsers.length,  color: "text-blue-500",    bg: "bg-blue-500/10"    },
             { icon: UserCheck, label: "Active",         value: activeCount,      color: "text-emerald-500", bg: "bg-emerald-500/10" },

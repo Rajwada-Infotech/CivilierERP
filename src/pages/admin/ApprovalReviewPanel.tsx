@@ -563,7 +563,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     {rungDetail.assignment.labourSource && (
                       <FormField
                         label="Labour Given By"
@@ -839,7 +839,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
           </div>
 
           {/* Right: approval chain, pinned — desktop only */}
-          <div className="hidden lg:block w-[340px] shrink-0 border-l border-border bg-muted/5 overflow-y-auto px-5 py-5">
+          <div className="hidden lg:block w-full sm:w-[340px] shrink-0 border-l border-border bg-muted/5 overflow-y-auto px-5 py-5">
             {chainSection}
           </div>
         </div>

@@ -47,8 +47,8 @@ async function fetchStatus(projectId: string): Promise<any> {
   return r.ok ? r.json() : null;
 }
 
-const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background";
-const labelCls = "text-xs text-muted-foreground block mb-1";
+const inputCls = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-muted/30 focus:bg-background focus:outline-none focus:ring-2 focus:ring-sky-500/30";
+const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
 const cardCls = "rounded-xl border border-border p-4 space-y-3";
 
 const CrmProjectAutoSetupParking: React.FC = () => {

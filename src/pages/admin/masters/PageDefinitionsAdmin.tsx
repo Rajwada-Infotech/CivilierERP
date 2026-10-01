@@ -373,7 +373,7 @@ export default function PageDefinitionsAdmin() {
         }
       >
         {/* ── Stats ── */}
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {[
             { label: "Total", value: stats.total, color: "text-foreground" },
             { label: "Active", value: stats.active, color: "text-emerald-500" },
@@ -399,7 +399,7 @@ export default function PageDefinitionsAdmin() {
 
         {/* ── Filters ── */}
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative flex-1 min-w-0 sm:min-w-[200px]">
             <Search
               size={13}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"

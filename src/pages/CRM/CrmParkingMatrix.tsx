@@ -393,7 +393,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
 
         <div className="rounded-xl border border-border p-4 space-y-2">
           <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Application & Customer</h3>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
             <div><span className="text-muted-foreground block">Application No</span><span className="font-semibold text-sm">{appNo || "—"}</span></div>
             <div><span className="text-muted-foreground block">Applicant</span><span className="font-semibold text-sm">{applicantName || "—"}</span></div>
             <div><span className="text-muted-foreground block">Mobile</span><span className="font-medium">{mobile || "—"}</span></div>
@@ -425,7 +425,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
         ) : (
           <div className="rounded-xl border border-border p-4 space-y-2">
             <h3 className="text-sm font-semibold flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-600" /> Sale</h3>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
               <div><span className="text-muted-foreground block">Booking</span><span className="font-semibold text-sm">{slot.BookingNo || "Standalone parking sale"}</span></div>
               <div>
                 <span className="text-muted-foreground block">Payment Status</span>
@@ -538,6 +538,16 @@ export function ParkingMatrixPage() {
     queryKey: ["parking-matrix-projects"],
     queryFn: () => fetchOptions<Option>(`${API}/projects`),
   });
+
+  // Show the first project's matrix straight away instead of an empty
+  // "select a project" panel. Done once on load, so if the user clears the
+  // project picker afterwards it stays cleared.
+  const [autoPicked, setAutoPicked] = useState(false);
+  useEffect(() => {
+    if (autoPicked || projectId || !projects.length) return;
+    setAutoPicked(true);
+    setProjectId(String((projects as any[])[0].Id));
+  }, [projects, projectId, autoPicked]);
 
   const { data: blocks = [] } = useQuery({
     queryKey: ["parking-matrix-blocks", projectId],

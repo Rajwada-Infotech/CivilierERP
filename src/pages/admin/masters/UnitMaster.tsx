@@ -196,7 +196,7 @@ const fields: FieldDef[] = [
             )}
           </div>
           {hasAny ? (
-            <div className="grid grid-cols-3 gap-3 mt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-1">
               <div>
                 <div className="text-xs text-muted-foreground mb-0.5">Carpet</div>
                 <div className="font-medium tabular-nums">{fmt(carpet)}</div>

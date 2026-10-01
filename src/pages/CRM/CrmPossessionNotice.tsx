@@ -183,7 +183,7 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
 
           {!noEligible && form.BookingId && (
             <>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
                     <CalendarDays size={10} className="inline mr-1" />Offered Date
@@ -204,7 +204,7 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
 
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Delivery Mode</label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                   {DELIVERY_MODES.map((m) => (
                     <button key={m} type="button" onClick={() => setForm((f) => ({ ...f, DeliveryMode: m }))}
                       className={cn(
@@ -762,7 +762,7 @@ const CrmPossessionNotice: React.FC = () => {
             <p className="text-sm text-muted-foreground">Confirm the channel used to dispatch this notice.</p>
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">Delivery Mode *</label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {DELIVERY_MODES.map((m) => (
                   <button key={m} type="button" onClick={() => setSentMode(m)}
                     className={cn(
@@ -794,7 +794,7 @@ const CrmPossessionNotice: React.FC = () => {
               </DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Offered Date</label>
                   <DateInput value={editForm.OfferedDate}
@@ -810,7 +810,7 @@ const CrmPossessionNotice: React.FC = () => {
               </div>
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">Delivery Mode</label>
-                <div className="grid grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
                   {DELIVERY_MODES.map((m) => (
                     <button key={m} type="button" onClick={() => setEditForm((f) => ({ ...f, DeliveryMode: m }))}
                       className={cn(

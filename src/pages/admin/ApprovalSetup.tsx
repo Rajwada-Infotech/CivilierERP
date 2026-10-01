@@ -665,7 +665,7 @@ function AddLevelRow({
             <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
               How many of them need to approve?
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {(
                 [
                   {
@@ -1260,7 +1260,7 @@ function ModuleGroupSelector({
             </div>
 
             {isOpen && (
-              <div className="absolute top-full left-0 mt-1 z-20 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[200px]">
+              <div className="absolute top-full left-0 mt-1 z-20 bg-card border border-border rounded-xl shadow-xl py-1 min-w-0 sm:min-w-[200px]">
                 {groupMods.map((m) => {
                   const active = selectedModules.includes(m.id);
                   return (

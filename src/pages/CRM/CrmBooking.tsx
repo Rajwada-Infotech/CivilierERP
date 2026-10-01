@@ -49,9 +49,9 @@ const TOKEN_TYPES = ["Percentage", "Amount"];
 // Shared field styling for the New Booking dialog's restructured 2-column
 // layout — same amber-focus-ring convention as the New Application wizard's
 // inputCls/labelCls (CrmApplication.tsx).
-const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40";
+const inputCls = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-muted/30 focus:bg-background focus:outline-none focus:ring-2 focus:ring-sky-500/30";
 const inputClsDisabled = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-muted/40 text-muted-foreground cursor-not-allowed";
-const labelCls = "text-xs text-muted-foreground block mb-1";
+const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
 
 const statusColor: Record<string, string> = {
   Pending:   "text-orange-600 bg-orange-50 border-orange-200",
@@ -901,7 +901,7 @@ const CrmBooking: React.FC = () => {
                     </>
                   )}
                 </div>
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                   <div>
                     <label className={labelCls}>Project</label>
                     <input type="text" value={form.ProjectName} readOnly disabled
@@ -921,7 +921,7 @@ const CrmBooking: React.FC = () => {
                       className={inputClsDisabled} />
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                   <div>
                     <label className={labelCls}>Inclusive Saleable Area (sq ft)</label>
                     <input type="text" value={form.AreaSqFt} readOnly disabled
@@ -992,7 +992,7 @@ const CrmBooking: React.FC = () => {
                       || "Default 7-stage split"}
                     className={inputClsDisabled} />
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className={labelCls}>Payment Mode</label>
                     {form.ApplicationId && form.PaymentMode ? (
@@ -1013,7 +1013,7 @@ const CrmBooking: React.FC = () => {
                     <p className="text-[0.6875rem] text-muted-foreground pt-2">Assigned by Accounts on the Received Payment before approval.</p>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <div>
                     <label className={labelCls}>
                       Booking Amount (₹) {selectedPlan ? "(Plan)" : ""}

@@ -13,9 +13,9 @@ interface CrmShellProps {
 
 /**
  * Shared glass-themed wrapper for all CRM module pages.
- * Provides ambient amber glow, frosted header band, and consistent layout —
+ * Provides ambient sky-blue glow, frosted header band, and consistent layout —
  * same structure as FinanceShell/MaterialShell, tinted to match the CRM
- * module's established amber identity (previously borrowed from
+ * module's sky-blue identity (previously borrowed from
  * SalesAutoShell — same #0ea5e9 accent, just under its own component now).
  */
 export const CrmShell: React.FC<CrmShellProps> = ({
@@ -47,10 +47,10 @@ export const CrmShell: React.FC<CrmShellProps> = ({
       };
 
   return (
-    <div className="relative min-h-full p-3 space-y-3.5">
+    <div className="relative min-h-full p-0 sm:p-3 space-y-4">
       {/* ── Ambient background orbs ─────────────────────────────────────── */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden z-0">
-        {/* Top-left amber bloom */}
+        {/* Top-left sky bloom */}
         <div
           className="absolute -top-24 -left-24 w-96 h-96 rounded-full"
           style={{
@@ -59,13 +59,13 @@ export const CrmShell: React.FC<CrmShellProps> = ({
               : "radial-gradient(circle, rgba(14,165,233,0.07) 0%, transparent 70%)",
           }}
         />
-        {/* Bottom-right amber/orange bloom */}
+        {/* Bottom-right blue bloom */}
         <div
           className="absolute -bottom-32 -right-32 w-80 h-80 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(circle, rgba(217,119,6,0.08) 0%, transparent 70%)"
-              : "radial-gradient(circle, rgba(217,119,6,0.05) 0%, transparent 70%)",
+              ? "radial-gradient(circle, rgba(59,130,246,0.08) 0%, transparent 70%)"
+              : "radial-gradient(circle, rgba(59,130,246,0.05) 0%, transparent 70%)",
           }}
         />
         {/* Center faint glow */}
@@ -84,7 +84,7 @@ export const CrmShell: React.FC<CrmShellProps> = ({
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3, ease: "easeOut" }}
-        className="relative z-30 rounded-xl px-4 py-3"
+        className="relative z-30 rounded-xl px-4 sm:px-5 py-3.5 sm:py-4"
         style={glassCard}
       >
         {/* Inner top gradient */}
@@ -104,11 +104,11 @@ export const CrmShell: React.FC<CrmShellProps> = ({
           }}
         />
 
-        <div className="relative z-10 flex flex-col gap-1.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-          <div className="flex items-center gap-2.5">
+        <div className="relative z-10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3 min-w-0">
             {/* Icon badge */}
             <div
-              className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
               style={{
                 background: "rgba(14,165,233,0.18)",
                 border: "1px solid rgba(14,165,233,0.35)",
@@ -116,30 +116,30 @@ export const CrmShell: React.FC<CrmShellProps> = ({
               }}
             >
               {PageIcon
-                ? <PageIcon size={14} style={{ color: "#38bdf8" }} />
-                : <Users size={14} style={{ color: "#38bdf8" }} />
+                ? <PageIcon size={18} style={{ color: "#0ea5e9" }} />
+                : <Users size={18} style={{ color: "#0ea5e9" }} />
               }
             </div>
-            <div>
+            <div className="min-w-0">
               <h1
-                className="text-sm font-heading font-bold"
-                style={{ color: isDark ? "#fef3c7" : "#78350f" }}
+                className="text-base sm:text-lg font-heading font-bold leading-tight"
+                style={{ color: isDark ? "#e0f2fe" : "#0c4a6e" }}
               >
                 {title}
               </h1>
               {subtitle && (
-                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
+                <p className="text-xs sm:text-[0.8125rem] text-muted-foreground mt-0.5 leading-snug">
                   {subtitle}
                 </p>
               )}
             </div>
           </div>
-          {action && <div className="shrink-0">{action}</div>}
+          {action && <div className="flex flex-wrap items-center gap-2 sm:shrink-0 sm:justify-end">{action}</div>}
         </div>
       </motion.div>
 
       {/* ── Page content ────────────────────────────────────────────────── */}
-      <div className="relative z-10 space-y-3.5 min-w-0">{children}</div>
+      <div className="relative z-10 space-y-4 min-w-0">{children}</div>
     </div>
   );
 };
@@ -226,7 +226,7 @@ export const CrmGlassCard: React.FC<{
 
         <div
           className="text-xl font-bold font-heading"
-          style={{ color: isDark ? "#f1f5f9" : "#78350f" }}
+          style={{ color: isDark ? "#f1f5f9" : "#0c4a6e" }}
         >
           {value}
         </div>

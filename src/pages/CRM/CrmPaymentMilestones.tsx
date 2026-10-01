@@ -1,5 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { translateError } from "@/lib/translateError";
@@ -177,6 +177,12 @@ const CrmPaymentMilestones: React.FC = () => {
     queryFn: () => fetchBookings(pickerScope),
     staleTime: 5 * 60_000,
   });
+  // Open the first booking in scope by default (also after the company /
+  // project / search filter changes); the user can switch from the picker.
+  useEffect(() => {
+    const first = (bookings as any[])[0];
+    if (!selectedBookingId && first) setSp({ bookingId: String(first.Id) }, { replace: true });
+  }, [bookings, selectedBookingId, setSp]);
   const { data: milestoneData, isLoading, isError, error: milestoneError, dataUpdatedAt, isFetching, refetch } = useQuery({
     queryKey: ["crm-milestones", selectedBookingId],
     queryFn: () => fetchMilestones(selectedBookingId),
@@ -1153,7 +1159,7 @@ const CrmPaymentMilestones: React.FC = () => {
                   className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background"
                   placeholder="e.g. PLC Charges" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Due Date</label>
                   <DateInput value={addForm.DueDate}

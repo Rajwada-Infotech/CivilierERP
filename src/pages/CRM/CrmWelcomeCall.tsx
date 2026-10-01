@@ -1429,7 +1429,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                 )}
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Called By</label>
                   {isEditingCall ? (
@@ -1995,7 +1995,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                 )
               ) : (
                 <div className="space-y-2 pt-1 rounded-lg border border-border p-3">
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input placeholder="Name *" value={coForm.Name} onChange={(e) => setCoForm((f) => ({ ...f, Name: e.target.value }))}
                       className="text-sm border border-border rounded px-2 py-1.5 bg-background" />
                     <input placeholder="Relation" value={coForm.Relation} onChange={(e) => setCoForm((f) => ({ ...f, Relation: e.target.value }))}
@@ -2036,7 +2036,7 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                 Ask the customer during the call — this unlocks the loan-tracking step and prefills Bank &amp; KYC.
               </p>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {(["SelfFunded", "LoanFinanced"] as const).map((opt) => {
                 const isSelected = callContext?.financingType === opt;
                 return (

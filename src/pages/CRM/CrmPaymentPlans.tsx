@@ -533,7 +533,7 @@ const CrmPaymentPlans: React.FC = () => {
 
                 {/* Stat strip — the three numbers worth knowing at a glance,
                     pulled out of the old plain-text footer into real tiles. */}
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                   <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
                     <div className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       <ListChecks size={11} /> Milestones

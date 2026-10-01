@@ -39,7 +39,14 @@ export interface ButtonProps
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
-    return <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} {...props} />;
+    // The default variant paints the module gradient (.btn-module). A button
+    // that sets its own background (e.g. green Approve / red Reject) must keep
+    // that colour, so it skips the gradient and keeps its own meaning.
+    const ownBackground = !variant && !!className && /(^|\s)(bg-(?!opacity)[a-z]|bg-\[)/.test(className);
+    const classes = ownBackground
+      ? cn(buttonVariants({ variant, size }).replace(/\bbtn-module\b/, "bg-primary text-primary-foreground hover:bg-primary/90"), className)
+      : cn(buttonVariants({ variant, size, className }));
+    return <Comp className={classes} ref={ref} {...props} />;
   },
 );
 Button.displayName = "Button";
