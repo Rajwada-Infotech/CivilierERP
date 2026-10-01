@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 
 const VIO_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Doc No", accessor: "DocNo" },
-  { header: "Entry Time", accessor: (r) => r.EntryTime ? new Date(r.EntryTime as string).toLocaleString("en-IN") : "" },
+  { header: "Entry Time", accessor: (r) => r.EntryTime ? fmtServerDateTime(r.EntryTime as string) : "" },
   { header: "Vehicle No", accessor: "VehicleNo" },
   { header: "Supplier", accessor: "SupplierName" },
   { header: "PO Number", accessor: "PONumber" },
@@ -359,10 +359,7 @@ function VehicleCard({
           </p>
           <p className="truncate">
             {rec.EntryTime
-              ? new Date(rec.EntryTime).toLocaleString("en-IN", {
-                  dateStyle: "short",
-                  timeStyle: "short",
-                })
+              ? fmtServerDateTime(rec.EntryTime, { dateStyle: "short", timeStyle: "short" })
               : "—"}
           </p>
         </div>
@@ -418,6 +415,23 @@ const toLocalDateInput = (d: Date) =>
 
 const toLocalDateTimeInput = (d: Date) =>
   `${toLocalDateInput(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
+// ── Server-returned time helpers ──────────────────────────────────────────
+// EntryTime/ExitTime come back from the API as "...Z"-suffixed ISO strings
+// purely because Date -> JSON always appends "Z" — not because the value is
+// a true UTC instant. The backend round-trips the literal IST digits the
+// user typed through a UTC-configured Node process with no real conversion
+// (see vehicleInOut.js's parseIstDateTime comment), so the ISO string's UTC
+// component IS the intended IST wall-clock reading. Formatting it with
+// plain toLocaleString() applies the BROWSER's own local-timezone
+// conversion on top of that, double-shifting the displayed time by +5:30
+// (06:10 AM rendered as 11:40 AM). These read the UTC getters directly so
+// the literal digits typed in are what's ever shown or prefilled.
+const fmtServerDateTime = (iso: string | Date, opts?: Intl.DateTimeFormatOptions) =>
+  new Date(iso).toLocaleString("en-IN", { ...opts, timeZone: "UTC" });
+
+const toUtcDateTimeInput = (d: Date) =>
+  `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}T${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
 
 // ── Form default ───────────────────────────────────────────────────────────────
 const buildEmpty = (activeFinYear?: string) => ({
@@ -513,12 +527,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
       const v = getValue() as string;
       return (
         <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {v
-            ? new Date(v).toLocaleString("en-IN", {
-                dateStyle: "short",
-                timeStyle: "short",
-              })
-            : "—"}
+          {v ? fmtServerDateTime(v, { dateStyle: "short", timeStyle: "short" }) : "—"}
         </span>
       );
     },
@@ -1081,10 +1090,10 @@ export default function VehicleInOut() {
       poNumber: full.PONumber ?? "",
       vehicleNo: full.VehicleNo ?? "",
       entryTime: full.EntryTime
-        ? toLocalDateTimeInput(new Date(full.EntryTime))
+        ? toUtcDateTimeInput(new Date(full.EntryTime))
         : "",
       exitTime: full.ExitTime
-        ? toLocalDateTimeInput(new Date(full.ExitTime))
+        ? toUtcDateTimeInput(new Date(full.ExitTime))
         : null,
       challanNo: full.ChallanNo ?? "",
       attachments: Array.isArray(full.Attachments) ? full.Attachments : [],
@@ -1190,11 +1199,11 @@ export default function VehicleInOut() {
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
     <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Entry Time</div>
-      <div style="font-size:13px;font-weight:600;">${rec.EntryTime ? new Date(rec.EntryTime).toLocaleString("en-IN") : "—"}</div>
+      <div style="font-size:13px;font-weight:600;">${rec.EntryTime ? fmtServerDateTime(rec.EntryTime) : "—"}</div>
     </div>
     <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Exit Time</div>
-      <div style="font-size:13px;font-weight:600;">${rec.ExitTime ? new Date(rec.ExitTime).toLocaleString("en-IN") : "—"}</div>
+      <div style="font-size:13px;font-weight:600;">${rec.ExitTime ? fmtServerDateTime(rec.ExitTime) : "—"}</div>
     </div>
   </div>
 
@@ -2481,7 +2490,7 @@ export default function VehicleInOut() {
                     </p>
                     <p className="text-xs font-semibold font-mono text-emerald-600 dark:text-emerald-400">
                       {viewingRec.EntryTime
-                        ? new Date(viewingRec.EntryTime).toLocaleString("en-IN")
+                        ? fmtServerDateTime(viewingRec.EntryTime)
                         : "—"}
                     </p>
                   </div>
@@ -2491,7 +2500,7 @@ export default function VehicleInOut() {
                     </p>
                     <p className="text-xs font-semibold font-mono text-foreground">
                       {viewingRec.ExitTime
-                        ? new Date(viewingRec.ExitTime).toLocaleString("en-IN")
+                        ? fmtServerDateTime(viewingRec.ExitTime)
                         : "Not yet exited"}
                     </p>
                   </div>
