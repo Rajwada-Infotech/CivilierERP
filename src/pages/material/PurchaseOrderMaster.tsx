@@ -60,6 +60,7 @@ import { getTCRecords } from "@/api/tcMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
 import { projectCompanyIds, type ProjectCompanyLike } from "@/lib/projectBelongsTo";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
 import {
   Plus,
@@ -1548,6 +1549,13 @@ const PurchaseOrderMaster: React.FC = () => {
     );
   }, [listData, searchQuery]);
 
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: poApprovalTrails, isLoading: poApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "PurchaseOrders",
+    filteredList.map((r: any) => r._id),
+  );
+
   // ── Computed totals ───────────────────────────────────────────────────────
   const { subtotal, totalCgst, totalSgst, totalIgst, totalTax, grandTotal } =
     useMemo(() => {
@@ -2834,7 +2842,13 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     meta: { className: "hidden sm:table-cell" },
                     cell: ({ row }: any) => (
                       <div className="flex flex-col items-start gap-1">
-                        <ApprovalStatusChain table="PurchaseOrders" recordId={row.original._id} fallback={<StatusChip status={row.original.status} />} />
+                        <ApprovalStatusChain
+                          table="PurchaseOrders"
+                          recordId={row.original._id}
+                          fallback={<StatusChip status={row.original.status} />}
+                          preloaded={poApprovalTrails.get(String(row.original._id)) ?? null}
+                          preloadedLoading={poApprovalTrailsLoading}
+                        />
                       </div>
                     ),
                   },

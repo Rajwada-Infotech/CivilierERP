@@ -53,6 +53,7 @@ import {
 import { useFinYear } from "@/contexts/FinYearContext";
 import { toShortFinYear } from "@/utils/finYear";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { usePageRights } from "@/hooks/usePageRights";
 import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
@@ -330,6 +331,14 @@ export default function MaterialRequest() {
     for (const row of pendingSummaryList) m.set(row.MRId, row);
     return m;
   }, [pendingSummaryList]);
+
+  // One request for every visible row's approval trail instead of one
+  // request PER row — see useApprovalTrailsBulk's own comment. ListView()
+  // below is called as a plain function (not <ListView/>), so its own hook
+  // calls would be conditional on viewMode and break the Rules of Hooks;
+  // this stays at the top level and ListView closes over it instead.
+  const mrIdsOnPage = useMemo(() => (listData?.data || []).map((r: any) => r.MRId), [listData]);
+  const { trails: approvalTrails, isLoading: approvalTrailsLoading } = useApprovalTrailsBulk("MaterialRequests", mrIdsOnPage);
 
   // ── Auto-select active fin year ──────────────────────────────────────────────
 
@@ -789,6 +798,8 @@ export default function MaterialRequest() {
               table="MaterialRequests"
               recordId={row.original.MRId}
               fallback={<StatusBadge status={row.original.Status} />}
+              preloaded={approvalTrails.get(String(row.original.MRId)) ?? null}
+              preloadedLoading={approvalTrailsLoading}
             />
             {pending &&
               (pending.totalPending > 0 ? (

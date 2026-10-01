@@ -102,6 +102,7 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import type {
   GRNFormDataPayload,
   GRNItemLine as GRNItemLineBase,
@@ -524,6 +525,11 @@ let deleteMutation: { mutate: (id: string) => void };
 let handleDeleteGrn: (id: string) => void;
 let _canDelete = true;
 let _canEdit = true;
+// Reassigned each render by GRN() below — see useApprovalTrailsBulk's own
+// comment for why the "chain" column reads from this instead of firing its
+// own per-row GET /trail.
+let _grnApprovalTrails = new Map<string, import("@/components/ApprovalStatusChain").TrailData | null>();
+let _grnApprovalTrailsLoading = false;
 
 // ─── List Columns ─────────────────────────────────────────────────────────────
 // isTransferGRN: doc number starts with "TRF-GRN" — these rows came from a
@@ -710,6 +716,8 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
         recordId={row.original.GRNID}
         compact
         fallback={<StatusBadge status={row.original.Status} />}
+        preloaded={_grnApprovalTrails.get(String(row.original.GRNID)) ?? null}
+        preloadedLoading={_grnApprovalTrailsLoading}
       />
     ),
   },
@@ -1214,6 +1222,15 @@ export default function GRN() {
     }
     return Array.from(groups.values());
   }, [filteredGrns]);
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: grnApprovalTrails, isLoading: grnApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "GoodsReceiptNotes",
+    filteredGrns.map((g: any) => g.GRNID),
+  );
+  _grnApprovalTrails = grnApprovalTrails;
+  _grnApprovalTrailsLoading = grnApprovalTrailsLoading;
 
   const [collapsedGrnGroups, setCollapsedGrnGroups] = useState<
     Record<string, boolean>

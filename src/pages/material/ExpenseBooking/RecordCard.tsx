@@ -4,7 +4,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { computeBreakdown, computeGrnNetWithTerms, fmt } from "./helpers";
 import type { ExpenseRecord } from "./types";
-import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { ApprovalStatusChain, type TrailData } from "@/components/ApprovalStatusChain";
 
 interface Props {
   rec: ExpenseRecord;
@@ -14,6 +14,10 @@ interface Props {
   onApprovalSuccess: () => void;
   canEdit?: boolean;
   canDelete?: boolean;
+  /** Bulk-fetched by the parent list — see useApprovalTrailsBulk's comment
+   *  on why this card doesn't fetch its own trail per-instance. */
+  approvalTrail?: TrailData | null;
+  approvalTrailLoading?: boolean;
 }
 
 export function RecordCard({
@@ -24,6 +28,8 @@ export function RecordCard({
   onApprovalSuccess,
   canEdit = true,
   canDelete = true,
+  approvalTrail,
+  approvalTrailLoading = false,
 }: Props) {
   const effectiveNet = (() => {
     if (rec.eSourceType === "GRN" && rec.grnTotalAmount != null) {
@@ -128,6 +134,8 @@ export function RecordCard({
             recordId={rec.id}
             compact
             fallback={<StatusBadge status={rec.status} className="text-[0.625rem] px-2 py-0.5" />}
+            preloaded={approvalTrail ?? null}
+            preloadedLoading={approvalTrailLoading}
           />
           <div className="flex items-center gap-1">
             <ApprovalActions

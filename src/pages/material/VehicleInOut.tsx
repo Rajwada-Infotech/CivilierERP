@@ -35,8 +35,9 @@ const VIO_EXPORT_COLUMNS: ExportColumn[] = [
 
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { ApprovalStatusChain, type TrailData } from "@/components/ApprovalStatusChain";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import {
   Truck,
   Plus,
@@ -299,6 +300,8 @@ function VehicleCard({
   onGeneratePdf,
   canEdit = true,
   canDelete = true,
+  approvalTrail,
+  approvalTrailLoading = false,
 }: {
   rec: any;
   onView: (r: any) => void;
@@ -307,6 +310,10 @@ function VehicleCard({
   onGeneratePdf: (r: any) => void;
   canEdit?: boolean;
   canDelete?: boolean;
+  /** Bulk-fetched by the parent list — see useApprovalTrailsBulk's comment
+   *  on why this card doesn't fetch its own trail per-instance. */
+  approvalTrail?: TrailData | null;
+  approvalTrailLoading?: boolean;
 }) {
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-3">
@@ -327,6 +334,8 @@ function VehicleCard({
             table="VehicleInOut"
             recordId={rec.VehicleInOutID}
             fallback={<StatusBadge status={rec.Status} />}
+            preloaded={approvalTrail ?? null}
+            preloadedLoading={approvalTrailLoading}
           />
         </div>
       </div>
@@ -475,6 +484,11 @@ let _onDelete: (id: number) => void = () => {};
 let _onGeneratePdf: (r: any) => void = () => {};
 let _canEdit = true;
 let _canDelete = true;
+// Reassigned each render by VehicleInOut() below — see
+// useApprovalTrailsBulk's own comment for why the Status column reads from
+// this instead of firing its own per-row GET /trail.
+let _vehicleApprovalTrails = new Map<string, TrailData | null>();
+let _vehicleApprovalTrailsLoading = false;
 
 // ── List columns ──────────────────────────────────────────────────────────────
 const COLUMNS: ColumnDef<any, unknown>[] = [
@@ -569,6 +583,8 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
           table="VehicleInOut"
           recordId={row.original.VehicleInOutID}
           fallback={<StatusBadge status={row.original.Status} />}
+          preloaded={_vehicleApprovalTrails.get(String(row.original.VehicleInOutID)) ?? null}
+          preloadedLoading={_vehicleApprovalTrailsLoading}
         />
       </div>
     ),
@@ -1374,6 +1390,15 @@ export default function VehicleInOut() {
       r.PONumber?.toLowerCase().includes(q)
     );
   });
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: vehicleApprovalTrails, isLoading: vehicleApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "VehicleInOut",
+    filteredRecords.map((r: any) => r.VehicleInOutID),
+  );
+  _vehicleApprovalTrails = vehicleApprovalTrails;
+  _vehicleApprovalTrailsLoading = vehicleApprovalTrailsLoading;
 
   // ── Group by linked PO — every Vehicle In/Out lot delivered against the
   // same PO now shows together instead of scattered across a flat list.
@@ -2379,6 +2404,8 @@ export default function VehicleInOut() {
                               onGeneratePdf={_onGeneratePdf}
                               canEdit={rights.canEdit}
                               canDelete={rights.canDelete}
+                              approvalTrail={vehicleApprovalTrails.get(String(rec.VehicleInOutID)) ?? null}
+                              approvalTrailLoading={vehicleApprovalTrailsLoading}
                             />
                           ))}
                         </div>

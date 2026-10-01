@@ -75,6 +75,7 @@ import { getTCRecords } from "@/api/tcMasterApi";
 import { useQuery } from "@tanstack/react-query";
 import { getHsn } from "@/api/hsnApi";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import {
   DocNumberPreview,
   fetchNextDocNumber,
@@ -2418,6 +2419,13 @@ const WorkOrdersList: React.FC<{
   const filteredTotal = filtered.length;
   const filteredPages = Math.ceil(filteredTotal / LIMIT);
 
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: approvalTrails, isLoading: approvalTrailsLoading } = useApprovalTrailsBulk(
+    "WorkOrderHeader",
+    paginated.map((wo) => wo.Id),
+  );
+
   // Summary stats
   const stats = useMemo(() => {
     const total = workOrders.reduce((s, w) => s + (w.TotalAmount || 0), 0);
@@ -2605,6 +2613,8 @@ const WorkOrdersList: React.FC<{
                         table="WorkOrderHeader"
                         recordId={wo.Id}
                         fallback={<StatusBadge status={wo.Status || "Draft"} />}
+                        preloaded={approvalTrails.get(String(wo.Id)) ?? null}
+                        preloadedLoading={approvalTrailsLoading}
                       />
                     </div>
                     <div className="text-xs space-y-1">

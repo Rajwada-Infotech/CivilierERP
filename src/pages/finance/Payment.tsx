@@ -72,6 +72,7 @@ import {
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { computeGrnNetWithTerms } from "@/pages/material/ExpenseBooking/helpers";
 
 // ─── Extracted modules (types, constants, API helpers, sub-components) ────────
@@ -962,6 +963,13 @@ const Payment: React.FC = () => {
   const totalPages: number = dbData?.totalPages ?? 1;
   const totalRecords: number = dbData?.total ?? 0;
   const records: PaymentRecord[] = dbItems.map(dbToRecord);
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: approvalTrails, isLoading: approvalTrailsLoading } = useApprovalTrailsBulk(
+    "NewPayment",
+    records.map((rec) => rec.id),
+  );
 
   // Export must cover every matching record, not just the current page —
   // the list endpoint caps `limit` at 100 server-side, so page through
@@ -4746,6 +4754,8 @@ const Payment: React.FC = () => {
                             table="NewPayment"
                             recordId={rec.id}
                             fallback={<StatusBadge status={rec.status} />}
+                            preloaded={approvalTrails.get(String(rec.id)) ?? null}
+                            preloadedLoading={approvalTrailsLoading}
                           />
                         </div>
                         <div className="flex items-center gap-1.5">
@@ -4929,6 +4939,8 @@ const Payment: React.FC = () => {
                                 <ApprovalStatusChain
                                   table="NewPayment"
                                   recordId={rec.id}
+                                  preloaded={approvalTrails.get(String(rec.id)) ?? null}
+                                  preloadedLoading={approvalTrailsLoading}
                                 />
                               )}
                             </div>
