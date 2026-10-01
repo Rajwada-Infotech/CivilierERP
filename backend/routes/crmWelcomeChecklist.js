@@ -484,7 +484,7 @@ router.get("/recheck/queue", requirePageRight("crm-welcome-calls", "view"), asyn
     const req0 = pool.request();
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     const result = await req0.query(`
       SELECT
         b.Id AS BookingId, b.BookingNo,

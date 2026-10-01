@@ -174,7 +174,7 @@ router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => 
     if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("ag.Status = @st"); }
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
       req0.input("search", sql.NVarChar(200), `%${search}%`);
       conds.push("(a.ApplicantName LIKE @search OR ag.AgreementNo LIKE @search OR b.BookingNo LIKE @search)");
@@ -207,7 +207,7 @@ router.get("/", requirePageRight("crm-agreements", "view"), async (req, res) => 
           WHERE (@st2 IS NULL OR ag.Status = @st2)
             AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
             AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
-            AND (@blockId2 IS NULL OR um.BlockId = @blockId2)
+            AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
             AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR ag.AgreementNo LIKE @search2 OR b.BookingNo LIKE @search2))
         `),
     ]);
@@ -1864,7 +1864,7 @@ router.get("/documents/all", requirePageRight("crm-documents", "view"), async (r
     // Company/Project/Block narrows the set server-side instead.
     if (companyId) { req0.input("companyId", sql.Int, companyId); conds.push("b.CompanyId = @companyId"); }
     if (projectId) { req0.input("projectId", sql.Int, projectId); conds.push("b.ProjectId = @projectId"); }
-    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("um.BlockId = @blockId"); }
+    if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     const where = conds.length ? "WHERE " + conds.join(" AND ") : "";
     // Includes the agreement-level lifecycle fields (senior/customer approval,
     // send/date state) and the Legal Executive assignment — not just the

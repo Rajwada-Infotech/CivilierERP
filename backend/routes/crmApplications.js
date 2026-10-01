@@ -189,7 +189,10 @@ function buildApplicationFilters(req0, query) {
   if (status) { req0.input("st", sql.NVarChar(30), status); conds.push("a.Status = @st"); }
   if (companyId) { req0.input("companyId", sql.Int, parseInt(companyId, 10)); conds.push("a.CompanyId = @companyId"); }
   if (projectId) { req0.input("projectId", sql.Int, parseInt(projectId, 10)); conds.push("a.ProjectId = @projectId"); }
-  if (blockId) { req0.input("blockId", sql.Int, parseInt(blockId, 10)); conds.push("um.BlockId = @blockId"); }
+  // um joins the application's PreferredUnitId, which a LAND application does
+  // not have — its plots hang off CrmApplicationPlot. Filtering on um alone
+  // therefore dropped every plot application from a block-filtered list.
+  if (blockId) { req0.input("blockId", sql.Int, parseInt(blockId, 10)); conds.push(`(um.BlockId = @blockId OR EXISTS (SELECT 1 FROM dbo.CrmApplicationPlot ap JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE ap.ApplicationId = a.Id AND ap.Status = N'Active' AND pm.BlockId = @blockId))`); }
   if (search) {
     req0.input("srch", sql.NVarChar(200), `%${search}%`);
     conds.push("(COALESCE(cust.CustomerName, a.ApplicantName) LIKE @srch OR COALESCE(cust.Mobile, a.Mobile) LIKE @srch OR a.ApplicationNo LIKE @srch)");
