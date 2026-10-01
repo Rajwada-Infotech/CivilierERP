@@ -87,7 +87,7 @@ function AddressFields({
           onChange={(e) => setForm((f: any) => ({ ...f, PermanentAddress: e.target.value }))}
           rows={2} className={`${inputCls} resize-none`} />
       </div>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {([
           { key: "PermanentCity", label: "City" },
           { key: "PermanentState", label: "State" },
@@ -120,7 +120,7 @@ function AddressFields({
               onChange={(e) => setForm((f: any) => ({ ...f, CurrentAddress: e.target.value }))}
               rows={2} className={`${inputCls} resize-none`} />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {([
               { key: "CurrentCity", label: "City" },
               { key: "CurrentState", label: "State" },
@@ -266,7 +266,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
             <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
               <User size={13} className="text-sky-500" /> Personal &amp; Financial Details
             </h3>
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
               {[
                 { key: "CustomerName", label: "Customer Name", type: "text", required: true },
                 { key: "Mobile", label: "Mobile", type: "text" },
@@ -336,7 +336,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
             {customer.outstanding && Number(customer.outstanding.TotalDue) > 0 ? (
               <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-2">
                 <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-sky-700 dark:text-sky-400"><IndianRupee size={13} /> Outstanding</h3>
-                <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
                   <div><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">₹{Number(customer.outstanding.TotalDue).toLocaleString("en-IN")}</span></div>
                   <div><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-green-700">₹{Number(customer.outstanding.TotalPaid).toLocaleString("en-IN")}</span></div>
                   <div><span className="text-muted-foreground block">Outstanding</span><span className="font-semibold text-sky-700">₹{Number(customer.outstanding.TotalOutstanding).toLocaleString("en-IN")}</span></div>
@@ -760,7 +760,7 @@ const CrmCustomers: React.FC = () => {
               <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
                 <User size={13} className="text-sky-500" /> Personal &amp; Financial Details
               </h3>
-              <div className="grid grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
                 {[
                   { key: "CustomerName", label: "Customer Name", type: "text", required: true },
                   { key: "Mobile", label: "Mobile", type: "text" },

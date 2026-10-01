@@ -234,7 +234,7 @@ function parseMilestones(json: string | null | undefined): MilestoneRow[] {
 }
 
 const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40 focus:border-sky-500/50";
-const labelCls = "text-xs text-muted-foreground block mb-1.5";
+const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
 
 // Live "cost + GST" preview shown at every point Unit/Parking/Extra Charges
 // values are picked — Application's Project/Unit and Parking steps, and
@@ -457,7 +457,7 @@ const CoApplicantStep: React.FC<{
 
       {editingId !== null && (
         <div className="rounded-lg border border-border p-3 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className={labelCls}>Name *</label>
               <input value={draft.Name} onChange={(e) => setDraft((d: any) => ({ ...d, Name: e.target.value }))} className={inputCls} />
@@ -541,7 +541,7 @@ const CoApplicantStep: React.FC<{
               onChange={(e) => setDraft((d: any) => ({ ...d, Address: e.target.value }))}
               className={inputCls + (sameAsApplicant ? " bg-muted/30 text-muted-foreground cursor-not-allowed" : "")} />
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <div>
               <label className={labelCls}>City</label>
               <input value={draft.City} readOnly={sameAsApplicant}
@@ -603,7 +603,7 @@ const CoApplicantStep: React.FC<{
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
               <div><span className="text-muted-foreground">Mobile:</span> <span className="text-foreground">{viewingCoApplicant.Mobile || "—"}</span></div>
               <div><span className="text-muted-foreground">Email:</span> <span className="text-foreground">{viewingCoApplicant.Email || "—"}</span></div>
               <div><span className="text-muted-foreground">PAN:</span> <span className="text-foreground">{viewingCoApplicant.PanNo || "—"}</span></div>
@@ -2130,7 +2130,7 @@ const CrmApplication: React.FC = () => {
                       )
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className={labelCls}>Company *</label>
                       <select value={form.CompanyId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}
@@ -2357,7 +2357,7 @@ const CrmApplication: React.FC = () => {
                             pattern used on Purchase Orders (PurchaseOrderMaster.tsx).
                             Nothing in here is ever an editable input. */}
                         {selectedBroker && (
-                          <dl className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-muted/20 border border-border p-3 text-sm">
+                          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 rounded-lg bg-muted/20 border border-border p-3 text-sm">
                             {selectedBroker.LHeadPhone && (
                               <div>
                                 <dt className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">Phone</dt>
@@ -2385,7 +2385,7 @@ const CrmApplication: React.FC = () => {
                           </dl>
                         )}
 
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                           <div>
                             <label className={labelCls}>Default Rate (Preview)</label>
                             <input readOnly value={`${brokerageTierDefault}% (< 1 Cr → 2%, ≥ 1 Cr → 1%)`}
@@ -2474,7 +2474,7 @@ const CrmApplication: React.FC = () => {
 
           {step === 7 && (
             <div className="space-y-4">
-              <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-2 gap-3 text-xs">
+              <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div>
                   <p className="text-muted-foreground mb-0.5 flex items-center gap-1"><User size={11} /> Assigned Sales Person</p>
                   <p className="font-medium text-foreground">{currentUser?.name || "—"} (you)</p>
@@ -2575,7 +2575,7 @@ const CrmApplication: React.FC = () => {
                     )
                   )}
                 </div>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className={labelCls}>Token Type</label>
                     <input type="text" value="Amount" readOnly disabled
@@ -2771,7 +2771,7 @@ const CrmApplication: React.FC = () => {
                     <span className="text-xs font-semibold uppercase tracking-wide">Applicant</span>
                     <span className="ml-auto font-mono text-[0.6875rem] text-muted-foreground">{a.CustomerNo || ""}</span>
                   </div>
-                  <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                  <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                     <Row label="Name" value={a.ApplicantName} />
                     <Row label="PAN" value={a.PanNo} />
                     <Row label="Mobile" value={<>{a.Mobile}{a.AltMobile ? <span className="text-muted-foreground"> / {a.AltMobile}</span> : null}</>} />
@@ -2801,7 +2801,7 @@ const CrmApplication: React.FC = () => {
                       <span className="ml-auto flex items-center gap-1 text-[0.6875rem] text-red-500"><XCircle size={11} /> Unit unavailable</span>
                     )}
                   </div>
-                  <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                  <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                     <Row label="Company" value={a.CompanyName} />
                     <Row label="Project" value={a.ProjectMasterName || a.InterestedProject} />
                     <Row label="Unit" value={a.PreferredUnitName || a.InterestedUnit} />
@@ -2896,7 +2896,7 @@ const CrmApplication: React.FC = () => {
                 </section>
 
                 {/* ── 4. Payment + Source in a 2-col row ── */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <section className="rounded-xl border border-border overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2 bg-muted/40 border-b border-border">
                       <Wallet size={12} className="text-primary shrink-0" />
@@ -2937,7 +2937,7 @@ const CrmApplication: React.FC = () => {
                       <Users2 size={13} className="text-primary shrink-0" />
                       <span className="text-xs font-semibold uppercase tracking-wide">Broker</span>
                     </div>
-                    <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                    <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                       <Row label="Broker" value={a.BrokerName} />
                       <Row label="Rate" value={a.BrokerageRatePercent != null ? `${a.BrokerageRatePercent}%` : null} />
                       {a.BrokeragePaymentPlan && a.BrokeragePaymentPlan !== "OneTime" && (
@@ -2958,7 +2958,7 @@ const CrmApplication: React.FC = () => {
                         Open <ChevronRight size={11} />
                       </button>
                     </div>
-                    <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-3">
+                    <div className="px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3">
                       <Row label="Booking No" value={<span className="font-mono">{booking.BookingNo}</span>} />
                       <Row label="Status" value={booking.Status} />
                       <Row label="Unit" value={[booking.ProjectName, booking.UnitNo].filter(Boolean).join(" · ")} />
@@ -3250,7 +3250,7 @@ const BankDetailsStep: React.FC<{
             {bankSaving ? "Saving..." : "Save"}
           </button>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {[
             ["BankName", "Bank Name"], ["BranchName", "Branch"], ["AccountNo", "Account No"], ["IfscCode", "IFSC Code"],
             ["AccountHolderName", "Account Holder Name"], ["PanNo", "PAN No"], ["AadhaarNo", "Aadhaar No"],

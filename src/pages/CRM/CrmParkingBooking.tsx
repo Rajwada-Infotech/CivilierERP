@@ -282,7 +282,7 @@ const DetailPanel: React.FC<DetailPanelProps> = ({
                       <span className="text-sm text-muted-foreground">Amount due</span>
                       <span className="text-base font-semibold">{inr(a.TotalAmount)}</span>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="text-xs text-muted-foreground block mb-1">Payment Mode</label>
                         <select value={mode} onChange={(e) => setMode(e.target.value)}
@@ -807,7 +807,7 @@ const CrmParkingBooking: React.FC = () => {
                 ))}
               </select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-sm font-medium block mb-1.5">Project</label>
                 <select value={form.ProjectId}
@@ -827,7 +827,7 @@ const CrmParkingBooking: React.FC = () => {
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-sm font-medium block mb-1.5">Parking Type / Rate <span className="text-red-500">*</span></label>
                 <select value={form.ParkingMasterId}

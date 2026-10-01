@@ -238,7 +238,7 @@ function AmountEditor({
   if (editing) {
     return (
       <div className="mt-3 rounded-lg border border-sky-300/60 bg-sky-500/[0.04] dark:border-sky-800/60 p-3 space-y-2">
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <div>
             <label className="text-[0.625rem] text-muted-foreground block mb-1">Stamp Duty (₹)</label>
             <Input type="number" className="h-8 font-mono text-xs focus-visible:ring-amber-500/40" placeholder="Optional" value={stamp} onChange={(e) => setStamp(e.target.value)} />
@@ -877,7 +877,7 @@ const CrmAfsQueryPayment: React.FC<{
               {step === 2 && (
                 <div className="pl-7 space-y-3">
                   <p className="text-xs text-muted-foreground">Once the customer has paid stamp duty and registration fees at the Sub-Registrar's Office, record the confirmation here.</p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-[0.6875rem] text-muted-foreground block mb-1">Amount Actually Paid (₹)</label>
                       <Input type="number" className="h-9 font-mono text-sm focus-visible:ring-amber-500/40" placeholder="Optional" value={confirmAmount} onChange={(e) => setConfirmAmount(e.target.value)} />
@@ -970,7 +970,7 @@ const CrmAfsQueryPayment: React.FC<{
               <p className="text-xs text-muted-foreground mt-0.5">Enter the stamp duty and registration fee amounts (both optional now — can be filled before sending to the customer).</p>
             </div>
             <div className="px-5 py-4 space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-foreground block mb-1.5">Stamp Duty (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
                   <Input type="number" className="h-9 font-mono text-sm focus-visible:ring-amber-500/40" placeholder="e.g. 50000"
@@ -1065,7 +1065,7 @@ const CrmAfsQueryPayment: React.FC<{
                   <p className="text-xs text-muted-foreground mt-0.5">Enter the stamp duty and registration fee amounts. The buyer will be notified and can confirm payment through their portal.</p>
                 </div>
                 <div className="px-5 py-4 space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs font-semibold text-foreground block mb-1.5">Stamp Duty (₹) <span className="font-normal text-muted-foreground">(optional)</span></label>
                       <Input type="number" className="h-9 font-mono text-sm focus-visible:ring-amber-500/40" placeholder="e.g. 50000"
@@ -1200,7 +1200,7 @@ const CrmAfsQueryPayment: React.FC<{
                           className="shrink-0 text-[0.6875rem] px-2 py-1 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 font-medium dark:border-emerald-700 dark:text-emerald-400">Lock</button>
                       ) : null}
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="text-[0.6875rem] text-muted-foreground block mb-1">Stamp Duty (₹)</label>
                         <Input type="number" className={`h-9 font-mono text-sm focus-visible:ring-amber-500/40 ${dialogFeesLocked ? "bg-muted/30" : ""}`} placeholder="Optional"

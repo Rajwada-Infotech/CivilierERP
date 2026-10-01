@@ -468,7 +468,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
               <div className="mt-3"><Timeline row={r} /></div>
             </div>
             <div className="px-5 py-4 space-y-3">
-              <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                 <div className="rounded-lg border border-border px-3 py-2">
                   <p className="text-[0.625rem] text-muted-foreground">Agreement No</p>
                   <p className="font-mono font-medium mt-0.5">{r.AgreementNo || "—"}</p>
@@ -773,7 +773,7 @@ const CrmAfsRegistry: React.FC<{ embeddedBookingId?: number; onChanged?: () => v
                 </div>
 
                 <div className="px-5 py-4 space-y-3">
-                  <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                     <div className="rounded-lg border border-border px-3 py-2">
                       <p className="text-[0.625rem] text-muted-foreground">Agreement No</p>
                       <p className="font-mono font-medium mt-0.5">{detailRow.AgreementNo || "—"}</p>

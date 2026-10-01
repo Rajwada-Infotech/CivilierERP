@@ -37,7 +37,7 @@ export function ProxyActionDialog({
             <label className="text-xs font-medium text-foreground block mb-1.5">
               How did the customer communicate? <span className="text-red-500">*</span>
             </label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {PROXY_METHODS.map((m) => (
                 <button key={m} type="button" onClick={() => setMethod(m)}
                   className={`text-xs px-3 py-2 rounded-lg border font-medium transition-colors text-left ${

@@ -501,7 +501,7 @@ function LedgerSubSection<T>({ icon: Icon, title, rows, empty, children }: {
 }
 
 const Row: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="grid grid-cols-5 gap-3 items-center px-2 py-2 rounded-lg hover:bg-muted/10 text-sm">
+  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 items-center px-2 py-2 rounded-lg hover:bg-muted/10 text-sm">
     {children}
   </div>
 );

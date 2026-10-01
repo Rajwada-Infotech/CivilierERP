@@ -592,7 +592,7 @@ export default function GodownAdmin() {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="gd-code">Code</Label>
                 <Input
@@ -618,7 +618,7 @@ export default function GodownAdmin() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label htmlFor="gd-company">Company</Label>
                 <Select

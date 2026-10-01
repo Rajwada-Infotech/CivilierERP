@@ -119,7 +119,7 @@ export const ActivityBrowserFilters: React.FC<Props> = ({
           value={dateFilters.period || ""}
           onValueChange={handlePresetClick}
         >
-          <SelectTrigger className="h-8 w-[130px] text-xs">
+          <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs">
             <SelectValue placeholder="Quick Select" />
           </SelectTrigger>
           <SelectContent>
@@ -145,7 +145,7 @@ export const ActivityBrowserFilters: React.FC<Props> = ({
         </Select>
 
         <Select onValueChange={handleMonthChange}>
-          <SelectTrigger className="h-8 w-[110px] text-xs">
+          <SelectTrigger className="h-8 w-full sm:w-[110px] text-xs">
             <SelectValue placeholder="Month" />
           </SelectTrigger>
           <SelectContent>
@@ -188,13 +188,13 @@ export const ActivityBrowserFilters: React.FC<Props> = ({
       </div>
 
       {/* Date Range Picker */}
-      <div className="flex items-center gap-2 min-w-[280px]">
+      <div className="flex items-center gap-2 min-w-0 sm:min-w-[280px]">
         <Popover>
           <PopoverTrigger asChild>
             <Button
               variant="outline"
               className={cn(
-                "w-[280px] justify-start text-left font-normal text-xs h-10",
+                "w-full sm:w-[280px] justify-start text-left font-normal text-xs h-10",
                 !dateRange.from && !dateRange.to && "text-muted-foreground",
               )}
             >
@@ -242,7 +242,7 @@ export const ActivityBrowserFilters: React.FC<Props> = ({
 
       {/* Search and Role */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-[220px] max-w-sm flex-1">
+        <div className="relative min-w-0 sm:min-w-[220px] max-w-sm flex-1">
           <Search
             size={14}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"

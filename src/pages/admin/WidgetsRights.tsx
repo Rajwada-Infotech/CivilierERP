@@ -431,7 +431,7 @@ export default function WidgetsRights() {
             {/* Toolbar */}
             <div className="px-4 py-3 border-b border-border flex flex-wrap items-center gap-3">
               {/* Search */}
-              <div className="relative flex-1 min-w-[180px]">
+              <div className="relative flex-1 min-w-0 sm:min-w-[180px]">
                 <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <input
                   value={widgetSearch}

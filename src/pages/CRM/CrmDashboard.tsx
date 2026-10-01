@@ -681,7 +681,7 @@ const CrmDashboard: React.FC = () => {
                 {(payments.OverdueCount ?? 0) > 0 && (
                   <p className="text-xs text-red-500 font-medium">{payments.OverdueCount} milestone(s) overdue</p>
                 )}
-                <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs mt-2">
                   <div>
                     <div className="text-muted-foreground">Due 30 days</div>
                     <div className="font-semibold">{fmtCr(metrics.forwardDue30Days ?? 0)}</div>

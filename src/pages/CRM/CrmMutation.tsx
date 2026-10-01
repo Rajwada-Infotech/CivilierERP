@@ -208,6 +208,16 @@ const CrmMutation: React.FC = () => {
     setSp((p) => { p.set("mutationId", String(id)); return p; }, { replace: true });
   };
 
+  // Open the first record by default instead of an empty "select one" panel;
+  // the user can still pick any other row. Deep links (?mutationId= / ?bookingId=)
+  // keep priority.
+  useEffect(() => {
+    if (detailId != null || sp.get("mutationId") || sp.get("bookingId")) return;
+    const first = (rows as any[])[0];
+    if (first) setDetailId(first.Id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, detailId]);
+
   const handleStart = async () => {
     if (!bookingId) { toast.error("Booking is required"); return; }
     setSaving(true);
@@ -545,7 +555,7 @@ const CrmMutation: React.FC = () => {
                       </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
                       <div><p className="text-xs text-muted-foreground">Booking</p><p className="font-medium">{detail.BookingNo}</p></div>
                       <div><p className="text-xs text-muted-foreground">Unit</p><p className="font-medium">{detail.UnitNo}</p></div>
                       <div><p className="text-xs text-muted-foreground">Applicant</p><p className="font-medium">{detail.ApplicantName}</p></div>
@@ -672,7 +682,7 @@ const CrmMutation: React.FC = () => {
                 <p className="text-[0.6875rem] text-muted-foreground mt-1">Requires Sale Deed Registry to be Completed.</p>
                 {!startableBookings.length && <p className="text-[0.6875rem] text-sky-600 mt-1">No bookings are eligible yet — Sale Deed Registry must be Completed first.</p>}
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Application No</label>
                   <Input value={startForm.ApplicationNo} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationNo: e.target.value }))} placeholder="Optional" />
@@ -687,7 +697,7 @@ const CrmMutation: React.FC = () => {
                 <label className="text-xs text-muted-foreground block mb-1">Authority</label>
                 <Input value={startForm.Authority} onChange={(e) => setStartForm((f) => ({ ...f, Authority: e.target.value }))} placeholder="e.g. GHMC, MCGM, BDA" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Old Khata No.</label>
                   <Input value={startForm.OldKhataNo} onChange={(e) => setStartForm((f) => ({ ...f, OldKhataNo: e.target.value }))} />
@@ -732,7 +742,7 @@ const CrmMutation: React.FC = () => {
                 <label className="text-xs text-muted-foreground block mb-1">New Khata No. *</label>
                 <Input value={approveForm.NewKhataNo} onChange={(e) => setApproveForm((f) => ({ ...f, NewKhataNo: e.target.value }))} placeholder="e.g. 456/2026" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Mutation No.</label>
                   <Input value={approveForm.ApprovedNo} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedNo: e.target.value }))} />

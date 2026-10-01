@@ -281,7 +281,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
 
         {/* ── Form sections ── */}
         <SectionCard icon={Landmark} iconClass="bg-sky-500/10 text-sky-600" title="Bank Details">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             {field("BankName", "Bank Name")}
             {field("BranchName", "Branch Name")}
             {field("AccountNo", "Account Number")}
@@ -290,7 +290,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
           </div>
         </SectionCard>
 
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <SectionCard icon={IdCard} iconClass="bg-sky-500/10 text-sky-600" title="Identity">
             {field("PanNo", "PAN Number")}
             {field("AadhaarNo", "Aadhaar Number")}
@@ -304,7 +304,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
         <SectionCard icon={CreditCard} iconClass="bg-cyan-500/10 text-cyan-600" title="Financing">
           <div>
             <label className="text-xs text-muted-foreground block mb-1">How is this purchase being financed?</label>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {(["SelfFunded", "LoanFinanced"] as const).map((opt) => (
                 <button key={opt} type="button" disabled={locked}
                   onClick={() => !locked && setForm((f) => ({ ...f, FinancingType: opt }))}

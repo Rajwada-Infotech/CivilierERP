@@ -479,7 +479,7 @@ const CrmLoanTracking: React.FC = () => {
               )}
 
               {/* Bank details */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
                   { key: "BankName",     label: "Bank Name",        type: "text", span: 1 },
                   { key: "BranchName",   label: "Branch",           type: "text", span: 1 },
@@ -506,7 +506,7 @@ const CrmLoanTracking: React.FC = () => {
               </div>
 
               {/* RM details */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
                   { key: "RmName",    label: "RM Name",    type: "text" },
                   { key: "RmContact", label: "RM Contact", type: "text" },

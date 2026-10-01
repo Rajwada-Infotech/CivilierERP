@@ -296,7 +296,7 @@ function ManualStep({
 
         {(!done || editing) && (
           <div className="mt-2 space-y-2 bg-muted/30 rounded-lg px-3 py-3 border border-border">
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <div>
                 <label className="text-[0.625rem] font-semibold uppercase tracking-wider text-muted-foreground">Date</label>
                 <DateInput value={formDate} onChange={(e) => setFormDate(e.target.value)}
@@ -444,7 +444,7 @@ function DeedDetailsSection({ detail, onSave, saving, canEdit }: {
           )}
           {editing ? (
             <>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
                   ["Deed Value", "DeedValue", "number"],
                   ["Stamp Duty", "StampDuty", "number"],
@@ -1224,6 +1224,16 @@ const CrmSalesDeed: React.FC = () => {
     setSp((p) => { p.set("deedId", String(id)); return p; }, { replace: true });
     setActiveTab('Timeline');
   };
+
+  // Open the first record by default instead of an empty "select one" panel;
+  // the user can still pick any other row. Deep links (?deedId= / ?bookingId=)
+  // keep priority.
+  useEffect(() => {
+    if (detailId != null || sp.get("deedId") || sp.get("bookingId")) return;
+    const first = (deeds as any[])[0];
+    if (first) selectDetail(first.Id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deeds, detailId]);
 
   const saveFields = async (fields: Record<string, any>) => {
     if (detailId == null) return;
@@ -2143,7 +2153,7 @@ const CrmSalesDeed: React.FC = () => {
                                 {execEditing && (
                                   <div className="mt-2 space-y-2 bg-muted/30 rounded-lg px-3 py-3 border border-border">
                                     <p className="text-[0.6875rem] text-muted-foreground">Status auto-advances once recorded: ExecutedBy → Executed; RegistrationNo → Registered. All mandatory documents must be Verified (server-checked).</p>
-                                    <div className="grid grid-cols-2 gap-2">
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                       <div className="col-span-2 space-y-1">
                                         <label className="text-[0.625rem] font-semibold uppercase tracking-wider text-muted-foreground">Executed By *</label>
                                         <Input className="h-9" value={execForm.ExecutedBy}
@@ -2244,7 +2254,7 @@ const CrmSalesDeed: React.FC = () => {
                                   const net = Number(qpDetail.RequiredAmount || 0);
                                   if (!stamp && !reg) return null;
                                   return (
-                                    <div className="grid grid-cols-4 gap-2 text-xs">
+                                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
                                       <div className="rounded-lg border border-border bg-muted/20 px-2.5 py-2"><p className="text-[0.625rem] text-muted-foreground">Stamp Duty</p><p className="font-mono font-semibold">{formatINR(stamp)}</p></div>
                                       <div className="rounded-lg border border-border bg-muted/20 px-2.5 py-2"><p className="text-[0.625rem] text-muted-foreground">Reg. Fee</p><p className="font-mono font-semibold">{formatINR(reg)}</p></div>
                                       {credit > 0 && <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-2"><p className="text-[0.625rem] text-emerald-700">AFS Credit</p><p className="font-mono font-semibold text-emerald-700">{formatINR(credit)}</p></div>}
@@ -2348,7 +2358,7 @@ const CrmSalesDeed: React.FC = () => {
                                         </div>
                                         {qpStep === 2 && (
                                           <>
-                                            <div className="grid grid-cols-2 gap-2">
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                                               <Input className="h-8 text-xs font-mono" placeholder={qpDetail.RequiredAmount ? String(qpDetail.RequiredAmount) : "Amount paid"} value={qpConfirmAmt} onChange={(e) => setQpConfirmAmt(e.target.value)} />
                                               <Input className="h-8 text-xs" placeholder="Remarks (optional)" value={qpConfirmRem} onChange={(e) => setQpConfirmRem(e.target.value)} />
                                             </div>
@@ -2482,7 +2492,7 @@ const CrmSalesDeed: React.FC = () => {
 
                                 {/* Government dues */}
                                 {(registry.DeedStampDuty || registry.DeedRegistrationFee || registry.QPConfirmedAmount) && (
-                                  <div className="border border-border rounded-lg p-3 grid grid-cols-3 gap-3 text-xs bg-muted/20">
+                                  <div className="border border-border rounded-lg p-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs bg-muted/20">
                                     <div><p className="text-muted-foreground">Stamp Duty</p><p className="font-medium">{registry.DeedStampDuty != null ? formatINR(registry.DeedStampDuty) : "—"}</p></div>
                                     <div><p className="text-muted-foreground">Registration Fee</p><p className="font-medium">{registry.DeedRegistrationFee != null ? formatINR(registry.DeedRegistrationFee) : "—"}</p></div>
                                     <div>
@@ -2806,7 +2816,7 @@ const CrmSalesDeed: React.FC = () => {
           <DialogContent className="max-w-xs">
             <DialogHeader><DialogTitle className="font-heading">{regScheduleOpen === "reschedule" ? "Reschedule Appointment" : "Schedule Registration"}</DialogTitle></DialogHeader>
             <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">{regScheduleOpen === "reschedule" ? "New Date *" : "Appointment Date *"}</label>
                   <DateInput value={regScheduledDate} onChange={(e) => setRegScheduledDate(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
@@ -2844,7 +2854,7 @@ const CrmSalesDeed: React.FC = () => {
                 <label className="text-xs text-muted-foreground block mb-1">Registration No. *</label>
                 <Input value={regCompleteForm.RegistrationNo} onChange={(e) => setRegCompleteForm((f) => ({ ...f, RegistrationNo: e.target.value }))} placeholder="e.g. 1234/2026" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Book No.</label>
                   <Input value={regCompleteForm.BookNo} onChange={(e) => setRegCompleteForm((f) => ({ ...f, BookNo: e.target.value }))} />
@@ -2992,7 +3002,7 @@ const CrmSalesDeed: React.FC = () => {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {[
                   ["Deed Value", "DeedValue", "number"],
                   ["Stamp Duty", "StampDuty", "number"],

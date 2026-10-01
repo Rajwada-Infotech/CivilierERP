@@ -204,7 +204,7 @@ export default function ContractorCategoryAdmin() {
         }
       >
       {/* Stats strip */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         {[
           { label: "Total", value: categories.length },
           { label: "Active", value: activeCount },

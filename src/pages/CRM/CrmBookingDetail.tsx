@@ -1452,7 +1452,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
 
             {tab === "Booking" && (
               <div className="space-y-4 pt-2">
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="text-xs text-muted-foreground block mb-1">Application</label>
                     <div className="text-sm px-2.5 py-2 border border-border rounded-lg bg-muted/30">{booking.ApplicationNo}</div>
@@ -2034,7 +2034,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                   <div className="rounded-xl border border-border p-4 space-y-2">
                     <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={15} className="text-sky-600 dark:text-sky-400" /> Submit Payment for Approval</h3>
                     <p className="text-[0.6875rem] text-muted-foreground">Creates the Money Receipt for this booking — it goes Pending until Finance/Account's Head approves it.</p>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <input type="number" placeholder={`Amount — Balance Due ${fmt(bookingAmountBalance)}`} value={payForm.Amount}
                         onChange={(e) => setPayForm((f) => ({ ...f, Amount: e.target.value }))}
                         className="text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
@@ -2189,7 +2189,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                             const gst = rate ? Math.round(effectiveRate * Number(rate.GstRate) / 100 * 100) / 100 : 0;
                             return (
                               <>
-                                <div className="grid grid-cols-2 gap-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                   <div>
                                     <label className="text-xs font-medium text-foreground block mb-1">
                                       Rate (₹){isUnrated && <span className="text-red-500 ml-0.5">*</span>}
@@ -2293,7 +2293,7 @@ export function CrmBookingDetail({ bookingId, onClose }: { bookingId: number; on
                           {/* Inline edit form — expands below the header row */}
                           {editingParkingId === p.Id ? (
                             <div className="rounded-lg border border-sky-200 bg-sky-50/40 dark:bg-sky-950/20 p-3 space-y-3 mt-1">
-                              <div className="grid grid-cols-2 gap-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
                                   <label className="text-xs font-medium text-foreground block mb-1">Rate (₹)</label>
                                   <input

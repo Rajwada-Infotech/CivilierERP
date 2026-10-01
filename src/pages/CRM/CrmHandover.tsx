@@ -413,7 +413,7 @@ const CrmHandover: React.FC = () => {
                 </div>
 
                 {/* Dates & flags */}
-                <div className="grid grid-cols-2 gap-2 text-sm mb-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm mb-3">
                   <div><span className="text-xs text-muted-foreground">Scheduled: </span>{detail.handover.ScheduledDate ? String(detail.handover.ScheduledDate).slice(0, 10) : "—"}</div>
                   <div><span className="text-xs text-muted-foreground">Actual: </span>{detail.handover.ActualHandoverDate ? String(detail.handover.ActualHandoverDate).slice(0, 10) : "—"}</div>
                   <div>

@@ -130,7 +130,7 @@ const SpecPanel: React.FC<{ blocks: RecordWithId[] }> = ({ blocks }) => {
         <select
           value={blockId}
           onChange={(e) => { setBlockId(e.target.value); setDirty(false); }}
-          className="border border-border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary min-w-[220px]"
+          className="border border-border rounded-md px-3 py-1.5 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary min-w-0 sm:min-w-[220px]"
         >
           <option value="">— choose a block —</option>
           {activeBlocks.map((b) => (

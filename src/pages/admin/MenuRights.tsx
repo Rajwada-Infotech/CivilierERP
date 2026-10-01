@@ -854,7 +854,7 @@ export default function MenuRights() {
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="bg-muted/30 border-b border-border text-xs uppercase tracking-wide">
-                    <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground min-w-[240px]">
+                    <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground min-w-0 sm:min-w-[240px]">
                       Menu / Page
                     </th>
                     {ALL_ACTIONS.map((a) => (
