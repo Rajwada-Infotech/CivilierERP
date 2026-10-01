@@ -433,10 +433,10 @@ export default function AskCivilierAI() {
 
                   <div className="flex-1 flex items-center gap-3 pl-5 pr-5">
                     <div className="min-w-0">
-                      <p className="font-heading font-bold text-[13px] text-foreground tracking-tight">
+                      <p className="font-heading font-bold text-[0.8125rem] text-foreground tracking-tight">
                         CivilierAI
                       </p>
-                      <p className="text-[10px] text-muted-foreground/55 font-medium leading-tight">
+                      <p className="text-[0.625rem] text-muted-foreground/55 font-medium leading-tight">
                         {stage === "answer"
                           ? "Noted — thanks!"
                           : "In-house assistant · preview"}
@@ -473,7 +473,7 @@ export default function AskCivilierAI() {
                       </p>
                       <button
                         onClick={() => setStage("list")}
-                        className="w-full flex items-center justify-center gap-2 rounded-xl bg-primary text-primary-foreground text-xs font-heading font-bold tracking-tight py-2.5 hover:opacity-90 transition-opacity"
+                        className="w-full flex items-center justify-center gap-2 rounded-xl btn-module text-white text-xs font-heading font-bold tracking-tight py-2.5 hover:opacity-90 transition-opacity"
                       >
                         <Sparkles size={13} />
                         Show smart queries
@@ -490,7 +490,7 @@ export default function AskCivilierAI() {
                       transition={{ duration: 0.2 }}
                       className="px-3 py-3 max-h-[340px] overflow-y-auto"
                     >
-                      <p className="px-1.5 pb-2 text-[10px] font-heading font-bold uppercase tracking-[0.18em] text-muted-foreground/45">
+                      <p className="px-1.5 pb-2 text-[0.625rem] font-heading font-bold uppercase tracking-[0.18em] text-muted-foreground/45">
                         {contextLabel
                           ? `Try asking · ${contextLabel}`
                           : "Try asking"}
@@ -518,7 +518,7 @@ export default function AskCivilierAI() {
                             >
                               <q.icon size={12} style={{ color: q.accent }} />
                             </div>
-                            <span className="text-[11.5px] font-medium text-foreground/85 leading-snug">
+                            <span className="text-[0.7188rem] font-medium text-foreground/85 leading-snug">
                               {q.label}
                             </span>
                           </motion.button>
@@ -546,12 +546,12 @@ export default function AskCivilierAI() {
                             style={{ color: selected.accent }}
                           />
                         </div>
-                        <p className="text-[11.5px] font-semibold text-foreground/80 leading-snug">
+                        <p className="text-[0.7188rem] font-semibold text-foreground/80 leading-snug">
                           {selected.label}
                         </p>
                       </div>
                       <div className="rounded-xl border border-border/50 bg-muted/20 px-3.5 py-3">
-                        <p className="text-[11px] text-muted-foreground/75 leading-relaxed">
+                        <p className="text-[0.6875rem] text-muted-foreground/75 leading-relaxed">
                           Got it. CivilierAI is still warming up — once
                           connected, it'll pull this straight from your live
                           data instead of a canned reply. For now, here's where
@@ -561,14 +561,14 @@ export default function AskCivilierAI() {
                       <button
                         onClick={() => goToModule(selected)}
                         style={{ background: selected.accent }}
-                        className="mt-3 w-full flex items-center justify-center gap-1.5 rounded-xl text-white text-[11.5px] font-heading font-bold tracking-tight py-2.5 hover:opacity-90 transition-opacity"
+                        className="mt-3 w-full flex items-center justify-center gap-1.5 rounded-xl text-white text-[0.7188rem] font-heading font-bold tracking-tight py-2.5 hover:opacity-90 transition-opacity"
                       >
                         Open {selected.module}
                         <ArrowRight size={13} />
                       </button>
                       <button
                         onClick={() => setStage("list")}
-                        className="mt-2 w-full rounded-xl border border-border/60 text-[11px] font-heading font-bold tracking-tight py-2 text-muted-foreground/70 hover:bg-muted/30 transition-colors"
+                        className="mt-2 w-full rounded-xl border border-border/60 text-[0.6875rem] font-heading font-bold tracking-tight py-2 text-muted-foreground/70 hover:bg-muted/30 transition-colors"
                       >
                         Ask another
                       </button>

@@ -2,6 +2,8 @@ import React from "react";
 import { motion } from "framer-motion";
 import { CalendarClock } from "lucide-react";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
+import { useModule } from "@/contexts/ModuleContext";
+import { CrmShell } from "@/components/crm/CrmShell";
 
 interface FollowupShellProps {
   title: string;
@@ -17,7 +19,15 @@ interface FollowupShellProps {
 const ACCENT = "#0d9488";
 const ACCENT_SOFT = "#2dd4bf";
 
-export const FollowupShell: React.FC<FollowupShellProps> = ({
+// Several Follow-Up setup masters are also served under /crm/setup/*; opened
+// from CRM they take the CRM shell so the page matches the CRM module.
+export const FollowupShell: React.FC<FollowupShellProps> = (props) => {
+  const { activeModule } = useModule();
+  if (activeModule === "crm") return <CrmShell {...props} />;
+  return <FollowupShellInner {...props} />;
+};
+
+const FollowupShellInner: React.FC<FollowupShellProps> = ({
   title,
   subtitle,
   icon: PageIcon,

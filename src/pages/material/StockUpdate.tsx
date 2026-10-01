@@ -19,6 +19,7 @@ import {
   getStockUpdates,
   type StockUpdateDetail,
 } from "@/api/stockUpdateApi";
+import { DateInput } from "@/components/ui/date-input";
 
 type Line = { key: number; itemId: string; uom: string; qty: string };
 
@@ -32,7 +33,7 @@ let lineKey = 0;
 const newLine = (): Line => ({ key: ++lineKey, itemId: "", uom: "", qty: "" });
 
 function Label({ children }: { children: React.ReactNode }) {
-  return <label className="block text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground mb-1.5">{children}</label>;
+  return <label className="block text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground mb-1.5">{children}</label>;
 }
 
 // Company/Project/Godown are locked once saved (see stockUpdates.js's own
@@ -132,7 +133,7 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
                 ["Godown", data.GodownName || "—"],
               ].map(([k, v]) => (
                 <div key={k} className="px-3 py-2 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{k} (locked)</p>
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{k} (locked)</p>
                   <p className="font-semibold text-foreground">{v}</p>
                 </div>
               ))}
@@ -141,7 +142,7 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <Label>Date of update</Label>
-                <input type="date" className={inp} value={updateDate} max={todayStr()} onChange={(e) => setUpdateDate(e.target.value)} />
+                <DateInput className={inp} value={updateDate} max={todayStr()} onChange={(e) => setUpdateDate(e.target.value)} />
               </div>
               <div>
                 <Label>Remarks</Label>
@@ -162,7 +163,7 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
               </div>
               <div className="rounded-xl border border-border overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/40 border-b border-border text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+                  <thead className="bg-muted/40 border-b border-border text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                     <tr>
                       <th className="px-3 py-2 text-left">Item</th>
                       <th className="px-3 py-2 text-left w-40">UOM</th>
@@ -230,7 +231,7 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
                 type="button"
                 onClick={handleSave}
                 disabled={save.isPending}
-                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-50 transition shadow-sm shadow-emerald-500/20"
+                className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white btn-module disabled:opacity-50 transition shadow-sm shadow-emerald-500/20"
               >
                 {save.isPending && <Loader2 size={14} className="animate-spin" />}
                 Save Changes
@@ -381,13 +382,13 @@ export default function StockUpdate() {
         {rights.canCreate && (
           <div className="rounded-2xl border border-border bg-card/70 backdrop-blur-sm overflow-hidden mb-6">
             <div className="px-5 py-3 border-b border-border/60">
-              <h3 className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">New Stock Update</h3>
+              <h3 className="text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground">New Stock Update</h3>
             </div>
             <div className="p-5 space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div>
                   <Label>Date of update</Label>
-                  <input type="date" className={inp} value={updateDate} max={todayStr()} onChange={(e) => setUpdateDate(e.target.value)} />
+                  <DateInput className={inp} value={updateDate} max={todayStr()} onChange={(e) => setUpdateDate(e.target.value)} />
                 </div>
                 <div>
                   <Label>Company</Label>
@@ -448,7 +449,7 @@ export default function StockUpdate() {
                     ))}
                   </select>
                   {projectId && projectGodowns.length === 0 && (
-                    <p className="text-[11px] text-amber-600 mt-1">This project has no godown yet. Add one in Godown Master.</p>
+                    <p className="text-[0.6875rem] text-amber-600 mt-1">This project has no godown yet. Add one in Godown Master.</p>
                   )}
                 </div>
               </div>
@@ -467,7 +468,7 @@ export default function StockUpdate() {
                 </div>
                 <div className="rounded-xl border border-border overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-muted/40 border-b border-border text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+                    <thead className="bg-muted/40 border-b border-border text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                       <tr>
                         <th className="px-3 py-2 text-left">Item</th>
                         <th className="px-3 py-2 text-left w-40">UOM</th>
@@ -548,7 +549,7 @@ export default function StockUpdate() {
                   type="button"
                   onClick={handleSave}
                   disabled={save.isPending}
-                  className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-50 transition shadow-sm shadow-emerald-500/20"
+                  className="inline-flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold text-white btn-module disabled:opacity-50 transition shadow-sm shadow-emerald-500/20"
                 >
                   {save.isPending && <Loader2 size={14} className="animate-spin" />}
                   Save &amp; Update Stock
@@ -560,12 +561,12 @@ export default function StockUpdate() {
 
         <div className="rounded-2xl border border-border bg-card/70 backdrop-blur-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-border/60 flex items-center justify-between">
-            <h3 className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">Previous Stock Updates</h3>
-            <span className="text-[11px] text-muted-foreground">{history.length} record{history.length === 1 ? "" : "s"}</span>
+            <h3 className="text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground">Previous Stock Updates</h3>
+            <span className="text-[0.6875rem] text-muted-foreground">{history.length} record{history.length === 1 ? "" : "s"}</span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/30 text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+              <thead className="bg-muted/30 text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                 <tr>
                   <th className="px-4 py-2 text-left">Doc No</th>
                   <th className="px-4 py-2 text-left">Date</th>
@@ -594,11 +595,11 @@ export default function StockUpdate() {
                       <td className="px-4 py-2.5 text-muted-foreground">{h.CreatedByName || h.CreatedBy || "—"}</td>
                       <td className="px-2 py-2.5 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <button onClick={() => setViewId(h.StockUpdateId)} className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors" title="View">
+                          <button data-row-view onClick={() => setViewId(h.StockUpdateId)} className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors" title="View">
                             <Eye size={13} />
                           </button>
                           {rights.canEdit && (
-                            <button onClick={() => setEditId(h.StockUpdateId)} className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors" title="Edit">
+                            <button onClick={() => setEditId(h.StockUpdateId)} className="p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors" title="Edit">
                               <Pencil size={13} />
                             </button>
                           )}
@@ -641,14 +642,14 @@ export default function StockUpdate() {
                   ["Remarks", viewing.Remarks || "—"],
                 ].map(([k, v]) => (
                   <div key={k} className="px-3 py-2 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{k}</p>
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{k}</p>
                     <p className="font-semibold text-foreground">{v}</p>
                   </div>
                 ))}
               </div>
               <div className="rounded-xl border border-border overflow-hidden">
                 <table className="w-full text-xs">
-                  <thead className="bg-muted/40 text-[9px] uppercase tracking-widest font-heading text-muted-foreground">
+                  <thead className="bg-muted/40 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground">
                     <tr>
                       <th className="px-3 py-2 text-left">Item</th>
                       <th className="px-3 py-2 text-left">UOM</th>

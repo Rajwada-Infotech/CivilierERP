@@ -171,7 +171,7 @@ export default function Signature() {
               {isEditing ? "Edit Signature" : "Add New Signature"}
             </span>
             {isEditing && (
-              <Badge className="ml-auto text-[10px] font-heading bg-primary/10 text-primary border border-primary/20 px-2">
+              <Badge className="ml-auto text-[0.625rem] font-heading bg-primary/10 text-primary border border-primary/20 px-2">
                 Editing
               </Badge>
             )}
@@ -182,7 +182,7 @@ export default function Signature() {
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="sig-name"
-                    className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
+                    className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground"
                   >
                     <Tag size={10} /> Signature Name{" "}
                     <span className="text-destructive">*</span>
@@ -200,7 +200,7 @@ export default function Signature() {
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="sig-owner"
-                    className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
+                    className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground"
                   >
                     <User size={10} /> Owner{" "}
                     <span className="text-destructive">*</span>
@@ -223,7 +223,7 @@ export default function Signature() {
                       !formData.owner.trim() ||
                       saveMutation.isPending
                     }
-                    className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
+                    className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
                   >
                     {saveMutation.isPending ? (
                       <Loader2 size={14} className="animate-spin" />
@@ -255,7 +255,7 @@ export default function Signature() {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
+                <Label className="flex items-center gap-1.5 text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground">
                   <UploadCloud size={10} /> Signature Image
                 </Label>
                 <div
@@ -318,7 +318,7 @@ export default function Signature() {
                           </span>{" "}
                           or drag &amp; drop
                         </p>
-                        <p className="text-[10px] font-body text-muted-foreground/50 mt-0.5">
+                        <p className="text-[0.625rem] font-body text-muted-foreground/50 mt-0.5">
                           PNG, JPG up to 2 MB
                         </p>
                       </div>
@@ -417,7 +417,7 @@ export default function Signature() {
                           variant={
                             sig.Status === "active" ? "default" : "secondary"
                           }
-                          className="text-[10px] font-heading uppercase tracking-wide px-2 py-0.5"
+                          className="text-[0.625rem] font-heading uppercase tracking-wide px-2 py-0.5"
                         >
                           {sig.Status}
                         </Badge>
@@ -442,7 +442,7 @@ export default function Signature() {
                         </Button>
                       </div>
                     </div>
-                    <p className="text-[10px] font-body text-muted-foreground/50 border-t border-border/50 pt-2.5 mt-0.5">
+                    <p className="text-[0.625rem] font-body text-muted-foreground/50 border-t border-border/50 pt-2.5 mt-0.5">
                       Added{" "}
                       {new Date(sig.AddedAt).toLocaleDateString("en-GB", {
                         day: "2-digit",

@@ -80,7 +80,7 @@ const PortalTickets: React.FC = () => {
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold truncate" style={{ color: TEXT }}>{t.Subject}</p>
-                <p className="text-[11px] mt-0.5" style={{ color: TEXT_FAINT }}>{t.TicketNo} · {t.Category.replace(/([A-Z])/g, " $1").trim()} · {fmtDate(t.CreatedAt)}</p>
+                <p className="text-[0.6875rem] mt-0.5" style={{ color: TEXT_FAINT }}>{t.TicketNo} · {t.Category.replace(/([A-Z])/g, " $1").trim()} · {fmtDate(t.CreatedAt)}</p>
               </div>
               <StatusPill status={t.Status} />
             </div>

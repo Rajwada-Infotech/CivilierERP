@@ -138,7 +138,7 @@ function SelectField({
   return (
     <div className="flex-1 space-y-1.5 min-w-0">
       <p
-        className={`text-[11px] font-semibold uppercase tracking-wider ${c.label}`}
+        className={`text-[0.6875rem] font-semibold uppercase tracking-wider ${c.label}`}
       >
         {label}
       </p>
@@ -211,7 +211,7 @@ function GodownPanel({
           <p className="text-xs font-semibold text-foreground truncate">
             {g.GodownName}
           </p>
-          <p className="text-[10px] text-muted-foreground">{g.GodownCode}</p>
+          <p className="text-[0.625rem] text-muted-foreground">{g.GodownCode}</p>
         </div>
       </div>
     );
@@ -302,7 +302,7 @@ function SidePanel({
       />
       <div className="space-y-1.5">
         <p
-          className={`text-[11px] font-semibold uppercase tracking-wider ${c.label}`}
+          className={`text-[0.6875rem] font-semibold uppercase tracking-wider ${c.label}`}
         >
           Godown
         </p>
@@ -447,12 +447,12 @@ function SOItemRow({
                       <p className="text-xs font-medium text-foreground truncate">
                         {a.itemName}
                       </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                      <p className="text-[0.625rem] text-muted-foreground mt-0.5">
                         {a.uom}
                       </p>
                     </div>
                     <span
-                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
+                      className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
                         a.available > 0
                           ? "bg-emerald-500/10 text-emerald-600"
                           : "bg-red-500/10 text-red-500"
@@ -471,7 +471,7 @@ function SOItemRow({
       {/* Available badge */}
       <div className="col-span-1 flex items-center h-9">
         {item.itemId && (
-          <span className="text-[10px] text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap">
+          <span className="text-[0.625rem] text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap">
             {fmtNum(item.availableQty)}
           </span>
         )}
@@ -492,7 +492,7 @@ function SOItemRow({
           }`}
         />
         {overLimit && (
-          <p className="text-[10px] text-red-500 mt-0.5 whitespace-nowrap">
+          <p className="text-[0.625rem] text-red-500 mt-0.5 whitespace-nowrap">
             Max: {fmtNum(item.availableQty)}
           </p>
         )}
@@ -545,7 +545,7 @@ function SOItemRow({
 
       {/* GL Head — which revenue ledger this item posts to once invoiced */}
       <div className="flex items-center gap-2 pl-8">
-        <span className="text-[10px] uppercase tracking-widest text-muted-foreground shrink-0">
+        <span className="text-[0.625rem] uppercase tracking-widest text-muted-foreground shrink-0">
           GL Head
         </span>
         <div className="flex-1 max-w-xs">
@@ -665,7 +665,7 @@ function SaleOrderHistory() {
                     {fmtDate(o.OrderDate)}
                   </td>
                   <td className="px-4 py-3">
-                    <span className="inline-flex flex-col gap-0.5 px-2 py-1 rounded-lg text-[10px] bg-blue-500/10 text-blue-600 border border-blue-400/20">
+                    <span className="inline-flex flex-col gap-0.5 px-2 py-1 rounded-lg text-[0.625rem] bg-blue-500/10 text-blue-600 border border-blue-400/20">
                       <span className="font-semibold">{o.FromCompanyName}</span>
                       <span className="opacity-80">
                         {o.FromProjectName} · {o.FromGodownName}
@@ -673,7 +673,7 @@ function SaleOrderHistory() {
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    <span className="inline-flex flex-col gap-0.5 px-2 py-1 rounded-lg text-[10px] bg-violet-500/10 text-violet-600 border border-violet-400/20">
+                    <span className="inline-flex flex-col gap-0.5 px-2 py-1 rounded-lg text-[0.625rem] bg-violet-500/10 text-violet-600 border border-violet-400/20">
                       <span className="font-semibold">{o.ToCompanyName}</span>
                       <span className="opacity-80">
                         {o.ToProjectName} · {o.ToGodownName}
@@ -699,7 +699,7 @@ function SaleOrderHistory() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-1">
-                      <button
+                      <button data-row-view
                         onClick={() => setViewingOrder(o)}
                         className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
                         title="View"
@@ -757,7 +757,7 @@ function SaleOrderHistory() {
                 <h2 className="font-heading font-bold text-base">
                   {viewingOrder.DocNo}
                 </h2>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">
                   Sale Order
                 </p>
               </div>
@@ -807,7 +807,7 @@ function SaleOrderHistory() {
                     key={label}
                     className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
                   >
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                       {label}
                     </p>
                     <p
@@ -818,7 +818,7 @@ function SaleOrderHistory() {
                   </div>
                 ))}
                 <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                     Status
                   </p>
                   <ApprovalStatusChain
@@ -831,7 +831,7 @@ function SaleOrderHistory() {
 
               {/* Items */}
               <div>
-                <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
+                <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3">
                   Items
                 </p>
                 <div className="overflow-x-auto rounded-xl border border-border/50">
@@ -883,7 +883,7 @@ function SaleOrderHistory() {
               <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 pt-2 border-t border-border">
                 {viewingOrder.Remarks && (
                   <div className="text-xs">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                       Remarks
                     </p>
                     <p className="text-muted-foreground">
@@ -892,7 +892,7 @@ function SaleOrderHistory() {
                   </div>
                 )}
                 <div className="text-right">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                     Total Amount
                   </p>
                   <p className="text-lg font-bold text-foreground">
@@ -1145,7 +1145,7 @@ export default function SaleOrder() {
                 onClick={() => setActiveTab("create")}
                 className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-colors ${
                   activeTab === "create"
-                    ? "bg-violet-600 text-white shadow-sm"
+                    ? "btn-module text-white shadow-sm"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`}
               >
@@ -1156,7 +1156,7 @@ export default function SaleOrder() {
               onClick={() => setActiveTab("history")}
               className={`inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg transition-colors ${
                 activeTab === "history"
-                  ? "bg-violet-600 text-white shadow-sm"
+                  ? "btn-module text-white shadow-sm"
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
               }`}
             >
@@ -1279,7 +1279,7 @@ export default function SaleOrder() {
                     ) : null}
                     <button
                       onClick={addItem}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg btn-module text-white text-xs font-medium transition-colors"
                     >
                       <Plus size={12} /> Add Item
                     </button>
@@ -1300,7 +1300,7 @@ export default function SaleOrder() {
                     ].map((h, i) => (
                       <span
                         key={i}
-                        className={`text-[10px] font-semibold text-muted-foreground uppercase tracking-wider ${
+                        className={`text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wider ${
                           i === 0
                             ? "col-span-1"
                             : i === 1
@@ -1336,7 +1336,7 @@ export default function SaleOrder() {
                   ))}
 
                   {missingRate && (
-                    <p className="text-[11px] text-amber-600 flex items-center gap-1 px-1">
+                    <p className="text-[0.6875rem] text-amber-600 flex items-center gap-1 px-1">
                       <AlertCircle size={11} /> Set a rate greater than 0 for
                       every item before submitting.
                     </p>
@@ -1374,7 +1374,7 @@ export default function SaleOrder() {
                     <button
                       onClick={handleSubmit}
                       disabled={!canSubmit}
-                      className="flex items-center gap-2 px-6 py-2.5 rounded-lg bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700 disabled:opacity-50 transition-colors shadow-sm"
+                      className="flex items-center gap-2 px-6 py-2.5 rounded-lg btn-module text-white text-sm font-semibold disabled:opacity-50 transition-colors shadow-sm"
                     >
                       {createMut.isPending ? (
                         <>

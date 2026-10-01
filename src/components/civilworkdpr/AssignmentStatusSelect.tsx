@@ -32,7 +32,7 @@ export function AssignmentStatusSelect({ rungId, status }: { rungId: number; sta
   if (options.length <= 1) {
     return (
       <span
-        className={`text-[11px] font-heading font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${meta.className}`}
+        className={`text-[0.6875rem] font-heading font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${meta.className}`}
       >
         {meta.label}
       </span>
@@ -44,7 +44,7 @@ export function AssignmentStatusSelect({ rungId, status }: { rungId: number; sta
       value={status}
       disabled={mutation.isPending}
       onChange={(e) => mutation.mutate(e.target.value as AssignmentStatus)}
-      className={`text-[11px] font-heading font-bold uppercase tracking-wide px-2.5 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 ${meta.className}`}
+      className={`text-[0.6875rem] font-heading font-bold uppercase tracking-wide px-2.5 py-1 rounded-full border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 ${meta.className}`}
     >
       {options.map((s) => (
         <option key={s} value={s}>

@@ -177,7 +177,7 @@ export const ActivityBrowserFilters: React.FC<Props> = ({
                 key={act}
                 variant={quickFilter === act ? "default" : "outline"}
                 size="sm"
-                className="h-7 text-[10px] uppercase tracking-wider"
+                className="h-7 text-[0.625rem] uppercase tracking-wider"
                 onClick={() => handleQuickFilter(act)}
               >
                 {act}

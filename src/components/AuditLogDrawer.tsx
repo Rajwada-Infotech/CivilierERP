@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { X, Clock, ChevronRight, Loader2, AlertCircle, History } from "lucide-react";
 import { fetchAuditLog, AuditEntry } from "@/api/auditLogApi";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ── Props ─────────────────────────────────────────────────────────────────────
 interface AuditLogDrawerProps {
@@ -41,7 +42,7 @@ const ACTION_STYLES: Record<string, { dot: string; pill: string }> = {
   },
   Escalated: {
     dot: "bg-amber-500",
-    pill: "bg-amber-500/10 text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/20",
+    pill: "bg-[#ffe2021a] text-amber-700 dark:text-amber-300 ring-1 ring-amber-500/20",
   },
   Deleted: {
     dot: "bg-red-500",
@@ -56,7 +57,7 @@ function ActionBadge({ action }: { action: string }) {
   };
   return (
     <span
-      className={`inline-flex items-center gap-1.5 text-[10px] font-semibold px-2 py-0.5 rounded-full ${s.pill}`}
+      className={`inline-flex items-center gap-1.5 text-[0.625rem] font-semibold px-2 py-0.5 rounded-full ${s.pill}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
       {action}
@@ -101,10 +102,10 @@ export function AuditLogDrawer({
   return (
     <>
       {/* Backdrop */}
-      <div
+      <BodyPortal><div
         className="fixed inset-0 z-40 bg-black/25 backdrop-blur-[2px]"
         onClick={onClose}
-      />
+      /></BodyPortal>
 
       {/* Drawer */}
       <div className="fixed right-0 top-0 bottom-0 z-50 w-[420px] max-w-[95vw] bg-card border-l border-border shadow-2xl flex flex-col">
@@ -115,11 +116,11 @@ export function AuditLogDrawer({
               <History size={14} className="text-primary" />
             </div>
             <div>
-              <h2 className="text-[13px] font-bold text-foreground leading-tight">
+              <h2 className="text-[0.8125rem] font-bold text-foreground leading-tight">
                 Change History
               </h2>
               {recordNo && (
-                <p className="text-[11px] text-muted-foreground font-mono">
+                <p className="text-[0.6875rem] text-muted-foreground font-mono">
                   {recordNo}
                 </p>
               )}
@@ -183,12 +184,12 @@ export function AuditLogDrawer({
                     <div className="flex-1 min-w-0 bg-muted/30 rounded-xl p-3 border border-border/50">
                       <div className="flex items-start justify-between gap-2 mb-1.5">
                         <ActionBadge action={entry.Action} />
-                        <span className="text-[10px] text-muted-foreground whitespace-nowrap flex-shrink-0">
+                        <span className="text-[0.625rem] text-muted-foreground whitespace-nowrap flex-shrink-0">
                           {fmtDateTime(entry.ChangedAt)}
                         </span>
                       </div>
 
-                      <p className="text-[11px] text-muted-foreground mb-2">
+                      <p className="text-[0.6875rem] text-muted-foreground mb-2">
                         by{" "}
                         <span className="font-semibold text-foreground">
                           {entry.ChangedBy}
@@ -201,9 +202,9 @@ export function AuditLogDrawer({
                           {entry.Changes.map((c, i) => (
                             <div
                               key={i}
-                              className="flex items-center gap-1.5 text-[11px] flex-wrap"
+                              className="flex items-center gap-1.5 text-[0.6875rem] flex-wrap"
                             >
-                              <span className="font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
+                              <span className="font-mono text-[0.625rem] bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
                                 {c.field}
                               </span>
                               {c.oldValue !== null && c.oldValue !== undefined && (
@@ -234,7 +235,7 @@ export function AuditLogDrawer({
         {/* Footer */}
         {!loading && entries.length > 0 && (
           <div className="flex-shrink-0 px-5 py-3 border-t border-border">
-            <p className="text-[11px] text-muted-foreground text-center">
+            <p className="text-[0.6875rem] text-muted-foreground text-center">
               {entries.length} event{entries.length !== 1 ? "s" : ""} recorded
             </p>
           </div>

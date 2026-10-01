@@ -121,6 +121,8 @@ import { getUndisbursedLoans, postLoanToGL, disburseLoan, type UndisbursedLoan }
 import { computePaymentStatus, deriveBillStatus, resolveOutstanding } from "./payment/partialPayment";
 import { previewOAAdjustment } from "@/api/onAccountAdjustment";
 import { getPayableJVLines, type PayableJVLine } from "@/api/journalVoucherApi";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // Same helper ReceivedPayment.tsx uses to compare company names for the
 // bank-company scoping filter below — tolerant of casing/whitespace so
@@ -867,7 +869,7 @@ const Payment: React.FC = () => {
     if (!form.company) {
       return (
         <Field label="TDS">
-          <p className="text-[11px] text-muted-foreground pt-2">Select the company to check TDS for this party.</p>
+          <p className="text-[0.6875rem] text-muted-foreground pt-2">Select the company to check TDS for this party.</p>
         </Field>
       );
     }
@@ -875,7 +877,7 @@ const Payment: React.FC = () => {
     if (!tdsEligibility.tdsApplicable) {
       return (
         <Field label="TDS">
-          <p className="text-[11px] text-muted-foreground pt-2">
+          <p className="text-[0.6875rem] text-muted-foreground pt-2">
             TDS isn't enabled for this party — turn on "TDS Applicable" in their master to deduct it.
           </p>
         </Field>
@@ -911,7 +913,7 @@ const Payment: React.FC = () => {
           ))}
         </select>
         {!!form.tdsId && (
-          <p className="text-[11px] text-muted-foreground mt-1">
+          <p className="text-[0.6875rem] text-muted-foreground mt-1">
             TDS ₹{tdsAmt.toLocaleString("en-IN")} · Net ₹{Math.max(0, (Number(form.amount) || 0) - tdsAmt).toLocaleString("en-IN")}
           </p>
         )}
@@ -2339,7 +2341,7 @@ const Payment: React.FC = () => {
                 value: String(chequeCount),
                 icon: Clock,
                 ring: "ring-amber-500/20",
-                bg: "bg-amber-500/10",
+                bg: "bg-[#ffe2021a]",
                 blob: "bg-amber-500",
                 borderL: "border-l-amber-500",
                 color: "text-amber-500",
@@ -2379,7 +2381,7 @@ const Payment: React.FC = () => {
                     <p className="text-lg font-bold font-heading text-foreground leading-none">
                       {value}
                     </p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                    <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
                       {label}
                     </p>
                   </div>
@@ -2548,7 +2550,7 @@ const Payment: React.FC = () => {
                               Loan Disbursement — loans not yet posted to GL
                             </p>
                             {undisbursedLoansLoading ? (
-                              <p className="text-[11px] text-muted-foreground">Checking for undisbursed loans…</p>
+                              <p className="text-[0.6875rem] text-muted-foreground">Checking for undisbursed loans…</p>
                             ) : (
                               <div className="space-y-1.5">
                                 {undisbursedLoans.map((loan) => {
@@ -2566,7 +2568,7 @@ const Payment: React.FC = () => {
                                             ? loan.BorrowerCompanyName ? `— to ${loan.BorrowerCompanyName}` : ""
                                             : loan.BorrowerCustomerName ? `— to ${loan.BorrowerCustomerName}` : ""}
                                         </p>
-                                        <p className="text-[11px] text-muted-foreground">
+                                        <p className="text-[0.6875rem] text-muted-foreground">
                                           {formatINR(loan.Amount)} · sanctioned {new Date(loan.LoanDate).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                                           {!isInterCompany && " · Customer Loan"}
                                         </p>
@@ -2576,7 +2578,7 @@ const Payment: React.FC = () => {
                                           type="button"
                                           disabled={disbursingLoanId === loan.LoanId}
                                           onClick={() => handleDisburseLoan(loan)}
-                                          className="shrink-0 px-3 py-1 rounded-md text-[11px] font-heading font-semibold bg-amber-600 text-white hover:bg-amber-600/90 transition-colors disabled:opacity-50"
+                                          className="shrink-0 px-3 py-1 rounded-md text-[0.6875rem] font-heading font-semibold bg-amber-600 text-white hover:bg-amber-600/90 transition-colors disabled:opacity-50"
                                         >
                                           {disbursingLoanId === loan.LoanId ? "Disbursing…" : "Disburse"}
                                         </button>
@@ -2584,7 +2586,7 @@ const Payment: React.FC = () => {
                                         <button
                                           type="button"
                                           onClick={() => handleSelectCustomerLoanDisbursement(loan)}
-                                          className={`shrink-0 px-3 py-1 rounded-md text-[11px] font-heading font-semibold transition-colors ${
+                                          className={`shrink-0 px-3 py-1 rounded-md text-[0.6875rem] font-heading font-semibold transition-colors ${
                                             selected
                                               ? "bg-amber-600/20 text-amber-700 dark:text-amber-400 border border-amber-500"
                                               : "bg-amber-600 text-white hover:bg-amber-600/90"
@@ -2599,7 +2601,7 @@ const Payment: React.FC = () => {
                               </div>
                             )}
                             {disbursingCustomerLoan && (
-                              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                              <p className="text-[0.6875rem] text-amber-700 dark:text-amber-400">
                                 Disbursing <span className="font-semibold">{disbursingCustomerLoan.LoanNo}</span> — party and amount pre-filled below. Pick the bank/mode, then Save.
                               </p>
                             )}
@@ -2623,12 +2625,12 @@ const Payment: React.FC = () => {
                         />
                         <div className="flex items-center gap-2 pt-1">
                           {filteredOptions.length === 0 && !loadingExpense && (
-                            <p className="text-[11px] text-muted-foreground">Invoice not visible?</p>
+                            <p className="text-[0.6875rem] text-muted-foreground">Invoice not visible?</p>
                           )}
                           <button
                             type="button"
                             disabled={syncingBalances}
-                            className="flex items-center gap-1 text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity disabled:opacity-50"
+                            className="flex items-center gap-1 text-[0.6875rem] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity disabled:opacity-50"
                             onClick={async () => {
                               setSyncingBalances(true);
                               try {
@@ -2818,7 +2820,7 @@ const Payment: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => setShowExpenseHeadPayment(true)}
-                          className="text-[11px] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
+                          className="text-[0.6875rem] text-primary underline underline-offset-2 hover:opacity-80 transition-opacity"
                         >
                           or pay Expense Head(s) directly →
                         </button>
@@ -2836,7 +2838,7 @@ const Payment: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => setShowExpenseHeadPayment(false)}
-                              className="mt-1.5 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                              className="mt-1.5 text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
                             >
                               Cancel — pay a Party instead
                             </button>
@@ -3105,14 +3107,14 @@ const Payment: React.FC = () => {
                 return (
                   <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 space-y-2">
                     <div className="flex items-center justify-between">
-                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary flex items-center gap-1.5">
+                      <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-primary flex items-center gap-1.5">
                         <Wallet size={9} /> Invoice Balance
                       </p>
-                      <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                      <span className={`text-[0.625rem] font-semibold px-2 py-0.5 rounded-full border ${
                         bStatus === "Paid"
                           ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
                           : bStatus === "Partially Paid"
-                          ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                          ? "bg-[#ffe2021a] border-amber-500/20 text-amber-700 dark:text-amber-400"
                           : "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400"
                       }`}>
                         {bStatus}
@@ -3120,21 +3122,21 @@ const Payment: React.FC = () => {
                     </div>
                     <div className={`grid gap-2 ${tdsAmt > 0 ? "grid-cols-4" : "grid-cols-3"}`}>
                       <div className="text-center">
-                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Invoice Total</p>
+                        <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">Invoice Total</p>
                         <p className="font-mono text-xs font-bold text-foreground">{formatINR(netAmt)}</p>
                       </div>
                       {tdsAmt > 0 && (
                         <div className="text-center">
-                          <p className="text-[9px] text-muted-foreground uppercase tracking-wider">TDS Deducted</p>
+                          <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">TDS Deducted</p>
                           <p className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">{formatINR(tdsAmt)}</p>
                         </div>
                       )}
                       <div className="text-center">
-                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Paid</p>
+                        <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">Paid</p>
                         <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">{formatINR(paid)}</p>
                       </div>
                       <div className="text-center">
-                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">Outstanding</p>
+                        <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">Outstanding</p>
                         <p className={`font-mono text-xs font-bold ${remaining > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
                           {formatINR(remaining)}
                         </p>
@@ -3149,13 +3151,13 @@ const Payment: React.FC = () => {
               {oaAdjustCtx && (
                 <div className="rounded-xl border border-blue-500/25 bg-blue-500/5 px-4 py-3 flex items-center justify-between">
                   <div>
-                    <p className="text-[10px] font-semibold uppercase tracking-widest text-blue-700 dark:text-blue-400">
+                    <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-blue-700 dark:text-blue-400">
                       On A/C Adjustment — {oaAdjustCtx.partyName}
                     </p>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       Select an invoice for this party — the On A/C balance will auto-apply on save
                     </p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                    <p className="text-[0.625rem] text-muted-foreground mt-0.5">
                       Source: {oaAdjustCtx.sourceDocNo}
                     </p>
                   </div>
@@ -3166,7 +3168,7 @@ const Payment: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => { setOaAdjustCtx(null); setOaBalance(0); }}
-                      className="text-[10px] text-muted-foreground hover:text-foreground underline"
+                      className="text-[0.625rem] text-muted-foreground hover:text-foreground underline"
                     >
                       Dismiss
                     </button>
@@ -3187,10 +3189,10 @@ const Payment: React.FC = () => {
                           <Wallet size={15} className="text-emerald-600 dark:text-emerald-400" />
                         </div>
                         <div>
-                          <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
+                          <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
                             On Account Balance
                           </p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5">Available for this supplier</p>
+                          <p className="text-[0.625rem] text-muted-foreground mt-0.5">Available for this supplier</p>
                         </div>
                       </div>
                       <span className="font-mono text-lg font-bold text-emerald-600 dark:text-emerald-400">
@@ -3217,13 +3219,13 @@ const Payment: React.FC = () => {
                         </p>
                         {useOnAccountBalance ? (
                           <div className="mt-2 rounded-lg border border-emerald-500/20 bg-background/60 divide-y divide-emerald-500/10 overflow-hidden">
-                            <div className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+                            <div className="flex items-center justify-between px-3 py-1.5 text-[0.6875rem]">
                               <span className="text-muted-foreground">Adjusted from balance</span>
                               <span className="font-mono font-semibold text-emerald-600 dark:text-emerald-400">
                                 {formatINR(preview.applyAmount)}
                               </span>
                             </div>
-                            <div className="flex items-center justify-between px-3 py-1.5 text-[11px]">
+                            <div className="flex items-center justify-between px-3 py-1.5 text-[0.6875rem]">
                               <span className="text-muted-foreground">
                                 {preview.isFullyCovered ? "Invoice status" : "Remaining outstanding"}
                               </span>
@@ -3239,7 +3241,7 @@ const Payment: React.FC = () => {
                             </div>
                           </div>
                         ) : (
-                          <p className="text-[11px] text-muted-foreground mt-1">
+                          <p className="text-[0.6875rem] text-muted-foreground mt-1">
                             Balance stays untouched — {formatINR(oaBalance)} kept on his on-account.
                           </p>
                         )}
@@ -3294,8 +3296,7 @@ const Payment: React.FC = () => {
                         size={13}
                         className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
-                      <input
-                        type="date"
+                      <DateInput
                         value={form.date}
                         onChange={(e) => set("date", e.target.value)}
                         className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"
@@ -3536,7 +3537,7 @@ const Payment: React.FC = () => {
                               {label}
                             </span>
                             {sub && (
-                              <p className="text-[10px] text-muted-foreground/60">
+                              <p className="text-[0.625rem] text-muted-foreground/60">
                                 {sub}
                               </p>
                             )}
@@ -3556,7 +3557,7 @@ const Payment: React.FC = () => {
                               size={13}
                               className="text-primary shrink-0"
                             />
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                            <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-heading">
                               Payment Breakdown
                             </p>
                           </div>
@@ -3592,7 +3593,7 @@ const Payment: React.FC = () => {
                                       key={label}
                                       className={`rounded-lg border px-3 py-2 ${cls}`}
                                     >
-                                      <div className="text-[10px] font-heading uppercase tracking-wider opacity-70">
+                                      <div className="text-[0.625rem] font-heading uppercase tracking-wider opacity-70">
                                         {label}
                                       </div>
                                       <div className="text-sm font-mono font-bold mt-1">
@@ -3601,7 +3602,7 @@ const Payment: React.FC = () => {
                                     </div>
                                   ))}
                                 </div>
-                                <div className="px-4 py-2.5 bg-muted/10 border border-blue-500/10 rounded-lg flex flex-wrap items-center gap-1.5 text-[11px] font-mono mb-2">
+                                <div className="px-4 py-2.5 bg-muted/10 border border-blue-500/10 rounded-lg flex flex-wrap items-center gap-1.5 text-[0.6875rem] font-mono mb-2">
                                   <span className="text-blue-600 dark:text-blue-400 font-semibold">
                                     {formatINR(
                                       grnGstBreakdown.totals.totalBase,
@@ -3909,23 +3910,23 @@ const Payment: React.FC = () => {
               {form.expenseRef && (formChainData?.payments?.length ?? 0) > 0 && (
                 <div className="rounded-xl border border-border/60 bg-muted/20 overflow-hidden">
                   <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40 bg-background/60">
-                    <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                    <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
                       <History size={9} /> Payment Chain
                     </p>
                     <div className="flex items-center gap-2.5">
                       {selectedContract && selectedContract.PendingAmount != null && (
-                        <span className="text-[10px] font-mono font-semibold text-amber-600 dark:text-amber-400">
+                        <span className="text-[0.625rem] font-mono font-semibold text-amber-600 dark:text-amber-400">
                           Pending {formatINR(Math.max(selectedContract.PendingAmount, 0))}
                         </span>
                       )}
-                      <span className="text-[10px] font-mono text-muted-foreground">
+                      <span className="text-[0.625rem] font-mono text-muted-foreground">
                         {formChainData!.payments.length} attempt{formChainData!.payments.length !== 1 ? "s" : ""}
                       </span>
                     </div>
                   </div>
                   <div className="px-4 py-3 space-y-2">
                     {loadingFormChain ? (
-                      <p className="text-[11px] text-muted-foreground text-center py-2">Loading…</p>
+                      <p className="text-[0.6875rem] text-muted-foreground text-center py-2">Loading…</p>
                     ) : (
                       formChainData!.payments.map((p: PaymentChainItem, idx: number) => {
                         const ds = p.DisplayStatus;
@@ -3951,23 +3952,23 @@ const Payment: React.FC = () => {
                             : ds === "Cheque Issued"
                             ? "bg-blue-500/10 text-blue-700 dark:text-blue-400 border-blue-500/20"
                             : ds === "Pending"
-                            ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20"
+                            ? "bg-[#ffe2021a] text-amber-700 dark:text-amber-400 border-amber-500/20"
                             : "bg-muted text-muted-foreground border-border";
                         return (
                           <div key={p.PPaymentID} className={`flex gap-2.5 pl-3 border-l-2 ${borderCls}`}>
                             <div className="min-w-0 flex-1 py-0.5 space-y-0.5">
                               <div className="flex items-center justify-between gap-2 flex-wrap">
                                 <div className="flex items-center gap-1.5">
-                                  <span className="font-mono text-[11px] font-semibold text-foreground">
+                                  <span className="font-mono text-[0.6875rem] font-semibold text-foreground">
                                     {p.DocNo ?? `#${p.PPaymentID}`}
                                   </span>
                                   {idx === formChainData!.payments.length - 1 && (
-                                    <span className="text-[9px] px-1 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 font-semibold">LATEST</span>
+                                    <span className="text-[0.5625rem] px-1 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 font-semibold">LATEST</span>
                                   )}
                                 </div>
-                                <span className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${badgeCls}`}>{ds}</span>
+                                <span className={`text-[0.5625rem] font-semibold px-1.5 py-0.5 rounded-full border ${badgeCls}`}>{ds}</span>
                               </div>
-                              <div className="flex items-center gap-2 flex-wrap text-[10px] text-muted-foreground">
+                              <div className="flex items-center gap-2 flex-wrap text-[0.625rem] text-muted-foreground">
                                 <span>{p.PDate ? new Date(p.PDate).toLocaleDateString("en-IN") : "—"}</span>
                                 <span>·</span>
                                 <span className="font-mono font-semibold text-foreground">{formatINR(p.PAmount ?? 0)}</span>
@@ -3990,13 +3991,13 @@ const Payment: React.FC = () => {
                                 )}
                               </div>
                               {p.BounceReason && (
-                                <p className="text-[10px] text-red-600 dark:text-red-400 italic">
+                                <p className="text-[0.625rem] text-red-600 dark:text-red-400 italic">
                                   Bounced: {p.BounceReason}
                                   {p.BounceDate && <> on {new Date(p.BounceDate).toLocaleDateString("en-IN")}</>}
                                 </p>
                               )}
                               {p.ReplacementDocNo && (
-                                <p className="text-[10px] text-violet-600 dark:text-violet-400">
+                                <p className="text-[0.625rem] text-violet-600 dark:text-violet-400">
                                   Reissued as {p.ReplacementDocNo}
                                 </p>
                               )}
@@ -4017,11 +4018,11 @@ const Payment: React.FC = () => {
                     <p className="text-xs font-semibold text-amber-600 dark:text-amber-400">
                       Re-issuing bounced payment
                     </p>
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-[0.6875rem] text-muted-foreground">
                       Replaces <span className="font-mono font-medium">{reissueCtx.replacesDocNo}</span>
                       {reissueCtx.bounceReason && <> · <span className="italic">{reissueCtx.bounceReason}</span></>}
                     </p>
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-[0.6875rem] text-muted-foreground">
                       Original amount: <span className="font-mono font-semibold">{formatINR(reissueCtx.amount)}</span>
                       {bounceCharge && parseFloat(bounceCharge) > 0 && (
                         <> + bounce charge: <span className="font-mono font-semibold text-red-500">{formatINR(parseFloat(bounceCharge))}</span>
@@ -4112,7 +4113,7 @@ const Payment: React.FC = () => {
                       ].filter(Boolean);
                       if (!details.length) return null;
                       return (
-                        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
+                        <p className="text-[0.6875rem] text-muted-foreground/70 mt-1 pl-1">
                           {details.join(" · ")}
                         </p>
                       );
@@ -4182,7 +4183,7 @@ const Payment: React.FC = () => {
                     }
                     badge={
                       form.mode === "Post-Dated Cheque" ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 ring-1 ring-indigo-500/20">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 ring-1 ring-indigo-500/20">
                           <CalendarClock size={9} /> Scheduled
                         </span>
                       ) : null
@@ -4210,7 +4211,7 @@ const Payment: React.FC = () => {
 
               {/* ── Save footer ── */}
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between pt-3 border-t border-border">
-                <p className="text-[11px] text-muted-foreground hidden sm:block">
+                <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
                   {canSave ? (
                     <span className="text-emerald-500 font-medium">
                       Ready to save
@@ -4295,7 +4296,7 @@ const Payment: React.FC = () => {
                         Filters
                       </span>
                       {hasActiveFilters && (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary text-primary-foreground">
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-primary text-primary-foreground">
                           {
                             [
                               companyFilter,
@@ -4319,7 +4320,7 @@ const Payment: React.FC = () => {
                             e.stopPropagation();
                             clearAll();
                           }}
-                          className="text-[11px] text-destructive/70 hover:text-destructive font-heading transition-colors cursor-pointer"
+                          className="text-[0.6875rem] text-destructive/70 hover:text-destructive font-heading transition-colors cursor-pointer"
                         >
                           Clear all
                         </span>
@@ -4337,7 +4338,7 @@ const Payment: React.FC = () => {
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
                         {/* 1. Company */}
                         <div className="space-y-1.5">
-                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                          <label className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                             <Building2 size={10} /> Company
                           </label>
                           <div className="relative">
@@ -4382,7 +4383,7 @@ const Payment: React.FC = () => {
 
                         {/* 2. Project */}
                         <div className="space-y-1.5">
-                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                          <label className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                             <FolderKanban size={10} /> Project
                           </label>
                           <div className="relative">
@@ -4417,7 +4418,7 @@ const Payment: React.FC = () => {
 
                         {/* 3. Fin Year */}
                         <div className="space-y-1.5">
-                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                          <label className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                             <CalendarDays size={10} /> Fin Year
                           </label>
                           <div className="relative">
@@ -4445,7 +4446,7 @@ const Payment: React.FC = () => {
 
                         {/* 4. Document Number */}
                         <div className="space-y-1.5">
-                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                          <label className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                             <Hash size={10} /> Document Number
                           </label>
                           <div className="relative">
@@ -4475,12 +4476,11 @@ const Payment: React.FC = () => {
 
                         {/* 5. Payment Date range */}
                         <div className="space-y-1.5">
-                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                          <label className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                             <FileText size={10} /> Date From
                           </label>
                           <div className="relative">
-                            <input
-                              type="date"
+                            <DateInput
                               value={dateFromFilter}
                               max={dateToFilter || undefined}
                               onChange={(e) => {
@@ -4505,12 +4505,11 @@ const Payment: React.FC = () => {
 
                         {/* 5b. Payment Date range — To */}
                         <div className="space-y-1.5">
-                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                          <label className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                             <FileText size={10} /> Date To
                           </label>
                           <div className="relative">
-                            <input
-                              type="date"
+                            <DateInput
                               value={dateToFilter}
                               min={dateFromFilter || undefined}
                               onChange={(e) => {
@@ -4535,7 +4534,7 @@ const Payment: React.FC = () => {
 
                         {/* 6. Supplier / Contractor / Broker */}
                         <div className="space-y-1.5">
-                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                          <label className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
                             <Truck size={10} /> Supplier / Contractor / Broker
                           </label>
                           <div className="relative">
@@ -4575,7 +4574,7 @@ const Payment: React.FC = () => {
                             (c) => String(c.id) === companyFilter,
                           );
                           return (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-primary/10 text-primary border border-primary/20">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading bg-primary/10 text-primary border border-primary/20">
                               <Building2 size={9} />
                               {co?.label || companyFilter}
                               <button
@@ -4592,7 +4591,7 @@ const Payment: React.FC = () => {
                           );
                         })()}
                       {projectFilter && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-violet-500/10 text-violet-600 border border-violet-500/20">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading bg-violet-500/10 text-violet-600 border border-violet-500/20">
                           <FolderKanban size={9} />
                           {projectFilter}
                           <button
@@ -4607,7 +4606,7 @@ const Payment: React.FC = () => {
                         </span>
                       )}
                       {finYearFilter && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading bg-[#ffe2021a] text-amber-600 border border-amber-500/20">
                           <CalendarDays size={9} />
                           FY {finYearFilter}
                           <button
@@ -4622,7 +4621,7 @@ const Payment: React.FC = () => {
                         </span>
                       )}
                       {docNumberFilter && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                           <Hash size={9} />
                           {docNumberFilter}
                           <button
@@ -4637,7 +4636,7 @@ const Payment: React.FC = () => {
                         </span>
                       )}
                       {(dateFromFilter || dateToFilter) && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-cyan-500/10 text-cyan-600 border border-cyan-500/20">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading bg-cyan-500/10 text-cyan-600 border border-cyan-500/20">
                           <FileText size={9} />
                           Date: {dateFromFilter || "…"} – {dateToFilter || "…"}
                           <button
@@ -4653,7 +4652,7 @@ const Payment: React.FC = () => {
                         </span>
                       )}
                       {supplierFilter && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-teal-500/10 text-teal-600 border border-teal-500/20">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading bg-teal-500/10 text-teal-600 border border-teal-500/20">
                           <Truck size={9} />
                           {supplierFilter}
                           <button
@@ -4721,17 +4720,17 @@ const Payment: React.FC = () => {
                         </p>
                       )}
                       {rec.docNo && (
-                        <span className="inline-block font-mono text-[11px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                        <span className="inline-block font-mono text-[0.6875rem] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2 py-0.5 rounded-md">
                           {rec.docNo}
                         </span>
                       )}
                       {rec.expenseRef && (
-                        <span className="inline-block font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md">
+                        <span className="inline-block font-mono text-[0.6875rem] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md">
                           {rec.expenseRef}
                         </span>
                       )}
                       {rec.chequeNo && (
-                        <span className="inline-block font-mono text-[11px] bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md">
+                        <span className="inline-block font-mono text-[0.6875rem] bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md">
                           Chq #{rec.chequeNo}
                         </span>
                       )}
@@ -4768,7 +4767,7 @@ const Payment: React.FC = () => {
                               );
                             }}
                           />
-                          <button
+                          <button data-row-view
                             onClick={() => openViewRec(rec)}
                             title="View details"
                             className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
@@ -4804,22 +4803,22 @@ const Payment: React.FC = () => {
                   <table className="w-full text-sm table-fixed">
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
-                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
+                        <th className="px-4 py-3.5 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
                           Payment Purpose
                         </th>
-                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
+                        <th className="px-4 py-3.5 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
                           Doc No
                         </th>
-                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
+                        <th className="px-4 py-3.5 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
                           Expense Ref
                         </th>
-                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%]">
+                        <th className="px-4 py-3.5 text-right text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[10%]">
                           Amount
                         </th>
-                        <th className="px-4 py-3.5 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
+                        <th className="px-4 py-3.5 text-left text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
                           Status
                         </th>
-                        <th className="px-4 py-3.5 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
+                        <th className="px-4 py-3.5 text-right text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground w-[16%]">
                           Actions
                         </th>
                       </tr>
@@ -4850,30 +4849,30 @@ const Payment: React.FC = () => {
                               {rec.paymentName || "—"}
                             </p>
                             {rec.paidTo && (
-                              <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                              <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">
                                 Paid to{" "}
                                 <span className="text-foreground/80">
                                   {rec.paidTo}
                                 </span>
                               </p>
                             )}
-                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                            <p className="text-[0.625rem] text-muted-foreground mt-0.5">
                               {rec.date || "—"}
                             </p>
                             {rec.bankName && (
-                              <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">{rec.bankName}</p>
+                              <p className="text-[0.625rem] text-muted-foreground/70 mt-0.5 truncate">{rec.bankName}</p>
                             )}
                           </td>
                           {/* Doc No + Mode + Cheque/Ref stacked */}
                           <td className="px-4 py-4">
-                            <span className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                            <span className="font-mono text-[0.6875rem] font-semibold text-emerald-600 dark:text-emerald-400">
                               {rec.docNo || "—"}
                             </span>
                             <div className="mt-1">
                               <ModeBadge mode={rec.mode} />
                             </div>
                             {(rec.chequeNo || rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference) && (
-                              <p className="font-mono text-[10px] text-blue-500 mt-0.5 truncate">
+                              <p className="font-mono text-[0.625rem] text-blue-500 mt-0.5 truncate">
                                 {rec.chequeNo ? `#${rec.chequeNo}` : rec.neftNumber || rec.upiTransactionId || rec.rtgsReference || rec.impsReference || rec.cardReference}
                               </p>
                             )}
@@ -4881,11 +4880,11 @@ const Payment: React.FC = () => {
                           {/* Expense Ref + JV + GRN stacked */}
                           <td className="px-4 py-4">
                             {rec.expenseRef ? (
-                              <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
+                              <span className="font-mono text-[0.6875rem] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
                                 {rec.expenseRef}
                               </span>
                             ) : rec.jvNo ? (
-                              <span className="font-mono text-[11px] bg-teal-500/10 text-teal-600 border border-teal-500/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
+                              <span className="font-mono text-[0.6875rem] bg-teal-500/10 text-teal-600 border border-teal-500/20 px-2 py-0.5 rounded-md block w-fit truncate max-w-full">
                                 {rec.jvNo}
                               </span>
                             ) : (
@@ -4907,7 +4906,7 @@ const Payment: React.FC = () => {
                           <td className="px-4 py-4">
                             <div className="flex flex-col gap-1">
                               {rec.displayStatus && rec.displayStatus !== rec.status ? (
-                                <span className={`inline-flex items-center justify-center w-28 py-px rounded text-[9px] font-semibold border whitespace-nowrap ${
+                                <span className={`inline-flex items-center justify-center w-28 py-px rounded text-[0.5625rem] font-semibold border whitespace-nowrap ${
                                   rec.displayStatus === "Success" || rec.displayStatus === "Cheque Cleared"
                                     ? "bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
                                   : rec.displayStatus === "Pending"
@@ -4955,7 +4954,7 @@ const Payment: React.FC = () => {
                                   );
                                 }}
                               />
-                              <button
+                              <button data-row-view
                                 onClick={() => openViewRec(rec)}
                                 title="View details"
                                 className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
@@ -5010,7 +5009,7 @@ const Payment: React.FC = () => {
                       <button
                         key={pg}
                         onClick={() => setPage(pg)}
-                        className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${pg === page ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                        className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${pg === page ? "border-primary btn-module text-white" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
                       >
                         {pg}
                       </button>
@@ -5032,7 +5031,7 @@ const Payment: React.FC = () => {
 
       {/* Payment detail view modal */}
       {viewingRec && (
-        <div
+        <BodyPortal><div
           className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
           onClick={() => {
             setViewingRec(null);
@@ -5054,7 +5053,7 @@ const Payment: React.FC = () => {
                     Payment Details
                   </h3>
                   {viewingRec.docNo && (
-                    <span className="text-[11px] font-mono text-muted-foreground">
+                    <span className="text-[0.6875rem] font-mono text-muted-foreground">
                       {viewingRec.docNo}
                     </span>
                   )}
@@ -5088,12 +5087,12 @@ const Payment: React.FC = () => {
                 >
                   {t === "details" ? "Details" : t === "chain" ? "Payment Chain" : "Posting"}
                   {t === "chain" && paymentChainData && (
-                    <span className="ml-1.5 text-[9px] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-semibold">
+                    <span className="ml-1.5 text-[0.5625rem] bg-primary/10 text-primary px-1.5 py-0.5 rounded-full font-semibold">
                       {paymentChainData.payments.length}
                     </span>
                   )}
                   {t === "posting" && pmtPostingData?.isPosted && (
-                    <span className="ml-1.5 text-[9px] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.5 rounded-full font-semibold">✓</span>
+                    <span className="ml-1.5 text-[0.5625rem] bg-emerald-500/10 text-emerald-600 px-1.5 py-0.5 rounded-full font-semibold">✓</span>
                   )}
                 </button>
               ))}
@@ -5118,7 +5117,7 @@ const Payment: React.FC = () => {
                      PAY-2026-00286 actually has, not a JVLineId settlement. */}
               {detailTab === "chain" && !viewingRec.expenseRef && viewingRec.jvNo && (
                 <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
-                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
+                  <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
                     Linked Reference
                   </p>
                   <div className="flex items-center gap-2">
@@ -5128,7 +5127,7 @@ const Payment: React.FC = () => {
                       <p className="font-mono text-sm font-semibold text-foreground">{viewingRec.jvNo}</p>
                     </div>
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-2">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-2">
                     This payment settles a Journal Voucher line directly — no invoice/GRN
                     chain applies. See the JV itself for its own GL posting.
                   </p>
@@ -5136,7 +5135,7 @@ const Payment: React.FC = () => {
               )}
               {detailTab === "chain" && !viewingRec.expenseRef && !viewingRec.jvNo && pmtPostingData?.jvNo && (
                 <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
-                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
+                  <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
                     Linked Reference
                   </p>
                   <div className="flex items-center gap-2">
@@ -5146,7 +5145,7 @@ const Payment: React.FC = () => {
                       <p className="font-mono text-sm font-semibold text-foreground">{pmtPostingData.jvNo}</p>
                     </div>
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-2">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-2">
                     This is a direct payment (no linked invoice) — its own GL posting was
                     recorded under this voucher number. See the Posting tab for the full entry.
                   </p>
@@ -5177,27 +5176,27 @@ const Payment: React.FC = () => {
                     } = computePaymentStatus(chainInvoiceTotal, paymentChainData.payments);
                     return (
                     <div className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3">
-                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
+                      <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-primary mb-2">
                         Invoice Summary
                       </p>
                       <div className="grid grid-cols-3 gap-2 text-center">
                         <div>
-                          <p className="text-[9px] text-muted-foreground uppercase">Invoice Total</p>
+                          <p className="text-[0.5625rem] text-muted-foreground uppercase">Invoice Total</p>
                           <p className="font-mono text-xs font-bold text-foreground">
                             {formatINR(chainInvoiceTotal)}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[9px] text-muted-foreground uppercase">Paid</p>
+                          <p className="text-[0.5625rem] text-muted-foreground uppercase">Paid</p>
                           <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
                             {formatINR(chainTotalPaid)}
                           </p>
                           {chainBounceTotal > 0 && (
-                            <p className="text-[8px] text-red-500 dark:text-red-400 font-mono">+{formatINR(chainBounceTotal)} bounce</p>
+                            <p className="text-[0.5rem] text-red-500 dark:text-red-400 font-mono">+{formatINR(chainBounceTotal)} bounce</p>
                           )}
                         </div>
                         <div>
-                          <p className="text-[9px] text-muted-foreground uppercase">Outstanding</p>
+                          <p className="text-[0.5625rem] text-muted-foreground uppercase">Outstanding</p>
                           <p className={`font-mono text-xs font-bold ${chainOutstanding > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
                             {formatINR(chainOutstanding)}
                           </p>
@@ -5205,7 +5204,7 @@ const Payment: React.FC = () => {
                       </div>
                       {paymentChainData.invoice?.ECostCenter && (
                         <div className="mt-2 pt-2 border-t border-primary/10 flex items-center justify-between">
-                          <span className="text-[9px] text-muted-foreground uppercase">Cost Centre</span>
+                          <span className="text-[0.5625rem] text-muted-foreground uppercase">Cost Centre</span>
                           <span className="text-xs font-medium text-foreground">
                             {paymentChainData.invoice.ECostCenter}
                           </span>
@@ -5243,7 +5242,7 @@ const Payment: React.FC = () => {
                             "bg-gray-400";
                           const badgeClass =
                             ds === "Success" || ds === "Cheque Cleared" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400" :
-                            ds === "Pending" ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400" :
+                            ds === "Pending" ? "bg-[#ffe2021a] border-amber-500/20 text-amber-700 dark:text-amber-400" :
                             ds === "Cheque Issued" ? "bg-blue-500/10 border-blue-500/20 text-blue-700 dark:text-blue-400" :
                             ds === "Cheque Bounced" || ds === "Cheque Cancelled" ? "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400" :
                             ds === "Reissued" ? "bg-violet-500/10 border-violet-500/20 text-violet-700 dark:text-violet-400" :
@@ -5255,14 +5254,14 @@ const Payment: React.FC = () => {
                               <div className={`rounded-lg border border-l-2 bg-card p-3 space-y-1.5 ${borderColor}`}>
                                 <div className="flex items-center justify-between gap-2">
                                   <div className="flex items-center gap-1.5">
-                                    <span className="font-mono text-[10px] font-semibold text-foreground">{p.DocNo ?? "—"}</span>
-                                    {p.PDate && <span className="text-[10px] text-muted-foreground">· {p.PDate.slice(0, 10)}</span>}
+                                    <span className="font-mono text-[0.625rem] font-semibold text-foreground">{p.DocNo ?? "—"}</span>
+                                    {p.PDate && <span className="text-[0.625rem] text-muted-foreground">· {p.PDate.slice(0, 10)}</span>}
                                   </div>
-                                  <span className={`text-[9px] font-semibold px-2 py-0.5 rounded-full border ${badgeClass}`}>
+                                  <span className={`text-[0.5625rem] font-semibold px-2 py-0.5 rounded-full border ${badgeClass}`}>
                                     {ds}
                                   </span>
                                 </div>
-                                <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+                                <div className="flex items-center gap-3 text-[0.625rem] text-muted-foreground">
                                   <span className="font-mono font-semibold text-foreground text-xs">{formatINR(Number(p.PAmount ?? 0))}</span>
                                   {p.PMode && <span>· {p.PMode}</span>}
                                   {p.PChequeNo && <span>· Chq #{p.PChequeNo}</span>}
@@ -5273,27 +5272,27 @@ const Payment: React.FC = () => {
                                   )}
                                 </div>
                                 {p.BounceDate && (
-                                  <div className="text-[10px] text-red-600 dark:text-red-400 flex items-center gap-1">
+                                  <div className="text-[0.625rem] text-red-600 dark:text-red-400 flex items-center gap-1">
                                     <AlertTriangle size={9} />
                                     Bounced {p.BounceDate.slice(0,10)}{p.BounceReason ? ` — ${p.BounceReason}` : ""}
                                   </div>
                                 )}
                                 {p.ReplacementDocNo && (
-                                  <div className="text-[10px] text-violet-600 dark:text-violet-400 flex items-center gap-1">
+                                  <div className="text-[0.625rem] text-violet-600 dark:text-violet-400 flex items-center gap-1">
                                     <RefreshCw size={9} /> Reissued as {p.ReplacementDocNo}
                                   </div>
                                 )}
                                 {p.OriginalDocNo && (
-                                  <div className="text-[10px] text-muted-foreground flex items-center gap-1">
+                                  <div className="text-[0.625rem] text-muted-foreground flex items-center gap-1">
                                     <ArrowLeft size={9} /> Replaces {p.OriginalDocNo}
                                   </div>
                                 )}
                                 {p.BounceCharge && Number(p.BounceCharge) > 0 && (
                                   <div className="flex items-center justify-between mt-1 pt-1.5 border-t border-dashed border-red-300 dark:border-red-800">
-                                    <span className="text-[10px] text-red-600 dark:text-red-400 flex items-center gap-1">
+                                    <span className="text-[0.625rem] text-red-600 dark:text-red-400 flex items-center gap-1">
                                       <AlertTriangle size={9} /> Bounce charge (separate)
                                     </span>
-                                    <span className="font-mono text-[11px] font-semibold text-red-600 dark:text-red-400">
+                                    <span className="font-mono text-[0.6875rem] font-semibold text-red-600 dark:text-red-400">
                                       {formatINR(Number(p.BounceCharge))}
                                     </span>
                                   </div>
@@ -5301,7 +5300,7 @@ const Payment: React.FC = () => {
                                 {/* Reissue button for bounced payments with no replacement */}
                                 {ds === "Cheque Bounced" && !p.ReplacementDocNo && (
                                   <button
-                                    className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-1 mt-0.5"
+                                    className="text-[0.625rem] font-semibold text-primary hover:underline flex items-center gap-1 mt-0.5"
                                     onClick={() => {
                                       setViewingRec(null);
                                       setViewingChain(null);
@@ -5341,11 +5340,11 @@ const Payment: React.FC = () => {
                 <ModeBadge mode={viewingRec.mode} />
                 {viewingChain?.billStatus && (
                   <span
-                    className={`flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-lg border ${
+                    className={`flex items-center gap-1 text-[0.625rem] font-semibold px-2.5 py-1 rounded-lg border ${
                       viewingChain.billStatus === "Paid"
                         ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
                         : viewingChain.billStatus === "Partially Paid"
-                          ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                          ? "bg-[#ffe2021a] border-amber-500/20 text-amber-700 dark:text-amber-400"
                           : "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400"
                     }`}
                   >
@@ -5379,7 +5378,7 @@ const Payment: React.FC = () => {
                     <p className="text-xs font-heading font-semibold text-foreground truncate">
                       {viewingCompanyDetail.name || viewingRec.company}
                     </p>
-                    <p className="text-[10px] text-muted-foreground truncate">
+                    <p className="text-[0.625rem] text-muted-foreground truncate">
                       {[
                         viewingCompanyDetail.address,
                         viewingCompanyDetail.city,
@@ -5388,7 +5387,7 @@ const Payment: React.FC = () => {
                         .filter(Boolean)
                         .join(", ")}
                     </p>
-                    <p className="text-[10px] text-muted-foreground truncate">
+                    <p className="text-[0.625rem] text-muted-foreground truncate">
                       {[
                         viewingCompanyDetail.phone_number,
                         viewingCompanyDetail.email,
@@ -5409,7 +5408,7 @@ const Payment: React.FC = () => {
               {/* Supplier / Vendor info */}
               {viewingChain?.supplier && (
                 <div className="rounded-xl border border-border bg-muted/10 p-3 space-y-1.5">
-                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                  <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
                     <Building2 size={9} className="text-primary" /> Supplier /
                     Vendor
                   </p>
@@ -5423,11 +5422,11 @@ const Payment: React.FC = () => {
                     ) : null}
                   </p>
                   {viewingChain.supplier.address && (
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[0.625rem] text-muted-foreground">
                       {viewingChain.supplier.address}
                     </p>
                   )}
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-[0.625rem] text-muted-foreground">
                     {[
                       viewingChain.supplier.phone,
                       viewingChain.supplier.email,
@@ -5447,11 +5446,11 @@ const Payment: React.FC = () => {
               {/* Traceability chain */}
               {viewingChain && (
                 <div className="rounded-xl border border-border bg-muted/10 p-3 space-y-2.5">
-                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                  <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
                     <ArrowRight size={9} className="text-primary" /> Document
                     Chain
                   </p>
-                  <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                  <div className="flex flex-wrap items-center gap-1.5 text-[0.625rem]">
                     {viewingChain.chain.mrDocNo && (
                       <>
                         <span className="bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-400 px-2 py-1 rounded-md font-mono font-semibold">
@@ -5535,7 +5534,7 @@ const Payment: React.FC = () => {
                     return (
                     <div className="flex items-center gap-2 pt-1 border-t border-border/60 mt-2">
                       <div className="flex-1 text-center">
-                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                        <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">
                           Net Payable
                         </p>
                         <p className="font-mono text-xs font-bold text-foreground">
@@ -5546,7 +5545,7 @@ const Payment: React.FC = () => {
                         <>
                           <div className="w-px h-6 bg-border" />
                           <div className="flex-1 text-center">
-                            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                            <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">
                               TDS
                             </p>
                             <p className="font-mono text-xs font-bold text-amber-600 dark:text-amber-400">
@@ -5557,19 +5556,19 @@ const Payment: React.FC = () => {
                       )}
                       <div className="w-px h-6 bg-border" />
                       <div className="flex-1 text-center">
-                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                        <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">
                           Total Paid
                         </p>
                         <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
                           {formatINR(displayTotalPaid)}
                         </p>
                         {displayBounceTotal > 0 && (
-                          <p className="text-[8px] text-red-500 dark:text-red-400 font-mono">+{formatINR(displayBounceTotal)} bounce</p>
+                          <p className="text-[0.5rem] text-red-500 dark:text-red-400 font-mono">+{formatINR(displayBounceTotal)} bounce</p>
                         )}
                       </div>
                       <div className="w-px h-6 bg-border" />
                       <div className="flex-1 text-center">
-                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                        <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">
                           Remaining
                         </p>
                         <p
@@ -5582,7 +5581,7 @@ const Payment: React.FC = () => {
                         <>
                           <div className="w-px h-6 bg-border" />
                           <div className="flex-1 text-center">
-                            <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                            <p className="text-[0.5625rem] text-muted-foreground uppercase tracking-wider">
                               On A/C
                             </p>
                             <p className="font-mono text-xs font-bold text-violet-500 dark:text-violet-400">
@@ -5597,7 +5596,7 @@ const Payment: React.FC = () => {
 
                   {/* Vendor invoice if present */}
                   {viewingChain.chain.vendorInvoiceNo && (
-                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-1 border-t border-border/60">
+                    <div className="flex items-center gap-2 text-[0.625rem] text-muted-foreground pt-1 border-t border-border/60">
                       <FileText size={9} />
                       Vendor Invoice:
                       <span className="font-mono font-semibold text-foreground">
@@ -5692,7 +5691,7 @@ const Payment: React.FC = () => {
                     : []),
                 ].map(({ label, value }) => (
                   <div key={label} className="space-y-0.5">
-                    <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                    <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                       {label}
                     </p>
                     <p className="text-xs font-medium text-foreground truncate">
@@ -5706,14 +5705,14 @@ const Payment: React.FC = () => {
                   against one or more Expense Heads, no Party involved. */}
               {viewingRec.expenseHeadAllocations && viewingRec.expenseHeadAllocations.length > 0 && (
                 <div className="rounded-xl border border-border overflow-hidden">
-                  <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                  <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
                     Expense Head{viewingRec.expenseHeadAllocations.length > 1 ? "s" : ""}
                   </p>
                   {viewingRec.expenseHeadAllocations.map((a) => (
                     <div key={a._key} className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/50 last:border-b-0">
                       <span className="text-xs text-foreground truncate">
                         {a.label}
-                        {a.code ? <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">({a.code})</span> : null}
+                        {a.code ? <span className="ml-1.5 font-mono text-[0.625rem] text-muted-foreground">({a.code})</span> : null}
                       </span>
                       <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
                         {formatINR(a.amount)}
@@ -5726,7 +5725,7 @@ const Payment: React.FC = () => {
               {/* TDS (migration 304) */}
               {!!viewingRec.tdsId && (
                 <div className="rounded-xl border border-border overflow-hidden">
-                  <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                  <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
                     TDS Details
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3">
@@ -5737,7 +5736,7 @@ const Payment: React.FC = () => {
                       { label: "TDS Amount", value: formatINR(viewingRec.tdsAmount || 0) },
                     ].map(({ label, value }) => (
                       <div key={label}>
-                        <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                        <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
                         <p className="text-xs font-semibold text-foreground truncate">{value ?? "—"}</p>
                       </div>
                     ))}
@@ -5816,29 +5815,29 @@ const Payment: React.FC = () => {
                               {/* Entry header */}
                               <div className={`flex items-center justify-between px-4 py-2.5 border-b ${isBounce ? "bg-rose-500/5 border-rose-500/20" : isDebitNote ? "bg-primary/5 border-primary/20" : isBouncedPayment ? "bg-rose-500/5 border-rose-500/10" : "bg-muted/40 border-border"}`}>
                                 <div className="flex items-center gap-2.5 flex-wrap">
-                                  <span className={`text-[10px] font-semibold uppercase tracking-widest ${isBounce ? "text-rose-600" : isDebitNote ? "text-primary" : isBouncedPayment ? "text-rose-500" : "text-muted-foreground"}`}>
+                                  <span className={`text-[0.625rem] font-semibold uppercase tracking-widest ${isBounce ? "text-rose-600" : isDebitNote ? "text-primary" : isBouncedPayment ? "text-rose-500" : "text-muted-foreground"}`}>
                                     {isBounce ? "Bounce Charge" : isDebitNote ? "Debit Note" : "Payment"}
                                   </span>
-                                  <span className="text-[10px] font-mono text-muted-foreground">{entry.docNo}</span>
-                                  <span className="text-[10px] text-muted-foreground">{fmtDate(entry.date)}</span>
+                                  <span className="text-[0.625rem] font-mono text-muted-foreground">{entry.docNo}</span>
+                                  <span className="text-[0.625rem] text-muted-foreground">{fmtDate(entry.date)}</span>
                                   {entry.mode && (
-                                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{entry.mode}</span>
+                                    <span className="text-[0.5625rem] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{entry.mode}</span>
                                   )}
                                   {isBounce && entry.bounceReason && (
-                                    <span className="text-[9px] text-rose-500 italic">{entry.bounceReason}</span>
+                                    <span className="text-[0.5625rem] text-rose-500 italic">{entry.bounceReason}</span>
                                   )}
                                   {isBouncedPayment && (
-                                    <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 font-medium">
+                                    <span className="text-[0.5625rem] px-1.5 py-0.5 rounded-full bg-rose-500/10 text-rose-600 border border-rose-500/20 font-medium">
                                       Cheque Bounced — not postable
                                     </span>
                                   )}
                                 </div>
                                 {isBouncedPayment ? null : entry.isPosted ? (
-                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
+                                  <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
                                     ✓ {entry.jvNo}
                                   </span>
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-muted-foreground whitespace-nowrap">
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[0.6875rem] font-semibold text-muted-foreground whitespace-nowrap">
                                     <span className="w-2.5 h-2.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                                     Posting…
                                   </span>
@@ -5847,7 +5846,7 @@ const Payment: React.FC = () => {
 
                               {/* Dr/Cr rows */}
                               <div className="divide-y divide-border/50">
-                                <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                                <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
                                   <span>Account</span>
                                   <span className="text-right">Debit (₹)</span>
                                   <span className="text-right">Credit (₹)</span>
@@ -5869,7 +5868,7 @@ const Payment: React.FC = () => {
                                   </div>
                                 ))}
                                 <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
-                                  <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                                  <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
                                   <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtAmt(totalDebit)}</span>
                                   <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtAmt(totalCredit)}</span>
                                 </div>
@@ -5901,7 +5900,7 @@ const Payment: React.FC = () => {
                 .reduce((s: number, e: any) => s + (e.amount ?? 0), 0);
               const remaining = Math.max(0, pmtPostingData.invoiceTotal - totalPosted);
               return (
-                <div className={`flex items-center justify-between px-5 py-2.5 border-t text-[11px] font-medium ${
+                <div className={`flex items-center justify-between px-5 py-2.5 border-t text-[0.6875rem] font-medium ${
                   remaining <= 0.01
                     ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
                     : "bg-amber-500/5 border-amber-500/20 text-amber-700 dark:text-amber-400"
@@ -5958,12 +5957,12 @@ const Payment: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* Delete confirm */}
       {deleteId && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-xl bg-card border border-border shadow-xl p-6 space-y-4">
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-lg bg-destructive/10 shrink-0">
@@ -5982,7 +5981,7 @@ const Payment: React.FC = () => {
             {/* Doc numbers are never reused after a delete — the sequence
                 simply continues from its current max, so removing a
                 record permanently leaves a gap. */}
-            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-[#ffe2021a] px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
               <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
               <span>
                 {(() => {
@@ -6009,7 +6008,7 @@ const Payment: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

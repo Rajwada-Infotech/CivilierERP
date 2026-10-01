@@ -39,7 +39,7 @@ export function ActivityChainPreview({ rungs, onRungClick }: Props) {
               title={clickable ? "Assign engineer & material" : undefined}
             >
               <span
-                className="w-4 h-4 rounded-full text-white text-[9px] font-heading font-bold flex items-center justify-center shrink-0"
+                className="w-4 h-4 rounded-full text-white text-[0.5625rem] font-heading font-bold flex items-center justify-center shrink-0"
                 style={{ background: accent }}
               >
                 {rung.sequenceNo}

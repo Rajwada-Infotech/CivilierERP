@@ -117,14 +117,14 @@ const columnRenderers = {
     </div>
   ),
   symbol: (value: unknown) => (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-1 text-[11px] font-heading text-foreground">
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-1 text-[0.6875rem] font-heading text-foreground">
       <Ruler size={11} className="text-emerald-600 dark:text-emerald-400" />
       {String(value ?? "")}
     </span>
   ),
   status: (value: unknown) => (
     <span
-      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-heading ${
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[0.6875rem] font-heading ${
         value
           ? "border-emerald-200 bg-emerald-50 text-emerald-700"
           : "border-amber-200 bg-amber-50 text-amber-700"
@@ -363,7 +363,7 @@ export default function UnitOfMeasurementMaster() {
         }
       >
         <MasterPage
-        saveButtonClass="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500"
+        saveButtonClass="btn-module "
           title="Unit of Measurement"
           fields={FIELDS}
           columns={COLUMNS}

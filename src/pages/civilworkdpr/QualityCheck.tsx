@@ -124,7 +124,7 @@ function InspectDialog({
             ["End", fmtDate(row.endDate)],
           ].map(([k, v]) => (
             <div key={k} className="px-3 py-2 rounded-xl bg-muted/30 border border-border/50">
-              <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{k}</p>
+              <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{k}</p>
               <p className="font-semibold text-foreground truncate">{v}</p>
             </div>
           ))}
@@ -132,7 +132,7 @@ function InspectDialog({
 
         {history.length > 0 && (
           <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs space-y-1">
-            <p className="text-[10px] uppercase tracking-widest font-semibold text-amber-600 dark:text-amber-400">Previous QC</p>
+            <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-amber-600 dark:text-amber-400">Previous QC</p>
             {history.slice(0, 3).map((h) => (
               <p key={h.id} className="text-foreground">
                 <span className="font-semibold">{h.decision === "APPROVED" ? "Approved" : "Rework"}</span>
@@ -144,7 +144,7 @@ function InspectDialog({
         )}
 
         <div>
-          <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+          <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
             Checklist sign-off ({checkpoints.length})
           </p>
           {isLoading ? (
@@ -161,7 +161,7 @@ function InspectDialog({
                   <div key={id} className="px-3 py-2.5 space-y-1.5">
                     <div className="flex items-center gap-2">
                       <span className="flex-1 text-sm font-medium text-foreground">{c.fieldName}</span>
-                      {c.isChecked && <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Engineer ticked</span>}
+                      {c.isChecked && <span className="text-[0.625rem] text-emerald-600 dark:text-emerald-400">Engineer ticked</span>}
                       <select
                         value={v?.rating ?? ""}
                         disabled={!canEdit}
@@ -219,7 +219,7 @@ function InspectDialog({
         </div>
 
         <div>
-          <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">Remarks</p>
+          <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">Remarks</p>
           <textarea
             rows={3}
             value={remarks}
@@ -259,8 +259,8 @@ function InspectDialog({
               onClick={() => decide.mutate()}
               className={`inline-flex items-center gap-1.5 px-5 py-2 rounded-xl text-sm font-semibold text-white transition disabled:opacity-40 shadow-sm ${
                 decision === "REWORK"
-                  ? "bg-gradient-to-r from-fuchsia-500 to-fuchsia-600 hover:from-fuchsia-600 hover:to-fuchsia-700 shadow-fuchsia-500/20"
-                  : "bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 shadow-emerald-500/20"
+                  ? "btn-module shadow-fuchsia-500/20"
+                  : "btn-module shadow-emerald-500/20"
               }`}
             >
               {decide.isPending ? (
@@ -317,7 +317,7 @@ export default function QualityCheck() {
         <div className="rounded-2xl border border-border bg-card/70 backdrop-blur-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-border/60 flex flex-wrap items-center gap-3">
             <h3 className="text-sm font-heading font-semibold text-foreground">Completed Activities</h3>
-            <span className="text-[11px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rows.length}</span>
+            <span className="text-[0.6875rem] text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rows.length}</span>
             <div className="relative ml-auto w-full sm:w-72">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <input
@@ -331,7 +331,7 @@ export default function QualityCheck() {
 
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/30 text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+              <thead className="bg-muted/30 text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                 <tr>
                   <th className="px-4 py-2 text-left">Activity</th>
                   <th className="px-4 py-2 text-left">Location</th>
@@ -359,7 +359,7 @@ export default function QualityCheck() {
                           <QcBadge qcStatus={r.qcStatus} />
                           <AttemptBadge attemptNo={r.attemptNo} />
                         </p>
-                        <p className="text-[11px] text-muted-foreground">{r.alias}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground">{r.alias}</p>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground max-w-[260px]">
                         {r.projectName ? `${r.projectName} > ` : ""}{r.scopePath}
@@ -380,7 +380,7 @@ export default function QualityCheck() {
                       <td className="px-4 py-3 text-right">
                         <button
                           onClick={() => setInspecting(r)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white btn-module transition"
                         >
                           <ShieldCheck size={12} /> Inspect
                         </button>

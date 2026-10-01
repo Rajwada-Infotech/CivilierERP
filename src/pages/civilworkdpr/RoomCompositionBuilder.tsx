@@ -344,7 +344,7 @@ export default function RoomCompositionBuilder() {
                           <button
                             onClick={handleSave}
                             disabled={saving}
-                            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-cyan-500 to-teal-400 hover:opacity-90 disabled:opacity-50 transition-all"
+                            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:opacity-90 disabled:opacity-50 transition-all"
                           >
                             <Save size={13} /> {saving ? "Saving…" : `Save ${selectedLabel} Template`}
                           </button>

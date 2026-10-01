@@ -482,7 +482,7 @@ function UserMultiSelect({
               key={u.id}
               className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary border border-primary/20"
             >
-              <span className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[9px] font-bold">
+              <span className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center text-[0.5625rem] font-bold">
                 {initials(u.name)}
               </span>
               {u.name.split(" ")[0]}
@@ -550,7 +550,7 @@ function UserMultiSelect({
                     onClick={() => toggle(u.id)}
                   >
                     <span
-                      className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0"
+                      className="w-7 h-7 rounded-full flex items-center justify-center text-[0.625rem] font-bold flex-shrink-0"
                       style={{
                         background: `hsl(${(u.id * 47) % 360} 60% 40% / 0.2)`,
                         color: `hsl(${(u.id * 47) % 360} 60% 55%)`,
@@ -562,7 +562,7 @@ function UserMultiSelect({
                       <div className="font-medium text-foreground truncate">
                         {u.name}
                       </div>
-                      <div className="text-[11px] text-muted-foreground">
+                      <div className="text-[0.6875rem] text-muted-foreground">
                         {u.role}
                       </div>
                     </div>
@@ -702,7 +702,7 @@ function AddLevelRow({
                         {opt.label}
                       </span>
                     </div>
-                    <p className="text-[11px] text-muted-foreground leading-snug">{opt.desc}</p>
+                    <p className="text-[0.6875rem] text-muted-foreground leading-snug">{opt.desc}</p>
                   </button>
                 );
               })}
@@ -714,7 +714,7 @@ function AddLevelRow({
       <div className="flex gap-2 pt-1">
         <Button
           size="sm"
-          className="gap-1.5 bg-primary hover:bg-primary/90 text-white"
+          className="gap-1.5 btn-module text-white"
           onClick={confirm}
         >
           <Check className="w-3.5 h-3.5" /> {isEdit ? "Save changes" : "Add this step"}
@@ -785,24 +785,24 @@ function LevelCard({
               {level.label}
             </div>
             {level.mode === "all" && levelUsers.length > 1 && (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-violet-600 bg-violet-500/10 border border-violet-500/20 rounded-full px-2 py-0.5">
+              <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold text-violet-600 bg-violet-500/10 border border-violet-500/20 rounded-full px-2 py-0.5">
                 <GitBranch className="w-2.5 h-2.5" /> All must approve
               </span>
             )}
           </div>
           <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
             {levelUsers.length === 0 ? (
-              <span className="inline-flex items-center gap-1 text-[11px] text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5">
+              <span className="inline-flex items-center gap-1 text-[0.6875rem] text-amber-500 bg-[#ffe2021a] border border-amber-500/20 rounded-full px-2 py-0.5">
                 <AlertCircle className="w-3 h-3" /> No one assigned yet
               </span>
             ) : (
               levelUsers.map((u) => (
                 <span
                   key={u.id}
-                  className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-[11px] bg-muted text-muted-foreground border border-border"
+                  className="inline-flex items-center gap-1.5 pl-1 pr-2 py-0.5 rounded-full text-[0.6875rem] bg-muted text-muted-foreground border border-border"
                 >
                   <span
-                    className="w-4 h-4 rounded-full flex items-center justify-center text-[8px] font-bold"
+                    className="w-4 h-4 rounded-full flex items-center justify-center text-[0.5rem] font-bold"
                     style={{
                       background: `hsl(${(u.id * 47) % 360} 60% 40% / 0.25)`,
                       color: `hsl(${(u.id * 47) % 360} 60% 55%)`,
@@ -1150,7 +1150,7 @@ function ConfigForm({
           </Button>
           <Button
             size="sm"
-            className="gap-1.5 bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 text-white font-semibold px-5"
+            className="gap-1.5 btn-module shadow-sm hover:opacity-90 text-white font-semibold px-5"
             onClick={submit}
             disabled={saving}
           >
@@ -1235,7 +1235,7 @@ function ModuleGroupSelector({
                 <span className="text-base">{group.icon}</span>
                 <span>{group.label}</span>
                 {selectedCount > 0 && (
-                  <span className="text-[10px] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">
+                  <span className="text-[0.625rem] font-bold bg-primary/20 text-primary px-1.5 py-0.5 rounded-full">
                     {selectedCount}
                   </span>
                 )}
@@ -1393,7 +1393,7 @@ export default function ApprovalSetup() {
         action={
           mode === "list" && canCreate && (
             <Button
-              className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
+              className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
               onClick={() => {
                 setEditing(null);
                 setMode("new");
@@ -1451,7 +1451,7 @@ export default function ApprovalSetup() {
                 </p>
                 {canCreate && (
                   <Button
-                    className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 text-white gap-1.5 font-semibold"
+                    className="btn-module shadow-sm hover:opacity-90 text-white gap-1.5 font-semibold"
                     onClick={() => {
                       setEditing(null);
                       setMode("new");
@@ -1492,7 +1492,7 @@ export default function ApprovalSetup() {
                             {wf.name}
                           </span>
                           {allModeSteps > 0 && (
-                            <span className="inline-flex items-center gap-1 text-[11px] text-violet-600 bg-violet-500/10 px-2 py-0.5 rounded-full border border-violet-500/20">
+                            <span className="inline-flex items-center gap-1 text-[0.6875rem] text-violet-600 bg-violet-500/10 px-2 py-0.5 rounded-full border border-violet-500/20">
                               <GitBranch className="w-3 h-3" />
                               {allModeSteps} step{allModeSteps > 1 ? "s" : ""} need everyone
                             </span>
@@ -1508,20 +1508,20 @@ export default function ApprovalSetup() {
                               return (
                                 <span
                                   key={mid}
-                                  className="text-[11px] px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground"
+                                  className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground"
                                 >
                                   {m?.icon} {m?.label ?? mid}
                                 </span>
                               );
                             })}
                             {wf.modules.length > 4 && (
-                              <span className="text-[11px] px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
+                              <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
                                 +{wf.modules.length - 4} more
                               </span>
                             )}
                           </div>
                           {/* Levels summary */}
-                          <span className="text-[11px] text-muted-foreground">
+                          <span className="text-[0.6875rem] text-muted-foreground">
                             {wf.levels.length} approval step
                             {wf.levels.length !== 1 ? "s" : ""}
                           </span>
@@ -1536,7 +1536,7 @@ export default function ApprovalSetup() {
                             onCheckedChange={() => handleToggle(wf.id)}
                             disabled={!canEdit}
                           />
-                          <span className="text-[10px] text-muted-foreground">
+                          <span className="text-[0.625rem] text-muted-foreground">
                             {wf.active ? "On" : "Off"}
                           </span>
                         </div>

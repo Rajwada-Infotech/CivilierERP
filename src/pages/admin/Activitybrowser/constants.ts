@@ -41,7 +41,7 @@ export const ACTION_COLORS: Record<string, string> = {
   logout: "bg-rose-500/10 text-rose-600 border-rose-500/20",
   read: "bg-blue-500/10 text-blue-600 border-blue-500/20",
   create: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
-  update: "bg-amber-500/10 text-amber-600 border-amber-500/20",
+  update: "bg-[#ffe2021a] text-amber-600 border-amber-500/20",
   delete: "bg-rose-500/10 text-rose-600 border-rose-500/20",
   write: "bg-purple-500/10 text-purple-600 border-purple-500/20",
   export: "bg-cyan-500/10 text-cyan-600 border-cyan-500/20",

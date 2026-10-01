@@ -124,7 +124,7 @@ function TreeNodeRow({
           >
             {node.name}
           </span>
-          <span className="font-mono text-[10px] text-muted-foreground shrink-0 ml-1">
+          <span className="font-mono text-[0.625rem] text-muted-foreground shrink-0 ml-1">
             {node.code}
           </span>
         </div>

@@ -44,6 +44,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DateInput } from "@/components/ui/date-input";
 
 const REPORT_API = "/api/task-performance-report";
 const ACCENT = "#0d9488";
@@ -187,7 +188,7 @@ interface TagStat {
 function Badge({ label, color }: { label: string; color: string }) {
   return (
     <span
-      className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
+      className="inline-flex items-center text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
       style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
     >
       {label}
@@ -314,7 +315,7 @@ const inputCls =
 function FilterField({ icon: Icon, label, children }: { icon: React.ElementType; label: string; children: React.ReactNode }) {
   return (
     <div className="min-w-0">
-      <label className="block text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-1">{label}</label>
+      <label className="block text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">{label}</label>
       <div className="relative">
         <Icon size={11} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10" />
         {children}
@@ -638,7 +639,7 @@ const TagPerformanceReport: React.FC = () => {
 
       <div id="tagperf-printable">
         {isFetching === false && rows.length === 0 && !isLoading && (
-          <div className="rounded-xl border border-amber-400/30 bg-amber-500/10 px-4 py-3 flex items-center gap-2 text-sm text-amber-600 mb-5">
+          <div className="rounded-xl border border-amber-400/30 bg-[#ffe2021a] px-4 py-3 flex items-center gap-2 text-sm text-amber-600 mb-5">
             <AlertCircle size={16} className="shrink-0" />
             <span>No tasks match the selected filters.</span>
           </div>
@@ -660,8 +661,8 @@ const TagPerformanceReport: React.FC = () => {
         {/* ── Filters ──────────────────────────────────────────────────── */}
         <div className="no-print rounded-xl p-4 my-5" style={cardStyle}>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT }}>Filters</p>
-            <button onClick={resetFilters} className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors">
+            <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT }}>Filters</p>
+            <button onClick={resetFilters} className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors">
               <RotateCcw size={11} /> Reset
             </button>
           </div>
@@ -698,8 +699,8 @@ const TagPerformanceReport: React.FC = () => {
             </FilterField>
             <FilterField icon={Clock} label="Date Range">
               <div className="flex gap-1">
-                <input type="date" className={inputCls} value={filters.startDate} onChange={(e) => updateFilter({ startDate: e.target.value })} />
-                <input type="date" className={inputCls} value={filters.endDate} onChange={(e) => updateFilter({ endDate: e.target.value })} />
+                <DateInput className={inputCls} value={filters.startDate} onChange={(e) => updateFilter({ startDate: e.target.value })} />
+                <DateInput className={inputCls} value={filters.endDate} onChange={(e) => updateFilter({ endDate: e.target.value })} />
               </div>
             </FilterField>
           </div>
@@ -758,7 +759,7 @@ const TagPerformanceReport: React.FC = () => {
                   key={key}
                   type="button"
                   onClick={() => setDetailFilter(key)}
-                  className={`text-[11px] font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
+                  className={`text-[0.6875rem] font-semibold px-2.5 py-1 rounded-lg border transition-colors ${
                     detailFilter === key ? "" : "border-border text-muted-foreground hover:bg-muted"
                   }`}
                   style={detailFilter === key ? { background: `${ACCENT}29`, borderColor: `${ACCENT}73`, color: ACCENT } : undefined}

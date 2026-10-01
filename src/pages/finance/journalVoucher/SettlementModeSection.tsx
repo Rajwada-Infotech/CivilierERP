@@ -15,6 +15,7 @@ import {
   type SettlementMode,
   type SettlementValue,
 } from "./settlement";
+import { DateInput } from "@/components/ui/date-input";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -129,14 +130,14 @@ export function SettlementModeSection({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-muted-foreground font-heading">
+        <p className="flex items-center gap-1.5 text-[0.6875rem] font-bold uppercase tracking-widest text-muted-foreground font-heading">
           <Wallet size={11} /> Payment Mode
         </p>
         {value.mode && (
           <button
             type="button"
             onClick={() => onChange(emptySettlement())}
-            className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+            className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-foreground"
           >
             <X size={11} /> Clear
           </button>
@@ -165,13 +166,13 @@ export function SettlementModeSection({
       {needsBank(value.mode) && (
         <div className="rounded-xl border border-border bg-muted/10 p-3 space-y-3">
           <div className="space-y-1.5">
-            <label className="text-[11px] font-medium text-muted-foreground">
+            <label className="text-[0.6875rem] font-medium text-muted-foreground">
               Bank Account{cheque ? " *" : ""}
             </label>
             {!companySelected ? (
               <p className="text-xs text-muted-foreground">Select the company first to see its bank accounts.</p>
             ) : banks.length === 0 ? (
-              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600">
+              <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#ffe2021a] border border-amber-500/20 text-xs text-amber-600">
                 <AlertTriangle size={12} /> No bank accounts are linked to this company.
               </div>
             ) : (
@@ -198,12 +199,12 @@ export function SettlementModeSection({
                   <Loader2 size={13} className="animate-spin" /> Loading cheque lots…
                 </div>
               ) : lots.length === 0 ? (
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600">
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#ffe2021a] border border-amber-500/20 text-xs text-amber-600">
                   <AlertTriangle size={12} /> No active cheque lots found for this bank.
                 </div>
               ) : (
                 <div className="space-y-1.5">
-                  <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                  <label className="text-[0.6875rem] font-medium text-muted-foreground flex items-center gap-1">
                     <BookOpen size={11} /> Cheque Lot *
                   </label>
                   <select
@@ -226,7 +227,7 @@ export function SettlementModeSection({
               {value.chequeLotId && (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                    <label className="text-[0.6875rem] font-medium text-muted-foreground flex items-center gap-1">
                       <Hash size={11} /> Cheque Number *
                     </label>
                     <select
@@ -244,17 +245,16 @@ export function SettlementModeSection({
                       ))}
                     </select>
                     {available.length === 0 && !loadingNumbers && (
-                      <p className="text-[11px] text-amber-600 flex items-center gap-1">
+                      <p className="text-[0.6875rem] text-amber-600 flex items-center gap-1">
                         <AlertTriangle size={10} /> No available cheques left in this lot.
                       </p>
                     )}
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-[11px] font-medium text-muted-foreground flex items-center gap-1">
+                    <label className="text-[0.6875rem] font-medium text-muted-foreground flex items-center gap-1">
                       <CalendarDays size={11} /> {postDated ? "Post-Dated Cheque Date *" : "Cheque Date *"}
                     </label>
-                    <input
-                      type="date"
+                    <DateInput
                       aria-label="Cheque date"
                       value={value.chequeDate}
                       min={postDated ? today() : undefined}
@@ -294,7 +294,7 @@ export function SettlementModeSection({
 
           {digital && (
             <div className="space-y-1.5">
-              <label className="text-[11px] font-medium text-muted-foreground">
+              <label className="text-[0.6875rem] font-medium text-muted-foreground">
                 {DIGITAL_REF_LABEL[value.mode] ?? "Reference Number"}
               </label>
               <Input

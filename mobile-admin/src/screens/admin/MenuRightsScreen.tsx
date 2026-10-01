@@ -332,7 +332,7 @@ export default function MenuRightsScreen() {
                   <Text style={{ color: colors.mutedForeground, fontSize: 10, fontFamily: fonts.heading.semibold }}>{stats.actionsGranted} actions</Text>
                 </View>
                 {dirty && (
-                  <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: "#f59e0b1a", borderWidth: 1, borderColor: "#f59e0b40" }}>
+                  <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: "#ffe2021a", borderWidth: 1, borderColor: "#f59e0b40" }}>
                     <Text style={{ color: "#f59e0b", fontSize: 10, fontFamily: fonts.heading.semibold }}>Unsaved</Text>
                   </View>
                 )}

@@ -158,7 +158,7 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
       <span
         title={tooltipText(last)}
         className={cn(
-          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold",
+          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold",
           "whitespace-nowrap",
           "bg-emerald-100 text-emerald-700 border border-emerald-200",
           "dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800",
@@ -177,7 +177,7 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
       <span
         title={tooltipText(rejectedStep)}
         className={cn(
-          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold",
+          "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold",
           "whitespace-nowrap",
           "bg-red-100 text-red-700 border border-red-200",
           "dark:bg-red-950/40 dark:text-red-400 dark:border-red-800",
@@ -201,7 +201,7 @@ export function ApprovalStatusChain({ table, recordId, className, fallback = nul
     <span
       title={tooltipText(currentStep)}
       className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold",
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[0.625rem] font-semibold",
         "whitespace-nowrap",
         "bg-amber-100 text-amber-700 border border-amber-200",
         "dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800",

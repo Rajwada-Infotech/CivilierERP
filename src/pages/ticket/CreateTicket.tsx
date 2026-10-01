@@ -45,6 +45,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -84,7 +85,7 @@ const PRIORITIES = [
     value: "Medium" as const,
     label: "Medium",
     color: "text-amber-500",
-    bg: "bg-amber-500/10",
+    bg: "bg-[#ffe2021a]",
     border: "border-amber-400/30",
     ring: "ring-amber-400/40",
     icon: AlertCircle,
@@ -228,7 +229,7 @@ function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <Label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+      <Label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
         {label}
         {required && <span className="text-red-500 ml-0.5">*</span>}
       </Label>
@@ -536,7 +537,7 @@ const CreateTicket = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* File upload */}
               <div>
-                <Label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 block">
+                <Label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 block">
                   Files
                 </Label>
                 <input
@@ -571,7 +572,7 @@ const CreateTicket = () => {
 
               {/* Camera */}
               <div>
-                <Label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 block">
+                <Label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 block">
                   Camera
                 </Label>
                 <button
@@ -664,7 +665,7 @@ const CreateTicket = () => {
         </div>
       {/* ── Camera modal ── */}
       {showCamera && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <BodyPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
@@ -736,7 +737,7 @@ const CreateTicket = () => {
               </Button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </TicketShell>
     </>

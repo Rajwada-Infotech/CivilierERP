@@ -239,7 +239,7 @@ export default function CrmBookingAmendments() {
       cell: ({ row }) => (
         <div>
           <div className="font-semibold text-xs">{row.original.BookingNo}</div>
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-[0.6875rem] text-muted-foreground">
             {row.original.ProjectName} · {row.original.UnitNo}
           </div>
         </div>
@@ -272,7 +272,7 @@ export default function CrmBookingAmendments() {
             );
             if (!entries.length) return null;
             return (
-              <div className="mt-0.5 text-[11px] text-muted-foreground truncate max-w-[200px]">
+              <div className="mt-0.5 text-[0.6875rem] text-muted-foreground truncate max-w-[200px]">
                 {entries.map(([k, v]) => `${k}: ${v}`).join(" · ")}
               </div>
             );
@@ -300,7 +300,7 @@ export default function CrmBookingAmendments() {
           <div className="text-xs font-medium">
             {row.original.RequestedByName || "—"}
           </div>
-          <div className="text-[11px] text-muted-foreground">
+          <div className="text-[0.6875rem] text-muted-foreground">
             {fmtDate(row.original.RequestedAt)}
           </div>
         </div>
@@ -313,14 +313,14 @@ export default function CrmBookingAmendments() {
         <div>
           <StatusBadge status={row.original.Status} />
           {row.original.ReviewedByName && (
-            <div className="text-[11px] text-muted-foreground mt-0.5">
+            <div className="text-[0.6875rem] text-muted-foreground mt-0.5">
               by {row.original.ReviewedByName} ·{" "}
               {fmtDate(row.original.ReviewedAt)}
             </div>
           )}
           {row.original.ReviewNotes && (
             <div
-              className="text-[11px] text-muted-foreground italic mt-0.5 max-w-[160px] truncate"
+              className="text-[0.6875rem] text-muted-foreground italic mt-0.5 max-w-[160px] truncate"
               title={row.original.ReviewNotes}
             >
               {row.original.ReviewNotes}
@@ -419,7 +419,7 @@ export default function CrmBookingAmendments() {
               {/* Live count badge — total matching this status, not just the current page */}
               {!isLoading && statusFilter === s && total > 0 && (
                 <span
-                  className="text-[10px] font-bold px-1 py-0.5 rounded-full leading-none min-w-[18px] text-center"
+                  className="text-[0.625rem] font-bold px-1 py-0.5 rounded-full leading-none min-w-[18px] text-center"
                   style={{
                     background: `${accent}25`,
                     color: accent,
@@ -527,7 +527,7 @@ export default function CrmBookingAmendments() {
 
               {/* Proposed change diff card — always visible */}
               <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <p className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">
                   Proposed Changes
                 </p>
                 <ProposedChangeDiffCard json={reviewDialog.row.ProposedChange} />

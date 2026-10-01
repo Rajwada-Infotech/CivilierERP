@@ -70,6 +70,7 @@ import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
 import { useOverlayBackClose } from "@/hooks/useOverlayBackClose";
 import { useCameraCapture, CAMERA_ERROR_TEXT } from "@/hooks/useCameraCapture";
 import { useAuth } from "@/contexts/AuthContext";
+import { DateInput } from "@/components/ui/date-input";
 
 type DetailTab = "overview" | "blueprint" | "photos" | "attendance" | "checkpoints" | "history";
 
@@ -346,7 +347,7 @@ function PhotosTab({ rungId }: { rungId: number }) {
               key={tag}
               type="button"
               onClick={() => setActiveTag(tag)}
-              className="flex items-center gap-1 px-2 py-1 rounded-full text-[11px] font-medium border transition-colors"
+              className="flex items-center gap-1 px-2 py-1 rounded-full text-[0.6875rem] font-medium border transition-colors"
               style={
                 active
                   ? { background: `${meta.color}1A`, borderColor: `${meta.color}60`, color: meta.color }
@@ -426,7 +427,7 @@ function PhotosTab({ rungId }: { rungId: number }) {
             const carriedCount = photos.filter((p) => p.note === CARRIED_FORWARD_NOTE).length;
             return (
               <div key={tag} className="pl-3 border-l-2" style={{ borderColor: `${meta.color}45` }}>
-                <p className="flex items-center gap-1 text-[10px] font-heading font-semibold uppercase tracking-wide mb-2" style={{ color: meta.color }}>
+                <p className="flex items-center gap-1 text-[0.625rem] font-heading font-semibold uppercase tracking-wide mb-2" style={{ color: meta.color }}>
                   <Icon size={10} /> {meta.label} · {photos.length}
                   {carriedCount > 0 && (
                     <span className="normal-case font-normal text-muted-foreground flex items-center gap-0.5 ml-0.5">
@@ -435,7 +436,7 @@ function PhotosTab({ rungId }: { rungId: number }) {
                   )}
                 </p>
                 {photos.length === 0 ? (
-                  <p className="text-[11px] text-muted-foreground/70 flex items-center gap-1">
+                  <p className="text-[0.6875rem] text-muted-foreground/70 flex items-center gap-1">
                     <ImageOff size={11} /> None yet
                   </p>
                 ) : (
@@ -548,7 +549,7 @@ function BlueprintTab({ rungId, roomId }: { rungId: number; roomId: number }) {
         )}
       </div>
 
-      <p className="text-[11px] text-muted-foreground text-center">
+      <p className="text-[0.6875rem] text-muted-foreground text-center">
         {rev.updatedBy ? `${rev.updatedBy} · ` : ""}
         {fmtDateTime(rev.updatedAt)}
       </p>
@@ -620,7 +621,7 @@ function AttendanceTab({ rungId }: { rungId: number }) {
         <label className="flex items-center gap-1.5 text-xs font-heading font-semibold uppercase tracking-wide text-muted-foreground">
           <CalendarDays size={12} /> Date
         </label>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} w-auto`} />
+        <DateInput value={date} onChange={(e) => setDate(e.target.value)} className={`${inputCls} w-auto`} />
       </div>
 
       {isFetching ? (
@@ -640,7 +641,7 @@ function AttendanceTab({ rungId }: { rungId: number }) {
               <div key={row.workerId} className="flex items-center justify-between gap-3 px-3 py-2.5">
                 <div className="min-w-0">
                   <p className="text-sm text-foreground truncate">{row.workerName}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">{row.contractorName || row.skillType}</p>
+                  <p className="text-[0.625rem] text-muted-foreground truncate">{row.contractorName || row.skillType}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <select
@@ -819,12 +820,12 @@ function CheckpointsTab({ rungId }: { rungId: number }) {
               <span className={`text-sm flex items-center gap-1.5 flex-wrap ${cp.isChecked ? "text-foreground" : "text-foreground/90"}`}>
                 {cp.fieldName}
                 {cp.isDaily && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
                     <CalendarDays size={9} /> Daily
                   </span>
                 )}
                 {gate.locked && (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                  <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full">
                     <Timer size={9} /> {gate.daysLeft != null ? `${gate.daysLeft}d left` : `${cp.minWaitDays}d wait`}
                   </span>
                 )}
@@ -843,7 +844,7 @@ function CheckpointsTab({ rungId }: { rungId: number }) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-0.5">{label}</p>
+      <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-0.5">{label}</p>
       <div className="text-sm text-foreground">{children}</div>
     </div>
   );
@@ -879,10 +880,10 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
             if (!delay) return null;
             return (
               <span
-                className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
                   delay.tone === "on-time"
                     ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                    : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                 }`}
               >
                 {delay.label}
@@ -918,7 +919,7 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
       </Field>
 
       <div>
-        <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-1">Remarks</p>
+        <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">Remarks</p>
         <textarea
           value={remarks}
           onChange={(e) => setRemarks(e.target.value)}
@@ -930,7 +931,7 @@ function OverviewTab({ row }: { row: ReportedAssignment }) {
           className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-cyan-500/30 resize-none"
         />
         {remarksMutation.isPending && (
-          <p className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1">
+          <p className="text-[0.625rem] text-muted-foreground mt-1 flex items-center gap-1">
             <Loader2 size={9} className="animate-spin" /> Saving…
           </p>
         )}
@@ -1030,7 +1031,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
   return (
     <div className="px-4 py-3 border-t border-border shrink-0 bg-muted/10">
       <div className="flex items-center justify-between mb-1.5">
-        <span className="text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+        <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
           <TrendingUp size={11} /> Work Done
           {locked && <Lock size={10} className="text-muted-foreground/70" />}
         </span>
@@ -1061,7 +1062,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
         <button
           type="button"
           onClick={() => setShowLog((v) => !v)}
-          className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+          className="flex items-center gap-1 text-[0.625rem] font-medium text-muted-foreground hover:text-foreground transition-colors"
         >
           <History size={10} /> {showLog ? "Hide" : "Show"} update log
         </button>
@@ -1070,7 +1071,7 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
             type="button"
             onClick={() => commit(percent)}
             disabled={mutation.isPending}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-600 text-white text-[11px] font-heading font-semibold hover:bg-cyan-700 disabled:opacity-60 transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-cyan-600 text-white text-[0.6875rem] font-heading font-semibold hover:bg-cyan-700 disabled:opacity-60 transition-colors"
           >
             {mutation.isPending ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />}
             Save
@@ -1081,13 +1082,13 @@ function ProgressDragBar({ row }: { row: ReportedAssignment }) {
       {showLog && (
         <div className="mt-2 rounded-lg border border-border bg-background/60 max-h-40 overflow-y-auto">
           {logLoading ? (
-            <p className="text-[11px] text-muted-foreground text-center py-3">Loading…</p>
+            <p className="text-[0.6875rem] text-muted-foreground text-center py-3">Loading…</p>
           ) : log.length === 0 ? (
-            <p className="text-[11px] text-muted-foreground text-center py-3">No updates logged yet.</p>
+            <p className="text-[0.6875rem] text-muted-foreground text-center py-3">No updates logged yet.</p>
           ) : (
             <div className="divide-y divide-border/60">
               {log.map((entry) => (
-                <div key={entry.id} className="px-3 py-1.5 text-[11px]">
+                <div key={entry.id} className="px-3 py-1.5 text-[0.6875rem]">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-medium text-foreground">
                       {entry.fromProgressPercent != null && entry.toProgressPercent != null
@@ -1150,7 +1151,7 @@ function HistoryTab({ rungId }: { rungId: number }) {
             <span className="text-sm flex items-center gap-1.5 flex-wrap text-foreground font-medium">
               Attempt {a.attemptNo}
               {a.isCurrent && (
-                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
+                <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full">
                   Current
                 </span>
               )}
@@ -1207,7 +1208,7 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
       <button
         type="button"
         onClick={() => setConfirmOpen(true)}
-        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-heading font-bold uppercase tracking-wide border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10 transition-colors"
+        className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[0.6875rem] font-heading font-bold uppercase tracking-wide border border-amber-500/40 text-amber-600 dark:text-amber-400 hover:bg-[#ffe2021a] transition-colors"
         title="Restore this Cancelled activity"
       >
         <ShieldQuestion size={12} /> Restore
@@ -1221,7 +1222,7 @@ function RestoreCancelledButton({ row, onClose }: { row: ReportedAssignment; onC
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center shrink-0">
+                <div className="w-9 h-9 rounded-xl bg-[#ffe2021a] flex items-center justify-center shrink-0">
                   <ShieldQuestion size={16} className="text-amber-600 dark:text-amber-400" />
                 </div>
                 <div>
@@ -1342,7 +1343,7 @@ export default function ActivityDetailModal({
                     <Icon size={13} />
                     {t.label}
                     {t.id === "photos" && photoCount > 0 && (
-                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[9px] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400">
+                      <span className="inline-flex items-center justify-center min-w-[16px] h-4 px-1 rounded-full text-[0.5625rem] font-bold bg-cyan-500/15 text-cyan-600 dark:text-cyan-400">
                         {photoCount}
                       </span>
                     )}

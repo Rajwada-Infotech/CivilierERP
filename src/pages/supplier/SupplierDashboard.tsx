@@ -131,7 +131,7 @@ export default function SupplierDashboard() {
                     ? { background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.12)" }
                     : { background: "rgba(255,255,255,0.55)", border: "1px solid rgba(16,185,129,0.25)" }}>
                   <p className="text-xl font-bold leading-none" style={{ color: s.valCol }}>{s.value}</p>
-                  <p className="text-[10px] mt-1 font-medium" style={{ color: isDark ? "rgba(255,255,255,0.40)" : "#059669" }}>{s.label}</p>
+                  <p className="text-[0.625rem] mt-1 font-medium" style={{ color: isDark ? "rgba(255,255,255,0.40)" : "#059669" }}>{s.label}</p>
                 </div>
               ))}
             </div>
@@ -146,7 +146,7 @@ export default function SupplierDashboard() {
             { label: "Submitted", value: submitted.length, cls: "text-emerald-600" },
           ].map((s) => (
             <div key={s.label} className="rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-2">
-              <div><p className={`text-lg font-bold ${s.cls}`}>{s.value}</p><p className="text-[10px] text-muted-foreground">{s.label}</p></div>
+              <div><p className={`text-lg font-bold ${s.cls}`}>{s.value}</p><p className="text-[0.625rem] text-muted-foreground">{s.label}</p></div>
             </div>
           ))}
         </div>
@@ -244,14 +244,14 @@ export default function SupplierDashboard() {
 
             {/* Quick tips */}
             <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Quick guide</p>
+              <p className="text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground">Quick guide</p>
               {[
                 { step: "1", text: "Open a pending RFQ and enter your rates for each item." },
                 { step: "2", text: "Add supply date and quality notes to stand out." },
                 { step: "3", text: "Submit before the due date — the buyer sees your prices in the L1 chart." },
               ].map((tip) => (
                 <div key={tip.step} className="flex items-start gap-3">
-                  <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
+                  <span className="w-5 h-5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.625rem] font-bold flex items-center justify-center shrink-0 mt-0.5">
                     {tip.step}
                   </span>
                   <p className="text-xs text-muted-foreground leading-relaxed">{tip.text}</p>
@@ -281,10 +281,10 @@ function Section({ title, count, accent = "default", children }: {
   return (
     <div>
       <div className="flex items-center gap-2 mb-2.5">
-        <span className={`text-[10px] font-bold uppercase tracking-widest ${accent === "amber" ? "text-amber-500" : "text-muted-foreground"}`}>
+        <span className={`text-[0.625rem] font-bold uppercase tracking-widest ${accent === "amber" ? "text-amber-500" : "text-muted-foreground"}`}>
           {title}
         </span>
-        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${accent === "amber" ? "bg-amber-500/10 text-amber-500" : "bg-muted text-muted-foreground"}`}>
+        <span className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full ${accent === "amber" ? "bg-[#ffe2021a] text-amber-500" : "bg-muted text-muted-foreground"}`}>
           {count}
         </span>
       </div>
@@ -308,7 +308,7 @@ function QuotationCard({ q, uid }: { q: spApi.SupplierQuotationSummary; uid: str
       }`}>
         <div className="p-4 flex items-center gap-3">
           <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${
-            urgent ? "bg-amber-500/10" : sub ? "bg-emerald-500/10" : "bg-muted/60"
+            urgent ? "bg-[#ffe2021a]" : sub ? "bg-emerald-500/10" : "bg-muted/60"
           }`}>
             <FileSpreadsheet size={16} className={urgent ? "text-amber-500" : sub ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"} />
           </div>
@@ -316,15 +316,15 @@ function QuotationCard({ q, uid }: { q: spApi.SupplierQuotationSummary; uid: str
             <div className="flex flex-wrap items-center gap-1.5 mb-0.5">
               <span className="font-mono font-bold text-sm text-emerald-600 dark:text-emerald-400">{q.DocNo}</span>
               {sub ? (
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
+                <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded-full">
                   <CheckCircle2 size={9} /> Submitted
                 </span>
               ) : od ? (
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded-full">
+                <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold text-red-500 bg-red-500/10 px-1.5 py-0.5 rounded-full">
                   <AlertCircle size={9} /> Overdue
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-500 bg-amber-500/10 px-1.5 py-0.5 rounded-full">
+                <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold text-amber-500 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full">
                   <Clock size={9} /> Pending
                 </span>
               )}
@@ -341,7 +341,7 @@ function QuotationCard({ q, uid }: { q: spApi.SupplierQuotationSummary; uid: str
               {q.DueDate ? fmtDate(q.DueDate) : "No due date"}
             </p>
             {!sub && (
-              <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-0.5 font-medium group-hover:underline">
+              <p className="text-[0.625rem] text-emerald-600 dark:text-emerald-400 mt-0.5 font-medium group-hover:underline">
                 Submit rates →
               </p>
             )}

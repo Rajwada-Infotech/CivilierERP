@@ -198,7 +198,7 @@ export default function YearEndClose() {
           <div className="flex flex-wrap items-end gap-4">
             {/* Company */}
             <div className="flex-1 min-w-[180px]">
-              <label className="flex items-center gap-1.5 text-[9px] font-heading uppercase tracking-widest text-muted-foreground/70 mb-1.5">
+              <label className="flex items-center gap-1.5 text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/70 mb-1.5">
                 <Building size={10} /> Company
               </label>
               <select
@@ -213,7 +213,7 @@ export default function YearEndClose() {
 
             {/* Financial Year */}
             <div className="flex-1 min-w-[180px]">
-              <label className="flex items-center gap-1.5 text-[9px] font-heading uppercase tracking-widest text-muted-foreground/70 mb-1.5">
+              <label className="flex items-center gap-1.5 text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/70 mb-1.5">
                 <CalendarDays size={10} /> Financial Year
               </label>
               <select
@@ -261,7 +261,7 @@ export default function YearEndClose() {
             <CheckCircle2 size={14} />
             <span>
               Year-End Closing completed successfully! Net {result.netProfit >= 0 ? "Profit" : "Loss"}: {fmt(result.netProfit)} transferred to Retained Earnings.
-              Voucher: <code className="bg-background/60 px-1.5 py-0.5 rounded text-[10px]">{result.voucherNo}</code>. Financial Year locked.
+              Voucher: <code className="bg-background/60 px-1.5 py-0.5 rounded text-[0.625rem]">{result.voucherNo}</code>. Financial Year locked.
             </span>
           </div>
         )}
@@ -286,11 +286,11 @@ export default function YearEndClose() {
             {/* Summary Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-xl border border-primary/15 bg-gradient-to-br from-primary/8 to-primary/3 p-4">
-                <p className="text-[9px] font-heading uppercase tracking-widest text-primary/60 mb-1">Total Revenue</p>
+                <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-primary/60 mb-1">Total Revenue</p>
                 <p className="text-lg font-bold tabular-nums text-primary tracking-tight">{fmt(preview.totalIncome)}</p>
               </div>
               <div className="rounded-xl border border-orange-500/20 bg-gradient-to-br from-orange-500/8 to-orange-500/3 p-4">
-                <p className="text-[9px] font-heading uppercase tracking-widest text-orange-600/60 dark:text-orange-400/60 mb-1">Total Expenses</p>
+                <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-orange-600/60 dark:text-orange-400/60 mb-1">Total Expenses</p>
                 <p className="text-lg font-bold tabular-nums text-orange-700 dark:text-orange-400 tracking-tight">{fmt(preview.totalExpenses)}</p>
               </div>
               <div className={`rounded-xl border p-4 ${
@@ -298,7 +298,7 @@ export default function YearEndClose() {
                   ? "border-emerald-500/20 bg-gradient-to-br from-emerald-500/10 to-emerald-500/3"
                   : "border-red-500/20 bg-gradient-to-br from-red-500/10 to-red-500/3"
               }`}>
-                <p className={`text-[9px] font-heading uppercase tracking-widest mb-1 ${
+                <p className={`text-[0.5625rem] font-heading uppercase tracking-widest mb-1 ${
                   preview.isProfit ? "text-emerald-600/60 dark:text-emerald-400/60" : "text-red-600/60 dark:text-red-400/60"
                 }`}>
                   Net {preview.isProfit ? "Profit" : "Loss"}
@@ -322,7 +322,7 @@ export default function YearEndClose() {
                     <ArrowRightLeft size={13} className="text-primary/60" />
                     <h3 className="text-xs font-semibold text-foreground">Closing Journal Entry Preview</h3>
                   </div>
-                  <span className="text-[9px] text-muted-foreground/60 tabular-nums">
+                  <span className="text-[0.5625rem] text-muted-foreground/60 tabular-nums">
                     Voucher Date: {new Date(preview.fy.endDate).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}
                   </span>
                 </div>
@@ -331,9 +331,9 @@ export default function YearEndClose() {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-border/50">
-                      <th className="pb-2 text-left text-[9px] font-heading uppercase tracking-widest text-muted-foreground">Particulars</th>
-                      <th className="pb-2 text-right text-[9px] font-heading uppercase tracking-widest text-muted-foreground w-28">Debit ₹</th>
-                      <th className="pb-2 text-right text-[9px] font-heading uppercase tracking-widest text-muted-foreground w-28">Credit ₹</th>
+                      <th className="pb-2 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Particulars</th>
+                      <th className="pb-2 text-right text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground w-28">Debit ₹</th>
+                      <th className="pb-2 text-right text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground w-28">Credit ₹</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -366,7 +366,7 @@ export default function YearEndClose() {
                     )}
                   </tbody>
                 </table>
-                <p className="mt-2 text-[9px] text-muted-foreground/60 italic">
+                <p className="mt-2 text-[0.5625rem] text-muted-foreground/60 italic">
                   (Being transfer of Net {preview.isProfit ? "Profit" : "Loss"} for FY {preview.fy.name} to Retained Earnings under Reserves & Surplus)
                 </p>
               </div>
@@ -387,12 +387,12 @@ export default function YearEndClose() {
                 </button>
                 {expandedHeads && (
                   <div className="px-5 pb-3 max-h-64 overflow-y-auto">
-                    <table className="w-full text-[11px]">
+                    <table className="w-full text-[0.6875rem]">
                       <thead>
                         <tr className="border-b border-border/40">
-                          <th className="pb-1.5 text-left text-[9px] font-heading uppercase tracking-widest text-muted-foreground">Group</th>
-                          <th className="pb-1.5 text-left text-[9px] font-heading uppercase tracking-widest text-muted-foreground">Head</th>
-                          <th className="pb-1.5 text-right text-[9px] font-heading uppercase tracking-widest text-muted-foreground w-24">Amount ₹</th>
+                          <th className="pb-1.5 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Group</th>
+                          <th className="pb-1.5 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Head</th>
+                          <th className="pb-1.5 text-right text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground w-24">Amount ₹</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -426,7 +426,7 @@ export default function YearEndClose() {
                     <AlertTriangle size={20} className="text-red-600 dark:text-red-400 shrink-0" />
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-semibold text-red-700 dark:text-red-400">Confirm Year-End Closing</p>
-                      <p className="text-[10px] text-red-600/70 dark:text-red-400/70 mt-0.5">
+                      <p className="text-[0.625rem] text-red-600/70 dark:text-red-400/70 mt-0.5">
                         This will post a closing journal entry and <strong>permanently lock</strong> FY {preview.fy.name}. No further transactions can be posted to this period. This action cannot be undone.
                       </p>
                     </div>
@@ -479,9 +479,9 @@ export default function YearEndClose() {
               <table className="w-full text-xs">
                 <thead>
                   <tr className="border-b border-border/50 bg-muted/20">
-                    <th className="py-2.5 px-4 text-left text-[9px] font-heading uppercase tracking-widest text-muted-foreground">Voucher No.</th>
-                    <th className="py-2.5 px-4 text-left text-[9px] font-heading uppercase tracking-widest text-muted-foreground">Date</th>
-                    <th className="py-2.5 px-4 text-left text-[9px] font-heading uppercase tracking-widest text-muted-foreground">Details</th>
+                    <th className="py-2.5 px-4 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Voucher No.</th>
+                    <th className="py-2.5 px-4 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Date</th>
+                    <th className="py-2.5 px-4 text-left text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground">Details</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -494,7 +494,7 @@ export default function YearEndClose() {
                         <td className="py-2 px-4 font-medium text-foreground">
                           <div className="flex items-center gap-1.5">
                             {expandedHistory === h.voucherNo ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                            <code className="text-[10px]">{h.voucherNo}</code>
+                            <code className="text-[0.625rem]">{h.voucherNo}</code>
                           </div>
                         </td>
                         <td className="py-2 px-4 tabular-nums text-muted-foreground">
@@ -506,11 +506,11 @@ export default function YearEndClose() {
                       </tr>
                       {expandedHistory === h.voucherNo && h.details.map((d, i) => (
                         <tr key={`${h.voucherNo}-${i}`} className="bg-muted/5 border-b border-border/10">
-                          <td className="py-1.5 pl-12 text-[10px] text-foreground/80">{d.headName}</td>
-                          <td className="py-1.5 px-4 text-right tabular-nums text-[10px]">
+                          <td className="py-1.5 pl-12 text-[0.625rem] text-foreground/80">{d.headName}</td>
+                          <td className="py-1.5 px-4 text-right tabular-nums text-[0.625rem]">
                             {d.debit > 0 ? fmt(d.debit) : "—"}
                           </td>
-                          <td className="py-1.5 px-4 text-right tabular-nums text-[10px]">
+                          <td className="py-1.5 px-4 text-right tabular-nums text-[0.625rem]">
                             {d.credit > 0 ? fmt(d.credit) : "—"}
                           </td>
                         </tr>
@@ -526,7 +526,7 @@ export default function YearEndClose() {
         {historyLoading && (
           <div className="mt-6 flex items-center justify-center py-6">
             <Loader2 size={16} className="animate-spin text-muted-foreground/40" />
-            <span className="ml-2 text-[10px] text-muted-foreground">Loading history…</span>
+            <span className="ml-2 text-[0.625rem] text-muted-foreground">Loading history…</span>
           </div>
         )}
 

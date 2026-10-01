@@ -279,7 +279,7 @@ export default function PostApprovalRights() {
                 </span>
                 <div className="flex items-center gap-2">
                   {selectedUser && (
-                    <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
+                    <span className="text-[0.625rem] font-heading px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20">
                       {selectedUser.role}
                     </span>
                   )}
@@ -418,7 +418,7 @@ export default function PostApprovalRights() {
               <button
                 onClick={handleSave}
                 disabled={saving || !dirty}
-                className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50 transition-all"
+                className="btn-module shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-50 transition-all"
               >
                 {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
                 {saving ? "Saving…" : "Save"}

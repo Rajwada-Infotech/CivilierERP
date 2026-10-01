@@ -107,7 +107,7 @@ export const GLAccountSelect: React.FC<{
             <>
               <BookOpen size={13} className="text-primary/70 shrink-0" />
               <span className="truncate">{selectedOption.label}</span>
-              {selectedOption.code ? <span className="font-mono text-[10px] text-muted-foreground/50 shrink-0">({selectedOption.code})</span> : null}
+              {selectedOption.code ? <span className="font-mono text-[0.625rem] text-muted-foreground/50 shrink-0">({selectedOption.code})</span> : null}
             </>
           ) : (
             <span className="truncate">{placeholder}</span>
@@ -167,7 +167,7 @@ export const GLAccountSelect: React.FC<{
                   >
                     {isSelected && <Check size={11} className="shrink-0" />}
                     <span className="flex-1 truncate">{o.label}</span>
-                    {o.code ? <span className="font-mono text-[10px] text-muted-foreground/50 shrink-0">{o.code}</span> : null}
+                    {o.code ? <span className="font-mono text-[0.625rem] text-muted-foreground/50 shrink-0">{o.code}</span> : null}
                   </div>
                 );
               })

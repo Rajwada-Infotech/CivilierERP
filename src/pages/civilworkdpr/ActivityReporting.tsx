@@ -88,7 +88,7 @@ function StatusTile({
       <Icon size={12} />
       {label}
       <span
-        className="px-1.5 rounded-full text-[10px] font-heading font-semibold leading-4"
+        className="px-1.5 rounded-full text-[0.625rem] font-heading font-semibold leading-4"
         style={
           active
             ? { background: `${accentColor}2e`, color: accentColor }
@@ -113,7 +113,7 @@ function ActivityPhotosBadge({ rungId }: { rungId: number }) {
 
   return (
     <span
-      className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium ${
+      className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[0.6875rem] font-medium ${
         count > 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
       }`}
     >
@@ -241,7 +241,7 @@ export default function ActivityReporting() {
                   <button
                     type="button"
                     onClick={toggleAllGroups}
-                    className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors shrink-0"
+                    className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors shrink-0"
                   >
                     {allGroupsExpanded ? (
                       <>
@@ -306,7 +306,7 @@ export default function ActivityReporting() {
                       <GitBranch size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
                       <span className="text-sm font-heading font-semibold text-foreground">{group.alias}</span>
                       <span
-                        className={`text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                        className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
                           group.workType === "INTERNAL"
                             ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
                             : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
@@ -318,7 +318,7 @@ export default function ActivityReporting() {
                         · {group.projectName ? `${group.projectName} — ` : ""}
                         {group.scopePath}
                       </span>
-                      <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                      <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
                         {group.rows.length} activit{group.rows.length !== 1 ? "ies" : "y"}
                       </span>
                     </button>
@@ -327,7 +327,7 @@ export default function ActivityReporting() {
                       <div className="overflow-x-auto">
                         <table className="w-full text-sm">
                           <thead>
-                            <tr className="border-b border-border text-left text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
+                            <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
                               <th className="px-5 py-2">Activity</th>
                               <th className="px-3 py-2">Engineer</th>
                               <th className="px-3 py-2">Start Date</th>
@@ -366,10 +366,10 @@ export default function ActivityReporting() {
                                     if (!delay) return null;
                                     return (
                                       <span
-                                        className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                                        className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.625rem] font-medium ${
                                           delay.tone === "on-time"
                                             ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                            : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                            : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                                         }`}
                                       >
                                         {delay.label}

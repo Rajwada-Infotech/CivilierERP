@@ -32,6 +32,7 @@ import {
   roleMasterSchema,
   type RoleMasterForm,
 } from "@/schemas/roleMasterSchema";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Local form types ────────────────────────────────────────────────────────
 interface FormState {
@@ -97,7 +98,7 @@ function buildRoleColumns(
         if (deleteId === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[11px] text-muted-foreground mr-1">
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                 Delete?
               </span>
               <button
@@ -117,7 +118,7 @@ function buildRoleColumns(
         }
         return (
           <div className="flex items-center justify-end gap-1">
-            <button
+            <button data-row-view
               onClick={() => onView(row.original)}
               className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10"
               title="View details"
@@ -319,14 +320,14 @@ const RoleMaster: React.FC = () => {
               <h2 className="font-heading font-semibold text-foreground text-sm">
                 {editingId ? "Edit Role" : "Add Role"}
               </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 {editingId
                   ? "Modify role details below."
                   : "Define a new user role."}
               </p>
             </div>
             {editingId && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-primary/10 text-primary border border-primary/20">
+              <span className="text-[0.625rem] px-2 py-0.5 rounded-full font-heading bg-primary/10 text-primary border border-primary/20">
                 Editing
               </span>
             )}
@@ -336,7 +337,7 @@ const RoleMaster: React.FC = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Role Name */}
               <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Role Name <span className="text-destructive">*</span>
                 </label>
                 <div className="relative">
@@ -353,7 +354,7 @@ const RoleMaster: React.FC = () => {
                   />
                 </div>
                 {errors.RName && (
-                  <p className="text-[11px] text-destructive mt-1">
+                  <p className="text-[0.6875rem] text-destructive mt-1">
                     Role name is required
                   </p>
                 )}
@@ -361,7 +362,7 @@ const RoleMaster: React.FC = () => {
 
               {/* Role Code (Read-only preview) */}
               <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Role Code
                 </label>
                 <div className="relative">
@@ -378,14 +379,14 @@ const RoleMaster: React.FC = () => {
                     title="Auto-generated from Role Name (server authoritative)"
                   />
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                <p className="text-[0.625rem] text-muted-foreground mt-1 font-mono">
                   {form.RName ? generateRoleCode(form.RName) : ""} (preview)
                 </p>
               </div>
 
               {/* Description */}
               <div className="lg:col-span-2">
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Description
                 </label>
                 <div className="relative">
@@ -407,7 +408,7 @@ const RoleMaster: React.FC = () => {
             <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
               <button
                 onClick={handleSave}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold text-white shadow-sm bg-gradient-to-r from-blue-500 to-indigo-600 hover:opacity-90 transition-all"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold text-white shadow-sm btn-module hover:opacity-90 transition-all"
               >
                 <Users size={15} />
                 {editingId ? "Update" : "Save Role"}
@@ -431,7 +432,7 @@ const RoleMaster: React.FC = () => {
               <h3 className="font-heading font-semibold text-foreground text-sm">
                 Role Records ({filtered.length})
               </h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 Manage user roles for access control
               </p>
             </div>
@@ -475,7 +476,7 @@ const RoleMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -497,7 +498,7 @@ const RoleMaster: React.FC = () => {
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Role Name
                 </p>
                 <p className="text-sm font-medium text-foreground">
@@ -505,7 +506,7 @@ const RoleMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Role Code
                 </p>
                 <p className="font-mono text-sm font-semibold text-primary">
@@ -513,7 +514,7 @@ const RoleMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Description
                 </p>
                 <p className="text-sm text-foreground">
@@ -531,13 +532,13 @@ const RoleMaster: React.FC = () => {
                   handleEdit(viewRecord);
                   setViewRecord(null);
                 }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white "
               >
                 <Edit2 size={13} /> Edit Role
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

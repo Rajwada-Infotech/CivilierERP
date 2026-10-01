@@ -43,7 +43,7 @@ const labelCls = "text-xs font-semibold text-muted-foreground uppercase tracking
 // collapse into once picked.
 const leanInputCls =
   "w-full px-2.5 py-1.5 rounded-lg text-xs bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
-const leanLabelCls = "text-[10px] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5";
+const leanLabelCls = "text-[0.625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1 mb-1.5";
 
 // unit-master already carries Project/Block/Floor for every unit — reusing
 // that one flat list (same source CrmApplication.tsx's own Project -> Block
@@ -490,7 +490,7 @@ export default function WorkDone() {
                 <button
                   type="button"
                   onClick={toggleAllChainGroups}
-                  className="ml-auto flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors"
+                  className="ml-auto flex items-center gap-1.5 text-[0.6875rem] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors"
                 >
                   {allChainGroupsExpanded ? (
                     <>
@@ -524,7 +524,7 @@ export default function WorkDone() {
                           {group.projectName ? `${group.projectName} > ` : ""}
                           {group.scopePath}
                         </span>
-                        <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                        <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
                           {group.chains.length} chain{group.chains.length !== 1 ? "s" : ""}
                         </span>
                       </button>
@@ -538,7 +538,7 @@ export default function WorkDone() {
                                 <div>
                                   <span className="text-sm font-semibold text-foreground">{chain.alias}</span>
                                   <span
-                                    className={`ml-2 text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                    className={`ml-2 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
                                       chain.workType === "INTERNAL"
                                         ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
                                         : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
@@ -576,7 +576,7 @@ export default function WorkDone() {
                                             {rung.sequenceNo}. {rung.activityName}
                                           </span>
                                           <span
-                                            className={`text-[9px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${meta.className}`}
+                                            className={`text-[0.5625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${meta.className}`}
                                           >
                                             {meta.label}
                                           </span>
@@ -650,7 +650,7 @@ export default function WorkDone() {
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-sm font-semibold text-foreground">{linkedDependency.alias}</span>
                         <span
-                          className={`text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
+                          className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-0.5 rounded-full ${
                             linkedDependency.workType === "INTERNAL"
                               ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
                               : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
@@ -689,7 +689,7 @@ export default function WorkDone() {
                       <div className="rounded-lg border border-border overflow-hidden overflow-x-auto">
                         <table className="w-full text-sm">
                           <thead>
-                            <tr className="border-b border-border text-left text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
+                            <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
                               <th className="px-3.5 py-2.5">Activity</th>
                               <th className="px-3 py-2.5">Engineer</th>
                               <th className="px-3 py-2.5">Start Date</th>

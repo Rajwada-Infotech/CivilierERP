@@ -96,7 +96,7 @@ function TreePickerNode({
           }}
         >
           <span className="truncate">{node.name}</span>
-          <span className="font-mono text-[9px] text-muted-foreground/50 ml-2 shrink-0">{node.code}</span>
+          <span className="font-mono text-[0.5625rem] text-muted-foreground/50 ml-2 shrink-0">{node.code}</span>
         </div>
       </div>
 
@@ -301,7 +301,7 @@ export function GroupTreePicker({
                   >
                     <CornerDownRight size={9} className="text-muted-foreground/40 shrink-0" />
                     <span className="flex-1 truncate">{g.name}</span>
-                    <span className="font-mono text-[9px] text-muted-foreground/50 shrink-0">{g.code}</span>
+                    <span className="font-mono text-[0.5625rem] text-muted-foreground/50 shrink-0">{g.code}</span>
                   </div>
                 ))
               )

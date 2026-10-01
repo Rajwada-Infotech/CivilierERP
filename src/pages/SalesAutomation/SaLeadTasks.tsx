@@ -9,6 +9,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { DateTimeInput } from "@/components/ui/date-input";
 
 const API = "/api/sa/lead-tasks";
 
@@ -130,12 +131,12 @@ const SaLeadTasks: React.FC = () => {
               <option value="">Assign to me</option>
               {users.map((u: any) => <option key={u.Id} value={u.Id}>{u.Name}</option>)}
             </select>
-            <input type="datetime-local" value={form.DueDate} onChange={(e) => setForm({ ...form, DueDate: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
+            <DateTimeInput value={form.DueDate} onChange={(e) => setForm({ ...form, DueDate: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <select value={form.Priority} onChange={(e) => setForm({ ...form, Priority: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm">
               {["Low", "Normal", "High", "Urgent"].map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
             <textarea value={form.Description} onChange={(e) => setForm({ ...form, Description: e.target.value })} placeholder="Task notes" className="md:col-span-4 min-h-20 border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <button className="md:col-span-1 inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium">
+            <button className="md:col-span-1 inline-flex items-center justify-center gap-2 rounded-md btn-module text-white px-3 py-2 text-sm font-medium">
               <Plus size={15} /> Add
             </button>
           </form>

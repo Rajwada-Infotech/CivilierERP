@@ -58,7 +58,7 @@ export function DeleteBlockedDialog({ info, onClose }: DeleteBlockedDialogProps)
                 },
               ].map(({ step, label, sub }) => (
                 <li key={step} className="flex gap-3">
-                  <span className="shrink-0 w-5 h-5 rounded-full bg-destructive/10 text-destructive text-[11px] font-bold flex items-center justify-center mt-0.5">
+                  <span className="shrink-0 w-5 h-5 rounded-full bg-destructive/10 text-destructive text-[0.6875rem] font-bold flex items-center justify-center mt-0.5">
                     {step}
                   </span>
                   <div>

@@ -91,7 +91,7 @@ const priorityCfg: Record<Priority, { cls: string; dot: string; bar: string }> =
       bar: "bg-orange-500",
     },
     Medium: {
-      cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+      cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
       dot: "bg-amber-400",
       bar: "bg-amber-400",
     },
@@ -104,7 +104,7 @@ const priorityCfg: Record<Priority, { cls: string; dot: string; bar: string }> =
 
 const statusCfg: Record<Status, { cls: string; label: string }> = {
   Pending: {
-    cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+    cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
     label: "Pending",
   },
   InProgress: {
@@ -128,7 +128,7 @@ function PriorityBadge({ priority }: { priority: Priority }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold border",
+        "inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border",
         cfg.cls,
       )}
     >
@@ -143,7 +143,7 @@ function StatusBadge({ status }: { status: Status }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border",
+        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border",
         cfg.cls,
       )}
     >
@@ -185,7 +185,7 @@ function ResolveDialog({
             <p className="text-sm font-semibold text-foreground">
               Approve Resolution
             </p>
-            <p className="text-[11px] text-muted-foreground mt-0.5 truncate max-w-[280px]">
+            <p className="text-[0.6875rem] text-muted-foreground mt-0.5 truncate max-w-[280px]">
               #{ticket.id} · {ticket.subject}
             </p>
           </div>
@@ -209,7 +209,7 @@ function ResolveDialog({
           </div>
 
           <div className="space-y-1.5">
-            <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+            <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
               Resolution Note{" "}
               <span className="text-muted-foreground/50 normal-case tracking-normal font-normal">
                 (optional)
@@ -275,7 +275,7 @@ function TicketRow({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-mono text-[10px] text-muted-foreground/60">
+                <span className="font-mono text-[0.625rem] text-muted-foreground/60">
                   #{ticket.id}
                 </span>
                 <h3 className="text-sm font-semibold text-foreground leading-snug truncate">
@@ -285,24 +285,24 @@ function TicketRow({
 
               {/* Meta */}
               <div className="flex items-center gap-3 mt-1 flex-wrap">
-                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                   <User size={10} />
                   <span>{ticket.customer_name || "—"}</span>
                 </div>
                 {ticket.assigned_to && (
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                     <span className="text-muted-foreground/40">→</span>
                     <span>{ticket.assigned_to}</span>
                   </div>
                 )}
-                <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                   <CalendarDays size={10} />
                   <span>
                     {fmtDate(ticket.created_at)} {fmtTime(ticket.created_at)}
                   </span>
                 </div>
                 {(ticket.comment_count ?? 0) > 0 && (
-                  <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <div className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
                     <MessageCircle size={10} />
                     <span>{ticket.comment_count}</span>
                   </div>
@@ -323,7 +323,7 @@ function TicketRow({
                   {isLong && (
                     <button
                       onClick={() => setExpanded((p) => !p)}
-                      className="text-[11px] text-primary mt-0.5 hover:underline flex items-center gap-0.5"
+                      className="text-[0.6875rem] text-primary mt-0.5 hover:underline flex items-center gap-0.5"
                     >
                       {expanded ? "Show less" : "Show more"}
                       <ChevronDown
@@ -394,7 +394,7 @@ function StatPill({
         <p className="text-lg font-bold text-foreground leading-none">
           {value}
         </p>
-        <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
+        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{label}</p>
       </div>
     </div>
   );
@@ -439,13 +439,13 @@ function RecentlyResolvedPanel() {
               <div className={cn("w-1.5 h-1.5 rounded-full shrink-0 mt-1", priorityCfg[t.priority]?.dot ?? "bg-muted")} />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium text-foreground truncate leading-snug">{t.subject}</p>
-                <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                <p className="text-[0.6875rem] text-muted-foreground truncate mt-0.5">
                   {t.customer_name}
                   {t.assigned_to && <span className="text-muted-foreground/50"> · {t.assigned_to}</span>}
                 </p>
-                <p className="text-[10px] text-muted-foreground/50 mt-0.5">{fmtDate(t.updated_at ?? t.created_at)}</p>
+                <p className="text-[0.625rem] text-muted-foreground/50 mt-0.5">{fmtDate(t.updated_at ?? t.created_at)}</p>
               </div>
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-emerald-500/10 text-emerald-600 border-emerald-400/20 shrink-0">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.625rem] font-semibold border bg-emerald-500/10 text-emerald-600 border-emerald-400/20 shrink-0">
                 <CheckCircle2 size={8} />
                 {t.status === "Closed" ? "Closed" : "Done"}
               </span>
@@ -620,21 +620,21 @@ export default function TicketResolution() {
             </div>
             <div className="flex items-center gap-4 flex-wrap">
               <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-muted-foreground font-medium">Status:</span>
+                <span className="text-[0.6875rem] text-muted-foreground font-medium">Status:</span>
                 {(["All", "Pending", "InProgress"] as const).map((s) => (
                   <button key={s} onClick={() => setStatus(s)}
-                    className={cn("px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all",
-                      statusFilter === s ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted")}>
+                    className={cn("px-2.5 py-1 rounded-lg text-[0.6875rem] font-medium transition-all",
+                      statusFilter === s ? "btn-module text-white" : "border border-border text-muted-foreground hover:bg-muted")}>
                     {s === "InProgress" ? "Resolving" : s}
                   </button>
                 ))}
               </div>
               <div className="flex items-center gap-1.5">
-                <span className="text-[11px] text-muted-foreground font-medium">Priority:</span>
+                <span className="text-[0.6875rem] text-muted-foreground font-medium">Priority:</span>
                 {(["All", ...PRIORITIES] as const).map((p) => (
                   <button key={p} onClick={() => setPriority(p as Priority | "All")}
-                    className={cn("px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all",
-                      priorityFilter === p ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted")}>
+                    className={cn("px-2.5 py-1 rounded-lg text-[0.6875rem] font-medium transition-all",
+                      priorityFilter === p ? "btn-module text-white" : "border border-border text-muted-foreground hover:bg-muted")}>
                     {p}
                   </button>
                 ))}

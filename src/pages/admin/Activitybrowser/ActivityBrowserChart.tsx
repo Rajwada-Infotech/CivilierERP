@@ -24,7 +24,7 @@ const ActivityChartTooltip = ({ active, payload, label }: any) => {
           {payload.map((entry: any) => (
             <div
               key={entry.name}
-              className="flex items-center justify-between gap-4 text-[11px]"
+              className="flex items-center justify-between gap-4 text-[0.6875rem]"
             >
               <div className="flex items-center gap-2">
                 <div

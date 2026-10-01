@@ -448,7 +448,7 @@ const statusColor: Record<string, string> = {
   Scheduled:  "text-blue-700 bg-blue-50 border-blue-200",
   Issued:     "text-green-700 bg-green-50 border-green-200",
   Approved:   "text-green-700 bg-green-50 border-green-200",
-  Applied:    "text-orange-700 bg-orange-50 border-orange-200",
+  Applied:    "text-sky-700 bg-sky-50 border-sky-200",
   Draft:      "text-orange-700 bg-orange-50 border-orange-200",
 };
 
@@ -493,7 +493,7 @@ const StageRow: React.FC<{
         </div>
         <div className="flex-1 rounded-xl border border-dashed border-border bg-muted/10 px-4 py-3 opacity-70">
           <span className="text-sm font-semibold text-muted-foreground line-through decoration-muted-foreground/40">{stage.label}</span>
-          <div className="text-[12px] text-muted-foreground mt-0.5">Not applicable — {stage.notApplicableReason}</div>
+          <div className="text-[0.75rem] text-muted-foreground mt-0.5">Not applicable — {stage.notApplicableReason}</div>
         </div>
       </div>
     );
@@ -534,21 +534,21 @@ const StageRow: React.FC<{
               <span className={`text-sm font-semibold leading-tight ${isLocked ? "text-muted-foreground" : isDone ? "text-green-700 dark:text-green-300" : "text-foreground"}`}>
                 {stage.label}
               </span>
-              {stage.no && <span className="text-[11px] font-mono text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">{stage.no}</span>}
+              {stage.no && <span className="text-[0.6875rem] font-mono text-muted-foreground bg-muted/60 px-1.5 py-0.5 rounded">{stage.no}</span>}
               {stage.status && (
-                <span className={`text-[11px] px-2 py-0.5 rounded-lg border font-semibold ${statusColor[stage.status] || ""}`}>
+                <span className={`text-[0.6875rem] px-2 py-0.5 rounded-lg border font-semibold ${statusColor[stage.status] || ""}`}>
                   {stage.status}
                 </span>
               )}
             </div>
-            <div className={`text-[12px] mt-0.5 leading-snug ${isLocked ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
+            <div className={`text-[0.75rem] mt-0.5 leading-snug ${isLocked ? "text-muted-foreground/60" : "text-muted-foreground"}`}>
               {isLocked
                 ? <span className="flex items-center gap-1"><Lock size={9} className="shrink-0" /> Waiting: {stage.unlockedHint}</span>
                 : stage.sublabel}
             </div>
           </div>
           {isAuto ? (
-            <span className="shrink-0 text-[10px] text-muted-foreground bg-muted/60 border border-border rounded-lg px-2.5 py-1.5 whitespace-nowrap">Auto-synced</span>
+            <span className="shrink-0 text-[0.625rem] text-muted-foreground bg-muted/60 border border-border rounded-lg px-2.5 py-1.5 whitespace-nowrap">Auto-synced</span>
           ) : (isManual && !canEdit) ? null : (
             <button
               onClick={handleClick}
@@ -557,7 +557,7 @@ const StageRow: React.FC<{
                   ? "border-green-300 text-green-700 bg-green-50 hover:bg-green-100 dark:bg-green-900/30 dark:border-green-800 dark:text-green-300"
                   : isLocked
                   ? "border-border text-muted-foreground hover:bg-muted"
-                  : "border-primary bg-primary text-primary-foreground hover:bg-primary/90"
+                  : "border-primary btn-module text-white "
               }`}
             >
               {actionLabel} {!isManual && <ExternalLink size={11} />}
@@ -687,7 +687,7 @@ const CrmLegalMilestones: React.FC = () => {
             {rights.canCreate && (
             <button
               onClick={() => setNewDialog(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90"
+              className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg "
             >
               <Plus size={14} /> Start Workflow
             </button>
@@ -724,7 +724,7 @@ const CrmLegalMilestones: React.FC = () => {
                   }`}
                 >
                   <div className="flex">
-                    <div className={`w-[3px] shrink-0 self-stretch ${done ? "bg-green-500" : m.agreementDone ? "bg-blue-500" : "bg-amber-400"}`} />
+                    <div className={`w-[3px] shrink-0 self-stretch ${done ? "bg-green-500" : m.agreementDone ? "bg-blue-500" : "bg-sky-400"}`} />
                     <div className="flex-1 min-w-0 p-3 space-y-1">
                       <div className="flex items-center gap-1.5">
                         <div className="text-sm font-semibold truncate">{t.ApplicantName}</div>
@@ -735,11 +735,11 @@ const CrmLegalMilestones: React.FC = () => {
                           // contradictory. This flag is about the PROJECT (Ready-to-
                           // Move / physically finished construction), not this
                           // booking's own progress — labelled accordingly.
-                          <span className="shrink-0 text-[9px] px-1.5 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="This booking's PROJECT is already physically complete (Ready-to-Move) — Handover doesn't have to wait on the Sale Deed. Does not mean this booking's own legal journey is finished.">Project Ready</span>
+                          <span className="shrink-0 text-[0.5625rem] px-1.5 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="This booking's PROJECT is already physically complete (Ready-to-Move) — Handover doesn't have to wait on the Sale Deed. Does not mean this booking's own legal journey is finished.">Project Ready</span>
                         )}
                       </div>
-                      <div className="text-[11px] text-muted-foreground">{t.BookingNo} · {t.UnitNo}</div>
-                      <div className={`text-[11px] font-medium flex items-center gap-1 ${done ? "text-green-600" : "text-muted-foreground"}`}>
+                      <div className="text-[0.6875rem] text-muted-foreground">{t.BookingNo} · {t.UnitNo}</div>
+                      <div className={`text-[0.6875rem] font-medium flex items-center gap-1 ${done ? "text-green-600" : "text-muted-foreground"}`}>
                         {done ? <CheckCircle2 size={10} /> : <Circle size={10} />}
                         {text}
                       </div>
@@ -765,14 +765,14 @@ const CrmLegalMilestones: React.FC = () => {
                   <div className="px-5 py-4 flex items-center justify-between gap-3 border-b border-border bg-muted/20">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="font-heading font-bold text-[15px] truncate">{selected.ApplicantName}</h2>
+                        <h2 className="font-heading font-bold text-[0.9375rem] truncate">{selected.ApplicantName}</h2>
                         {model.isPhysicallyComplete && (
-                          <span className="shrink-0 text-[10px] px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="Project already complete — Handover doesn't have to wait on the Sale Deed. Agreement/AFS Registration is still required as normal.">
+                          <span className="shrink-0 text-[0.625rem] px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-full font-medium" title="Project already complete — Handover doesn't have to wait on the Sale Deed. Agreement/AFS Registration is still required as normal.">
                             Project Completed
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5">{selected.BookingNo} · {selected.UnitNo}</div>
+                      <div className="text-[0.6875rem] text-muted-foreground mt-0.5">{selected.BookingNo} · {selected.UnitNo}</div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 flex-wrap">
                       <button
@@ -792,8 +792,8 @@ const CrmLegalMilestones: React.FC = () => {
                       really was. */}
                   <div className="px-5 py-3 space-y-2">
                     <div className="flex items-center justify-between gap-3">
-                      <span className="text-[11px] text-muted-foreground font-medium">Overall journey progress</span>
-                      <span className="text-[11px] font-semibold text-foreground">{model.doneCount}/{model.totalCount} steps</span>
+                      <span className="text-[0.6875rem] text-muted-foreground font-medium">Overall journey progress</span>
+                      <span className="text-[0.6875rem] font-semibold text-foreground">{model.doneCount}/{model.totalCount} steps</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
                       <div
@@ -804,7 +804,7 @@ const CrmLegalMilestones: React.FC = () => {
                     <div className="flex items-center gap-1 flex-wrap pt-0.5">
                       {model.progressChecks.map((p) => (
                         <span key={p.label} title={p.label}
-                          className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-medium ${
+                          className={`flex items-center gap-1 text-[0.625rem] px-2 py-0.5 rounded-full border font-medium ${
                             p.done ? "bg-green-100 border-green-300 text-green-700 dark:bg-green-900/30 dark:border-green-700 dark:text-green-300" : "bg-muted/40 border-border text-muted-foreground/60"
                           }`}>
                           {p.done ? <CheckCircle2 size={9} /> : <Circle size={9} />}
@@ -828,7 +828,7 @@ const CrmLegalMilestones: React.FC = () => {
                     <div className="px-5 py-3.5 border-b border-border bg-muted/20 flex items-start gap-3">
                       <div>
                         <h3 className="text-sm font-bold">{section.title}</h3>
-                        <p className="text-[11px] text-muted-foreground mt-0.5 leading-relaxed">
+                        <p className="text-[0.6875rem] text-muted-foreground mt-0.5 leading-relaxed">
                           {section.isApplicable ? section.description : section.notApplicableReason}
                         </p>
                       </div>
@@ -880,7 +880,7 @@ const CrmLegalMilestones: React.FC = () => {
               <button
                 onClick={handleStart}
                 disabled={saving || startableBookings.length === 0}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40"
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40"
               >
                 {saving ? "Starting..." : "Start"}
               </button>

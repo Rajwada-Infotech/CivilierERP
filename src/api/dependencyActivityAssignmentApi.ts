@@ -220,7 +220,7 @@ export const ASSIGNMENT_STATUS_META: Record<AssignmentStatus, { label: string; c
   // /:rungId/status autoStatus branch).
   ALLOCATED: { label: "Allocated", className: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
   IN_PROGRESS: { label: "In Progress", className: "bg-blue-500/10 text-blue-600 dark:text-blue-400" },
-  HOLD: { label: "Hold", className: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
+  HOLD: { label: "Hold", className: "bg-[#ffe2021a] text-amber-600 dark:text-amber-400" },
   CANCELLED: { label: "Cancelled", className: "bg-red-500/10 text-red-600 dark:text-red-400" },
   APPROVED: { label: "Approved", className: "bg-teal-500/10 text-teal-600 dark:text-teal-400" },
   REWORK: { label: "Rework", className: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400" },

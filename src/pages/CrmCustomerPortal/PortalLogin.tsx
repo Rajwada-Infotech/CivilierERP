@@ -200,7 +200,7 @@ export default function PortalLogin() {
           <div className="w-14 h-14 rounded-2xl bg-white/10 flex items-center justify-center mb-6 overflow-hidden" style={{ border: `1px solid rgba(201,162,39,0.35)` }}>
             <img src="/Civilier.png" alt="" className="w-10 h-10 object-contain" />
           </div>
-          <p className="text-[11px] font-semibold tracking-[0.18em] uppercase mb-2" style={{ color: GOLD }}>Customer Record</p>
+          <p className="text-[0.6875rem] font-semibold tracking-[0.18em] uppercase mb-2" style={{ color: GOLD }}>Customer Record</p>
           <h1 className="text-3xl font-semibold text-white leading-tight mb-3" style={serif}>
             Customer Portal
           </h1>
@@ -232,7 +232,7 @@ export default function PortalLogin() {
               style={{ background: "rgba(201,162,39,0.14)", color: GOLD }}>CE</div>
             <div>
               <p className="text-xs font-semibold text-white">Your journey, one place</p>
-              <p className="text-[10px] text-white/40 mt-0.5">CivilierERP · Customer Experience</p>
+              <p className="text-[0.625rem] text-white/40 mt-0.5">CivilierERP · Customer Experience</p>
             </div>
           </div>
         </motion.div>
@@ -324,7 +324,7 @@ export default function PortalLogin() {
                     </motion.button>
                   </AnimatedInput>
 
-                  <p className="text-[11px] -mt-1.5 px-1" style={{ color: TEXT_FAINT }}>
+                  <p className="text-[0.6875rem] -mt-1.5 px-1" style={{ color: TEXT_FAINT }}>
                     First time signing in? Use your registered mobile number as the password.
                   </p>
 
@@ -354,7 +354,7 @@ export default function PortalLogin() {
                 </motion.form>
 
                 <div className="mt-5 text-center">
-                  <p className="text-[11px]" style={{ color: TEXT_FAINT }}>
+                  <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>
                     Are you our staff?{" "}
                     <button onClick={() => navigate("/login")} className="font-medium hover:underline transition-colors" style={{ color: VIOLET }}>
                       Go to main login

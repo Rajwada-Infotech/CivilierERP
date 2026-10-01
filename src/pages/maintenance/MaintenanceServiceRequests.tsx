@@ -15,7 +15,7 @@ const TICKET_VIOLET = "#a78bfa";
 const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN") : "\u2014");
 
 const STATUS_COLOR: Record<string, string> = {
-  Open:       "bg-amber-500/10 border-amber-500/20 text-amber-600",
+  Open:       "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
   Assigned:   "bg-sky-500/10 border-sky-500/20 text-sky-600",
   InProgress: "bg-violet-500/10 border-violet-500/20 text-violet-600",
   Resolved:   "bg-emerald-500/10 border-emerald-500/20 text-emerald-600",
@@ -29,10 +29,10 @@ const PRIORITY_COLOR: Record<string, string> = {
   Low:    "bg-muted border-border text-muted-foreground",
 };
 function StatusBadge({ status }: { status: string }) {
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${STATUS_COLOR[status] || "bg-muted border-border text-muted-foreground"}`}>{status}</span>;
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${STATUS_COLOR[status] || "bg-muted border-border text-muted-foreground"}`}>{status}</span>;
 }
 function PriorityBadge({ priority }: { priority: string }) {
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${PRIORITY_COLOR[priority] || "bg-muted border-border text-muted-foreground"}`}>{priority}</span>;
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${PRIORITY_COLOR[priority] || "bg-muted border-border text-muted-foreground"}`}>{priority}</span>;
 }
 
 const STATUS_TABS: { label: string; value: string }[] = [
@@ -202,7 +202,7 @@ export default function MaintenanceServiceRequests() {
           <DialogHeader><DialogTitle className="font-heading text-base">Resolve Ticket</DialogTitle></DialogHeader>
           <div className="space-y-3 pt-1">
             <div>
-              <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Resolution Notes *</label>
+              <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Resolution Notes *</label>
               <textarea value={resolutionNotes} onChange={(e) => setResolutionNotes(e.target.value)} rows={3} placeholder="Describe what was done to resolve this issue\u2026" className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground resize-none" />
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t border-border">

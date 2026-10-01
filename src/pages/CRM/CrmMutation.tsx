@@ -17,17 +17,18 @@ import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "
 import { useAuth } from "@/contexts/AuthContext";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { DateInput } from "@/components/ui/date-input";
 
 const API = "/api/crm/mutation";
 
 const STATUS_COLOR: Record<string, string> = {
-  Applied:     "text-amber-600 bg-amber-50 border-amber-200",
-  QueryRaised: "text-orange-600 bg-orange-50 border-orange-200",
+  Applied:     "text-sky-600 bg-sky-50 border-sky-200",
+  QueryRaised: "text-sky-600 bg-sky-50 border-sky-200",
   Approved:    "text-emerald-600 bg-emerald-50 border-emerald-200",
 };
 
 const DOC_STATUS_COLOR: Record<string, string> = {
-  Requested: 'text-amber-600 bg-amber-50 border-amber-200',
+  Requested: 'text-sky-600 bg-sky-50 border-sky-200',
   Uploaded:  'text-blue-600 bg-blue-50 border-blue-200',
   Verified:  'text-emerald-600 bg-emerald-50 border-emerald-200',
   Rejected:  'text-red-600 bg-red-50 border-red-200',
@@ -373,9 +374,9 @@ const CrmMutation: React.FC = () => {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-0.5 flex-wrap">
             <span className="font-medium">{doc.Label || doc.DocumentType}</span>
-            <span className={cn("text-[10px] px-2 py-0.5 rounded-full border font-medium", DOC_STATUS_COLOR[doc.Status] || "bg-muted border-border text-muted-foreground")}>{doc.Status}</span>
+            <span className={cn("text-[0.625rem] px-2 py-0.5 rounded-full border font-medium", DOC_STATUS_COLOR[doc.Status] || "bg-muted border-border text-muted-foreground")}>{doc.Status}</span>
             {isSynced(doc) && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full border font-medium text-indigo-600 bg-indigo-50 border-indigo-200 flex items-center gap-1">
+              <span className="text-[0.625rem] px-2 py-0.5 rounded-full border font-medium text-indigo-600 bg-indigo-50 border-indigo-200 flex items-center gap-1">
                 <Link2 size={9} /> Synced from Registry
               </span>
             )}
@@ -401,7 +402,7 @@ const CrmMutation: React.FC = () => {
         {['Requested', 'Rejected'].includes(doc.Status) && !locked && (
           <>
             <input type="file" className="hidden" id={`doc-attach-${doc.Id}`} onChange={(e) => e.target.files?.[0] && handleUploadDoc(e.target.files[0], doc.DocumentType, doc.Label)} />
-            <button onClick={() => document.getElementById(`doc-attach-${doc.Id}`)?.click()} className="text-xs bg-primary text-primary-foreground px-2.5 py-1 rounded font-medium hover:bg-primary/90">
+            <button onClick={() => document.getElementById(`doc-attach-${doc.Id}`)?.click()} className="text-xs btn-module text-white px-2.5 py-1 rounded font-medium ">
               {doc.Status === 'Rejected' ? 'Re-attach File' : 'Attach File'}
             </button>
           </>
@@ -426,7 +427,7 @@ const CrmMutation: React.FC = () => {
           <div className="flex items-center gap-3">
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
             <button onClick={() => setDialogOpen(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+              className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
               <Plus size={14} /> Start Mutation
             </button>
           </div>
@@ -458,7 +459,7 @@ const CrmMutation: React.FC = () => {
                       <div className="flex-1 p-3 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-semibold text-sm truncate">{r.ApplicantName}</span>
-                          <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0", STATUS_COLOR[r.Status] || "")}>{r.Status}</span>
+                          <span className={cn("text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium shrink-0", STATUS_COLOR[r.Status] || "")}>{r.Status}</span>
                         </div>
                         <div className="text-xs text-muted-foreground mt-0.5 truncate">{r.MutationNo} · {r.BookingNo} · {r.UnitNo}</div>
                       </div>
@@ -498,16 +499,16 @@ const CrmMutation: React.FC = () => {
                 {activeTab === "Overview" && (
                   <div className="space-y-4">
                     {detail.Status === "Applied" && (
-                      <div className="border border-amber-200 bg-amber-50 rounded-lg p-4">
+                      <div className="border border-sky-200 bg-sky-50 rounded-lg p-4">
                         <div className="flex items-center justify-between gap-3 flex-wrap">
                           <div>
                             <p className="text-sm font-semibold text-amber-800 flex items-center gap-1.5"><Landmark size={14} /> Application pending with the authority</p>
-                            <p className="text-xs text-amber-700 mt-0.5">
+                            <p className="text-xs text-sky-700 mt-0.5">
                               {required.length > 0 ? `${verifiedCount}/${required.length} mandatory documents verified.` : "No mandatory document requested yet."}
                             </p>
                           </div>
                           <div className="flex items-center gap-2 shrink-0">
-                            <button onClick={() => setQueryOpen(true)} className="text-xs border border-orange-300 text-orange-700 px-3 py-1.5 rounded hover:bg-orange-100 font-medium">Raise Query</button>
+                            <button onClick={() => setQueryOpen(true)} className="text-xs border border-sky-300 text-sky-700 px-3 py-1.5 rounded hover:bg-sky-100 font-medium">Raise Query</button>
                             {canApproveMutation ? (
                               <button onClick={() => setApproveOpen(true)} disabled={!docsReady}
                                 title={!docsReady ? "Verify the mandatory documents first" : undefined}
@@ -515,7 +516,7 @@ const CrmMutation: React.FC = () => {
                                 Approve
                               </button>
                             ) : (
-                              <span className="text-xs text-amber-600 border border-amber-200 bg-amber-50 px-2.5 py-1.5 rounded flex items-center gap-1">
+                              <span className="text-xs text-sky-600 border border-sky-200 bg-sky-50 px-2.5 py-1.5 rounded flex items-center gap-1">
                                 🔒 Requires Legal Head / Admin
                               </span>
                             )}
@@ -524,15 +525,15 @@ const CrmMutation: React.FC = () => {
                       </div>
                     )}
                     {detail.Status === "QueryRaised" && (
-                      <div className="border border-orange-200 bg-orange-50 rounded-lg p-4">
+                      <div className="border border-sky-200 bg-sky-50 rounded-lg p-4">
                         <p className="text-sm font-semibold text-orange-800 flex items-center gap-1.5"><AlertTriangle size={14} /> Query raised by the authority</p>
-                        {detail.QueryRemarks && <p className="text-xs text-orange-700 mt-1 bg-white/60 border border-orange-200 rounded px-2 py-1.5">"{detail.QueryRemarks}"</p>}
-                        <p className="text-xs text-orange-700 mt-2">
+                        {detail.QueryRemarks && <p className="text-xs text-sky-700 mt-1 bg-white/60 border border-sky-200 rounded px-2 py-1.5">"{detail.QueryRemarks}"</p>}
+                        <p className="text-xs text-sky-700 mt-2">
                           {required.length > 0 ? `${verifiedCount}/${required.length} mandatory documents verified.` : "No mandatory document requested yet."}
                         </p>
                         <button onClick={handleResubmit} disabled={!docsReady}
                           title={!docsReady ? "Fix and verify the flagged documents first" : undefined}
-                          className="mt-2 text-xs bg-orange-600 text-white px-3 py-1.5 rounded hover:bg-orange-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                          className="mt-2 text-xs btn-module text-white px-3 py-1.5 rounded hover:shadow-lg font-medium disabled:opacity-50 disabled:cursor-not-allowed">
                           Resubmit to Authority
                         </button>
                       </div>
@@ -570,15 +571,15 @@ const CrmMutation: React.FC = () => {
                       <div className="flex items-center justify-between mb-2">
                         <h4 className="text-xs font-semibold text-foreground uppercase tracking-wide">Required Documents</h4>
                         {required.length > 0 && (
-                          <span className={cn("text-[11px] font-semibold", verifiedCount === required.length ? "text-emerald-600" : "text-amber-600")}>{verifiedCount}/{required.length} verified</span>
+                          <span className={cn("text-[0.6875rem] font-semibold", verifiedCount === required.length ? "text-emerald-600" : "text-sky-600")}>{verifiedCount}/{required.length} verified</span>
                         )}
                       </div>
                       {required.length === 0 ? (
-                        <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 flex items-center justify-between gap-3">
-                          <p className="text-xs text-amber-800"><span className="font-semibold">No mandatory document requested yet.</span> Approval is blocked until one is requested and verified.</p>
+                        <div className="border border-sky-200 bg-sky-50 rounded-lg p-3 flex items-center justify-between gap-3">
+                          <p className="text-xs text-sky-800"><span className="font-semibold">No mandatory document requested yet.</span> Approval is blocked until one is requested and verified.</p>
                           {!locked && (
                             <button onClick={() => handleRequestDoc('MutationApplicationForm', 'Mutation Application Form')} disabled={requestingDoc}
-                              className="shrink-0 text-xs bg-amber-600 text-white px-3 py-1.5 rounded hover:bg-amber-700 disabled:opacity-50 font-medium">
+                              className="shrink-0 text-xs bg-sky-600 text-white px-3 py-1.5 rounded hover:bg-sky-700 disabled:opacity-50 font-medium">
                               {requestingDoc ? "Requesting..." : "Request Application Form"}
                             </button>
                           )}
@@ -603,21 +604,21 @@ const CrmMutation: React.FC = () => {
                         <p className="text-xs text-muted-foreground mb-2">For reference material only — use the request action above for anything approval needs to check.</p>
                         <div className="flex items-end gap-2">
                           <div className="flex-1 space-y-1">
-                            <label className="text-[10px] font-medium text-muted-foreground">Type</label>
+                            <label className="text-[0.625rem] font-medium text-muted-foreground">Type</label>
                             <select value={newDocType} onChange={(e) => setNewDocType(e.target.value)} className="w-full h-8 text-xs border border-border rounded px-2 bg-background">
                               <option value="IdentityProof">Identity Proof</option>
                               <option value="Other">Other</option>
                             </select>
                           </div>
                           <div className="flex-1 space-y-1">
-                            <label className="text-[10px] font-medium text-muted-foreground">Label (Optional)</label>
+                            <label className="text-[0.625rem] font-medium text-muted-foreground">Label (Optional)</label>
                             <Input className="h-8 text-xs" value={newDocLabel} onChange={(e) => setNewDocLabel(e.target.value)} placeholder="e.g. Aadhaar copy" />
                           </div>
                           <div className="shrink-0 space-y-1">
-                            <label className="text-[10px] font-medium text-transparent">.</label>
+                            <label className="text-[0.625rem] font-medium text-transparent">.</label>
                             <input type="file" className="hidden" ref={fileInputRef} onChange={(e) => e.target.files?.[0] && handleUploadDoc(e.target.files[0], newDocType, newDocLabel)} />
                             <button onClick={() => fileInputRef.current?.click()} disabled={uploadingDoc}
-                              className="h-8 px-3 text-xs bg-primary text-primary-foreground rounded hover:bg-primary/90 flex items-center gap-1.5 font-medium disabled:opacity-50">
+                              className="h-8 px-3 text-xs btn-module text-white rounded flex items-center gap-1.5 font-medium disabled:opacity-50">
                               <Upload size={12} /> {uploadingDoc ? "Uploading..." : "Upload"}
                             </button>
                           </div>
@@ -668,8 +669,8 @@ const CrmMutation: React.FC = () => {
                     <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
                   ))}
                 </select>
-                <p className="text-[11px] text-muted-foreground mt-1">Requires Sale Deed Registry to be Completed.</p>
-                {!startableBookings.length && <p className="text-[11px] text-amber-600 mt-1">No bookings are eligible yet — Sale Deed Registry must be Completed first.</p>}
+                <p className="text-[0.6875rem] text-muted-foreground mt-1">Requires Sale Deed Registry to be Completed.</p>
+                {!startableBookings.length && <p className="text-[0.6875rem] text-sky-600 mt-1">No bookings are eligible yet — Sale Deed Registry must be Completed first.</p>}
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -678,7 +679,7 @@ const CrmMutation: React.FC = () => {
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Application Date</label>
-                  <input type="date" value={startForm.ApplicationDate} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationDate: e.target.value }))}
+                  <DateInput value={startForm.ApplicationDate} onChange={(e) => setStartForm((f) => ({ ...f, ApplicationDate: e.target.value }))}
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
               </div>
@@ -699,7 +700,7 @@ const CrmMutation: React.FC = () => {
             </div>
             <div className="flex justify-end gap-2 pt-3 border-t border-border">
               <button onClick={() => { setDialogOpen(false); setBookingId(""); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleStart} disabled={saving || !bookingId} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              <button onClick={handleStart} disabled={saving || !bookingId} className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                 {saving ? "Starting..." : "Start"}
               </button>
             </div>
@@ -713,11 +714,11 @@ const CrmMutation: React.FC = () => {
             <div>
               <label className="text-xs text-muted-foreground block mb-1">What did the authority flag? *</label>
               <textarea value={queryRemarks} onChange={(e) => setQueryRemarks(e.target.value)} className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background min-h-[80px]" />
-              <p className="text-[11px] text-muted-foreground mt-1">Mandatory documents will be reset so staff must genuinely correct and reattach them before resubmitting.</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-1">Mandatory documents will be reset so staff must genuinely correct and reattach them before resubmitting.</p>
             </div>
             <div className="flex justify-end gap-2 pt-3 border-t border-border">
               <button onClick={() => setQueryOpen(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-              <button onClick={handleQuery} className="px-4 py-1.5 text-sm bg-orange-600 text-white rounded-lg font-medium hover:bg-orange-700">Confirm Query</button>
+              <button onClick={handleQuery} className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg ">Confirm Query</button>
             </div>
           </DialogContent>
         </Dialog>
@@ -738,7 +739,7 @@ const CrmMutation: React.FC = () => {
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground block mb-1">Approved Date</label>
-                  <input type="date" value={approveForm.ApprovedDate} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedDate: e.target.value }))}
+                  <DateInput value={approveForm.ApprovedDate} onChange={(e) => setApproveForm((f) => ({ ...f, ApprovedDate: e.target.value }))}
                     className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
                 </div>
               </div>

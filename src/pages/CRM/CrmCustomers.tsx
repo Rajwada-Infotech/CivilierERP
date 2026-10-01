@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
+import { AutoInput } from "@/components/ui/date-input";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -235,7 +236,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
         <DialogHeader className="space-y-0.5">
           <DialogTitle className="font-heading text-base font-bold flex items-center justify-between gap-2 pr-6">
             <span className="flex items-center gap-2">
-              <IdCard size={16} className="text-amber-500" /> {customer.CustomerNo} — Edit Customer
+              <IdCard size={16} className="text-sky-500" /> {customer.CustomerNo} — Edit Customer
             </span>
             {locked ? (
               <button onClick={() => setLocked(false)}
@@ -243,7 +244,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
                 <Pencil size={12} /> Edit
               </button>
             ) : (
-              <span className="flex items-center gap-1 text-xs font-medium text-amber-600 shrink-0">
+              <span className="flex items-center gap-1 text-xs font-medium text-sky-600 shrink-0">
                 <Pencil size={12} /> Editing
               </span>
             )}
@@ -263,7 +264,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <div className="rounded-xl border border-border p-3 space-y-2">
             <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-              <User size={13} className="text-amber-500" /> Personal &amp; Financial Details
+              <User size={13} className="text-sky-500" /> Personal &amp; Financial Details
             </h3>
             <div className="grid grid-cols-3 gap-2.5">
               {[
@@ -279,7 +280,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
               ].map(({ key, label, type, required }) => (
                 <div key={key}>
                   <label className="text-xs text-muted-foreground block mb-0.5">{label}{required && <span className="text-destructive"> *</span>}</label>
-                  <input type={type} value={(form as any)[key]} readOnly={locked}
+                  <AutoInput type={type} value={(form as any)[key]} readOnly={locked}
                     onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                     className={inputCls} />
                 </div>
@@ -290,7 +291,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
           <div className="space-y-3">
             <div className="rounded-xl border border-border p-3 space-y-2">
               <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                <MapPin size={13} className="text-amber-500" /> Address
+                <MapPin size={13} className="text-sky-500" /> Address
               </h3>
               <AddressFields form={form} setForm={setForm} readOnly={locked} inputCls={inputCls} />
             </div>
@@ -301,9 +302,9 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
 
             <div className="rounded-xl border border-border p-3 space-y-2">
               <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                <FileText size={13} className="text-amber-500" /> Billing
+                <FileText size={13} className="text-sky-500" /> Billing
               </h3>
-              <p className="text-[11px] text-muted-foreground">Non-Invoice (default) — no invoice is ever generated for this customer, in the CRM booking pipeline or the Accounts Sale Invoice module.</p>
+              <p className="text-[0.6875rem] text-muted-foreground">Non-Invoice (default) — no invoice is ever generated for this customer, in the CRM booking pipeline or the Accounts Sale Invoice module.</p>
               <div className="flex items-center gap-4">
                 {(["NonInvoice", "Invoice"] as const).map((mode) => (
                   <label key={mode} className={`flex items-center gap-1.5 text-sm ${locked ? "opacity-70 cursor-not-allowed" : "cursor-pointer"}`}>
@@ -317,7 +318,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
 
             <div className="rounded-xl border border-border p-3 space-y-2">
               <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                <FileText size={13} className="text-amber-500" /> Notes
+                <FileText size={13} className="text-sky-500" /> Notes
               </h3>
               <textarea value={form.Notes} readOnly={locked} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
                 rows={2} className={`${inputCls} resize-none`} />
@@ -333,23 +334,23 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
         {(customer.outstanding && Number(customer.outstanding.TotalDue) > 0) || customer.applications?.length > 0 ? (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
             {customer.outstanding && Number(customer.outstanding.TotalDue) > 0 ? (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
-                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-amber-700 dark:text-amber-400"><IndianRupee size={13} /> Outstanding</h3>
+              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 space-y-2">
+                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-sky-700 dark:text-sky-400"><IndianRupee size={13} /> Outstanding</h3>
                 <div className="grid grid-cols-3 gap-2 text-xs">
                   <div><span className="text-muted-foreground block">Total Due</span><span className="font-semibold">₹{Number(customer.outstanding.TotalDue).toLocaleString("en-IN")}</span></div>
                   <div><span className="text-muted-foreground block">Paid</span><span className="font-semibold text-green-700">₹{Number(customer.outstanding.TotalPaid).toLocaleString("en-IN")}</span></div>
-                  <div><span className="text-muted-foreground block">Outstanding</span><span className="font-semibold text-amber-700">₹{Number(customer.outstanding.TotalOutstanding).toLocaleString("en-IN")}</span></div>
+                  <div><span className="text-muted-foreground block">Outstanding</span><span className="font-semibold text-sky-700">₹{Number(customer.outstanding.TotalOutstanding).toLocaleString("en-IN")}</span></div>
                 </div>
               </div>
             ) : <div />}
 
             {customer.applications?.length > 0 && (
               <div className="rounded-xl border border-border p-3 space-y-2">
-                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground"><IdCard size={13} className="text-amber-500" /> Applications ({customer.applications.length})</h3>
+                <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground"><IdCard size={13} className="text-sky-500" /> Applications ({customer.applications.length})</h3>
                 <div className="space-y-1.5 max-h-20 overflow-y-auto thin-scroll">
                   {customer.applications.map((a: any) => (
                     <div key={a.Id} className="flex items-center justify-between text-xs">
-                      <span className="font-mono text-amber-600 dark:text-amber-400">{a.ApplicationNo}</span>
+                      <span className="font-mono text-sky-600 dark:text-sky-400">{a.ApplicationNo}</span>
                       <span className="text-muted-foreground">{a.Status}</span>
                       {a.BookingNo && <span className="text-green-600">→ {a.BookingNo}</span>}
                     </div>
@@ -393,7 +394,7 @@ function EditCustomerDialog({ customer, canDelete = false, onClose, onSaved, onD
               <button onClick={() => { setLocked(true); onClose(); }}
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleSave} disabled={saving}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                 {saving ? "Saving..." : "Save Changes"}
               </button>
             </>
@@ -702,7 +703,7 @@ const CrmCustomers: React.FC = () => {
             <BookUser size={14} /> Customer Ledger (Master)
           </button>
           <button onClick={() => setDialogOpen(true)}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all">
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module hover:shadow-lg transition-all">
             <Plus size={14} /> New Customer
           </button>
         </div>
@@ -714,7 +715,7 @@ const CrmCustomers: React.FC = () => {
           <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") updateFilter(setSearch)(searchInput); }}
             placeholder="Search name, mobile, PAN, customer no... (Enter to search)"
-            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+            className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
         </div>
         <CrmCompanyProjectBlockFilter value={cpb} onChange={updateFilter(setCpb)} />
       </div>
@@ -735,14 +736,14 @@ const CrmCustomers: React.FC = () => {
         <DialogContent accent="crm" className="max-w-5xl max-h-[92vh] overflow-y-auto p-4 sm:p-5 gap-2.5">
           <DialogHeader className="space-y-0.5">
             <DialogTitle className="font-heading text-base font-bold flex items-center gap-2">
-              <UserPlus size={16} className="text-amber-500" /> New Customer
+              <UserPlus size={16} className="text-sky-500" /> New Customer
             </DialogTitle>
           </DialogHeader>
 
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Link to Existing Lead (optional)</label>
             <select value={form.LeadId} onChange={(e) => handleLeadChange(e.target.value)}
-              className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40">
+              className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40">
               <option value="">— Walk-in / New Customer —</option>
               {availableLeads.map((l: any) => (
                 <option key={l.Id} value={String(l.Id)}>{l.CustomerName} · {l.Mobile} · {l.LeadUid}</option>
@@ -757,7 +758,7 @@ const CrmCustomers: React.FC = () => {
                 2-column layout's 4+1 rows across two separate cards. */}
             <div className="rounded-xl border border-border p-3 space-y-2">
               <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                <User size={13} className="text-amber-500" /> Personal &amp; Financial Details
+                <User size={13} className="text-sky-500" /> Personal &amp; Financial Details
               </h3>
               <div className="grid grid-cols-3 gap-2.5">
                 {[
@@ -773,7 +774,7 @@ const CrmCustomers: React.FC = () => {
                 ].map(({ key, label, type, required }) => (
                   <div key={key}>
                     <label className="text-xs text-muted-foreground block mb-0.5">{label}{required && <span className="text-destructive"> *</span>}</label>
-                    <input type={type} value={(form as any)[key]}
+                    <AutoInput type={type} value={(form as any)[key]}
                       onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
                       onBlur={() => {
                         // Trigger duplicate check when Mobile or PAN loses focus —
@@ -782,7 +783,7 @@ const CrmCustomers: React.FC = () => {
                           checkDuplicates(form.Mobile, form.PanNo, form.CustomerName);
                         }
                       }}
-                      className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+                      className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
                   </div>
                 ))}
 
@@ -793,13 +794,13 @@ const CrmCustomers: React.FC = () => {
             <div className="space-y-3">
               <div className="rounded-xl border border-border p-3 space-y-2">
                 <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                  <MapPin size={13} className="text-amber-500" /> Address
+                  <MapPin size={13} className="text-sky-500" /> Address
                 </h3>
                 <AddressFields
                   form={form}
                   setForm={setForm}
                   readOnly={false}
-                  inputCls="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40"
+                  inputCls="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40"
                 />
               </div>
 
@@ -807,9 +808,9 @@ const CrmCustomers: React.FC = () => {
 
               <div className="rounded-xl border border-border p-3 space-y-2">
                 <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                  <FileText size={13} className="text-amber-500" /> Billing
+                  <FileText size={13} className="text-sky-500" /> Billing
                 </h3>
-                <p className="text-[11px] text-muted-foreground">Non-Invoice (default) — no invoice is ever generated for this customer, in the CRM booking pipeline or the Accounts Sale Invoice module.</p>
+                <p className="text-[0.6875rem] text-muted-foreground">Non-Invoice (default) — no invoice is ever generated for this customer, in the CRM booking pipeline or the Accounts Sale Invoice module.</p>
                 <div className="flex items-center gap-4">
                   {(["NonInvoice", "Invoice"] as const).map((mode) => (
                     <label key={mode} className="flex items-center gap-1.5 text-sm cursor-pointer">
@@ -823,10 +824,10 @@ const CrmCustomers: React.FC = () => {
 
               <div className="rounded-xl border border-border p-3 space-y-2">
                 <h3 className="text-xs font-heading font-semibold uppercase tracking-wide flex items-center gap-1.5 text-muted-foreground">
-                  <FileText size={13} className="text-amber-500" /> Notes
+                  <FileText size={13} className="text-sky-500" /> Notes
                 </h3>
                 <textarea value={form.Notes} onChange={(e) => setForm((f) => ({ ...f, Notes: e.target.value }))}
-                  rows={2} className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+                  rows={2} className="w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background resize-none focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
               </div>
             </div>
           </div>
@@ -836,13 +837,13 @@ const CrmCustomers: React.FC = () => {
               Each candidate is shown as a compact card; staff can dismiss
               individual cards or open the existing record directly. */}
           {(dupChecking || dupSuggestions.length > 0) && (
-            <div className="rounded-xl border border-amber-400/40 bg-amber-50/60 dark:bg-amber-900/10 p-3 space-y-2">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-700 dark:text-amber-400">
+            <div className="rounded-xl border border-sky-400/40 bg-sky-50/60 dark:bg-sky-900/10 p-3 space-y-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-sky-700 dark:text-sky-400">
                 <AlertTriangle size={13} />
                 {dupChecking ? "Checking for duplicates…" : `${dupSuggestions.length} possible duplicate${dupSuggestions.length > 1 ? "s" : ""} found — verify before registering`}
               </div>
               {dupSuggestions.map((d: any) => (
-                <div key={d.Id} className="flex items-start justify-between gap-2 rounded-lg border border-amber-300/50 bg-white dark:bg-card px-3 py-2 text-xs">
+                <div key={d.Id} className="flex items-start justify-between gap-2 rounded-lg border border-sky-300/50 bg-white dark:bg-card px-3 py-2 text-xs">
                   <div className="space-y-0.5 min-w-0">
                     {d._fromError ? (
                       <p className="font-medium text-red-600">{d._errorMsg}</p>
@@ -857,7 +858,7 @@ const CrmCustomers: React.FC = () => {
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       onClick={() => { setDialogOpen(false); setDupSuggestions([]); setForm({ ...EMPTY_FORM }); openCustomer(d.Id); }}
-                      className="px-2 py-1 rounded-md text-xs font-medium border border-amber-400/60 text-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/20 transition-colors"
+                      className="px-2 py-1 rounded-md text-xs font-medium border border-sky-400/60 text-sky-700 hover:bg-sky-100 dark:hover:bg-sky-900/20 transition-colors"
                     >
                       View Customer
                     </button>
@@ -878,7 +879,7 @@ const CrmCustomers: React.FC = () => {
               Cancel
             </button>
             <button onClick={handleCreate} disabled={saving}
-              className="px-4 py-1.5 text-sm text-white rounded-lg font-medium shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 disabled:opacity-40 transition-all">
+              className="px-4 py-1.5 text-sm text-white rounded-lg font-medium shadow-sm btn-module hover:shadow-lg disabled:opacity-40 transition-all">
               {saving ? "Registering..." : "Register Customer"}
             </button>
           </div>

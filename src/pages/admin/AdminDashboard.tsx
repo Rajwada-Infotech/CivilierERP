@@ -235,7 +235,7 @@ export default function AdminDashboard() {
       sub: "discontinued accounts",
       icon: ShieldCheck,
       color: "text-amber-600",
-      bg: "bg-amber-500/10",
+      bg: "bg-[#ffe2021a]",
       ring: "ring-amber-500/20",
     },
     {
@@ -307,7 +307,7 @@ export default function AdminDashboard() {
               }}
             />
             <div className="relative z-10 flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-white/70">
+              <span className="text-[0.6875rem] font-semibold uppercase tracking-wider text-white/70">
                 Total Users
               </span>
               <div className="p-1 rounded-md bg-white/15">
@@ -322,12 +322,12 @@ export default function AdminDashboard() {
                   {stats.totalUsers.toLocaleString()}
                 </div>
               )}
-              <p className="text-[11px] text-white/70 mt-0.5">
+              <p className="text-[0.6875rem] text-white/70 mt-0.5">
                 registered accounts
               </p>
             </div>
             <div className="relative z-10 mt-1.5">
-              <div className="flex items-center justify-between text-[10px] text-white/70 mb-1">
+              <div className="flex items-center justify-between text-[0.625rem] text-white/70 mb-1">
                 <span>Active ratio</span>
                 <span className="font-semibold text-white">{activeRatio}%</span>
               </div>
@@ -346,7 +346,7 @@ export default function AdminDashboard() {
               className={`rounded-xl border border-border bg-card p-3.5 flex flex-col justify-between min-h-[100px] hover:shadow-lg hover:-translate-y-0.5 transition-all ring-1 ring-transparent hover:${stat.ring}`}
             >
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <span className="text-[0.6875rem] font-semibold uppercase tracking-wider text-muted-foreground">
                   {stat.title}
                 </span>
                 <div className={`p-1 rounded-md ${stat.bg}`}>
@@ -360,7 +360,7 @@ export default function AdminDashboard() {
                   {stat.value.toLocaleString()}
                 </div>
               )}
-              <p className="text-[11px] text-muted-foreground">{stat.sub}</p>
+              <p className="text-[0.6875rem] text-muted-foreground">{stat.sub}</p>
             </div>
           ))}
         </div>
@@ -394,7 +394,7 @@ export default function AdminDashboard() {
                       className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-muted/40 transition-colors"
                     >
                       <div
-                        className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${avatarColor(i)}`}
+                        className={`w-7 h-7 rounded-full flex items-center justify-center text-[0.625rem] font-bold shrink-0 ${avatarColor(i)}`}
                       >
                         {getInitials(user.name)}
                       </div>
@@ -402,12 +402,12 @@ export default function AdminDashboard() {
                         <p className="font-medium text-xs truncate">
                           {user.name}
                         </p>
-                        <p className="text-[11px] text-muted-foreground truncate">
+                        <p className="text-[0.6875rem] text-muted-foreground truncate">
                           {user.email}
                         </p>
                       </div>
                       <span
-                        className={`flex items-center gap-1.5 text-[10px] font-semibold shrink-0 ${
+                        className={`flex items-center gap-1.5 text-[0.625rem] font-semibold shrink-0 ${
                           !user.discontinue
                             ? "text-emerald-600"
                             : "text-rose-600"
@@ -479,15 +479,15 @@ export default function AdminDashboard() {
                               </p>
                               <Badge
                                 variant="outline"
-                                className={`text-[9px] px-1.5 py-0 whitespace-nowrap shrink-0 ${getRelativeTimeColor(activity.timestamp)}`}
+                                className={`text-[0.5625rem] px-1.5 py-0 whitespace-nowrap shrink-0 ${getRelativeTimeColor(activity.timestamp)}`}
                               >
                                 {getRelativeTime(activity.timestamp)}
                               </Badge>
                             </div>
-                            <p className="text-[11px] text-muted-foreground truncate">
+                            <p className="text-[0.6875rem] text-muted-foreground truncate">
                               {subDetail}
                             </p>
-                            <p className="text-[10px] text-muted-foreground/70">
+                            <p className="text-[0.625rem] text-muted-foreground/70">
                               by {activity.userName || activity.userEmail} •{" "}
                               {new Date(activity.timestamp).toLocaleString(
                                 "en-IN",

@@ -281,7 +281,7 @@ const ItemGroupMaster: React.FC = () => {
         }
       >
         <MasterPage
-        saveButtonClass="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500"
+        saveButtonClass="btn-module "
           title="Item Group"
           fields={[
             { name: "Name", label: "Name", type: "text", required: true },
@@ -385,7 +385,7 @@ const ItemGroupMaster: React.FC = () => {
             <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
               <button
                 onClick={() => setImportResults(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
               >
                 Close
               </button>

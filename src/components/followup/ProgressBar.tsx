@@ -65,7 +65,7 @@ export const ProgressBar: React.FC<ProgressBarProps> = ({ value, onCommit, disab
         )}
       </div>
       <span
-        className={`shrink-0 font-mono font-semibold ${size === "sm" ? "text-[10px] w-7" : "text-xs w-8"} text-right`}
+        className={`shrink-0 font-mono font-semibold ${size === "sm" ? "text-[0.625rem] w-7" : "text-xs w-8"} text-right`}
         style={{ color }}
         title={disabled ? "Auto-calculated from sub-tasks" : undefined}
       >

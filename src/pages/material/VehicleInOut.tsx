@@ -81,6 +81,8 @@ import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
 import { createQualityDebitNote } from "@/api/qualityRejectionDebitNoteApi";
 import { RaiseDebitNoteModal } from "@/components/quality/RaiseDebitNoteModal";
 import { usePageRights } from "@/hooks/usePageRights";
+import { DateInput, DateTimeInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
 const VEH_TEMPLATE_COLUMNS = [
@@ -109,7 +111,7 @@ function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="block text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+    <label className="block text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
       {children}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -150,7 +152,7 @@ function SectionTitle({
         <p className="text-xs font-semibold text-foreground tracking-wide">
           {label}
         </p>
-        {sub && <p className="text-[10px] text-muted-foreground">{sub}</p>}
+        {sub && <p className="text-[0.625rem] text-muted-foreground">{sub}</p>}
       </div>
     </div>
   );
@@ -168,7 +170,7 @@ function InfoPill({
   if (!value) return null;
   return (
     <div className="flex flex-col gap-0.5 px-3 py-2 rounded-lg bg-muted/60 border border-border/60 min-w-0">
-      <span className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+      <span className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
         {label}
       </span>
       <span
@@ -309,7 +311,7 @@ function VehicleCard({
           <p className="font-mono text-sm font-bold text-foreground truncate">
             {rec.DocNo || "—"}
           </p>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
+          <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
             {rec.DocDate
               ? new Date(rec.DocDate).toLocaleDateString("en-IN")
               : "—"}
@@ -325,7 +327,7 @@ function VehicleCard({
 
       {/* Attachment count */}
       {Number(rec.AttachmentCount) > 0 && (
-        <div className="inline-flex items-center gap-1 text-[10px] text-muted-foreground">
+        <div className="inline-flex items-center gap-1 text-[0.625rem] text-muted-foreground">
           <Paperclip size={10} />
           {rec.AttachmentCount} attachment{rec.AttachmentCount > 1 ? "s" : ""}
         </div>
@@ -342,19 +344,19 @@ function VehicleCard({
       {/* Supplier / PO / Entry / Challan grid */}
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div className="min-w-0">
-          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
             Supplier
           </p>
           <p className="truncate">{rec.SupplierName || "—"}</p>
         </div>
         <div className="min-w-0">
-          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
             PO No
           </p>
           <p className="font-mono truncate">{rec.PONumber || "—"}</p>
         </div>
         <div className="min-w-0">
-          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
             Entry Time
           </p>
           <p className="truncate">
@@ -367,7 +369,7 @@ function VehicleCard({
           </p>
         </div>
         <div className="min-w-0">
-          <p className="text-[9px] uppercase tracking-widest font-semibold text-muted-foreground">
+          <p className="text-[0.5625rem] uppercase tracking-widest font-semibold text-muted-foreground">
             Challan No
           </p>
           <p className="truncate">{rec.ChallanNo || "—"}</p>
@@ -376,7 +378,7 @@ function VehicleCard({
 
       {/* Actions */}
       <div className="flex items-center justify-end gap-1 pt-2 border-t border-border/60">
-        <button
+        <button data-row-view
           onClick={() => onView(rec)}
           className="text-muted-foreground hover:bg-muted p-2 rounded-lg transition-colors"
           title="View"
@@ -407,8 +409,8 @@ function VehicleCard({
 }
 
 // ── Local time helpers ──────────────────────────────────────────────────────────
-// toISOString() always converts to UTC, which is wrong for <input type="date">
-// and <input type="datetime-local">: those inputs expect/display local wall-clock
+// toISOString() always converts to UTC, which is wrong for <DateInput>
+// and <DateTimeInput>: those inputs expect/display local wall-clock
 // time. Using toISOString() here made entry/exit time off by the IST offset
 // (+5:30), e.g. showing 11:08 AM when the local clock read 4:38 PM.
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -455,7 +457,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => (
       <div className="flex flex-col gap-0.5">
         <span className="font-mono text-xs font-bold">{row.original.DocNo || "—"}</span>
-        <span className="text-[10px] text-muted-foreground whitespace-nowrap">
+        <span className="text-[0.625rem] text-muted-foreground whitespace-nowrap">
           {row.original.DocDate ? new Date(row.original.DocDate).toLocaleDateString("en-IN") : ""}
         </span>
       </div>
@@ -498,7 +500,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => (
       <div className="flex flex-col gap-0.5">
         <span className="text-xs truncate block">{row.original.CompanyName || "—"}</span>
-        <span className="text-[10px] text-muted-foreground truncate block">
+        <span className="text-[0.625rem] text-muted-foreground truncate block">
           {row.original.ProjectName || "—"}
         </span>
       </div>
@@ -556,7 +558,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
       return (
         <div className="flex items-center justify-end gap-3">
           <div className="flex items-center gap-2">
-            <button
+            <button data-row-view
               onClick={() => _onView(rec)}
               className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
@@ -1353,7 +1355,7 @@ export default function VehicleInOut() {
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
@@ -1369,7 +1371,7 @@ export default function VehicleInOut() {
                     setQualityByItem({});
                     setErrors({});
                   }}
-                  className="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
+                  className="btn-module inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
                 >
                   <Plus size={13} /> New Entry
                 </button>
@@ -1464,7 +1466,7 @@ export default function VehicleInOut() {
                       />
                     </div>
                     {errors.companyId && (
-                      <p className="text-[10px] text-destructive mt-1">
+                      <p className="text-[0.625rem] text-destructive mt-1">
                         {errors.companyId}
                       </p>
                     )}
@@ -1515,7 +1517,7 @@ export default function VehicleInOut() {
                       />
                     </div>
                     {errors.projectId && (
-                      <p className="text-[10px] text-destructive mt-1">
+                      <p className="text-[0.625rem] text-destructive mt-1">
                         {errors.projectId}
                       </p>
                     )}
@@ -1530,8 +1532,7 @@ export default function VehicleInOut() {
                         size={13}
                         className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
-                      <input
-                        type="date"
+                      <DateInput
                         value={form.docDate}
                         readOnly
                         disabled
@@ -1675,7 +1676,7 @@ export default function VehicleInOut() {
                       />
                     </div>
                     {errors.poId && (
-                      <p className="text-[10px] text-destructive mt-1">
+                      <p className="text-[0.625rem] text-destructive mt-1">
                         {errors.poId}
                       </p>
                     )}
@@ -1745,10 +1746,10 @@ export default function VehicleInOut() {
                   <div className="rounded-xl border border-border overflow-hidden">
                     <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center gap-2">
                       <Package size={13} className="text-muted-foreground" />
-                      <span className="text-[11px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                      <span className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
                         PO Items — Qty Received (This Lot)
                       </span>
-                      <span className="ml-auto text-[10px] text-muted-foreground">
+                      <span className="ml-auto text-[0.625rem] text-muted-foreground">
                         {loadingPOItems
                           ? "Loading…"
                           : `${poItemsRemaining.length} item${poItemsRemaining.length !== 1 ? "s" : ""}`}
@@ -1763,15 +1764,15 @@ export default function VehicleInOut() {
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="border-b border-border bg-muted/10">
-                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">#</th>
-                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Item</th>
-                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Ordered</th>
-                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Received So Far</th>
-                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Remaining</th>
-                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">UOM</th>
-                              <th className="px-4 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Qty This Lot</th>
-                              <th className="px-4 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Quality</th>
-                              <th className="px-4 py-2 text-center text-[10px] uppercase tracking-wider text-muted-foreground font-heading">Photo</th>
+                              <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">#</th>
+                              <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Item</th>
+                              <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Ordered</th>
+                              <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Received So Far</th>
+                              <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Remaining</th>
+                              <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">UOM</th>
+                              <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Qty This Lot</th>
+                              <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Quality</th>
+                              <th className="px-4 py-2 text-center text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Photo</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-border">
@@ -1953,7 +1954,7 @@ export default function VehicleInOut() {
                       placeholder="e.g. WB-01-AB-1234"
                     />
                     {errors.vehicleNo && (
-                      <p className="text-destructive text-[11px] mt-1 flex items-center gap-1">
+                      <p className="text-destructive text-[0.6875rem] mt-1 flex items-center gap-1">
                         <AlertCircle size={10} />
                         {errors.vehicleNo}
                       </p>
@@ -1968,15 +1969,14 @@ export default function VehicleInOut() {
                         size={13}
                         className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
-                      <input
-                        type="datetime-local"
+                      <DateTimeInput
                         value={form.entryTime}
                         onChange={(e) => pf({ entryTime: e.target.value })}
                         className={`${inp} pl-9 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer ${errors.entryTime ? "border-destructive ring-1 ring-destructive" : ""}`}
                       />
                     </div>
                     {errors.entryTime && (
-                      <p className="text-destructive text-[11px] mt-1 flex items-center gap-1">
+                      <p className="text-destructive text-[0.6875rem] mt-1 flex items-center gap-1">
                         <AlertCircle size={10} />
                         {errors.entryTime}
                       </p>
@@ -1991,8 +1991,7 @@ export default function VehicleInOut() {
                         size={13}
                         className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                       />
-                      <input
-                        type="datetime-local"
+                      <DateTimeInput
                         value={form.exitTime ?? ""}
                         max={toLocalDateTimeInput(new Date())}
                         onChange={(e) => {
@@ -2007,7 +2006,7 @@ export default function VehicleInOut() {
                         className={`${inp} pl-9 [&::-webkit-calendar-picker-indicator]:opacity-50 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer`}
                       />
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-1">
+                    <p className="text-[0.625rem] text-muted-foreground mt-1">
                       Defaults to now — backfill an earlier time, or clear if the vehicle hasn't exited yet
                     </p>
                   </div>
@@ -2026,7 +2025,7 @@ export default function VehicleInOut() {
                       placeholder="e.g. CH-20240601-001"
                     />
                     {errors.challanNo && (
-                      <p className="text-[10px] text-destructive mt-1">{errors.challanNo}</p>
+                      <p className="text-[0.625rem] text-destructive mt-1">{errors.challanNo}</p>
                     )}
                   </div>
 
@@ -2090,7 +2089,7 @@ export default function VehicleInOut() {
 
               {/* ── Actions ── */}
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden mt-4 -mx-5 -mb-5">
-                <p className="hidden sm:block text-[11px] text-muted-foreground">
+                <p className="hidden sm:block text-[0.6875rem] text-muted-foreground">
                   Ready to save
                 </p>
                 <div className="flex items-center gap-2 sm:ml-auto">
@@ -2113,7 +2112,7 @@ export default function VehicleInOut() {
                     disabled={
                       createMut.isPending || updateMut.isPending || uploading
                     }
-                    className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                    className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
                   >
                     {createMut.isPending || updateMut.isPending ? (
                       <RefreshCw size={14} className="animate-spin" />
@@ -2231,7 +2230,7 @@ export default function VehicleInOut() {
                           · {group.supplierName}
                         </span>
                       )}
-                      <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                      <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
                         {group.rows.length} lot{group.rows.length !== 1 ? "s" : ""}
                       </span>
                     </button>
@@ -2305,7 +2304,7 @@ export default function VehicleInOut() {
         {/* VIEW MODAL                                                          */}
         {/* ═══════════════════════════════════════════════════════════════════ */}
         {viewingRec && (
-          <div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
+          <BodyPortal><div className="fixed inset-0 z-[60] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4">
             <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-2xl max-h-[92vh] sm:max-h-[88vh] overflow-y-auto">
               {/* Modal header */}
               <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-6 py-4 border-b border-border">
@@ -2313,7 +2312,7 @@ export default function VehicleInOut() {
                   <h2 className="font-heading font-bold text-base">
                     {viewingRec.DocNo || "Vehicle In/Out"}
                   </h2>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">
                     Vehicle In/Out Entry
                   </p>
                 </div>
@@ -2398,7 +2397,7 @@ export default function VehicleInOut() {
                       key={label}
                       className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50"
                     >
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                         {label}
                       </p>
                       <p
@@ -2415,7 +2414,7 @@ export default function VehicleInOut() {
                       onClick={() => setShowPODetails(true)}
                       className="px-3 py-2.5 rounded-xl bg-blue-500/5 border border-blue-500/20 text-left hover:bg-blue-500/10 transition-colors"
                     >
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                         PO Reference
                       </p>
                       <p className="text-xs font-semibold font-mono text-blue-600 dark:text-blue-400 flex items-center gap-1.5">
@@ -2425,7 +2424,7 @@ export default function VehicleInOut() {
                     </button>
                   ) : (
                     <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">PO Reference</p>
+                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">PO Reference</p>
                       <p className="text-xs text-muted-foreground">—</p>
                     </div>
                   )}
@@ -2438,7 +2437,7 @@ export default function VehicleInOut() {
                 {/* Times */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="px-3 py-2.5 rounded-xl bg-emerald-500/5 border border-emerald-500/20">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                       Entry Time
                     </p>
                     <p className="text-xs font-semibold font-mono text-emerald-600 dark:text-emerald-400">
@@ -2448,7 +2447,7 @@ export default function VehicleInOut() {
                     </p>
                   </div>
                   <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">
                       Exit Time
                     </p>
                     <p className="text-xs font-semibold font-mono text-foreground">
@@ -2465,16 +2464,16 @@ export default function VehicleInOut() {
                     turn out inferior on inspection). */}
                 {Array.isArray(viewingRec.Items) && viewingRec.Items.length > 0 && (
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
                       Received Items
                     </p>
                     <div className="rounded-xl border border-border/50 overflow-hidden">
                       <table className="w-full text-xs">
                         <thead className="bg-muted/40">
                           <tr>
-                            <th className="text-left px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide">Item</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide">Received</th>
-                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[10px] uppercase tracking-wide"></th>
+                            <th className="text-left px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide">Item</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide">Received</th>
+                            <th className="text-right px-3 py-2 font-medium text-muted-foreground text-[0.625rem] uppercase tracking-wide"></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/50">
@@ -2485,11 +2484,11 @@ export default function VehicleInOut() {
                                   {it.ItemName || "—"}
                                   {it.Quality && (
                                     <span
-                                      className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold uppercase tracking-wide border ${
+                                      className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold uppercase tracking-wide border ${
                                         it.Quality === "Excellent"
                                           ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25"
                                           : it.Quality === "Good"
-                                            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25"
+                                            ? "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/25"
                                             : "bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25"
                                       }`}
                                     >
@@ -2510,7 +2509,7 @@ export default function VehicleInOut() {
                                       setDebitNoteReason("");
                                     }}
                                     title="Raise a debit note if part of this line was found below the ordered grade"
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[11px] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors"
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-rose-500/25 text-rose-600 dark:text-rose-400 text-[0.6875rem] font-semibold hover:bg-rose-600 hover:text-white hover:border-rose-600 transition-colors"
                                   >
                                     <FileWarning size={12} /> Debit Note
                                   </button>
@@ -2531,7 +2530,7 @@ export default function VehicleInOut() {
                 {Array.isArray(viewingRec.Attachments) &&
                 viewingRec.Attachments.length > 0 ? (
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
                       Attachments ({viewingRec.Attachments.length})
                     </p>
                     <div className="flex flex-wrap gap-2">
@@ -2557,7 +2556,7 @@ export default function VehicleInOut() {
                     if (legacyPaths.length === 0) return null;
                     return (
                       <div>
-                        <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                        <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
                           Attachments ({legacyPaths.length})
                         </p>
                         <div className="flex flex-wrap gap-2">
@@ -2596,7 +2595,7 @@ export default function VehicleInOut() {
                 {/* Remarks */}
                 {viewingRec.Remarks && (
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">
                       Remarks
                     </p>
                     <p className="text-sm text-foreground bg-muted/40 rounded-xl px-4 py-3 border border-border/50">
@@ -2628,7 +2627,7 @@ export default function VehicleInOut() {
               </div>
               )}
             </div>
-          </div>
+          </div></BodyPortal>
         )}
 
       {/* ── Raise Debit Note modal (quality rejection against a received line) ── */}
@@ -2651,7 +2650,7 @@ export default function VehicleInOut() {
 
       {/* ── PO Preview pop-out (above view modal) ── */}
       {showPODetails && viewingRec && (
-        <div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4">
+        <BodyPortal><div className="fixed inset-0 z-[70] flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4">
           <div className="bg-card border border-border rounded-t-2xl sm:rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-y-auto">
             {/* Header */}
             <div className="sticky top-0 bg-card z-10 flex items-center justify-between px-5 py-4 border-b border-border">
@@ -2664,7 +2663,7 @@ export default function VehicleInOut() {
                     {loadingPODetail ? "Loading…" : (viewingPODetail as any)?.PurchaseOrderNo || viewingRec.PONumber}
                   </h2>
                 </div>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-8">Purchase Order</p>
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5 ml-8">Purchase Order</p>
               </div>
               <button
                 onClick={() => setShowPODetails(false)}
@@ -2695,7 +2694,7 @@ export default function VehicleInOut() {
                     { label: "Total Amount", value: (viewingPODetail as any).TotalAmount != null ? `₹${Number((viewingPODetail as any).TotalAmount).toLocaleString("en-IN")}` : "—" },
                   ].map(({ label, value, blue }: any) => (
                     <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
                       <p className={`text-xs font-semibold truncate ${blue ? "font-mono text-blue-600 dark:text-blue-400" : "text-foreground"}`}>{value || "—"}</p>
                     </div>
                   ))}
@@ -2704,13 +2703,13 @@ export default function VehicleInOut() {
                 {/* Line items */}
                 {Array.isArray((viewingPODetail as any).LineItems) && (viewingPODetail as any).LineItems.length > 0 && (
                   <div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-2">Order Items</p>
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-2">Order Items</p>
                     <div className="rounded-xl border border-border overflow-hidden">
                       <table className="w-full text-xs" style={{ tableLayout: "fixed" }}>
                         <thead className="bg-muted/40 border-b border-border">
                           <tr>
                             {[["Description", "38%"], ["Qty", "12%"], ["Unit", "10%"], ["Rate", "15%"], ["Amount", "15%"], ["GST", "10%"]].map(([h, w]) => (
-                              <th key={h} className={`px-3 py-2 text-[9px] uppercase tracking-widest font-heading text-muted-foreground ${h === "Qty" || h === "Rate" || h === "Amount" || h === "GST" ? "text-right" : "text-left"}`} style={{ width: w }}>{h}</th>
+                              <th key={h} className={`px-3 py-2 text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground ${h === "Qty" || h === "Rate" || h === "Amount" || h === "GST" ? "text-right" : "text-left"}`} style={{ width: w }}>{h}</th>
                             ))}
                           </tr>
                         </thead>
@@ -2733,7 +2732,7 @@ export default function VehicleInOut() {
 
                 {(viewingPODetail as any).Remarks && (
                   <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Remarks</p>
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Remarks</p>
                     <p className="text-xs text-foreground">{(viewingPODetail as any).Remarks}</p>
                   </div>
                 )}
@@ -2745,12 +2744,12 @@ export default function VehicleInOut() {
               </div>
             )}
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* ── Camera capture modal ── */}
       {showCamera && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
+        <BodyPortal><div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[60] p-4">
           <div className="bg-card rounded-2xl border border-border shadow-2xl w-full max-w-md overflow-hidden">
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
@@ -2822,7 +2821,7 @@ export default function VehicleInOut() {
 
                   {/* Multi-capture hint */}
                   {capturingPoItemId == null && form.attachments.length > 0 && (
-                    <div className="absolute bottom-2 left-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/55 text-white text-[11px] backdrop-blur-sm">
+                    <div className="absolute bottom-2 left-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/55 text-white text-[0.6875rem] backdrop-blur-sm">
                       <ImageIcon size={11} />
                       {form.attachments.length} attached
                     </div>
@@ -2855,7 +2854,7 @@ export default function VehicleInOut() {
               )}
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
 
       {/* Delete confirm */}

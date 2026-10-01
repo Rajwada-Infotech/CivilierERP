@@ -127,7 +127,7 @@ export const MODULE_CONFIG: Record<
   },
   "work-orders": {
     icon: Hammer,
-    color: "text-amber-500 bg-amber-500/10",
+    color: "text-amber-500 bg-[#ffe2021a]",
     navPath: "/material/work-order",
     apiEndpoint: "/api/work-orders",
     label: "Work Orders",
@@ -300,7 +300,7 @@ export const MODULE_CONFIG: Record<
   },
   "crm-brokerage": {
     icon: Receipt,
-    color: "text-amber-500 bg-amber-500/10",
+    color: "text-amber-500 bg-[#ffe2021a]",
     navPath: "/crm/brokerage",
     apiEndpoint: "/api/crm/brokerage",
     label: "CRM Brokerage",
@@ -328,7 +328,7 @@ export const MODULE_CONFIG: Record<
   },
   "crm-booking-amendment": {
     icon: Car,
-    color: "text-amber-500 bg-amber-500/10",
+    color: "text-amber-500 bg-[#ffe2021a]",
     navPath: "/crm/booking-amendments",
     apiEndpoint: "/api/crm/booking-amendments",
     label: "Booking Amendments",
@@ -844,7 +844,7 @@ const InboxRow: React.FC<{
 
   const actions = (
     <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
-      <button
+      <button data-row-view
         onClick={() => setReviewOpen(true)}
         className="p-1.5 rounded-md text-sky-500 hover:bg-sky-500/10 transition-colors"
         title="Review & Approve"
@@ -868,7 +868,7 @@ const InboxRow: React.FC<{
         // just 403 from transition()'s own per-level gate. Say so instead
         // of offering live-looking buttons that are guaranteed to fail.
         <span
-          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-medium text-muted-foreground bg-muted border border-border whitespace-nowrap"
+          className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-[0.625rem] font-medium text-muted-foreground bg-muted border border-border whitespace-nowrap"
           title="Named on this approval workflow, but this record hasn't reached your level yet."
         >
           Waiting on Level {item._currentLevel}
@@ -980,7 +980,7 @@ const InboxRow: React.FC<{
               <p className="text-xs font-semibold text-foreground truncate">
                 {item.ModuleLabel}
               </p>
-              <p className="text-[11px] text-muted-foreground font-mono truncate">
+              <p className="text-[0.6875rem] text-muted-foreground font-mono truncate">
                 {item.Reference || `#${item.RecordId}`}
               </p>
             </div>
@@ -992,11 +992,11 @@ const InboxRow: React.FC<{
         <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
           {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
             <div className="flex flex-col gap-0.5 min-w-0">
-              <span className="font-mono text-[11px] font-semibold text-violet-600 dark:text-violet-400 truncate">
+              <span className="font-mono text-[0.6875rem] font-semibold text-violet-600 dark:text-violet-400 truncate">
                 {item.SourceTransferDocNo}
               </span>
               {item.FromGodownName && item.ToGodownName && (
-                <span className="flex items-center gap-1 text-[10px] truncate">
+                <span className="flex items-center gap-1 text-[0.625rem] truncate">
                   <Warehouse size={9} className="shrink-0 text-orange-500" />
                   <span className="truncate">{item.FromGodownName}</span>
                   <ArrowLeftRight size={8} className="shrink-0" />
@@ -1007,13 +1007,13 @@ const InboxRow: React.FC<{
             </div>
           ) : item.Module === "sale-orders" ? (
             <div className="flex flex-col gap-0.5 min-w-0">
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+              <span className="flex items-center gap-1 text-[0.6875rem] font-semibold text-foreground truncate">
                 <span className="truncate">{item.ContractorName}</span>
                 <ArrowLeftRight size={8} className="shrink-0" />
                 <span className="truncate">{item.SupplierName}</span>
               </span>
               {item.FromGodownName && item.ToGodownName && (
-                <span className="flex items-center gap-1 text-[10px] truncate">
+                <span className="flex items-center gap-1 text-[0.625rem] truncate">
                   <Warehouse size={9} className="shrink-0 text-orange-500" />
                   <span className="truncate">{item.FromGodownName}</span>
                   <ArrowLeftRight size={8} className="shrink-0" />
@@ -1027,7 +1027,7 @@ const InboxRow: React.FC<{
               {item.JournalVoucherSummary}
             </span>
           ) : item.Module === "fund-transfer" && item.ContractorName && item.SupplierName ? (
-            <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+            <span className="flex items-center gap-1 text-[0.6875rem] font-semibold text-foreground truncate">
               <span className="truncate">{item.ContractorName}</span>
               <ArrowLeftRight size={8} className="shrink-0" />
               <span className="truncate">{item.SupplierName}</span>
@@ -1045,12 +1045,12 @@ const InboxRow: React.FC<{
           </p>
           <div className="flex items-center gap-1.5">
             {approvedBy && (
-              <span className="flex items-center gap-1 text-[10px] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[120px]">
+              <span className="flex items-center gap-1 text-[0.625rem] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[120px]">
                 <CheckCircle2 size={9} /> {approvedBy}
               </span>
             )}
             {rejectedBy && (
-              <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full truncate max-w-[120px]">
+              <span className="flex items-center gap-1 text-[0.625rem] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full truncate max-w-[120px]">
                 <XCircle size={9} /> {rejectedBy}
               </span>
             )}
@@ -1087,10 +1087,10 @@ const InboxRow: React.FC<{
             <Icon size={15} />
           </div>
           <div className="min-w-0">
-            <p className="text-[13px] font-semibold text-foreground truncate leading-tight">
+            <p className="text-[0.8125rem] font-semibold text-foreground truncate leading-tight">
               {item.ModuleLabel}
             </p>
-            <p className="text-[11px] text-muted-foreground font-mono truncate mt-0.5">
+            <p className="text-[0.6875rem] text-muted-foreground font-mono truncate mt-0.5">
               {item.Reference || `#${item.RecordId}`}
             </p>
           </div>
@@ -1104,14 +1104,14 @@ const InboxRow: React.FC<{
         {/* Col 3 — Party / Transfer route */}
         {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
           <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+            <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
               Transfer ref
             </span>
             <span className="font-mono text-xs font-semibold text-violet-600 dark:text-violet-400 truncate">
               {item.SourceTransferDocNo}
             </span>
             {item.FromGodownName && item.ToGodownName && (
-              <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+              <span className="flex items-center gap-1 text-[0.625rem] text-muted-foreground truncate">
                 <Warehouse size={9} className="shrink-0 text-orange-500" />
                 <span className="truncate">{item.FromGodownName}</span>
                 <ArrowLeftRight size={8} className="shrink-0" />
@@ -1122,7 +1122,7 @@ const InboxRow: React.FC<{
           </div>
         ) : item.Module === "sale-orders" ? (
           <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+            <span className="flex items-center gap-1 text-[0.6875rem] font-semibold text-foreground truncate">
               <Building2 size={9} className="shrink-0 text-blue-500" />
               <span className="truncate">{item.ContractorName}</span>
               <ArrowLeftRight
@@ -1133,7 +1133,7 @@ const InboxRow: React.FC<{
               <span className="truncate">{item.SupplierName}</span>
             </span>
             {item.FromGodownName && item.ToGodownName && (
-              <span className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+              <span className="flex items-center gap-1 text-[0.625rem] text-muted-foreground truncate">
                 <Warehouse size={9} className="shrink-0 text-orange-500" />
                 <span className="truncate">{item.FromGodownName}</span>
                 <ArrowLeftRight size={8} className="shrink-0" />
@@ -1144,7 +1144,7 @@ const InboxRow: React.FC<{
           </div>
         ) : item.Module === "journal-voucher" && item.JournalVoucherSummary ? (
           <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+            <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
               Account heads
             </span>
             <p className="text-xs text-foreground truncate" title={item.JournalVoucherSummary}>
@@ -1153,10 +1153,10 @@ const InboxRow: React.FC<{
           </div>
         ) : item.Module === "fund-transfer" && item.ContractorName && item.SupplierName ? (
           <div className="flex flex-col gap-0.5 min-w-0">
-            <span className="text-[9px] uppercase tracking-wide text-muted-foreground font-semibold">
+            <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
               From → To
             </span>
-            <span className="flex items-center gap-1 text-[11px] font-semibold text-foreground truncate">
+            <span className="flex items-center gap-1 text-[0.6875rem] font-semibold text-foreground truncate">
               <Building2 size={9} className="shrink-0 text-blue-500" />
               <span className="truncate">{item.ContractorName}</span>
               <ArrowLeftRight size={8} className="shrink-0 text-muted-foreground" />
@@ -1170,7 +1170,7 @@ const InboxRow: React.FC<{
 
         {/* Col 4 — Amount */}
         <div className="inline-flex items-center px-2 py-1 rounded-lg bg-foreground/5 border border-border/60">
-          <p className="text-[13px] font-mono font-bold text-foreground tabular-nums">
+          <p className="text-[0.8125rem] font-mono font-bold text-foreground tabular-nums">
             {fmtAmount(effectiveAmount)}
           </p>
         </div>
@@ -1178,17 +1178,17 @@ const InboxRow: React.FC<{
         {/* Col 5 — Approved/Rejected By */}
         <div className="flex items-center gap-1.5 min-w-0">
           {approvedBy && (
-            <span className="flex items-center gap-1 text-[10px] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
+            <span className="flex items-center gap-1 text-[0.625rem] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
               <CheckCircle2 size={9} /> {approvedBy}
             </span>
           )}
           {rejectedBy && (
-            <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
+            <span className="flex items-center gap-1 text-[0.625rem] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
               <XCircle size={9} /> {rejectedBy}
             </span>
           )}
           {!approvedBy && !rejectedBy && (
-            <span className="text-[10px] text-muted-foreground/50 italic">—</span>
+            <span className="text-[0.625rem] text-muted-foreground/50 italic">—</span>
           )}
         </div>
 
@@ -1349,7 +1349,7 @@ const ApprovalInbox: React.FC = () => {
         action={
           <div className="flex items-center gap-2">
             {totalCount > 0 && (
-              <span className="bg-red-500 text-white text-[11px] font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full leading-none">
+              <span className="bg-red-500 text-white text-[0.6875rem] font-bold min-w-[22px] h-[22px] flex items-center justify-center rounded-full leading-none">
                 {totalCount}
               </span>
             )}
@@ -1402,7 +1402,7 @@ const ApprovalInbox: React.FC = () => {
             </span>
             <button
               onClick={() => setDateSort((s) => (s === "desc" ? "asc" : "desc"))}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[0.6875rem] font-medium border border-border bg-background text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               title="Toggle date sort order"
             >
               {dateSort === "desc" ? (
@@ -1479,7 +1479,7 @@ const ApprovalInbox: React.FC = () => {
                 ].map((h) => (
                   <p
                     key={h}
-                    className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground"
+                    className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground"
                   >
                     {h}
                   </p>
@@ -1496,10 +1496,10 @@ const ApprovalInbox: React.FC = () => {
                         screen makes the header redundant. */}
                     {groupedItems.length > 1 && (
                       <div className="sticky top-0 z-[1] flex items-center gap-1.5 px-4 py-1.5 bg-muted/60 backdrop-blur-sm border-b border-border">
-                        <span className={`text-[10px] font-bold uppercase tracking-wider ${CATEGORY_META[cat].color}`}>
+                        <span className={`text-[0.625rem] font-bold uppercase tracking-wider ${CATEGORY_META[cat].color}`}>
                           {CATEGORY_META[cat].label}
                         </span>
-                        <span className="text-[10px] text-muted-foreground">({catItems.length})</span>
+                        <span className="text-[0.625rem] text-muted-foreground">({catItems.length})</span>
                       </div>
                     )}
                     {(() => {
@@ -1536,7 +1536,7 @@ const ApprovalInbox: React.FC = () => {
                               <span className="text-sm font-semibold text-foreground">
                                 {cfg?.label ?? mod}
                               </span>
-                              <span className="text-[11px] text-muted-foreground">
+                              <span className="text-[0.6875rem] text-muted-foreground">
                                 ({modItems.length})
                               </span>
                             </button>
@@ -1558,7 +1558,7 @@ const ApprovalInbox: React.FC = () => {
               </div>
 
               <div className="px-4 py-2.5 border-t border-border bg-muted/20 rounded-b-xl">
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-[0.6875rem] text-muted-foreground">
                   {items.length} record{items.length !== 1 ? "s" : ""} pending
                   approval
                   {activeModules.length > 0 &&

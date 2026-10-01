@@ -14,17 +14,18 @@ import {
   getElectricityProviders,
   type MeterRow,
 } from "@/api/electricityMaintenanceApi";
+import { DateInput } from "@/components/ui/date-input";
 
 const PAGE_KEY = "meter-reading-master";
 const STATUS_OPTIONS = ["Active", "Inactive", "Transferred", "Disconnected"] as const;
 const inputCls = "px-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
-const labelCls = "block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
+const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 const fieldCls = "w-full px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 text-foreground";
 
 const STATUS_STYLE: Record<string, string> = {
   Active: "bg-emerald-500/10 border-emerald-500/20 text-emerald-600",
   Inactive: "bg-muted border-border text-muted-foreground",
-  Transferred: "bg-amber-500/10 border-amber-500/20 text-amber-600",
+  Transferred: "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
   Disconnected: "bg-red-500/10 border-red-500/20 text-red-600",
 };
 
@@ -73,7 +74,7 @@ export default function MeterReadingMaster() {
         {rows.length > 0 && (
           <div className="rounded-xl border border-border overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
                 <tr>
                   <th className="text-left px-4 py-2.5">Customer</th>
                   <th className="text-left px-4 py-2.5">Flat</th>
@@ -95,7 +96,7 @@ export default function MeterReadingMaster() {
                     <td className="px-4 py-2.5 text-muted-foreground">{m.ProviderName}</td>
                     <td className="px-4 py-2.5 text-muted-foreground">{m.BillingCycle}</td>
                     <td className="px-4 py-2.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${STATUS_STYLE[m.Status] || ""}`}>{m.Status}</span>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${STATUS_STYLE[m.Status] || ""}`}>{m.Status}</span>
                     </td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center justify-end gap-1">
@@ -232,7 +233,7 @@ function MeterFormDialog({ meter, onClose, onSaved }: { meter: MeterRow | null; 
           {!isEdit && (
             <div className="grid grid-cols-2 gap-3">
               <div><label className={labelCls}>Opening Reading</label><input type="number" value={openingReading} onChange={(e) => setOpeningReading(e.target.value)} className={fieldCls} /></div>
-              <div><label className={labelCls}>Opening Reading Date</label><input type="date" value={openingReadingDate} onChange={(e) => setOpeningReadingDate(e.target.value)} className={fieldCls} /></div>
+              <div><label className={labelCls}>Opening Reading Date</label><DateInput value={openingReadingDate} onChange={(e) => setOpeningReadingDate(e.target.value)} className={fieldCls} /></div>
             </div>
           )}
 

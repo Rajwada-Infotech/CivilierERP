@@ -19,7 +19,7 @@ const MILESTONE_MASTER_API = "/api/crm/milestone-master";
 // milestones the plan has.
 const SEGMENT_COLORS = [
   "bg-primary", "bg-sky-500", "bg-emerald-500", "bg-violet-500",
-  "bg-amber-500", "bg-rose-500", "bg-cyan-500", "bg-fuchsia-500",
+  "bg-sky-500", "bg-rose-500", "bg-cyan-500", "bg-fuchsia-500",
 ];
 
 type MilestoneRow = { name: string; pct: number };
@@ -375,7 +375,7 @@ const CrmPaymentPlans: React.FC = () => {
           <div className="flex items-center gap-3">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={openCreate}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg hover:shadow-lg ">
           <Plus size={14} /> New Plan
         </button>
         </div>
@@ -432,7 +432,7 @@ const CrmPaymentPlans: React.FC = () => {
                   {p.Description && <div className="text-xs text-muted-foreground mt-0.5">{p.Description}</div>}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                  <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                  <span className={`text-[0.625rem] font-semibold px-2 py-0.5 rounded-full border ${
                     p.IsActive
                       ? "text-green-600 dark:text-green-400 bg-green-500/15 border-green-500/30"
                       : "text-muted-foreground bg-muted/50 border-border"
@@ -487,7 +487,7 @@ const CrmPaymentPlans: React.FC = () => {
 
               <div className="mt-2.5 pt-2 border-t border-border flex items-center justify-between text-xs text-muted-foreground">
                 <span className="flex items-center gap-1"><ListChecks size={12} /> {p.ItemCount} milestone{p.ItemCount === 1 ? "" : "s"}</span>
-                <span className={Math.round(p.TotalPercent) === 100 ? "text-green-600 dark:text-green-400 font-medium" : "text-amber-600 font-medium"}>
+                <span className={Math.round(p.TotalPercent) === 100 ? "text-green-600 dark:text-green-400 font-medium" : "text-sky-600 font-medium"}>
                   {p.TotalPercent}% total
                 </span>
               </div>
@@ -517,7 +517,7 @@ const CrmPaymentPlans: React.FC = () => {
                         )}
                       </div>
                     </div>
-                    <span className={`shrink-0 text-[10px] font-semibold px-2.5 py-1 rounded-full border ${
+                    <span className={`shrink-0 text-[0.625rem] font-semibold px-2.5 py-1 rounded-full border ${
                       previewPlan.IsActive
                         ? "text-green-600 dark:text-green-400 bg-green-500/15 border-green-500/30"
                         : "text-muted-foreground bg-muted/50 border-border"
@@ -535,7 +535,7 @@ const CrmPaymentPlans: React.FC = () => {
                     pulled out of the old plain-text footer into real tiles. */}
                 <div className="grid grid-cols-3 gap-2.5">
                   <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
-                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <div className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       <ListChecks size={11} /> Milestones
                     </div>
                     <div className="mt-1 text-sm font-semibold text-foreground tabular-nums">
@@ -543,7 +543,7 @@ const CrmPaymentPlans: React.FC = () => {
                     </div>
                   </div>
                   <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
-                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <div className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       <Calendar size={11} /> Created
                     </div>
                     <div className="mt-1 text-sm font-semibold text-foreground tabular-nums">
@@ -551,10 +551,10 @@ const CrmPaymentPlans: React.FC = () => {
                     </div>
                   </div>
                   <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
-                    <div className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    <div className="flex items-center gap-1.5 text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground">
                       <Percent size={11} /> After Booking
                     </div>
-                    <div className={`mt-1 text-sm font-semibold tabular-nums ${previewAfterBookingTotal === 100 ? "text-green-600 dark:text-green-400" : "text-amber-600"}`}>
+                    <div className={`mt-1 text-sm font-semibold tabular-nums ${previewAfterBookingTotal === 100 ? "text-green-600 dark:text-green-400" : "text-sky-600"}`}>
                       {previewAfterBookingTotal}%
                     </div>
                   </div>
@@ -565,7 +565,7 @@ const CrmPaymentPlans: React.FC = () => {
                     {previewMilestones.map((m, i) => (
                       <div key={i} className="relative flex items-center gap-2.5 text-sm rounded-lg border border-border bg-muted/20 pl-4 pr-3 py-2 overflow-hidden">
                         <span className={`absolute left-0 top-0 bottom-0 w-1 ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`} />
-                        <span className={`shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold text-white ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`}>
+                        <span className={`shrink-0 flex items-center justify-center w-5 h-5 rounded-full text-[0.625rem] font-bold text-white ${SEGMENT_COLORS[i % SEGMENT_COLORS.length]}`}>
                           {i + 1}
                         </span>
                         <span className="flex-1 min-w-0 break-words text-foreground font-medium">{m.name}</span>
@@ -577,7 +577,7 @@ const CrmPaymentPlans: React.FC = () => {
                   </div>
 
                   <div className="rounded-lg border border-border bg-muted/10 p-3 self-start">
-                    <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">
+                    <div className="flex items-center gap-1.5 text-[0.6875rem] font-semibold uppercase tracking-wide text-muted-foreground mb-2.5">
                       <Building2 size={12} /> Tagged Projects
                     </div>
                     {previewTaggedProjects.length ? (
@@ -616,7 +616,7 @@ const CrmPaymentPlans: React.FC = () => {
                   className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Close</button>
                 {rights.canEdit && (
                   <button onClick={() => openEdit(previewPlan.Id)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm btn-module text-white rounded-lg font-medium ">
                     <Pencil size={13} /> Edit Plan
                   </button>
                 )}
@@ -649,7 +649,7 @@ const CrmPaymentPlans: React.FC = () => {
             <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2">
               <div>
                 <div className="text-xs font-medium text-foreground">Status</div>
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-[0.6875rem] text-muted-foreground">
                   {isActive ? "Active — offered wherever payment plans are picked." : "Inactive — hidden from pickers, kept for existing bookings/history."}
                 </p>
               </div>
@@ -666,7 +666,7 @@ const CrmPaymentPlans: React.FC = () => {
 
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Tagged Projects</label>
-              <p className="text-[11px] text-muted-foreground mb-2">
+              <p className="text-[0.6875rem] text-muted-foreground mb-2">
                 Optional — leave empty and this plan still shows up everywhere as a fallback option.
                 Tag it to one or more Projects to make it selectable from Block/Unit Payment Plan pickers under those Projects.
                 A Project can have many Plans tagged to it, and a Plan can likewise be tagged to many Projects.
@@ -680,7 +680,7 @@ const CrmPaymentPlans: React.FC = () => {
               <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
                 <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
                   <div>
-                    <label className="text-[11px] text-muted-foreground block mb-1">Company</label>
+                    <label className="text-[0.6875rem] text-muted-foreground block mb-1">Company</label>
                     <select
                       value={tagCompanyId}
                       onChange={(e) => setTagCompanyId(e.target.value)}
@@ -691,7 +691,7 @@ const CrmPaymentPlans: React.FC = () => {
                     </select>
                   </div>
                   <div>
-                    <label className="text-[11px] text-muted-foreground block mb-1">Project</label>
+                    <label className="text-[0.6875rem] text-muted-foreground block mb-1">Project</label>
                     <select
                       value={tagProjectPick}
                       onChange={(e) => setTagProjectPick(e.target.value)}
@@ -760,12 +760,12 @@ const CrmPaymentPlans: React.FC = () => {
                           </span>
                           <div className="flex-1 min-w-0 space-y-2">
                             <div className="text-sm font-medium text-foreground">Booking</div>
-                            <p className="text-[11px] text-muted-foreground">
+                            <p className="text-[0.6875rem] text-muted-foreground">
                               Fixed ₹ amount, set here on the plan — never typed per booking, never a % of
                               the plan. Milestones below split 100% of whatever's left after this is deducted.
                             </p>
                             <div>
-                              <label className="text-[11px] text-muted-foreground block mb-1">Booking Amount (₹) *</label>
+                              <label className="text-[0.6875rem] text-muted-foreground block mb-1">Booking Amount (₹) *</label>
                               <div className="relative w-40">
                                 <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none">₹</span>
                                 <input type="number" placeholder="0" value={bookingAmount}
@@ -786,7 +786,7 @@ const CrmPaymentPlans: React.FC = () => {
                         </span>
                         <div className="flex-1 min-w-0 space-y-2">
                           <div>
-                            <label className="text-[11px] text-muted-foreground block mb-1">Milestone *</label>
+                            <label className="text-[0.6875rem] text-muted-foreground block mb-1">Milestone *</label>
                             <select value={it.MilestoneMasterId}
                               onChange={(e) => {
                                 const master = (milestoneMaster as any[]).find((m: any) => String(m.Id) === e.target.value);
@@ -815,7 +815,7 @@ const CrmPaymentPlans: React.FC = () => {
                                 ))}
                             </select>
                             {!fromMaster && (
-                              <p className="text-[11px] text-amber-600 mt-1">
+                              <p className="text-[0.6875rem] text-sky-600 mt-1">
                                 {milestoneMasterHasUnusedOptions
                                   ? "Pick a milestone above before saving."
                                   : "No unused Milestone Master entries left — add one there first."}
@@ -824,7 +824,7 @@ const CrmPaymentPlans: React.FC = () => {
                           </div>
 
                           <div>
-                            <label className="text-[11px] text-muted-foreground block mb-1">% Share</label>
+                            <label className="text-[0.6875rem] text-muted-foreground block mb-1">% Share</label>
                             <div className="relative w-24">
                               <input type="number" placeholder="0" value={it.Percent}
                                 onChange={(e) => setItems((arr) => arr.map((x, i) => i === idx ? { ...x, Percent: e.target.value } : x))}
@@ -851,7 +851,7 @@ const CrmPaymentPlans: React.FC = () => {
                 + Add milestone
               </button>
               {!milestoneMasterHasUnusedOptions && (
-                <p className="text-[11px] text-muted-foreground mt-1">
+                <p className="text-[0.6875rem] text-muted-foreground mt-1">
                   Every active Milestone Master entry is already used in this plan —{" "}
                   <a href="/crm/milestone-master" target="_blank" rel="noreferrer" className="underline">add more there</a> to include another.
                 </p>
@@ -861,7 +861,7 @@ const CrmPaymentPlans: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); resetForm(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSave} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Saving..." : editingId != null ? "Save Changes" : "Create"}
             </button>
           </div>

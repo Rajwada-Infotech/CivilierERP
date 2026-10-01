@@ -337,7 +337,7 @@ const BillingTermsMaster: React.FC = () => {
   const columnRenderers = {
     status: (value: unknown) => (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${
           value
             ? "bg-primary/10 text-primary border-primary/20"
             : "bg-destructive/10 text-destructive border-destructive/20"
@@ -353,7 +353,7 @@ const BillingTermsMaster: React.FC = () => {
     ),
     DeductionType: (value: unknown) => (
       <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${
           value === "Addition"
             ? "bg-green-500/10 text-green-500 border-green-500/20"
             : "bg-destructive/10 text-destructive border-destructive/20"
@@ -553,7 +553,7 @@ const BillingTermsMaster: React.FC = () => {
             <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
               <button
                 onClick={() => setImportResults(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
               >
                 Close
               </button>

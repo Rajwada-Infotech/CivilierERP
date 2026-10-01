@@ -29,7 +29,7 @@ const INR = (n: number | null | undefined) =>
 const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN") : "\u2014");
 
 const STATUS_COLOR: Record<string, string> = {
-  Open:       "bg-amber-500/10 border-amber-500/20 text-amber-600",
+  Open:       "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
   Assigned:   "bg-sky-500/10 border-sky-500/20 text-sky-600",
   InProgress: "bg-violet-500/10 border-violet-500/20 text-violet-600",
   Resolved:   "bg-emerald-500/10 border-emerald-500/20 text-emerald-600",
@@ -44,14 +44,14 @@ const PRIORITY_COLOR: Record<string, string> = {
 };
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${STATUS_COLOR[status] || "bg-muted border-border text-muted-foreground"}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${STATUS_COLOR[status] || "bg-muted border-border text-muted-foreground"}`}>
       {status}
     </span>
   );
 }
 function PriorityBadge({ priority }: { priority: string }) {
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${PRIORITY_COLOR[priority] || "bg-muted border-border text-muted-foreground"}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${PRIORITY_COLOR[priority] || "bg-muted border-border text-muted-foreground"}`}>
       {priority}
     </span>
   );
@@ -200,7 +200,7 @@ export default function CustomerMaintenanceProfile() {
                 <s.icon size={15} style={{ color: s.color }} />
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground">{s.label}</p>
+                <p className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">{s.label}</p>
                 <p className="text-lg font-heading font-bold text-foreground">{s.value}</p>
               </div>
             </div>
@@ -225,7 +225,7 @@ export default function CustomerMaintenanceProfile() {
           ) : (
             <div className="rounded-xl border border-border overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+                <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
                   <tr>
                     <th className="text-left px-4 py-2">Charge</th>
                     <th className="text-right px-4 py-2">Base</th>
@@ -270,7 +270,7 @@ export default function CustomerMaintenanceProfile() {
           ) : (
             <div className="rounded-xl border border-border overflow-x-auto">
               <table className="w-full text-sm">
-                <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+                <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
                   <tr>
                     <th className="text-left px-4 py-2">Bill No</th>
                     <th className="text-left px-4 py-2">Bill Date</th>
@@ -287,7 +287,7 @@ export default function CustomerMaintenanceProfile() {
                       <td className="px-4 py-2 text-muted-foreground">{fmtDate(b.DueDate)}</td>
                       <td className="px-4 py-2 text-right font-mono font-semibold">{INR(b.GrandTotal)}</td>
                       <td className="px-4 py-2">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${b.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${b.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-red-500/10 border-red-500/20 text-red-600"}`}>
                           {b.Status}
                         </span>
                       </td>
@@ -373,11 +373,11 @@ export default function CustomerMaintenanceProfile() {
                 <div key={b.Id} className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5 bg-card/40 hover:bg-muted/20">
                   <div>
                     <p className="text-xs font-mono font-medium text-foreground">{b.BillNo}</p>
-                    <p className="text-[11px] text-muted-foreground">{fmtDate(b.BillDate)}{b.DueDate ? ` \u00B7 Due ${fmtDate(b.DueDate)}` : ""}</p>
+                    <p className="text-[0.6875rem] text-muted-foreground">{fmtDate(b.BillDate)}{b.DueDate ? ` \u00B7 Due ${fmtDate(b.DueDate)}` : ""}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-sm font-heading font-semibold text-foreground">{INR(b.GrandTotal)}</p>
-                    <span className={`text-[11px] font-heading ${b.Status === "Active" ? "text-emerald-600" : "text-red-500"}`}>{b.Status}</span>
+                    <span className={`text-[0.6875rem] font-heading ${b.Status === "Active" ? "text-emerald-600" : "text-red-500"}`}>{b.Status}</span>
                   </div>
                 </div>
               ))}
@@ -429,7 +429,7 @@ export default function CustomerMaintenanceProfile() {
           <DialogHeader><DialogTitle className="font-heading text-base">Resolve Ticket</DialogTitle></DialogHeader>
           <div className="space-y-3 pt-1">
             <div>
-              <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Resolution Notes *</label>
+              <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Resolution Notes *</label>
               <textarea value={resolutionNotes} onChange={(e) => setResolutionNotes(e.target.value)} rows={3} placeholder="Describe what was done\u2026" className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground resize-none" />
             </div>
             <div className="flex justify-end gap-2 pt-2 border-t border-border">
@@ -448,7 +448,7 @@ export default function CustomerMaintenanceProfile() {
 function InfoField({ icon: Icon, label, value }: { icon: typeof Phone; label: string; value: string }) {
   return (
     <div>
-      <p className="flex items-center gap-1.5 text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-1">
+      <p className="flex items-center gap-1.5 text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-1">
         <Icon size={11} /> {label}
       </p>
       <p className="text-sm font-medium text-foreground truncate" title={value}>{value}</p>
@@ -482,29 +482,29 @@ function RaiseTicketDialog({ bookingId, customerName, onClose, onSaved }: { book
           <p className="text-xs text-muted-foreground">For: <span className="font-medium text-foreground">{customerName}</span></p>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Category</label>
+              <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Category</label>
               <select value={category} onChange={(e) => setCategory(e.target.value as TicketCategory)} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none text-foreground">
                 {TICKET_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div>
-              <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Priority</label>
+              <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Priority</label>
               <select value={priority} onChange={(e) => setPriority(e.target.value as TicketPriority)} className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none text-foreground">
                 {TICKET_PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
           </div>
           <div>
-            <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Subject *</label>
+            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Subject *</label>
             <input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Brief subject line\u2026" className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground" />
           </div>
           <div>
-            <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Description</label>
+            <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">Description</label>
             <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="Detailed description (optional)\u2026" className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground resize-none" />
           </div>
           <div className="flex justify-end gap-2 pt-2 border-t border-border">
             <button onClick={onClose} className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-all">Cancel</button>
-            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-primary text-primary-foreground hover:opacity-90 transition-all disabled:opacity-60">
+            <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:opacity-90 transition-all disabled:opacity-60">
               {saving ? <Loader2 size={13} className="animate-spin" /> : <Ticket size={13} />} Raise Ticket
             </button>
           </div>

@@ -21,6 +21,7 @@ import { exportToCsv, parseCsv, type ExportColumn } from "@/lib/export";
 import { ExportMenu } from "@/components/ExportMenu";
 import { format } from "date-fns";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { DateInput } from "@/components/ui/date-input";
 
 const API = "/api/material-issue-returns";
 
@@ -79,7 +80,7 @@ async function apiFetch<T>(url: string, opts?: RequestInit): Promise<T> {
 
 function FieldLabel({ children, required }: { children: React.ReactNode; required?: boolean }) {
   return (
-    <label className="block text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
+    <label className="block text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
       {children}{required && <span className="text-red-400 ml-0.5">*</span>}
     </label>
   );
@@ -220,7 +221,7 @@ export default function IssueReturn() {
       cell: ({ row }) => (
         <div className="flex flex-col gap-0.5">
           <span className="text-xs font-medium truncate">{row.original.CompanyName || "—"}</span>
-          <span className="text-[10px] text-muted-foreground truncate">{row.original.ProjectName || "—"}</span>
+          <span className="text-[0.625rem] text-muted-foreground truncate">{row.original.ProjectName || "—"}</span>
         </div>
       ),
     },
@@ -232,12 +233,12 @@ export default function IssueReturn() {
       id: "actions", header: () => <div className="text-right">Actions</div>, size: 140, enableSorting: false,
       cell: ({ row: { original: r } }) => (
         <div className="flex items-center justify-end gap-1">
-          <button className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors" title="View" onClick={() => openDetail(r)}><Eye size={14} /></button>
+          <button data-row-view className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors" title="View" onClick={() => openDetail(r)}><Eye size={14} /></button>
           {/* Approve/Reject live only in the centralized Approval Inbox, same
               as Material Request/PO/GRN — this list never shows them.
               Submit is automatic on create; editing a Rejected return
               re-submits it on save (see saveMut), so no manual button either. */}
-          {(r.Status === "Draft" || r.Status === "Approved" || r.Status === "Rejected") && rights.canEdit && <button className="p-1.5 rounded-lg text-amber-400 hover:bg-amber-500/10 transition-colors" title={r.Status === "Rejected" ? "Edit and re-submit for approval" : "Edit"} onClick={() => openEdit(r)}><Edit3 size={14} /></button>}
+          {(r.Status === "Draft" || r.Status === "Approved" || r.Status === "Rejected") && rights.canEdit && <button className="p-1.5 rounded-lg text-amber-400 hover:bg-[#ffe2021a] transition-colors" title={r.Status === "Rejected" ? "Edit and re-submit for approval" : "Edit"} onClick={() => openEdit(r)}><Edit3 size={14} /></button>}
           {["Draft", "Rejected"].includes(r.Status) && rights.canDelete && (
             <button className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors" title="Delete" onClick={() => { if (confirm("Delete this return?")) deleteMut.mutate(r.ReturnId); }}>
               <Trash2 size={14} />
@@ -285,7 +286,7 @@ export default function IssueReturn() {
               <div className="px-5 py-3.5 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
                 <div>
                   <h2 className="text-sm font-heading font-bold text-foreground">Issue Returns Register</h2>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">{filtered.length} record{filtered.length !== 1 ? "s" : ""}</p>
+                  <p className="text-[0.625rem] text-muted-foreground mt-0.5">{filtered.length} record{filtered.length !== 1 ? "s" : ""}</p>
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <div className="relative">
@@ -338,7 +339,7 @@ export default function IssueReturn() {
                     onClick={() => importFileInputRef.current?.click()}
                     disabled={importing}
                     title="Import from CSV"
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
                   >
                     {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                     <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
@@ -346,7 +347,7 @@ export default function IssueReturn() {
                   {rights.canCreate && (
                     <button
                       onClick={openNew}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 transition shadow-sm shadow-emerald-500/20"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-white btn-module transition shadow-sm shadow-emerald-500/20"
                     >
                       <Plus size={13} /> New Return
                     </button>
@@ -380,14 +381,14 @@ export default function IssueReturn() {
                 </div>
                 <div>
                   <h2 className="text-sm font-heading font-bold text-foreground">{editId ? "Edit Issue Return" : "New Issue Return"}</h2>
-                  <p className="text-[10px] text-muted-foreground">Fill header details and load items from the issue</p>
+                  <p className="text-[0.625rem] text-muted-foreground">Fill header details and load items from the issue</p>
                 </div>
               </div>
               <div className="flex gap-2">
                 <button onClick={() => { setView("list"); setEditId(null); setForm(emptyForm()); }} className="px-3 py-1.5 rounded-xl text-xs border border-border hover:bg-muted transition-colors font-medium">
                   Cancel
                 </button>
-                <button onClick={handleSave} disabled={saveMut.isPending} className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold text-white bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 disabled:opacity-50 transition shadow-sm shadow-emerald-500/20">
+                <button onClick={handleSave} disabled={saveMut.isPending} className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-semibold text-white btn-module disabled:opacity-50 transition shadow-sm shadow-emerald-500/20">
                   <Save size={13} /> {editId ? "Update" : "Save"}
                 </button>
               </div>
@@ -399,7 +400,7 @@ export default function IssueReturn() {
                 <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "rgba(16,185,129,0.15)" }}>
                   <FileText size={11} className="text-emerald-500" />
                 </div>
-                <h3 className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">Header Details</h3>
+                <h3 className="text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground">Header Details</h3>
               </div>
               <div className="p-5 space-y-4">
                 {/* Row 1: Return Date | Company | Project / Site | Issue Reference */}
@@ -408,7 +409,7 @@ export default function IssueReturn() {
                     <FieldLabel required>Return Date</FieldLabel>
                     <div className="relative">
                       <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                      <input type="date" className={inp + " pl-9"} value={form.ReturnDate} onChange={(e) => setForm((f) => ({ ...f, ReturnDate: e.target.value }))} />
+                      <DateInput className={inp + " pl-9"} value={form.ReturnDate} onChange={(e) => setForm((f) => ({ ...f, ReturnDate: e.target.value }))} />
                     </div>
                   </div>
                   <div>
@@ -466,9 +467,9 @@ export default function IssueReturn() {
                   <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: "rgba(16,185,129,0.15)" }}>
                     <Package size={11} className="text-emerald-500" />
                   </div>
-                  <h3 className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">Return Items</h3>
+                  <h3 className="text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground">Return Items</h3>
                   {form.items.length > 0 && (
-                    <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">{form.items.length}</span>
+                    <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">{form.items.length}</span>
                   )}
                 </div>
                 {form.IssueId && issueItems.length > 0 && (
@@ -499,7 +500,7 @@ export default function IssueReturn() {
                     <thead>
                       <tr className="border-b border-border bg-muted/30">
                         {["Item Name", "Issued Qty", "Return Qty", "UOM", ""].map((h, i) => (
-                          <th key={i} className="px-4 py-2.5 text-left text-[9px] uppercase tracking-widest font-heading text-muted-foreground" style={{ width: i === 0 ? "40%" : i === 4 ? "5%" : "15%" }}>{h}</th>
+                          <th key={i} className="px-4 py-2.5 text-left text-[0.5625rem] uppercase tracking-widest font-heading text-muted-foreground" style={{ width: i === 0 ? "40%" : i === 4 ? "5%" : "15%" }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -553,7 +554,7 @@ export default function IssueReturn() {
                     </h2>
                     <StatusBadge status={detailRecord.Status} />
                   </div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Issue Return</p>
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Issue Return</p>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {/* Approve/Reject live only in the centralized Approval
@@ -562,7 +563,7 @@ export default function IssueReturn() {
                   {(detailRecord.Status === "Draft" || detailRecord.Status === "Approved" || detailRecord.Status === "Rejected") && rights.canEdit && (
                     <button
                       onClick={() => { setDetailRecord(null); openEdit(detailRecord); }}
-                      className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm"
+                      className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold btn-module shadow-sm"
                     >
                       <Edit3 size={13} /><span className="hidden sm:inline">{detailRecord.Status === "Rejected" ? "Edit & Re-submit" : "Edit"}</span>
                     </button>
@@ -578,7 +579,7 @@ export default function IssueReturn() {
 
               {/* Meta fields */}
               <div>
-                <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
                   <RotateCw size={10} className="text-emerald-500" /> Return Details
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -592,14 +593,14 @@ export default function IssueReturn() {
                     { label: "Created", value: detailRecord.CreatedAt ? format(new Date(detailRecord.CreatedAt), "dd MMM yyyy") : "—" },
                   ].map(({ label, value, color }: any) => (
                     <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
                       <p className={`text-xs font-semibold truncate ${color || "text-foreground"}`}>{value}</p>
                     </div>
                   ))}
                 </div>
                 {detailRecord.Remarks && (
                   <div className="mt-3 px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                    <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">Remarks</p>
+                    <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Remarks</p>
                     <p className="text-xs text-foreground">{detailRecord.Remarks}</p>
                   </div>
                 )}
@@ -607,17 +608,17 @@ export default function IssueReturn() {
 
               {/* Items */}
               <div>
-                <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+                <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
                   <Package size={10} className="text-emerald-500" /> Return Items
-                  <span className="ml-1 font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded-full border border-border">{(detailRecord.items || []).length}</span>
+                  <span className="ml-1 font-mono text-[0.625rem] bg-muted px-1.5 py-0.5 rounded-full border border-border">{(detailRecord.items || []).length}</span>
                 </p>
                 <div className="rounded-xl border border-border overflow-x-auto">
                   <table className="w-full text-xs" style={{ tableLayout: "auto" }}>
                     <thead className="bg-muted/40 border-b border-border">
                       <tr>
-                        <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Item</th>
-                        <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Qty</th>
-                        <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">UOM</th>
+                        <th className="px-4 py-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Item</th>
+                        <th className="px-4 py-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Qty</th>
+                        <th className="px-4 py-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">UOM</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border/60">

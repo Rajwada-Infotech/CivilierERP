@@ -30,7 +30,7 @@ import {
 const INTERVIEW_RESULT_META: Record<string, { label: string; className: string }> = {
   Selected: { label: "Selected", className: "bg-green-500/10 text-green-600 border-green-500/30" },
   Rejected: { label: "Rejected", className: "bg-red-500/10 text-red-600 border-red-500/30" },
-  "On Hold": { label: "Hold", className: "bg-amber-500/10 text-amber-600 border-amber-500/30" },
+  "On Hold": { label: "Hold", className: "bg-[#ffe2021a] text-amber-600 border-amber-500/30" },
 };
 const DEFAULT_RESULT_CLASS = "bg-muted text-muted-foreground border-border";
 
@@ -55,7 +55,7 @@ const InterviewResultSelect: React.FC<{ candidateId: number; value: string }> = 
   if (!rights.canEdit) {
     if (!INTERVIEW_RESULT_META[value]) return <span className="text-xs text-muted-foreground">-</span>;
     return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${className}`}>
+      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border ${className}`}>
         {INTERVIEW_RESULT_META[value].label}
       </span>
     );

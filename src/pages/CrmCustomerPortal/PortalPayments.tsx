@@ -96,15 +96,15 @@ const PortalPayments: React.FC = () => {
         <div className="grid grid-cols-3 gap-4 mt-4 text-center">
           <div>
             <p className="text-lg font-semibold" style={{ ...serif, color: TEXT }}>{fmtMoney(totalPaid)}</p>
-            <p className="text-[11px]" style={{ color: TEXT_FAINT }}>Paid</p>
+            <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>Paid</p>
           </div>
           <div>
             <p className="text-lg font-semibold" style={{ ...serif, color: GOLD }}>{fmtMoney(totalDue - totalPaid)}</p>
-            <p className="text-[11px]" style={{ color: TEXT_FAINT }}>Remaining</p>
+            <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>Remaining</p>
           </div>
           <div>
             <p className="text-lg font-semibold" style={{ ...serif, color: TEXT }}>{fmtMoney(totalDue)}</p>
-            <p className="text-[11px]" style={{ color: TEXT_FAINT }}>Total</p>
+            <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>Total</p>
           </div>
         </div>
       </Card>
@@ -121,11 +121,11 @@ const PortalPayments: React.FC = () => {
                 : <Circle size={18} className="shrink-0" style={{ color: TEXT_FAINT }} />}
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-semibold" style={{ color: TEXT }}>{m.MilestoneName}</p>
-                <p className="text-[11px]" style={{ color: TEXT_FAINT }}>{m.DueDate ? `Due ${fmtDate(m.DueDate)}` : "Due date to be set"}</p>
+                <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>{m.DueDate ? `Due ${fmtDate(m.DueDate)}` : "Due date to be set"}</p>
               </div>
               <div className="text-right shrink-0 flex flex-col items-end gap-1">
                 <p className="text-sm font-bold" style={{ color: TEXT }}>{fmtMoney(m.AmountDue)}</p>
-                {m.AmountPaid > 0 && !isPaid && <p className="text-[10px]" style={{ color: TEXT_FAINT }}>{fmtMoney(m.AmountPaid)} received</p>}
+                {m.AmountPaid > 0 && !isPaid && <p className="text-[0.625rem]" style={{ color: TEXT_FAINT }}>{fmtMoney(m.AmountPaid)} received</p>}
                 <StatusPill status={isPaid ? "Paid" : isOverdue ? "Overdue" : "Pending"} />
               </div>
             </div>
@@ -140,7 +140,7 @@ const PortalPayments: React.FC = () => {
             <div key={inv.Id} className="flex items-center justify-between gap-3 px-5 py-3.5 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
               <div className="min-w-0">
                 <p className="text-sm font-semibold" style={{ color: TEXT }}>{inv.InvoiceNo}</p>
-                <p className="text-[11px]" style={{ color: TEXT_FAINT }}>{inv.InvoiceType} · {fmtDate(inv.InvoiceDate)}{inv.Description ? ` · ${inv.Description}` : ""}</p>
+                <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>{inv.InvoiceType} · {fmtDate(inv.InvoiceDate)}{inv.Description ? ` · ${inv.Description}` : ""}</p>
               </div>
               <div className="flex items-center gap-3 shrink-0">
                 <p className="text-sm font-bold" style={{ color: TEXT }}>{fmtMoney(inv.Amount)}</p>

@@ -90,6 +90,8 @@ import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
 import { usePageRights } from "@/hooks/usePageRights";
 import { DepositBankAssignPanel } from "./DepositBankAssignPanel";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Export ───────────────────────────────────────────────────────────────────
 
@@ -273,7 +275,7 @@ function FieldLabel({
   required?: boolean;
 }) {
   return (
-    <label className="block text-[11px] uppercase tracking-widest font-heading font-semibold text-muted-foreground mb-1.5">
+    <label className="block text-[0.6875rem] uppercase tracking-widest font-heading font-semibold text-muted-foreground mb-1.5">
       {children}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
@@ -1041,7 +1043,7 @@ export default function ReceivedPaymentPage() {
       sub: "awaiting approval",
       icon: Clock,
       ring: "ring-amber-500/20",
-      bg: "bg-amber-500/10",
+      bg: "bg-[#ffe2021a]",
       blob: "bg-amber-500",
       borderL: "border-l-amber-500",
       color: "text-amber-500",
@@ -1202,10 +1204,10 @@ export default function ReceivedPaymentPage() {
                 <p className="text-lg font-bold font-heading text-foreground leading-none">
                   {s.value}
                 </p>
-                <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
                   {s.label}
                 </p>
-                <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
+                <p className="text-[0.6875rem] text-muted-foreground font-mono mt-0.5 truncate">
                   {s.sub}
                 </p>
               </div>
@@ -1342,12 +1344,12 @@ export default function ReceivedPaymentPage() {
                         <td className="px-4 py-3">
                           <StatusBadge status={p.status} />
                           {p.status === "Pending" && p.crmBookingId != null && !p.depositBankId && (
-                            <span className="ml-1 inline-block text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded" title="CRM payment — Accounts must assign the deposit bank before approval">Bank pending</span>
+                            <span className="ml-1 inline-block text-[0.5625rem] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded" title="CRM payment — Accounts must assign the deposit bank before approval">Bank pending</span>
                           )}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-1">
-                            <button
+                            <button data-row-view
                               onClick={() => setViewingPayment(p)}
                               title="View (print & edit are here too)"
                               className="p-1.5 rounded-md text-muted-foreground/50 hover:text-emerald-600 hover:bg-emerald-500/10 transition-colors"
@@ -1388,7 +1390,7 @@ export default function ReceivedPaymentPage() {
                         <p className="text-xs text-primary font-heading font-medium">
                           {p.docNo}
                         </p>
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[0.625rem] text-muted-foreground">
                           {p.companyName} · {p.finYear}
                         </p>
                         <p className="text-sm font-semibold text-foreground">
@@ -1405,7 +1407,7 @@ export default function ReceivedPaymentPage() {
                         </p>
                         <StatusBadge status={p.status} />
                         {p.status === "Pending" && p.crmBookingId != null && !p.depositBankId && (
-                          <span className="ml-1 inline-block text-[9px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded" title="CRM payment — Accounts must assign the deposit bank before approval">Bank pending</span>
+                          <span className="ml-1 inline-block text-[0.5625rem] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded" title="CRM payment — Accounts must assign the deposit bank before approval">Bank pending</span>
                         )}
                       </div>
                     </div>
@@ -1417,7 +1419,7 @@ export default function ReceivedPaymentPage() {
                         {modeShortLabel(p.mode)}
                       </span>
                       <div className="flex items-center gap-1">
-                        <button
+                        <button data-row-view
                           onClick={() => setViewingPayment(p)}
                           className="p-1.5 text-muted-foreground/50 hover:text-emerald-600"
                           title="View (print & edit are here too)"
@@ -1600,7 +1602,7 @@ export default function ReceivedPaymentPage() {
                     outstanding EMIs is picked. */}
                 {form.companyId && !editingId && (loanEmisLoading || loanEmiOptions.length > 0) && (
                   <div className="rounded-lg border border-border bg-muted/20 p-3 space-y-2">
-                    <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-muted-foreground">
+                    <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold text-muted-foreground">
                       Settle a Loan Repayment
                     </p>
                     {loanEmisLoading ? (
@@ -1629,7 +1631,7 @@ export default function ReceivedPaymentPage() {
                     )}
                     {selectedLoanEmi && (
                       <div className="flex items-center justify-between gap-2 pt-1">
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-[0.6875rem] text-muted-foreground">
                           {loanPayMode === "lumpsum"
                             ? "Lump sum"
                             : `${selectedLoanEmiIds.length} EMI${selectedLoanEmiIds.length === 1 ? "" : "s"} selected`}
@@ -1640,14 +1642,14 @@ export default function ReceivedPaymentPage() {
                           <button
                             type="button"
                             onClick={() => setLoanPaymentDetailsOpen(true)}
-                            className="text-[11px] font-medium text-primary hover:underline"
+                            className="text-[0.6875rem] font-medium text-primary hover:underline"
                           >
                             Edit
                           </button>
                           <button
                             type="button"
                             onClick={clearLoanEmiLink}
-                            className="text-[11px] font-medium text-muted-foreground hover:text-destructive"
+                            className="text-[0.6875rem] font-medium text-muted-foreground hover:text-destructive"
                           >
                             Clear
                           </button>
@@ -1665,7 +1667,7 @@ export default function ReceivedPaymentPage() {
                     is saved. */}
                 {form.companyId && !editingId && (undisbursedBankLoansLoading || undisbursedBankLoans.length > 0) && (
                   <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
-                    <p className="text-[11px] uppercase tracking-widest font-heading font-semibold text-amber-600 dark:text-amber-400">
+                    <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold text-amber-600 dark:text-amber-400">
                       Disburse a Loan
                     </p>
                     {undisbursedBankLoansLoading ? (
@@ -1682,7 +1684,7 @@ export default function ReceivedPaymentPage() {
                             className={cn(
                               "flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors",
                               disbursingBankLoan?.LoanId === loan.LoanId
-                                ? "border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-400"
+                                ? "border-amber-500/50 bg-[#ffe2021a] text-amber-700 dark:text-amber-400"
                                 : "border-border bg-background text-muted-foreground hover:border-amber-500/40",
                             )}
                           >
@@ -1694,13 +1696,13 @@ export default function ReceivedPaymentPage() {
                     )}
                     {disbursingBankLoan && (
                       <div className="flex items-center justify-between gap-2 pt-1">
-                        <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                        <p className="text-[0.6875rem] text-amber-700 dark:text-amber-400">
                           Disbursing <span className="font-semibold">{disbursingBankLoan.LoanNo}</span> — fill in the deposit bank/mode below, then Save.
                         </p>
                         <button
                           type="button"
                           onClick={() => setDisbursingBankLoan(null)}
-                          className="text-[11px] font-medium text-muted-foreground hover:text-destructive shrink-0"
+                          className="text-[0.6875rem] font-medium text-muted-foreground hover:text-destructive shrink-0"
                         >
                           Clear
                         </button>
@@ -1713,8 +1715,7 @@ export default function ReceivedPaymentPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <FieldLabel required>Date of Receipt</FieldLabel>
-                    <input
-                      type="date"
+                    <DateInput
                       value={date ? format(date, "yyyy-MM-dd") : ""}
                       onChange={(e) =>
                         setDate(
@@ -1833,7 +1834,7 @@ export default function ReceivedPaymentPage() {
                                   ) : null}
                                 </span>
                                 {(b.BAccountNumber || b.BIfscCode) && (
-                                  <span className="text-muted-foreground text-[10px] font-mono">
+                                  <span className="text-muted-foreground text-[0.625rem] font-mono">
                                     {b.BAccountNumber
                                       ? `A/C ••${b.BAccountNumber.slice(-4)}`
                                       : ""}
@@ -1936,7 +1937,7 @@ export default function ReceivedPaymentPage() {
                         )}
                       </div>
                     )}
-                    <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                    <p className="text-[0.625rem] text-muted-foreground mt-1 font-mono">
                       REC / 000001 / {form.finYear || activeFinYear} — locked on
                       save
                     </p>
@@ -1960,8 +1961,7 @@ export default function ReceivedPaymentPage() {
                         <div className="flex items-end gap-2 mt-2">
                           <div className="flex-1">
                             <FieldLabel>{instrumentLabel} Date</FieldLabel>
-                            <Input
-                              type="date"
+                            <DateInput
                               className="h-9 text-sm"
                               value={form.chequeDate ?? ""}
                               onChange={(e) => {
@@ -2035,7 +2035,7 @@ export default function ReceivedPaymentPage() {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground hidden sm:block">
+            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
               {canSave
                 ? <span className="text-emerald-500 font-medium">Ready to save</span>
                 : "Fill in the required fields to save"}
@@ -2132,7 +2132,7 @@ export default function ReceivedPaymentPage() {
                         <span className="flex items-center gap-2 text-xs">
                           <input type="checkbox" checked={checked} onChange={() => toggleLoanEmiSelected(e.EMIId)} className="accent-emerald-500" />
                           Installment #{e.InstallmentNo}
-                          {e.IsOverdue && <span className="text-[10px] font-semibold text-destructive">OVERDUE</span>}
+                          {e.IsOverdue && <span className="text-[0.625rem] font-semibold text-destructive">OVERDUE</span>}
                         </span>
                         <span className="font-mono text-xs font-medium">{formatINR(Number(e.EMIAmount))}</span>
                       </label>
@@ -2151,7 +2151,7 @@ export default function ReceivedPaymentPage() {
                     }}
                     className="h-9 text-sm"
                   />
-                  <p className="text-[11px] text-muted-foreground mt-1">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1">
                     Outstanding on this loan: <span className="font-mono font-medium text-foreground/80">{formatINR(loanOutstandingTotal)}</span>
                   </p>
                 </div>
@@ -2187,7 +2187,7 @@ export default function ReceivedPaymentPage() {
 
       {/* ── View Receipt Modal ───────────────────────────────────────────────── */}
       {viewingPayment && (
-        <div
+        <BodyPortal><div
           className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm bw-modal-topmost"
           onClick={() => setViewingPayment(null)}
         >
@@ -2206,7 +2206,7 @@ export default function ReceivedPaymentPage() {
                     {viewingPayment.companyName || "Received Payment"}
                   </h3>
                   {viewingPayment.docNo && (
-                    <span className="text-[11px] font-mono text-muted-foreground">
+                    <span className="text-[0.6875rem] font-mono text-muted-foreground">
                       {viewingPayment.docNo}
                     </span>
                   )}
@@ -2254,7 +2254,7 @@ export default function ReceivedPaymentPage() {
             <div className="px-5 pt-4 pb-2">
               <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-5 py-4 flex items-center justify-between">
                 <div>
-                  <p className="text-[10px] font-heading uppercase tracking-wider text-emerald-600/70 mb-1">
+                  <p className="text-[0.625rem] font-heading uppercase tracking-wider text-emerald-600/70 mb-1">
                     Amount Received
                   </p>
                   <p className="text-2xl font-heading font-bold text-emerald-600">
@@ -2262,7 +2262,7 @@ export default function ReceivedPaymentPage() {
                   </p>
                 </div>
                 <div className="text-right space-y-1">
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-[0.6875rem] text-muted-foreground">
                     {viewingPayment.docDate
                       ? new Date(viewingPayment.docDate).toLocaleDateString(
                           "en-IN",
@@ -2276,7 +2276,7 @@ export default function ReceivedPaymentPage() {
                   </p>
                   <StatusBadge status={viewingPayment.status} />
                   <span
-                    className={`ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading ${modeColor[viewingPayment.mode]}`}
+                    className={`ml-1.5 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-heading ${modeColor[viewingPayment.mode]}`}
                   >
                     {modeIcon(viewingPayment.mode)}
                     {viewingPayment.mode}
@@ -2321,7 +2321,7 @@ export default function ReceivedPaymentPage() {
                   : []),
               ].map(({ label, value }) => (
                 <div key={label} className="space-y-0.5">
-                  <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                  <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                     {label}
                   </p>
                   <p className="text-xs font-medium text-foreground truncate">
@@ -2357,7 +2357,7 @@ export default function ReceivedPaymentPage() {
             {/* Remarks */}
             {viewingPayment.remarks && (
               <div className="px-5 pb-3">
-                <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-1">
+                <p className="text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">
                   Remarks
                 </p>
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2 text-xs text-foreground">
@@ -2388,21 +2388,21 @@ export default function ReceivedPaymentPage() {
                 ) : (
                   <div className="rounded-xl border border-border overflow-hidden">
                     <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/40">
-                      <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                         {postingData.entries[0]?.docNo}
                       </span>
                       {postingData.isPosted ? (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
+                        <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
                           ✓ {postingData.jvNo}
                         </span>
                       ) : (
-                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-600 border border-amber-500/20 font-medium whitespace-nowrap">
+                        <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-[#ffe2021a] text-amber-600 border border-amber-500/20 font-medium whitespace-nowrap">
                           Not yet posted
                         </span>
                       )}
                     </div>
                     <div className="divide-y divide-border/50">
-                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                      <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
                         <span>Account</span>
                         <span className="text-right">Debit (₹)</span>
                         <span className="text-right">Credit (₹)</span>
@@ -2425,7 +2425,7 @@ export default function ReceivedPaymentPage() {
                         </div>
                       ))}
                       <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
-                        <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                        <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
                         <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(postingData.amount)}</span>
                         <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(postingData.amount)}</span>
                       </div>
@@ -2437,7 +2437,7 @@ export default function ReceivedPaymentPage() {
 
             {/* Footer */}
             <div className="px-5 py-3 border-t border-border bg-muted/10 flex items-center justify-between">
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-[0.625rem] text-muted-foreground">
                 Created{" "}
                 {viewingPayment.createdAt
                   ? new Date(viewingPayment.createdAt).toLocaleString("en-IN", {
@@ -2450,7 +2450,7 @@ export default function ReceivedPaymentPage() {
                   : "—"}
               </p>
               {viewingPayment.status === "Pending" && (
-                <span className="inline-flex items-center gap-1.5 text-[11px] text-amber-600 font-heading font-medium">
+                <span className="inline-flex items-center gap-1.5 text-[0.6875rem] text-amber-600 font-heading font-medium">
                   <Clock size={12} className="text-amber-500 animate-pulse" />
                   {viewingPayment.crmBookingId != null && !viewingPayment.depositBankId ? "Awaiting deposit bank (Accounts)" : "Awaiting admin approval"}
                 </span>
@@ -2480,7 +2480,7 @@ export default function ReceivedPaymentPage() {
               )}
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

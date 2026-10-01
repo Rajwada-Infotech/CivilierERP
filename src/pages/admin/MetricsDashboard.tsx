@@ -220,7 +220,7 @@ const MetricsDashboard = () => {
               <span className="text-sm font-heading font-semibold text-foreground">Connect to Backend</span>
             </div>
             {live && (
-              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[11px] font-medium animate-pulse">
+              <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 text-[0.6875rem] font-medium animate-pulse">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
                 Live — refreshing every 10s
               </span>
@@ -240,12 +240,12 @@ const MetricsDashboard = () => {
                   placeholder="http://localhost:5000"
                   className="font-mono text-sm"
                 />
-                <p className="text-[11px] text-muted-foreground">The address your backend is running on</p>
+                <p className="text-[0.6875rem] text-muted-foreground">The address your backend is running on</p>
               </div>
               <div className="space-y-1.5 md:col-span-2">
                 <Label htmlFor="token" className="text-xs font-semibold flex items-center gap-2">
                   Auth Token
-                  <span className="font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded text-[10px]">optional</span>
+                  <span className="font-normal text-muted-foreground bg-muted px-1.5 py-0.5 rounded text-[0.625rem]">optional</span>
                 </Label>
                 <Input
                   id="token"
@@ -255,7 +255,7 @@ const MetricsDashboard = () => {
                   placeholder="Paste your bearer token here (from your login session)"
                   className="text-sm"
                 />
-                <p className="text-[11px] text-muted-foreground">Found in browser dev tools → Network → any request → Authorization header. Leave blank if your backend is open.</p>
+                <p className="text-[0.6875rem] text-muted-foreground">Found in browser dev tools → Network → any request → Authorization header. Leave blank if your backend is open.</p>
               </div>
             </div>
 
@@ -263,7 +263,7 @@ const MetricsDashboard = () => {
               <Button
                 onClick={() => fetchData(false)}
                 disabled={loading}
-                className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-2 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
+                className="btn-module shadow-sm hover:opacity-90 gap-2 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto"
               >
                 {loading ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />}
                 {loading ? "Connecting…" : metrics ? "Refresh Now" : "Connect"}
@@ -384,7 +384,7 @@ const MetricsDashboard = () => {
                       variant={
                         metrics.cacheHitRate > 0.7 ? "default" : "secondary"
                       }
-                      className="text-[10px] font-heading uppercase tracking-wide px-2 py-0.5"
+                      className="text-[0.625rem] font-heading uppercase tracking-wide px-2 py-0.5"
                     >
                       {metrics.cacheHitRate > 0.7 ? "Good" : "Improve"}
                     </Badge>
@@ -430,8 +430,8 @@ const MetricsDashboard = () => {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="text-[11px] font-heading uppercase tracking-widest text-muted-foreground">User</TableHead>
-                          <TableHead className="text-right text-[11px] font-heading uppercase tracking-widest text-muted-foreground">Score</TableHead>
+                          <TableHead className="text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground">User</TableHead>
+                          <TableHead className="text-right text-[0.6875rem] font-heading uppercase tracking-widest text-muted-foreground">Score</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -441,7 +441,7 @@ const MetricsDashboard = () => {
                               {user.name}
                             </TableCell>
                             <TableCell className="text-right">
-                              <Badge className="text-[10px] font-heading uppercase tracking-wide px-2 py-0.5">
+                              <Badge className="text-[0.625rem] font-heading uppercase tracking-wide px-2 py-0.5">
                                 {user.score.toFixed(0)}
                               </Badge>
                             </TableCell>
@@ -461,7 +461,7 @@ const MetricsDashboard = () => {
                   Live Stats
                 </span>
                 {live && (
-                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[11px] font-heading uppercase tracking-wide">
+                  <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[0.6875rem] font-heading uppercase tracking-wide">
                     <Play size={10} />
                     Live (10s)
                   </span>
@@ -526,10 +526,10 @@ const MetricsDashboard = () => {
                   { step: "3", text: 'Click "Connect"', sub: "Or press Enter in the URL field" },
                 ].map(({ step, text, sub }) => (
                   <div key={step} className="flex items-start gap-3 p-3 rounded-lg bg-muted/30 border border-border">
-                    <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-[11px] font-bold flex items-center justify-center shrink-0 mt-0.5">{step}</span>
+                    <span className="w-6 h-6 rounded-full bg-primary/10 text-primary text-[0.6875rem] font-bold flex items-center justify-center shrink-0 mt-0.5">{step}</span>
                     <div>
                       <p className="text-xs font-semibold">{text}</p>
-                      <p className="text-[11px] text-muted-foreground">{sub}</p>
+                      <p className="text-[0.6875rem] text-muted-foreground">{sub}</p>
                     </div>
                   </div>
                 ))}

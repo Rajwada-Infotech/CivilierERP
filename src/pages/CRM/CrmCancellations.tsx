@@ -223,7 +223,7 @@ const CrmCancellations: React.FC = () => {
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           {rights.canCreate && (
             <button onClick={() => setDialogOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
             <XCircle size={14} /> Request Cancellation
           </button>
           )}
@@ -288,7 +288,7 @@ const CrmCancellations: React.FC = () => {
                       → <span className="font-bold">{Number(policy.DeductionPercent)}% deduction</span>
                     </p>
                     {policy.Notes && <p className="text-blue-600/80 dark:text-blue-400/70 italic">{policy.Notes}</p>}
-                    {policy.source === "default" && <p className="text-amber-600">Using global system default (no project-specific policy)</p>}
+                    {policy.source === "default" && <p className="text-sky-600">Using global system default (no project-specific policy)</p>}
                   </>
                 )}
               </div>
@@ -298,7 +298,7 @@ const CrmCancellations: React.FC = () => {
               <label className="text-xs text-muted-foreground block mb-1">
                 Cancellation Charge (%)
                 {policy && form.DeductionPercent !== String(Number(policy.DeductionPercent)) && form.DeductionPercent !== "" && (
-                  <span className="ml-2 text-amber-600 font-medium">⚠ Overriding policy ({Number(policy.DeductionPercent)}%)</span>
+                  <span className="ml-2 text-sky-600 font-medium">⚠ Overriding policy ({Number(policy.DeductionPercent)}%)</span>
                 )}
               </label>
               <input type="number" min={0} max={100} step="0.01" value={form.DeductionPercent}
@@ -306,7 +306,7 @@ const CrmCancellations: React.FC = () => {
                 onChange={(e) => setForm((f) => ({ ...f, DeductionPercent: e.target.value }))}
                 className={`w-full text-sm border rounded px-2 py-1.5 bg-background ${
                   policy && form.DeductionPercent !== "" && form.DeductionPercent !== String(Number(policy.DeductionPercent))
-                    ? "border-amber-400 ring-1 ring-amber-400/40"
+                    ? "border-sky-400 ring-1 ring-sky-400/40"
                     : "border-border"
                 }`} />
             </div>
@@ -319,7 +319,7 @@ const CrmCancellations: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); setPolicy(null); setForm({ BookingId: "", Reason: "", DeductionPercent: "" }); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleRequest} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Submitting..." : "Submit Request"}
             </button>
           </div>

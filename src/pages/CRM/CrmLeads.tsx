@@ -99,7 +99,7 @@ const CrmLeads: React.FC = () => {
         ) : (
           <button
             onClick={() => navigate(`/crm/customers?leadId=${l.Id}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg hover:shadow-amber-500/20 transition-all"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold text-white shadow-sm btn-module hover:shadow-lg transition-all"
           >
             <UserPlus size={12} /> Create Customer
           </button>
@@ -109,14 +109,14 @@ const CrmLeads: React.FC = () => {
 
   const glassStyle: React.CSSProperties = {
     background: isDark ? "rgba(15,12,3,0.5)" : "rgba(255,255,255,0.72)",
-    border: isDark ? "1px solid rgba(245,158,11,0.15)" : "1px solid rgba(245,158,11,0.18)",
+    border: isDark ? "1px solid rgba(14,165,233,0.15)" : "1px solid rgba(14,165,233,0.18)",
     backdropFilter: "blur(16px) saturate(150%)",
     WebkitBackdropFilter: "blur(16px) saturate(150%)",
     boxShadow: isDark
       ? "0 4px 24px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.05)"
-      : "0 4px 24px rgba(245,158,11,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
+      : "0 4px 24px rgba(14,165,233,0.06), inset 0 1px 0 rgba(255,255,255,0.9)",
   };
-  const borderColor = isDark ? "rgba(245,158,11,0.15)" : "rgba(245,158,11,0.12)";
+  const borderColor = isDark ? "rgba(14,165,233,0.15)" : "rgba(14,165,233,0.12)";
 
   return (
     <CrmShell
@@ -132,7 +132,7 @@ const CrmLeads: React.FC = () => {
               <button key={t} onClick={() => setTab(t)}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-heading font-medium rounded-lg transition-all ${
                   tab === t
-                    ? "text-white shadow-sm bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600"
+                    ? "text-white shadow-sm btn-module "
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
                 }`}>
                 {t === "Available" ? <Users size={13} /> : <CheckCircle2 size={13} />} {t} ({t === "Available" ? available.length : used.length})
@@ -143,7 +143,7 @@ const CrmLeads: React.FC = () => {
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder="Search name, mobile, lead code..."
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
           </div>
         </div>
 
@@ -154,12 +154,12 @@ const CrmLeads: React.FC = () => {
           <div className="flex flex-col items-center gap-3 py-14 px-6 text-center">
             <div
               className="w-11 h-11 rounded-full flex items-center justify-center"
-              style={{ background: "rgba(245,158,11,0.12)" }}
+              style={{ background: "rgba(14,165,233,0.12)" }}
             >
               {tab === "Available" ? (
-                <Users size={20} style={{ color: "#f59e0b" }} />
+                <Users size={20} style={{ color: "#0ea5e9" }} />
               ) : (
-                <CheckCircle2 size={20} style={{ color: "#f59e0b" }} />
+                <CheckCircle2 size={20} style={{ color: "#0ea5e9" }} />
               )}
             </div>
             <div className="space-y-1">

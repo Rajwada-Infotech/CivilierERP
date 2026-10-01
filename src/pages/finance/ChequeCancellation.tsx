@@ -222,7 +222,7 @@ export default function ChequeCancellation() {
     }).length;
     return [
       { label: "Total Cancelled", value: String(cancelledList.length), icon: Ban, bg: "bg-rose-500/10", color: "text-rose-500", ring: "ring-rose-500/15", borderL: "border-l-rose-500" },
-      { label: "Cancelled This Month", value: String(thisMonth), icon: CalendarClock, bg: "bg-amber-500/10", color: "text-amber-500", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
+      { label: "Cancelled This Month", value: String(thisMonth), icon: CalendarClock, bg: "bg-[#ffe2021a]", color: "text-amber-500", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
       { label: "Total Amount", value: formatINR(totalAmount), icon: Wallet, bg: "bg-primary/10", color: "text-primary", ring: "ring-primary/15", borderL: "border-l-primary" },
     ];
   }, [cancelledList]);
@@ -256,7 +256,7 @@ export default function ChequeCancellation() {
               </div>
               <div className="min-w-0">
                 <p className="text-lg font-bold font-heading text-foreground leading-none truncate">{value}</p>
-                <p className="text-[10px] text-muted-foreground mt-1 font-heading uppercase tracking-wide">{label}</p>
+                <p className="text-[0.625rem] text-muted-foreground mt-1 font-heading uppercase tracking-wide">{label}</p>
               </div>
             </div>
           ))}
@@ -269,7 +269,7 @@ export default function ChequeCancellation() {
             <TabsTrigger value="bulk" className="text-xs gap-1.5"><Layers size={12} /> Bulk Cancel</TabsTrigger>
             <TabsTrigger value="list" className="text-xs gap-1.5">
               <Ban size={12} /> Cancelled Cheques
-              <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-muted text-[10px] leading-none">{cancelledList.length}</span>
+              <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-muted text-[0.625rem] leading-none">{cancelledList.length}</span>
             </TabsTrigger>
           </TabsList>
 
@@ -295,7 +295,7 @@ export default function ChequeCancellation() {
                 <Button
                   onClick={runSearch}
                   disabled={searching}
-                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-primary hover:bg-primary/90 transition-all"
+                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
                 >
                   {searching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} Search
                 </Button>
@@ -323,16 +323,16 @@ export default function ChequeCancellation() {
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {row.PPaymentID == null && (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-muted text-muted-foreground text-[11px] font-semibold">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-muted text-muted-foreground text-[0.6875rem] font-semibold">
                           Not linked to a payment
                         </span>
                       )}
                       {row.PIsChequeCancelled ? (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[11px] font-semibold">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[0.6875rem] font-semibold">
                           <Ban size={11} /> Cancelled Cheque
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.6875rem] font-semibold">
                           <CheckCircle2 size={11} /> Active
                         </span>
                       )}
@@ -354,7 +354,7 @@ export default function ChequeCancellation() {
                         { label: "IFSC", value: row.PChequeIfsc },
                       ].map((f) => (
                         <div key={f.label} className="min-w-0">
-                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground/80">{f.label}</p>
+                          <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground/80">{f.label}</p>
                           <p className="font-medium text-foreground truncate">{f.value || "—"}</p>
                         </div>
                       ))}
@@ -406,7 +406,7 @@ export default function ChequeCancellation() {
                   <button
                     onClick={runBulkSearch}
                     disabled={bulkSearching || !bulkInput.trim()}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-all"
+                    className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg btn-module text-white text-xs font-medium disabled:opacity-50 transition-all"
                   >
                     {bulkSearching ? <Loader2 size={13} className="animate-spin" /> : <Search size={13} />} Check
                   </button>
@@ -429,20 +429,20 @@ export default function ChequeCancellation() {
                 <div className="rounded-xl border border-border overflow-hidden">
                   {/* Summary strip */}
                   <div className="flex flex-wrap items-center gap-2 px-3 py-2.5 bg-muted/20 border-b border-border">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[11px] font-semibold">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.6875rem] font-semibold">
                       <CheckCircle2 size={11} /> {validBulkEntries.length} ready
                     </span>
                     {bulkResults.some((r) => r.found && r.alreadyCancelled) && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-500 text-[11px] font-semibold">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-rose-500/10 text-rose-500 text-[0.6875rem] font-semibold">
                         <Ban size={11} /> {bulkResults.filter((r) => r.found && r.alreadyCancelled).length} already cancelled
                       </span>
                     )}
                     {bulkResults.some((r) => !r.found) && (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted text-muted-foreground text-[11px] font-semibold">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted text-muted-foreground text-[0.6875rem] font-semibold">
                         <XCircle size={11} /> {bulkResults.filter((r) => !r.found).length} not found
                       </span>
                     )}
-                    <span className="ml-auto text-[10px] text-muted-foreground">{bulkResults.length} checked</span>
+                    <span className="ml-auto text-[0.625rem] text-muted-foreground">{bulkResults.length} checked</span>
                   </div>
 
                   {/* Result rows */}
@@ -548,7 +548,7 @@ export default function ChequeCancellation() {
                     <thead>
                       <tr className="border-b border-border bg-muted/10">
                         {["Cheque No", "Lot", "Bank", "A/C Number", "Payment Doc", "Company", "Project", "Amount", "Reason", "Cancelled By", "Cancelled At"].map((h) => (
-                          <th key={h} className="px-3 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
+                          <th key={h} className="px-3 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">
                             {h}
                           </th>
                         ))}

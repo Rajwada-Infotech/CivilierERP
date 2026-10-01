@@ -29,6 +29,7 @@ import { useLookup } from "@/hooks/useLookup";
 import { usePageRights } from "@/hooks/usePageRights";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
 import { INDIA_STATE_CITIES, INDIA_STATES } from "@/lib/indiaStateCities";
+import { AutoInput, DateInput } from "@/components/ui/date-input";
 
 const GSTIN_REGEX = /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
@@ -265,7 +266,7 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
 
   const Row = ({ label, value }: { label: string; value?: string | null }) => (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
       <span className="text-sm text-foreground break-words">
@@ -498,7 +499,7 @@ function buildCompanyColumns(
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-1">
-          <button
+          <button data-row-view
             onClick={() => openView(row.original)}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10"
             title="View details"
@@ -783,8 +784,7 @@ export default function CompanyMaster() {
                 size={14}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
               />
-              <input
-                type="date"
+              <DateInput
                 value={form[key] as string}
                 onChange={(e) =>
                   setForm((c) => ({ ...c, [key]: e.target.value }))
@@ -796,14 +796,14 @@ export default function CompanyMaster() {
               />
             </div>
             {options?.disabled && options?.title && (
-              <p className="mt-1 text-[11px] text-muted-foreground">
+              <p className="mt-1 text-[0.6875rem] text-muted-foreground">
                 {options.title}
               </p>
             )}
           </>
         ) : (
           <>
-            <input
+            <AutoInput
               type={type}
               value={form[key] as string}
               onChange={(e) => {
@@ -821,7 +821,7 @@ export default function CompanyMaster() {
               }`}
             />
             {options?.disabled && options?.title && (
-              <p className="mt-1 text-[11px] text-muted-foreground">
+              <p className="mt-1 text-[0.6875rem] text-muted-foreground">
                 {options.title}
               </p>
             )}
@@ -867,7 +867,7 @@ export default function CompanyMaster() {
           rights.canCreate && (
             <button
               onClick={openNew}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
             >
               <Plus size={13} /> Add Company
             </button>
@@ -951,7 +951,7 @@ export default function CompanyMaster() {
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${activeTab === tab ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-sm" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize transition-colors ${activeTab === tab ? "btn-module text-white shadow-sm" : "text-muted-foreground hover:bg-muted"}`}
                 >
                   {tab}
                 </button>
@@ -1182,7 +1182,7 @@ export default function CompanyMaster() {
                       showAsterisk: form.gstType === "Registered",
                     })}
                     {gstError && (
-                      <p className="mt-1 text-[11px] text-red-500 flex items-center gap-1">
+                      <p className="mt-1 text-[0.6875rem] text-red-500 flex items-center gap-1">
                         <span>⚠</span> {gstError}
                       </p>
                     )}
@@ -1229,7 +1229,7 @@ export default function CompanyMaster() {
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={!form.code || !form.name || saveMutation.isPending}
-                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg btn-module shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
               >
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />

@@ -14,7 +14,7 @@ export function FormSection({
 }) {
   return (
     <div className="space-y-3">
-      <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground border-b border-border/60 pb-1.5">
+      <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground border-b border-border/60 pb-1.5">
         {label}
       </p>
       {children}
@@ -44,7 +44,7 @@ export function Field({
         {required && <span className="text-destructive ml-0.5">*</span>}
       </Label>
       {children}
-      {hint && <p className="text-[10px] text-muted-foreground">{hint}</p>}
+      {hint && <p className="text-[0.625rem] text-muted-foreground">{hint}</p>}
     </div>
   );
 }
@@ -136,7 +136,7 @@ export function BreakdownRow({
       <div className="min-w-0 mr-4">
         <p className={labelStyles[variant]}>{label}</p>
         {sublabel && (
-          <p className="text-[10px] text-muted-foreground mt-0.5">{sublabel}</p>
+          <p className="text-[0.625rem] text-muted-foreground mt-0.5">{sublabel}</p>
         )}
       </div>
       <span className={`shrink-0 ${valueStyles[variant]}`}>{value}</span>

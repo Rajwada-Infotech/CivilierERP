@@ -336,7 +336,7 @@ export default function TaskDetail() {
               ) : (
                 task.comments.map((c) => (
                   <div key={c.id} className="flex items-start gap-3">
-                    <div className="w-7 h-7 rounded-full gradient-accent flex items-center justify-center text-[10px] font-heading font-bold text-primary-foreground shrink-0">
+                    <div className="w-7 h-7 rounded-full gradient-accent flex items-center justify-center text-[0.625rem] font-heading font-bold text-primary-foreground shrink-0">
                       {c.userInitials}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -344,7 +344,7 @@ export default function TaskDetail() {
                         <span className="text-xs font-heading font-semibold text-foreground">
                           {c.userName}
                         </span>
-                        <span className="text-[10px] text-muted-foreground">
+                        <span className="text-[0.625rem] text-muted-foreground">
                           {formatDateTime(c.createdAt)}
                         </span>
                       </div>
@@ -420,7 +420,7 @@ export default function TaskDetail() {
                   className="text-muted-foreground mt-0.5 shrink-0"
                 />
                 <div className="min-w-0">
-                  <p className="text-[10px] font-heading text-muted-foreground uppercase tracking-wider">
+                  <p className="text-[0.625rem] font-heading text-muted-foreground uppercase tracking-wider">
                     {label}
                   </p>
                   <p className="text-sm text-foreground font-heading break-words">
@@ -433,7 +433,7 @@ export default function TaskDetail() {
 
           {/* Actions */}
           <div className="rounded-xl bg-card border border-border p-4 space-y-2">
-            <p className="text-[10px] font-heading text-muted-foreground uppercase tracking-wider mb-3">
+            <p className="text-[0.625rem] font-heading text-muted-foreground uppercase tracking-wider mb-3">
               Actions
             </p>
 

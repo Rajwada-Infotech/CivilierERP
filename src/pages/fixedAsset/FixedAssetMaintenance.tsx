@@ -27,6 +27,7 @@ import {
   REPAIR_EXPENSE_TYPES, REPAIR_EXPENSE_LABEL,
   type FAMaintAsset, type MaintenanceItem, type RepairExpenseType, type PostingPlan,
 } from "@/api/fixedAssetMaintenanceApi";
+import { DateInput } from "@/components/ui/date-input";
 
 function ensureArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -561,7 +562,7 @@ export default function FixedAssetMaintenance() {
               <Check size={13} /> {editingId ? (editDetail?.Status === "Posted" ? "Save & Unpost" : "Update Draft") : "Save Draft"}
             </button>
             <button onClick={handleSaveAndPost} disabled={busy}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
               <Send size={13} /> {busy ? "Working…" : "Save & Post"}
             </button>
           </div>
@@ -569,7 +570,7 @@ export default function FixedAssetMaintenance() {
       >
         <div className="w-full max-w-[1100px]">
           {editingId && editDetail?.Status === "Posted" && (
-            <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-[#ffe2021a] px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
               <span>
                 This record is <b>Posted</b> (voucher {editDetail.VoucherNo}). Saving will reverse the current
@@ -615,7 +616,7 @@ export default function FixedAssetMaintenance() {
                   </div>
                   <div>
                     <label className={labelCls}><Calendar size={11} /> Doc Date *</label>
-                    <input type="date" value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
+                    <DateInput value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
                   </div>
                 </div>
               </div>
@@ -635,19 +636,19 @@ export default function FixedAssetMaintenance() {
                       onSelect={(a) => setField("assetId", String(a.AssetId))} />
                     {form.itemName && !editingId && (
                       loadingCodes ? (
-                        <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Loading FA Item Codes…</p>
+                        <p className="text-[0.6875rem] text-muted-foreground mt-1 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /> Loading FA Item Codes…</p>
                       ) : codesForItem.length === 0 ? (
-                        <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">No FA Item Code found for this Item.</p>
+                        <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400 mt-1">No FA Item Code found for this Item.</p>
                       ) : (
-                        <p className="text-[11px] text-muted-foreground mt-1">{codesForItem.length} FA Item Code{codesForItem.length > 1 ? "s" : ""} for “{form.itemName}”.</p>
+                        <p className="text-[0.6875rem] text-muted-foreground mt-1">{codesForItem.length} FA Item Code{codesForItem.length > 1 ? "s" : ""} for “{form.itemName}”.</p>
                       )
                     )}
                   </div>
                 </div>
                 {!form.companyId || !form.projectId ? (
-                  <p className="text-[11px] text-muted-foreground">Select Company and Project to load valid, active Fixed Assets.</p>
+                  <p className="text-[0.6875rem] text-muted-foreground">Select Company and Project to load valid, active Fixed Assets.</p>
                 ) : itemNames.length === 0 && !loadingAssets ? (
-                  <p className="text-[11px] text-amber-600 dark:text-amber-400">No valid/active Fixed Asset records for this Company / Project.</p>
+                  <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400">No valid/active Fixed Asset records for this Company / Project.</p>
                 ) : null}
               </div>
 
@@ -676,13 +677,13 @@ export default function FixedAssetMaintenance() {
                     <input type="number" min="0" step="0.01" value={form.amount}
                       onChange={(e) => setField("amount", e.target.value)} placeholder="0.00" className={inputCls} />
                     {sacInfo.code && sacInfo.ratePct != null && Number(form.amount) > 0 && (
-                      <p className="text-[11px] text-muted-foreground mt-1">
+                      <p className="text-[0.6875rem] text-muted-foreground mt-1">
                         SAC {sacInfo.code} · GST {sacInfo.ratePct}% = ₹{fmtAmt(round2(Number(form.amount) * sacInfo.ratePct / 100))}
                         &nbsp;·&nbsp; Total ₹{fmtAmt(round2(Number(form.amount) * (1 + sacInfo.ratePct / 100)))}
                       </p>
                     )}
                     {form.assetId && !sacInfo.code && (
-                      <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                      <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400 mt-1">
                         No SAC Code configured for this FA Item Code — set it on the Fixed Asset Depreciation Tag before posting.
                       </p>
                     )}
@@ -751,7 +752,7 @@ export default function FixedAssetMaintenance() {
                           <tr key={i}>
                             <td className="px-4 py-2.5">{e.account}</td>
                             <td className="px-4 py-2.5 text-center">
-                              <span className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-bold ${e.debit ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"}`}>
+                              <span className={`inline-block rounded px-1.5 py-0.5 text-[0.6875rem] font-bold ${e.debit ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"}`}>
                                 {e.debit ? "Dr" : "Cr"}
                               </span>
                             </td>
@@ -768,7 +769,7 @@ export default function FixedAssetMaintenance() {
                         </tr>
                       </tfoot>
                     </table>
-                    <p className="text-[11px] text-muted-foreground mt-2">
+                    <p className="text-[0.6875rem] text-muted-foreground mt-2">
                       Voucher: <span className="font-mono">{preview.voucherNo}</span>
                       {preview.isPosted && <span className="ml-2 text-emerald-600 dark:text-emerald-400">• already posted</span>}
                     </p>
@@ -795,7 +796,7 @@ export default function FixedAssetMaintenance() {
         accentColor="#eab308"
         action={rights.canCreate && (
           <button onClick={goToCreate}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
             <Plus size={13} /> New Record
           </button>
         )}
@@ -873,11 +874,11 @@ export default function FixedAssetMaintenance() {
                         className="hover:bg-muted/30 transition-colors cursor-pointer">
                         <td className="px-4 py-3 font-mono text-xs">
                           {c.DocNo}
-                          <span className="block text-[10px] font-sans text-muted-foreground">{fmtDate(c.DocDate)}</span>
+                          <span className="block text-[0.625rem] font-sans text-muted-foreground">{fmtDate(c.DocDate)}</span>
                         </td>
                         <td className="px-4 py-3">
                           <p className="font-mono text-xs text-yellow-600 dark:text-yellow-400 truncate">{c.FAItemCode || "—"}</p>
-                          <p className="text-[11px] text-muted-foreground truncate">{c.ItemName || "—"}</p>
+                          <p className="text-[0.6875rem] text-muted-foreground truncate">{c.ItemName || "—"}</p>
                         </td>
                         <td className="px-4 py-3 text-xs">{c.VendorName || "—"}</td>
                         <td className="px-4 py-3 text-xs">{REPAIR_EXPENSE_LABEL[c.RepairExpenseType]}</td>
@@ -887,7 +888,7 @@ export default function FixedAssetMaintenance() {
                         </td>
                         <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center justify-end gap-1">
-                            <button onClick={() => setViewingId(c.MaintenanceId)} title="View"
+                            <button data-row-view="hide" onClick={() => setViewingId(c.MaintenanceId)} title="View"
                               className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"><Eye size={14} /></button>
                             {rights.canPrint && (
                               <button
@@ -964,7 +965,7 @@ export default function FixedAssetMaintenance() {
                   <p className="text-xs font-semibold mb-2 flex items-center gap-1.5"><BookOpen size={12} /> Posting</p>
                   <table className="w-full text-xs">
                     <thead>
-                      <tr className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                      <tr className="text-muted-foreground text-[0.625rem] uppercase tracking-wide">
                         <th className="py-1 text-left font-medium">Account</th>
                         <th className="py-1 text-center font-medium">Dr/Cr</th>
                         <th className="py-1 text-right font-medium">Amount</th>
@@ -975,7 +976,7 @@ export default function FixedAssetMaintenance() {
                         <tr key={i}>
                           <td className="py-1.5">{e.account}</td>
                           <td className="py-1.5 text-center">
-                            <span className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${e.debit ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"}`}>
+                            <span className={`inline-block rounded px-1.5 py-0.5 text-[0.625rem] font-bold ${e.debit ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"}`}>
                               {e.debit ? "Dr" : "Cr"}
                             </span>
                           </td>
@@ -1000,7 +1001,7 @@ export default function FixedAssetMaintenance() {
                   </button>
                   {viewDetail.Status === "Draft" && (
                     <button onClick={() => { setViewingId(null); postMut.mutate(viewDetail.MaintenanceId); }}
-                      className="flex-1 inline-flex items-center justify-center gap-1.5 font-semibold text-white text-xs px-3 py-2 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600">
+                      className="flex-1 inline-flex items-center justify-center gap-1.5 font-semibold text-white text-xs px-3 py-2 rounded-lg btn-module ">
                       <Send size={13} /> Post to GL
                     </button>
                   )}

@@ -87,6 +87,7 @@ import {
   type CompanyExposure,
   type LoanPayment,
 } from "@/api/loanSanctionApi";
+import { DateInput } from "@/components/ui/date-input";
 
 const ACCENT = "#22c55e";
 const LOAN_TYPES: LoanType[] = ["Inter-Company", "Bank Loan", "Customer Loan"];
@@ -384,13 +385,12 @@ function LoanChequePicker({
           ))}
         </select>
         {activeLot && availableCheques.length === 0 && !loadingCheques && (
-          <p className="text-[11px] text-amber-600">No available cheques left in this lot.</p>
+          <p className="text-[0.6875rem] text-amber-600">No available cheques left in this lot.</p>
         )}
       </div>
       <div className="space-y-2">
         <label className={labelCls}>{isPostDated ? "Post-Dated Cheque Date" : "Cheque Date"}</label>
-        <input
-          type="date"
+        <DateInput
           className={inputCls}
           value={chequeDate}
           min={isPostDated ? new Date().toISOString().slice(0, 10) : undefined}
@@ -842,7 +842,7 @@ export default function LoanSanctionPage() {
       cell: ({ row }) => {
         const c = LOAN_TYPE_COLORS[row.original.LoanType];
         return (
-          <span className="px-2 py-0.5 rounded-full text-[11px] font-medium" style={{ background: `${c}18`, color: c }}>
+          <span className="px-2 py-0.5 rounded-full text-[0.6875rem] font-medium" style={{ background: `${c}18`, color: c }}>
             {row.original.LoanType}
           </span>
         );
@@ -883,7 +883,7 @@ export default function LoanSanctionPage() {
             <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden">
               <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pct}%` }} />
             </div>
-            <span className="text-[11px] text-muted-foreground shrink-0">
+            <span className="text-[0.6875rem] text-muted-foreground shrink-0">
               {paid}/{total}
             </span>
           </div>
@@ -920,7 +920,7 @@ export default function LoanSanctionPage() {
             {instrument && (
               <span
                 title={instrumentFull ?? undefined}
-                className="inline-block w-fit whitespace-nowrap text-[10px] text-muted-foreground bg-muted px-2 py-0.5 rounded-full"
+                className="inline-block w-fit whitespace-nowrap text-[0.625rem] text-muted-foreground bg-muted px-2 py-0.5 rounded-full"
               >
                 {instrument}
               </span>
@@ -935,7 +935,7 @@ export default function LoanSanctionPage() {
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
-          <button
+          <button data-row-view
             onClick={() => openView(row.original)}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title="View"
@@ -1066,7 +1066,7 @@ export default function LoanSanctionPage() {
             />
             <button
               onClick={openCreate}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-green-500 to-lime-500 transition-all"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
             >
               <Plus size={13} />
               <span className="hidden sm:inline">New Loan</span>
@@ -1094,7 +1094,7 @@ export default function LoanSanctionPage() {
             >
               <Filter size={12} style={{ color: ACCENT }} />
             </div>
-            <span className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+            <span className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
               Filter loans
             </span>
           </div>
@@ -1102,7 +1102,7 @@ export default function LoanSanctionPage() {
           <CompanyFilterCombo companies={companies} value={listCompanyId} onChange={setListCompanyId} />
 
           {listCompanyId != null && (
-            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
               {companies.find((c) => c.id === listCompanyId)?.label ?? "1 company"}
               <button
                 type="button"
@@ -1155,7 +1155,7 @@ export default function LoanSanctionPage() {
                 </h2>
                 {viewingLoan && (
                   <span
-                    className="px-1.5 py-0.5 rounded-full text-[9px] font-medium shrink-0"
+                    className="px-1.5 py-0.5 rounded-full text-[0.5625rem] font-medium shrink-0"
                     style={{
                       background: `${LOAN_TYPE_COLORS[viewingLoan.LoanType]}18`,
                       color: LOAN_TYPE_COLORS[viewingLoan.LoanType],
@@ -1172,12 +1172,12 @@ export default function LoanSanctionPage() {
                     Bank Loan → we are the borrower → "Loan Received"
                     Inter-Company → could be either; show both party labels */}
                 {viewingLoan && viewingLoan.LoanType === "Customer Loan" && !viewingLoan.LenderCustomerId && (
-                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
                     <TrendingUp size={9} /> Loan Given
                   </span>
                 )}
                 {viewingLoan && (viewingLoan.LoanType === "Bank Loan" || (viewingLoan.LoanType === "Customer Loan" && !!viewingLoan.LenderCustomerId)) && (
-                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 bg-purple-500/15 text-purple-600 dark:text-purple-400">
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold shrink-0 bg-purple-500/15 text-purple-600 dark:text-purple-400">
                     <TrendingDown size={9} /> Loan Received
                   </span>
                 )}
@@ -1189,23 +1189,23 @@ export default function LoanSanctionPage() {
                     a "Sanctioned" label specifically when Status==="Closed",
                     inverted from what it should say. */}
                 {viewingLoan && viewingLoan.Status === "Closed" && (
-                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 bg-slate-500/15 text-slate-600 dark:text-slate-400">
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold shrink-0 bg-slate-500/15 text-slate-600 dark:text-slate-400">
                     <FileCheck2 size={10} /> Closed
                   </span>
                 )}
                 {viewingLoan && viewingLoan.Status !== "Closed" && totalEmis > 0 && paidEmis === totalEmis && (
-                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold shrink-0 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400">
                     <CheckCircle2 size={10} /> Paid
                   </span>
                 )}
                 {viewingLoan && viewingLoan.Status !== "Closed" && !(totalEmis > 0 && paidEmis === totalEmis) && (
-                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold shrink-0 bg-blue-500/15 text-blue-600 dark:text-blue-400">
                     <MoneyRecive size={10} /> Sanctioned
                   </span>
                 )}
                 {viewingLoan && viewingLoan.Status !== "Closed" && nextDue && (
                   <span
-                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-semibold shrink-0 ${
+                    className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold shrink-0 ${
                       new Date(nextDue.DueDate) < new Date(new Date().toDateString())
                         ? "bg-red-500/15 text-red-600 dark:text-red-400"
                         : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
@@ -1250,7 +1250,7 @@ export default function LoanSanctionPage() {
                   type="button"
                   disabled={disabled}
                   onClick={() => setTab(t.id)}
-                  className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-5 py-2.5 sm:py-3.5 text-[11px] sm:text-xs font-semibold rounded-t-lg border-b-2 whitespace-nowrap transition-colors ${
+                  className={`flex items-center gap-1 sm:gap-1.5 px-2.5 sm:px-5 py-2.5 sm:py-3.5 text-[0.6875rem] sm:text-xs font-semibold rounded-t-lg border-b-2 whitespace-nowrap transition-colors ${
                     disabled
                       ? "opacity-40 cursor-not-allowed border-transparent text-muted-foreground"
                       : tab === t.id
@@ -1337,7 +1337,7 @@ export default function LoanSanctionPage() {
                               }`}
                             >
                               <span className="block">{d.label}</span>
-                              <span className="block text-[11px] font-normal opacity-75">{d.hint}</span>
+                              <span className="block text-[0.6875rem] font-normal opacity-75">{d.hint}</span>
                             </button>
                           ))}
                         </div>
@@ -1377,7 +1377,7 @@ export default function LoanSanctionPage() {
                         </button>
                       </div>
                       {pendingDocumentFile && (
-                        <p className="text-[11px] text-muted-foreground flex items-center gap-1.5">
+                        <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1.5">
                           <FileText size={11} /> {pendingDocumentFile.name}
                           <button
                             type="button"
@@ -1398,7 +1398,7 @@ export default function LoanSanctionPage() {
                       <div className="rounded-xl border border-primary/30 bg-primary/[0.03] p-4 space-y-4">
                         <SectionLabel icon={Pencil} label="Edit Loan Details" />
                         {paidEmis > 0 && (
-                          <p className="text-[11px] text-amber-600 dark:text-amber-400 flex items-center gap-1.5 -mt-2">
+                          <p className="text-[0.6875rem] text-amber-600 dark:text-amber-400 flex items-center gap-1.5 -mt-2">
                             <AlertTriangle size={11} /> This loan already has repayments recorded — amount, interest, tenure and dates are locked. Only Loan Doc No, Purpose, Remarks, and bank A/C tags can be edited.
                           </p>
                         )}
@@ -1413,8 +1413,7 @@ export default function LoanSanctionPage() {
                           </div>
                           <div className="space-y-1.5">
                             <label className={labelCls}>Loan Date</label>
-                            <input
-                              type="date"
+                            <DateInput
                               className={inputCls}
                               disabled={paidEmis > 0}
                               value={editForm.loanDate}
@@ -1473,8 +1472,7 @@ export default function LoanSanctionPage() {
                           {isInterCompanyType && !editForm.hasInterest && (
                             <div className="space-y-1.5">
                               <label className={labelCls}>Repayment Due Date</label>
-                              <input
-                                type="date"
+                              <DateInput
                                 className={inputCls}
                                 disabled={paidEmis > 0}
                                 value={editForm.dueDate}
@@ -1548,7 +1546,7 @@ export default function LoanSanctionPage() {
                             type="button"
                             onClick={handleSaveDetails}
                             disabled={savingDetails}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-50 transition-opacity"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium btn-module text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
                           >
                             <Save size={12} /> {savingDetails ? "Saving…" : "Save"}
                           </button>
@@ -1666,7 +1664,7 @@ export default function LoanSanctionPage() {
                         </div>
                         {/* Amount progress bar */}
                         <div className="rounded-xl border border-border bg-muted/10 px-3.5 py-2.5 space-y-1.5">
-                          <div className="flex items-center justify-between text-[11px] font-medium text-muted-foreground">
+                          <div className="flex items-center justify-between text-[0.6875rem] font-medium text-muted-foreground">
                             <span>Repayment progress</span>
                             <span className="font-heading font-bold text-foreground tabular-nums">
                               {totalScheduledAmount > 0
@@ -1686,7 +1684,7 @@ export default function LoanSanctionPage() {
                             />
                           </div>
                           {nextDue && viewingLoan?.Status !== "Closed" && (
-                            <p className={`text-[11px] flex items-center gap-1 ${
+                            <p className={`text-[0.6875rem] flex items-center gap-1 ${
                               new Date(nextDue.DueDate) < new Date(new Date().toDateString())
                                 ? "text-red-600 dark:text-red-400"
                                 : "text-amber-600 dark:text-amber-400"
@@ -1707,7 +1705,7 @@ export default function LoanSanctionPage() {
                               <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
                                 All installments paid — ready to close
                               </p>
-                              <p className="text-[11px] text-muted-foreground">
+                              <p className="text-[0.6875rem] text-muted-foreground">
                                 Formally closing the loan updates its status, records the closure date,
                                 and enables NOC upload. This step requires your confirmation.
                               </p>
@@ -1742,7 +1740,7 @@ export default function LoanSanctionPage() {
                             >
                               <FileText size={12} className="text-muted-foreground shrink-0" />
                               <span className="flex-1 truncate font-medium text-foreground">{d.FileName}</span>
-                              <span className="text-[10px] text-muted-foreground shrink-0">{d.DocType}</span>
+                              <span className="text-[0.625rem] text-muted-foreground shrink-0">{d.DocType}</span>
                             </a>
                           ))}
                         </div>
@@ -1930,8 +1928,7 @@ export default function LoanSanctionPage() {
 
                       <div className="space-y-2">
                         <label className={labelCls}>Loan Date <span className="text-red-500">*</span></label>
-                        <input
-                          type="date"
+                        <DateInput
                           className={inputCls}
                           value={form.loanDate}
                           onChange={(e) => set("loanDate", e.target.value)}
@@ -1950,14 +1947,13 @@ export default function LoanSanctionPage() {
                       {isInterCompanyType && !form.hasInterest && (
                         <div className="space-y-2">
                           <label className={labelCls}>Repayment Due Date</label>
-                          <input
-                            type="date"
+                          <DateInput
                             className={inputCls}
                             value={form.dueDate}
                             min={form.loanDate || undefined}
                             onChange={(e) => set("dueDate", e.target.value)}
                           />
-                          <p className="text-[11px] text-muted-foreground">
+                          <p className="text-[0.6875rem] text-muted-foreground">
                             No EMIs — whole amount due back on this date.
                           </p>
                         </div>
@@ -2028,19 +2024,19 @@ export default function LoanSanctionPage() {
                         </div>
                         <div className="grid grid-cols-2 gap-3 pt-1 border-t border-emerald-500/15">
                           <div>
-                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                            <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                               Total Interest
                             </p>
                             <p className="text-sm font-semibold text-foreground">{fmt(estimatedTotalInterest)}</p>
                           </div>
                           <div>
-                            <p className="text-[10px] uppercase tracking-widest text-muted-foreground">
+                            <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                               Total Repayable
                             </p>
                             <p className="text-sm font-semibold text-foreground">{fmt(estimatedTotalRepayable)}</p>
                           </div>
                         </div>
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-[0.6875rem] text-muted-foreground">
                           Full installment-by-installment breakdown is generated on sanctioning.
                         </p>
                       </div>
@@ -2130,8 +2126,7 @@ export default function LoanSanctionPage() {
                           </div>
                           <div className="space-y-2">
                             <label className={labelCls}>Cheque Date</label>
-                            <input
-                              type="date"
+                            <DateInput
                               className={inputCls}
                               value={form.chequeDate}
                               onChange={(e) => set("chequeDate", e.target.value)}
@@ -2173,8 +2168,7 @@ export default function LoanSanctionPage() {
                           </div>
                           <div className="space-y-2">
                             <label className={labelCls}>DD Date</label>
-                            <input
-                              type="date"
+                            <DateInput
                               className={inputCls}
                               value={form.demandDraftDate}
                               onChange={(e) => set("demandDraftDate", e.target.value)}
@@ -2300,7 +2294,7 @@ export default function LoanSanctionPage() {
                 </div>
 
                 {viewingLoan.Status !== "Closed" && (
-                  <div className="rounded-xl border border-border bg-muted/10 p-3.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+                  <div className="rounded-xl border border-border bg-muted/10 p-3.5 flex items-center gap-2 text-[0.6875rem] text-muted-foreground">
                     <Wallet size={13} className="shrink-0" />
                     EMIs are paid from the <span className="font-semibold text-foreground">Finance → Payment</span> page (Loan EMIs tab) — this view is read-only.
                   </div>
@@ -2309,7 +2303,7 @@ export default function LoanSanctionPage() {
                 <div className="rounded-xl border border-border overflow-hidden overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="bg-muted/30 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <tr className="bg-muted/30 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                         <th className="text-left px-3 py-2.5">#</th>
                         <th className="text-left px-3 py-2.5">Due Date</th>
                         <th className="text-right px-3 py-2.5">Principal</th>
@@ -2348,12 +2342,12 @@ export default function LoanSanctionPage() {
                                 <span className="flex items-center gap-1.5">
                                   {fmtDate(emi.DueDate)}
                                   {isNext && (
-                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                                    <span className="px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold bg-amber-500/15 text-amber-600 dark:text-amber-400">
                                       NEXT
                                     </span>
                                   )}
                                   {isOverdue && (
-                                    <span className="px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-red-500/15 text-red-600 dark:text-red-400">
+                                    <span className="px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold bg-red-500/15 text-red-600 dark:text-red-400">
                                       OVERDUE
                                     </span>
                                   )}
@@ -2388,7 +2382,7 @@ export default function LoanSanctionPage() {
                       <FileCheck2 size={16} className="text-emerald-500 shrink-0" />
                       <div>
                         <p className="text-xs font-semibold text-foreground">Loan fully repaid and closed</p>
-                        <p className="text-[11px] text-muted-foreground">
+                        <p className="text-[0.6875rem] text-muted-foreground">
                           {viewingLoan.NOCFileName
                             ? `NOC on file: ${viewingLoan.NOCFileName}`
                             : "Upload the No Objection Certificate (NOC) once received."}
@@ -2537,7 +2531,7 @@ export default function LoanSanctionPage() {
                       <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
                         All installments paid — ready to close
                       </p>
-                      <p className="text-[11px] text-muted-foreground">
+                      <p className="text-[0.6875rem] text-muted-foreground">
                         Click to formally close this loan, record the closure date, and unlock NOC upload.
                       </p>
                     </div>
@@ -2560,28 +2554,28 @@ export default function LoanSanctionPage() {
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2">
                     <Wallet size={14} className="text-emerald-600" />
-                    <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                    <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
                       Journal Entry — Loan Posting
                     </span>
                   </div>
                   {readOnly && (
                     loanPostingLoading ? (
-                      <span className="text-[10px] text-muted-foreground">Loading…</span>
+                      <span className="text-[0.625rem] text-muted-foreground">Loading…</span>
                     ) : loanPostingData?.isPosted ? (
-                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                         <CheckCircle2 size={10} /> Posted · {loanPostingData.jvNo || viewingLoan?.LoanNo}
                       </span>
                     ) : loanPosting ? (
-                      <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                      <span className="flex items-center gap-1.5 text-[0.625rem] text-muted-foreground">
                         <span className="w-2.5 h-2.5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
                         Posting…
                       </span>
                     ) : loanPostingError ? (
-                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 text-red-600 border border-red-500/20">
+                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-red-500/10 text-red-600 border border-red-500/20">
                         <AlertCircle size={10} /> {loanPostingError}
                       </span>
                     ) : (
-                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                      <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-[#ffe2021a] text-amber-600 border border-amber-500/20">
                         <AlertCircle size={10} /> Not disbursed
                       </span>
                     )
@@ -2621,7 +2615,7 @@ export default function LoanSanctionPage() {
                       : "Loans and Advances";
                   return (
                     <div className="rounded-xl border border-border overflow-hidden">
-                      <div className={`grid ${gridCols} bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2`}>
+                      <div className={`grid ${gridCols} bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[0.5625rem] sm:text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2`}>
                         <span>Account</span>
                         <span>Account Group</span>
                         <span className="text-right">Debit (₹)</span>
@@ -2630,29 +2624,29 @@ export default function LoanSanctionPage() {
                       <div className={`grid ${gridCols} px-2 sm:px-4 py-3 border-b border-border/50 items-center gap-1 sm:gap-2`}>
                         <div className="flex items-center gap-2 min-w-0 pl-1">
                           <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 bg-emerald-500" />
-                          <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0">
+                          <span className="text-[0.6875rem] sm:text-xs text-foreground break-words sm:truncate min-w-0">
                             Loan — {displayBorrower || "Borrower"}
                             {readOnly && viewingLoan?.BorrowerLHeadCode && ` (${viewingLoan.BorrowerLHeadCode})`}
                           </span>
                         </div>
-                        <span className="text-[11px] text-muted-foreground truncate">{borrowerGroup}</span>
+                        <span className="text-[0.6875rem] text-muted-foreground truncate">{borrowerGroup}</span>
                         <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400">{fmt(displayAmount)}</span>
                         <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400" />
                       </div>
                       <div className={`grid ${gridCols} px-2 sm:px-4 py-3 border-b border-border/50 items-center gap-1 sm:gap-2`}>
                         <div className="flex items-center gap-2 min-w-0 pl-1">
                           <span className="inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 bg-rose-500" />
-                          <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0">
+                          <span className="text-[0.6875rem] sm:text-xs text-foreground break-words sm:truncate min-w-0">
                             Loan — {displayLender || "Lender"}
                             {readOnly && viewingLoan?.LenderLHeadCode && ` (${viewingLoan.LenderLHeadCode})`}
                           </span>
                         </div>
-                        <span className="text-[11px] text-muted-foreground truncate">{lenderGroup}</span>
+                        <span className="text-[0.6875rem] text-muted-foreground truncate">{lenderGroup}</span>
                         <span className="text-xs text-right font-mono text-emerald-700 dark:text-emerald-400" />
                         <span className="text-xs text-right font-mono text-rose-600 dark:text-rose-400">{fmt(displayAmount)}</span>
                       </div>
                       <div className={`grid ${gridCols} px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2`}>
-                        <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                        <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
                         <span />
                         <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(displayAmount)}</span>
                         <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(displayAmount)}</span>
@@ -2709,13 +2703,13 @@ export default function LoanSanctionPage() {
                   <div className="space-y-4 pt-2">
                     <div className="flex items-center gap-2">
                       <Receipt size={14} className="text-emerald-600" />
-                      <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                      <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
                         Repayment Postings
                       </span>
                     </div>
                     {loanPostingData.repaymentPostings.map((rp: any) => (
                       <div key={rp.paymentId} className="space-y-2">
-                        <div className="flex items-center gap-2 flex-wrap text-[10px] text-muted-foreground">
+                        <div className="flex items-center gap-2 flex-wrap text-[0.625rem] text-muted-foreground">
                           <span className="font-mono">{rp.paymentRef}</span>
                           <span>·</span>
                           <span>{fmtDate(rp.paymentDate)}</span>
@@ -2799,7 +2793,7 @@ function SectionLabel({ icon: Icon, label }: { icon: typeof FileText; label: str
       <div className="w-5 h-5 rounded-md bg-emerald-500/10 flex items-center justify-center shrink-0">
         <Icon size={11} className="text-emerald-600 dark:text-emerald-400" />
       </div>
-      <span className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">
+      <span className="text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground">
         {label}
       </span>
       <div className="flex-1 h-px bg-gradient-to-r from-border to-transparent" />
@@ -2833,7 +2827,7 @@ function InfoCard({
         />
       )}
       <div className="relative flex items-start justify-between gap-2 mb-1">
-        <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground leading-tight">
+        <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground leading-tight">
           {label}
         </p>
         {Icon && (
@@ -2875,7 +2869,7 @@ function StatTile({
     <div className="rounded-xl border border-border p-3.5" style={{ borderColor: `${accent}30` }}>
       <div className="flex items-center gap-1.5 mb-1.5">
         <Icon size={12} style={{ color: accent }} />
-        <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">{label}</span>
+        <span className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">{label}</span>
       </div>
       <p className="text-base font-bold text-foreground">{value}</p>
     </div>
@@ -2902,7 +2896,7 @@ function ChainNode({
       <div className="flex flex-col items-center">
         <div
           className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 border ${
-            done ? "bg-emerald-500/15 border-emerald-500/40" : "bg-amber-500/10 border-amber-500/30"
+            done ? "bg-emerald-500/15 border-emerald-500/40" : "bg-[#ffe2021a] border-amber-500/30"
           }`}
         >
           {icon}
@@ -2931,17 +2925,17 @@ function PostingCard({ p }: { p: { companyId: number | null; companyName: string
     <div className="rounded-xl border border-border overflow-hidden">
       <div className="flex items-center justify-between px-4 py-2.5 border-b bg-muted/40 border-border">
         <div className="flex items-center gap-2.5 flex-wrap">
-          <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+          <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
             {p.companyName || "Company"}'s Books
           </span>
-          <span className="text-[10px] font-mono text-muted-foreground">{p.voucherNo}</span>
+          <span className="text-[0.625rem] font-mono text-muted-foreground">{p.voucherNo}</span>
         </div>
-        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
+        <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 font-medium whitespace-nowrap">
           ✓ Posted
         </span>
       </div>
       <div className="divide-y divide-border/50">
-        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+        <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
           <span>Account</span>
           <span className="text-right">Debit (₹)</span>
           <span className="text-right">Credit (₹)</span>
@@ -2963,7 +2957,7 @@ function PostingCard({ p }: { p: { companyId: number | null; companyName: string
           </div>
         ))}
         <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-4 py-2 bg-muted/30 text-xs font-bold gap-2">
-          <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+          <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
           <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmt(total)}</span>
           <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmt(total)}</span>
         </div>
@@ -3065,7 +3059,7 @@ function CustomerComboField({
             }`}
           >
             <span className="truncate">{c.label}</span>
-            <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wide ${
+            <span className={`shrink-0 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-bold uppercase tracking-wide ${
               c.source === "CRM"
                 ? "bg-violet-500/15 text-violet-600 dark:text-violet-400"
                 : "bg-sky-500/15 text-sky-600 dark:text-sky-400"

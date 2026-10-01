@@ -111,7 +111,7 @@ export default function RemindersManager() {
               <div className="text-lg font-bold leading-none">
                 ₹{stats.overdueSum.toLocaleString()}
               </div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">
+              <div className="text-[0.625rem] text-muted-foreground mt-0.5">
                 Overdue Volume
               </div>
             </div>
@@ -127,7 +127,7 @@ export default function RemindersManager() {
               <div className="text-lg font-bold leading-none">
                 {stats.overdueCount}
               </div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">
+              <div className="text-[0.625rem] text-muted-foreground mt-0.5">
                 Pending Alerts
               </div>
             </div>
@@ -143,7 +143,7 @@ export default function RemindersManager() {
               <div className="text-lg font-bold leading-none">
                 {stats.totalCount}
               </div>
-              <div className="text-[10px] text-muted-foreground mt-0.5">
+              <div className="text-[0.625rem] text-muted-foreground mt-0.5">
                 Tracked Tenants
               </div>
             </div>
@@ -162,9 +162,9 @@ export default function RemindersManager() {
               <button
                 key={f}
                 onClick={() => setFilter(f)}
-                className={`px-3 py-1 text-[10px] font-semibold uppercase rounded transition-all ${
+                className={`px-3 py-1 text-[0.625rem] font-semibold uppercase rounded transition-all ${
                   filter === f
-                    ? "bg-primary text-primary-foreground shadow"
+                    ? "btn-module text-white shadow"
                     : "text-muted-foreground hover:bg-muted"
                 }`}
               >
@@ -213,10 +213,10 @@ export default function RemindersManager() {
                   filtered.map((r) => (
                     <TableRow key={r.id} className="text-xs">
                       <TableCell>
-                        <div className="font-medium text-[11px]">
+                        <div className="font-medium text-[0.6875rem]">
                           {r.tenantName}
                         </div>
-                        <div className="text-muted-foreground text-[10px]">
+                        <div className="text-muted-foreground text-[0.625rem]">
                           Due: {r.dueDate}
                         </div>
                       </TableCell>
@@ -227,7 +227,7 @@ export default function RemindersManager() {
                       </TableCell>
                       <TableCell>
                         <Badge
-                          className={`text-[10px] gap-1 ${
+                          className={`text-[0.625rem] gap-1 ${
                             r.status === "overdue"
                               ? "bg-red-500/15 text-red-500 border-red-500/30"
                               : r.status === "scheduled"
@@ -238,7 +238,7 @@ export default function RemindersManager() {
                           {r.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-[10px] text-muted-foreground">
+                      <TableCell className="text-[0.625rem] text-muted-foreground">
                         {r.lastSentOn || "Never"}
                       </TableCell>
                       <TableCell className="text-right">
@@ -246,13 +246,13 @@ export default function RemindersManager() {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-6 gap-1 text-[10px] px-2"
+                            className="h-6 gap-1 text-[0.625rem] px-2"
                           >
                             <QrCode size={10} /> QR
                           </Button>
                           <Button
                             size="sm"
-                            className="h-6 gap-1 text-[10px] px-2 bg-amber-500 hover:bg-amber-600 text-white"
+                            className="h-6 gap-1 text-[0.625rem] px-2 bg-amber-500 hover:bg-amber-600 text-white"
                             onClick={() => handleSend(r.id)}
                           >
                             <Send size={10} /> Send

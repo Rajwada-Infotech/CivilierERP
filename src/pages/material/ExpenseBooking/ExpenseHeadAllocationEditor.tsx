@@ -80,7 +80,7 @@ export function ExpenseHeadAllocationEditor({ rows, onChange, targetAmount, read
               isDuplicate ? "border-amber-500/40 bg-amber-500/[0.06]" : "border-border/60 bg-muted/20"
             }`}
           >
-            <span className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary text-[11px] font-semibold font-mono">
+            <span className="shrink-0 inline-flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary text-[0.6875rem] font-semibold font-mono">
               {i + 1}
             </span>
 
@@ -91,7 +91,7 @@ export function ExpenseHeadAllocationEditor({ rows, onChange, targetAmount, read
                 placeholder="Select Expense Head..."
               />
               {isDuplicate && (
-                <p className="flex items-center gap-1 text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                <p className="flex items-center gap-1 text-[0.625rem] text-amber-600 dark:text-amber-400 mt-1">
                   <AlertCircle size={10} className="shrink-0" /> Already used in another row
                 </p>
               )}
@@ -141,7 +141,7 @@ export function ExpenseHeadAllocationEditor({ rows, onChange, targetAmount, read
       )}
 
       {hasDuplicates && (
-        <div className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
+        <div className="flex items-center gap-1.5 text-[0.6875rem] font-medium px-2.5 py-1.5 rounded-lg bg-[#ffe2021a] text-amber-600 dark:text-amber-400">
           <AlertCircle size={11} className="shrink-0" />
           {duplicateLHeadIds.size === 1
             ? "One Expense Head is used in more than one row — each row posts its own debit leg, so this will double-post that head."
@@ -151,10 +151,10 @@ export function ExpenseHeadAllocationEditor({ rows, onChange, targetAmount, read
 
       {rows.length > 0 && (
         <div
-          className={`flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-lg ${
+          className={`flex items-center gap-1.5 text-[0.6875rem] font-medium px-2.5 py-1.5 rounded-lg ${
             balanced
               ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-              : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+              : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
           }`}
         >
           {balanced ? <CheckCircle2 size={11} className="shrink-0" /> : <AlertCircle size={11} className="shrink-0" />}

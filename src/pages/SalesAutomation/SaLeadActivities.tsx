@@ -9,6 +9,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useAuth } from "@/contexts/AuthContext";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { DateInput } from "@/components/ui/date-input";
 
 const API = "/api/sa/lead-activities";
 const ACTIVITY_TYPES = ["Call", "WhatsApp", "Email", "Meeting", "Note", "SMS", "SiteVisit"];
@@ -112,9 +113,9 @@ const SaLeadActivities: React.FC = () => {
               <option value="Inbound">Inbound</option>
             </select>
             <input value={form.Outcome} onChange={(e) => setForm({ ...form, Outcome: e.target.value })} placeholder="Outcome" className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <input type="date" value={form.NextFollowupDate} onChange={(e) => setForm({ ...form, NextFollowupDate: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
+            <DateInput value={form.NextFollowupDate} onChange={(e) => setForm({ ...form, NextFollowupDate: e.target.value })} className="border border-border rounded-md bg-background px-3 py-2 text-sm" />
             <textarea value={form.Summary} onChange={(e) => setForm({ ...form, Summary: e.target.value })} placeholder="Conversation summary" className="md:col-span-5 min-h-20 border border-border rounded-md bg-background px-3 py-2 text-sm" />
-            <button className="inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground px-3 py-2 text-sm font-medium">
+            <button className="inline-flex items-center justify-center gap-2 rounded-md btn-module text-white px-3 py-2 text-sm font-medium">
               <Plus size={15} /> Log
             </button>
           </form>

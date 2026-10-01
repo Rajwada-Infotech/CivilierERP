@@ -110,7 +110,7 @@ export function DependencyMasterList({ rows, canEdit, canDelete, onEdit, onDelet
           <span className={`truncate ${depth === 0 ? "text-sm font-heading font-semibold" : "text-sm"} text-foreground`}>
             {node.label}
           </span>
-          <span className="ml-auto text-[10px] font-mono text-muted-foreground shrink-0">
+          <span className="ml-auto text-[0.625rem] font-mono text-muted-foreground shrink-0">
             {node.count} {node.count === 1 ? "chain" : "chains"}
           </span>
         </button>

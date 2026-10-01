@@ -109,7 +109,7 @@ const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n ?? 0);
 function StatusBadge({ status }: { status: keyof typeof ASSIGNMENT_STATUS_META }) {
   const meta = ASSIGNMENT_STATUS_META[status] ?? ASSIGNMENT_STATUS_META.PENDING;
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-heading font-bold uppercase tracking-wide ${meta.className}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-bold uppercase tracking-wide ${meta.className}`}>
       {meta.label}
     </span>
   );
@@ -438,7 +438,7 @@ export default function CivilWorkDprDashboard() {
                 </div>
                 <button
                   onClick={() => navigate("/civilworkdpr/activity-reporting")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: ACCENT }}
                 >
                   View all →
@@ -454,7 +454,7 @@ export default function CivilWorkDprDashboard() {
                         <p className="text-xs font-medium text-foreground truncate max-w-[160px] sm:max-w-[220px]">
                           {a.ActivityName || "—"} · {a.ChainAlias || "—"}
                         </p>
-                        <p className="text-[10px] text-muted-foreground truncate">
+                        <p className="text-[0.625rem] text-muted-foreground truncate">
                           {a.ProjectName || "—"} · {a.EngineerNames || "Unassigned"} · {timeAgo(a.UpdatedAt)}
                         </p>
                       </div>
