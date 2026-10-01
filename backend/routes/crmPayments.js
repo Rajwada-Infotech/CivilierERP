@@ -1618,7 +1618,7 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
     if (dateFrom)  { where += " AND o.ReceivedDate >= @df";  req_.input("df",        sql.Date, dateFrom); }
     if (dateTo)    { where += " AND o.ReceivedDate <= @dt";  req_.input("dt",        sql.Date, dateTo); }
     if (search) {
-      where += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR um.UnitName LIKE @s)";
+      where += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR COALESCE(um.UnitName, b.UnitNo) LIKE @s)";
       req_.input("s", sql.NVarChar(200), `%${search}%`);
     }
 
@@ -1655,7 +1655,7 @@ router.get("/on-account", requirePageRight("crm-payments", "view"), async (req, 
     if (dateFrom)  { countWhere += " AND o.ReceivedDate >= @df";  countReq.input("df",        sql.Date, dateFrom); }
     if (dateTo)    { countWhere += " AND o.ReceivedDate <= @dt";  countReq.input("dt",        sql.Date, dateTo); }
     if (search) {
-      countWhere += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR um.UnitName LIKE @s)";
+      countWhere += " AND (a.ApplicantName LIKE @s OR b.BookingNo LIKE @s OR proj.name LIKE @s OR COALESCE(um.UnitName, b.UnitNo) LIKE @s)";
       countReq.input("s", sql.NVarChar(200), `%${search}%`);
     }
     const countResult = await countReq.query(`

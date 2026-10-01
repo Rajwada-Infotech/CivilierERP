@@ -269,7 +269,7 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
     if (blockId) { req0.input("blockId", sql.Int, blockId); conds.push("b.BlockId = @blockId"); }
     if (search) {
       req0.input("search", sql.NVarChar(200), `%${search}%`);
-      conds.push("(a.ApplicantName LIKE @search OR a.Mobile LIKE @search OR b.BookingNo LIKE @search OR um.UnitName LIKE @search)");
+      conds.push("(a.ApplicantName LIKE @search OR a.Mobile LIKE @search OR b.BookingNo LIKE @search OR COALESCE(um.UnitName, b.UnitNo) LIKE @search)");
     }
     const where = `WHERE ${conds.join(" AND ")}`;
 
@@ -301,7 +301,7 @@ router.get("/", requirePageRight("crm-bookings", "view"), async (req, res) => {
             AND (@companyId2 IS NULL OR b.CompanyId = @companyId2)
             AND (@projectId2 IS NULL OR b.ProjectId = @projectId2)
             AND (@blockId2 IS NULL OR b.BlockId = @blockId2)
-            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR a.Mobile LIKE @search2 OR b.BookingNo LIKE @search2 OR um.UnitName LIKE @search2))
+            AND (@search2 IS NULL OR (a.ApplicantName LIKE @search2 OR a.Mobile LIKE @search2 OR b.BookingNo LIKE @search2 OR COALESCE(um.UnitName, b.UnitNo) LIKE @search2))
         `),
     ]);
     res.json({ rows: result.recordset, total: countResult.recordset[0].total, page, pageSize });
