@@ -14,7 +14,7 @@ const { postCrmParkingPaymentToGL } = require("../services/crmLedger");
 const { recordGLPosting } = require("../services/approvalService");
 const { recalculateRemainingMilestones, isLegalWorkStarted, isSaleDeedRegistered, isBookingPastFirstApproval, requireActiveBooking, isBookingFullySettled, syncParkingPaymentStatus } = require("../services/crmWorkflowGuards");
 const { createAmendmentRequest } = require("../services/crmAmendments");
-const { recalculateBookingGst, getHsnRate, UNIT_PARKING_THRESHOLD, AFFORDABLE_HSN_CODE, OTHER_RESIDENTIAL_HSN_CODE } = require("../services/crmGst");
+const { recalculateBookingGst, getHsnRate, resolveUnitParkingHsn } = require("../services/crmGst");
 
 router.use(authMiddleware);
 router.use(apiRateLimit);
@@ -675,7 +675,11 @@ router.get("/application/:applicationId", requireAnyPageRight(["crm-bookings", "
       const allotmentBase = allotments.reduce((s, a) => s + (Number(a.RateSnapshot) || 0) * (Number(a.Quantity) || 1), 0);
       const holdBase = holdLineAmounts.reduce((s, x) => s + x.lineAmount, 0);
       const combinedBase = unitTotal + allotmentBase + holdBase;
-      const hsnCode = combinedBase <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE;
+      // Through the shared resolver so dbo.CrmGstRule governs here too. This
+      // used to compare against UNIT_PARKING_THRESHOLD directly, which meant
+      // moving the threshold in the master repriced the booking but not this
+      // quote.
+      const hsnCode = (await resolveUnitParkingHsn(pool, combinedBase)).hsnCode;
       unitParkingRate = await getHsnRate(pool, hsnCode);
     }
 

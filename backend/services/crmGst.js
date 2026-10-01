@@ -111,6 +111,37 @@ async function resolveLandOwnedByBookingCustomer(pool, bookingId) {
   return sourceCount > 0 && Number(row?.CustomerOwnedPlotCount || 0) === sourceCount;
 }
 
+
+/**
+ * THE single place the Unit+Parking HSN bracket is decided.
+ *
+ * This test used to be written out in three places — here, crmParking.js and
+ * applicationFormPdf.js — each comparing against the UNIT_PARKING_THRESHOLD
+ * constant directly. Once migration 487 made the bands editable master data,
+ * that duplication became a real inconsistency rather than mere repetition:
+ * moving the threshold in dbo.CrmGstRule changed the booking's GST while
+ * parking pricing and the customer's printed application form carried on using
+ * the hardcoded Rs 45 lakh. The quote and the invoice would simply disagree.
+ *
+ * The constants remain ONLY as a fallback for an empty or non-matching rule
+ * table. That is deliberate: a GST engine that stopped taxing because someone
+ * deactivated a master row would be far worse than one that carried on as it
+ * always had. `fromRule` is returned so a caller can tell the two apart — the
+ * fallback is safe, but it should not be invisible.
+ */
+async function resolveUnitParkingHsn(pool, bracketBase, opts = {}) {
+  const resolved = await resolveHsnCode(pool, APPLIES_TO.UNIT_PARKING, {
+    value: bracketBase,
+    landOwnedByCustomer: opts.landOwnedByCustomer ?? null,
+  });
+  if (resolved.hsnCode) return { hsnCode: resolved.hsnCode, fromRule: true, ruleName: resolved.ruleName };
+  return {
+    hsnCode: bracketBase <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE,
+    fromRule: false,
+    ruleName: null,
+  };
+}
+
 // The single source of truth for ParkingTotal/ExtraChargesTotal/GrandTotal
 // AND the fixed HSN-driven GST — merged into one function (rather than two
 // separate rollups) so milestones are always redistributed
@@ -175,12 +206,7 @@ async function recalculateBookingGst(pool, bookingId) {
   let hsnCode = null;
   if (!outsideGst) {
     const landOwnedByCustomer = await resolveLandOwnedByBookingCustomer(pool, bookingId);
-    const resolved = await resolveHsnCode(pool, APPLIES_TO.UNIT_PARKING, {
-      value: bracketBase,
-      landOwnedByCustomer,
-    });
-    hsnCode = resolved.hsnCode
-      ?? (bracketBase <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE);
+    hsnCode = (await resolveUnitParkingHsn(pool, bracketBase, { landOwnedByCustomer })).hsnCode;
   }
   const unitParkingRate = outsideGst ? 0 : await getHsnRate(pool, hsnCode);
 
@@ -291,6 +317,7 @@ async function recalculateBookingGst(pool, bookingId) {
 }
 
 module.exports = {
+  resolveUnitParkingHsn,
   recalculateBookingGst,
   checkGstExemption,
   getHsnRate,

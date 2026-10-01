@@ -2,9 +2,7 @@ const PDFDocument = require("pdfkit");
 const { sql } = require("../db");
 const {
   getHsnRate,
-  UNIT_PARKING_THRESHOLD,
-  AFFORDABLE_HSN_CODE,
-  OTHER_RESIDENTIAL_HSN_CODE,
+  resolveUnitParkingHsn,
   EXTRA_WORK_HSN_CODE,
 } = require("./crmGst");
 
@@ -184,7 +182,9 @@ async function fetchApplicationFormData(pool, applicationId) {
     const extraBase = d.extraCharges.reduce((s, c) => s + Number(c.Amount || 0), 0);
     const extraGst = d.extraCharges.reduce((s, c) => s + Number(c.GstAmount || 0), 0);
     const upTotal = unitValue + parkingBase;
-    const hsnCode = upTotal <= UNIT_PARKING_THRESHOLD ? AFFORDABLE_HSN_CODE : OTHER_RESIDENTIAL_HSN_CODE;
+    // Same resolver the booking itself uses, so the printed form can never
+    // quote a different bracket from the one that will be charged.
+    const hsnCode = (await resolveUnitParkingHsn(pool, upTotal)).hsnCode;
     const gstRate = upTotal > 0 ? await getHsnRate(pool, hsnCode) : 0;
     const unitGst = round2(unitValue * gstRate / 100);
     const parkingGst = round2(parkingBase * gstRate / 100);
