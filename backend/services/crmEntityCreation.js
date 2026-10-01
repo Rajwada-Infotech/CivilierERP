@@ -878,6 +878,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       // Name concatenates multiple unit names if there are several
       .input("unit",  sql.NVarChar(100), unitRows.map(u => u.UnitName).join(", "))
       .input("blk",   sql.NVarChar(100), unitRow.BlockName || b.BlockName || null)
+      .input("blkid", sql.Int,           unitRow.BlockId != null ? unitRow.BlockId : null)
       .input("flr",   sql.NVarChar(100), b.FloorName   || null)
       .input("utype", sql.NVarChar(100), unitRow.UnitType || b.UnitType || null)
       .input("area",  sql.Decimal(18,2), area)
@@ -902,7 +903,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
       .input("cdl",   sql.DateTime2(3),  confirmDeadline)
       .query(`
         INSERT INTO dbo.CrmBooking
-          (BookingNo, ApplicationId, UnitId, ProjectId, ProjectName, CompanyId, UnitNo, BlockName, FloorName, UnitType,
+          (BookingNo, ApplicationId, UnitId, ProjectId, ProjectName, CompanyId, UnitNo, BlockName, BlockId, FloorName, UnitType,
            AreaSqFt, CarpetAreaSqFt, BuiltUpAreaSqFt, SuperBuiltUpAreaSqFt, OpenTerraceAreaSqFt,
            RatePerSqFt, TotalValue, BookingAmount, TokenType, TokenValue, PaymentPlanId,
            BookingDate, PaymentMode, AssignedTo, Status, Notes, IsActive,
@@ -910,7 +911,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
            BrokerId, BrokerageRatePercent, BrokeragePaymentPlan, ConfirmDeadline)
         OUTPUT INSERTED.Id
         VALUES
-          (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @flr, @utype,
+          (@no, @appId, @uid, @pid, @pname, @cid, @unit, @blk, @blkid, @flr, @utype,
            @area, @carpetArea, @builtUpArea, @superBuiltUpArea, @openTerraceArea,
            @rate, @tot, @bamt, @ttype, @tval, @ppid,
            ISNULL(@bdate, CAST(SYSDATETIME() AS DATE)), @pmode,
