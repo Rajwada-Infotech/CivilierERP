@@ -167,17 +167,31 @@ function bookingSaleTreatment(unitKinds = []) {
  */
 async function getBookingLandSplit(pool, bookingId, totalValue) {
   const rows = await pool.request().input("bid", sql.Int, bookingId).query(`
+    -- Land sold as PLOTS. Migration 491 moved plot inventory out of UnitMaster
+    -- into dbo.PlotMaster, with dbo.CrmBookingPlot as its booking line — so a
+    -- plot booking has NO CrmBookingUnit row at all. Reading only the unit
+    -- lines (as this did before) classified a pure-land booking as construction
+    -- and taxed the land, which is exactly backwards.
+    SELECT N'PLOT' AS UnitKind, bp.AllocatedValue
+    FROM dbo.CrmBookingPlot bp
+    WHERE bp.BookingId = @bid AND bp.Status = N'Active'
+    UNION ALL
+    -- Constructed assets (flat / villa), plus any early UnitMaster PLOT rows
+    -- that predate 491 and are kept for historical foreign keys.
     SELECT u.UnitKind, l.AllocatedValue
     FROM dbo.CrmBookingUnit l
     JOIN dbo.UnitMaster u ON u.Id = l.UnitId
     WHERE l.BookingId = @bid AND l.Status = N'Active'
     UNION ALL
-    -- Pre-485 fallback: no lines, so use the booking's own primary unit.
+    -- Pre-485 fallback: no lines of EITHER kind, so use the booking's own
+    -- primary unit. Guarded on both tables, or a plot booking would also pick
+    -- up its UnitId here and be double-counted.
     SELECT u2.UnitKind, b.TotalValue
     FROM dbo.CrmBooking b
     JOIN dbo.UnitMaster u2 ON u2.Id = b.UnitId
     WHERE b.Id = @bid
       AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingUnit l2 WHERE l2.BookingId = @bid AND l2.Status = N'Active')
+      AND NOT EXISTS (SELECT 1 FROM dbo.CrmBookingPlot bp2 WHERE bp2.BookingId = @bid AND bp2.Status = N'Active')
   `);
 
   const lines = rows.recordset;
