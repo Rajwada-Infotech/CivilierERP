@@ -1343,7 +1343,8 @@ const CrmApplication: React.FC = () => {
     if (!form.CompanyId || !form.ProjectId) { toast.error("Select a company and project"); return; }
     if (!form.PreferredUnitIds?.length && !form.PreferredPlotIds?.length) { toast.error("Select a unit or plot"); return; }
     if (form.RatePerSqFt === "" || Number(form.RatePerSqFt) <= 0) { toast.error("Enter a valid Rate (₹/sqft)"); return; }
-    if (!form.PaymentPlanId) { toast.error("Select a Payment Plan for this unit"); return; }
+    // Plot sales have no payment plan: Booking Amount, then the balance.
+    if (!form.PreferredPlotIds?.length && !form.PaymentPlanId) { toast.error("Select a Payment Plan for this unit"); return; }
     setSaving(true);
     try {
       // Shared Company/Project/Unit/Payment Plan + intake fields step 1 owns.
@@ -1356,7 +1357,7 @@ const CrmApplication: React.FC = () => {
         ProjectId: form.ProjectId || null,
         PreferredUnitIds: form.PreferredUnitIds || [],
         PreferredPlotIds: form.PreferredPlotIds || [],
-        PaymentPlanId: form.PaymentPlanId || null,
+        PaymentPlanId: form.PreferredPlotIds?.length ? null : (form.PaymentPlanId || null),
         RatePerSqFt: form.RatePerSqFt || null,
         DateOfApply: form.DateOfApply || null,
         Source: form.Source || null,
@@ -1468,8 +1469,11 @@ const CrmApplication: React.FC = () => {
     try {
       await saveApplicationFields({
         Notes: form.Notes || null,
-        TokenType: form.TokenType || null,
+        // The field is always ₹ ("Amount"); a plot sale has no plan to supply
+        // the Booking Amount, so the typed figure is it.
+        TokenType: form.PreferredPlotIds?.length ? "Amount" : (form.TokenType || null),
         TokenValue: form.TokenValue || null,
+        ...(form.PreferredPlotIds?.length ? { BookingAmount: form.TokenValue || 0 } : {}),
         PaymentMode: form.PaymentMode || null,
         DepositBankId: null, // assigned by Accounts before approval
       });
@@ -2326,7 +2330,13 @@ const CrmApplication: React.FC = () => {
                       Master); if the unit has none tagged, every active plan
                       is offered instead. Not re-selectable on the Booking
                       page — this is the one place it's chosen. */}
-                  {hasInventorySelection && (
+                  {hasInventorySelection && form.PreferredPlotIds.length > 0 && (
+                    <div className="rounded-xl border border-border bg-muted/20 p-4">
+                      <p className="text-xs font-semibold text-foreground">No payment plan</p>
+                      <p className="mt-1 text-[11px] text-muted-foreground">A plot sale is paid as the Booking Amount entered on the payment step, then the balance. With no Booking Amount, the full value is due as one payment.</p>
+                    </div>
+                  )}
+                  {hasInventorySelection && form.PreferredPlotIds.length === 0 && (
                     <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-4 space-y-2">
                       <label className={labelCls}>Payment Plan <span className="text-destructive">*</span></label>
                       <select value={form.PaymentPlanId} disabled={applicationId != null && (unitLocked || !canEditUnitSelection)}

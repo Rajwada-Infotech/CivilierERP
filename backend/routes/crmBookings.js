@@ -453,6 +453,13 @@ router.put("/:id", requirePageRight("crm-bookings", "edit"), async (req, res) =>
     const hasPlanId = (v) => v !== null && v !== undefined && v !== "";
     const newPlanId = b.PaymentPlanId !== undefined ? (hasPlanId(b.PaymentPlanId) ? parseInt(b.PaymentPlanId) : null) : undefined;
     const planIsChanging = newPlanId !== undefined && newPlanId !== oldRow.PaymentPlanId;
+    if (planIsChanging && hasPlanId(newPlanId)) {
+      const plotLine = await pool.request().input("bid", sql.Int, id)
+        .query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @bid");
+      if (plotLine.recordset.length) {
+        return res.status(400).json({ error: "A plot sale has no payment plan — its schedule is the Booking Amount and the balance." });
+      }
+    }
     if (planIsChanging) {
       if (hasPlanId(newPlanId)) {
         // Same tag-based resolver Application/Booking creation use — the new

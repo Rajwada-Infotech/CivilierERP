@@ -331,8 +331,10 @@ async function createCrmApplicationRecord(pool, b, actorUserId) {
       throw new CrmCreationError("This unit already has an active hold from another application", 409);
     }
   }
+  // A plot sale has no payment plan: land is paid as booking amount + balance
+  // (see landSaleSchedule), not in construction stages.
   const effectivePaymentPlanId = rawAppPlotIds.length > 0
-    ? (b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? parseInt(b.PaymentPlanId) : null)
+    ? null
     : await resolveApplicationPaymentPlan(pool, {
     preferredUnitId: preferredUnitId !== undefined && preferredUnitId !== null && preferredUnitId !== "" ? parseInt(preferredUnitId) : null,
     paymentPlanId: b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? b.PaymentPlanId : null,
@@ -502,8 +504,43 @@ const DEFAULT_MILESTONES = [
 // a plan (or the 7-stage default, when none is selected) into real
 // CrmPaymentMilestone rows, so a plan switch produces an identical shape
 // to what creation would have produced.
+// A plot sale's schedule. No payment plan applies to land: the customer pays
+// the Booking Amount (if one was taken) and then the balance. Every rupee is
+// due from the start, unlike a plan schedule that waits for a Booking Amount.
+function landSaleSchedule(totalValue, bookingAmount) {
+  const total = Math.round(Number(totalValue) * 100) / 100;
+  const booking = Math.min(total, Math.max(0, Math.round(Number(bookingAmount || 0) * 100) / 100));
+  if (booking <= 0 || booking >= total) return [{ no: 1, name: "Full Payment", amount: total, dept: "Sales" }];
+  return [
+    { no: 1, name: "Booking", amount: booking, dept: "Sales", docs: "Booking Receipt" },
+    { no: 2, name: "Balance", amount: Math.round((total - booking) * 100) / 100, dept: "Sales" },
+  ];
+}
+
 async function generateMilestonesForBooking(poolOrTx, bookingId, totalValue, paymentPlanId, bookingDate, actorUserId, bookingAmount = 0) {
   if (!totalValue || totalValue <= 0) return;
+  const plotLine = await poolOrTx.request().input("bid", sql.Int, bookingId)
+    .query("SELECT TOP 1 1 AS x FROM dbo.CrmBookingPlot WHERE BookingId = @bid");
+  if (plotLine.recordset.length) {
+    const due = bookingDate ? new Date(bookingDate) : new Date();
+    for (const m of landSaleSchedule(totalValue, bookingAmount)) {
+      await poolOrTx.request()
+        .input("bid",  sql.Int,           bookingId)
+        .input("mno",  sql.Int,           m.no)
+        .input("mname",sql.NVarChar(200), m.name)
+        .input("amt",  sql.Decimal(18,2), m.amount)
+        .input("pct",  sql.Decimal(5,2),  Math.round((m.amount / totalValue) * 10000) / 100)
+        .input("due",  sql.Date,          due)
+        .input("rdocs",sql.NVarChar(sql.MAX), m.docs || null)
+        .input("dept", sql.NVarChar(100), m.dept || null)
+        .input("cb",   sql.Int,           actorUserId)
+        .query(`
+          INSERT INTO dbo.CrmPaymentMilestone (BookingId, MilestoneNo, MilestoneName, AmountDue, [Percent], DueDate, RequiredDocuments, ResponsibleDepartment, Status, CreatedBy, CreatedAt)
+          VALUES (@bid, @mno, @mname, @amt, @pct, @due, @rdocs, @dept, 'Pending', @cb, SYSDATETIME())
+        `);
+    }
+    return;
+  }
   let milestones;
   // Booking Amount is now set on the Payment Plan itself (at plan-creation
   // time), not typed fresh per booking — see CrmPaymentPlans.tsx. When the
@@ -799,7 +836,7 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // changing it at booking time.
   const hasId = (v) => v !== null && v !== undefined && v !== "";
   const effectivePaymentPlanId = isPlotBooking
-    ? (hasId(b.PaymentPlanId) ? parseInt(b.PaymentPlanId) : (hasId(appRow.recordset[0].PaymentPlanId) ? parseInt(appRow.recordset[0].PaymentPlanId) : null))
+    ? null
     : await resolveApplicationPaymentPlan(pool, {
     preferredUnitId: unitRow.Id,
     paymentPlanId: hasId(b.PaymentPlanId) ? b.PaymentPlanId : (hasId(appRow.recordset[0].PaymentPlanId) ? appRow.recordset[0].PaymentPlanId : null),
@@ -833,16 +870,27 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
   // without a fixed BookingAmount set (e.g. an old plan saved before this
   // field existed) can no longer produce a booking via a silent %
   // fallback — staff must open the plan and set one first.
-  if (effectivePaymentPlanId === null || effectivePaymentPlanId === undefined) {
-    throw new CrmCreationError("A Payment Plan must be tagged to this unit before a Booking can be created — Booking Amount can only come from the plan.");
+  // A plot sale has no payment plan — its Booking Amount is the figure
+  // entered on the application, and the balance is one further milestone.
+  let bookingAmount;
+  if (isPlotBooking) {
+    // The application form records it as the Token (Booking) Amount in ₹.
+    const typed = hasId(b.BookingAmount) ? Number(b.BookingAmount) : (hasId(b.TokenValue) ? Number(b.TokenValue) : 0);
+    if (!Number.isFinite(typed) || typed < 0) throw new CrmCreationError("Booking Amount must be zero or more");
+    if (typed > total) throw new CrmCreationError("Booking Amount cannot be more than the plot value");
+    bookingAmount = typed;
+  } else {
+    if (effectivePaymentPlanId === null || effectivePaymentPlanId === undefined) {
+      throw new CrmCreationError("A Payment Plan must be tagged to this unit before a Booking can be created — Booking Amount can only come from the plan.");
+    }
+    const planRes = await pool.request().input("pid", sql.Int, parseInt(effectivePaymentPlanId))
+      .query("SELECT PlanName, BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
+    const planRow = planRes.recordset[0];
+    if (!planRow || planRow.BookingAmount == null) {
+      throw new CrmCreationError(`Payment Plan "${planRow?.PlanName || effectivePaymentPlanId}" has no fixed Booking Amount set — open it in Payment Plan Master and set one before booking this unit.`);
+    }
+    bookingAmount = Number(planRow.BookingAmount);
   }
-  const planRes = await pool.request().input("pid", sql.Int, parseInt(effectivePaymentPlanId))
-    .query("SELECT PlanName, BookingAmount FROM dbo.CrmPaymentPlanTemplate WHERE Id = @pid");
-  const planRow = planRes.recordset[0];
-  if (!planRow || planRow.BookingAmount == null) {
-    throw new CrmCreationError(`Payment Plan "${planRow?.PlanName || effectivePaymentPlanId}" has no fixed Booking Amount set — open it in Payment Plan Master and set one before booking this unit.`);
-  }
-  const bookingAmount = Number(planRow.BookingAmount);
 
   // getNextDocNumber uses its own internal sp_getapplock transaction and must
   // always run on pool (not on tx) — see crmPayments.js comment at line ~121.
@@ -1102,6 +1150,6 @@ async function checkTokenVsFirstMilestone(pool, bookingId, bookingAmount) {
 
 module.exports = {
   createCrmApplicationRecord, createCrmBookingRecord, CrmCreationError, SOURCE_TYPES,
-  generateMilestonesForBooking, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
+  generateMilestonesForBooking, landSaleSchedule, resolveApplicationPaymentPlan, getApplicablePaymentPlans, validatePlotSelection,
 };
 

@@ -556,7 +556,8 @@ router.put("/:id", requirePageRight("crm-applications", "edit"), async (req, res
       const effectiveUnitId = b.PreferredUnitId !== undefined && b.PreferredUnitId !== null && b.PreferredUnitId !== "" ? parseInt(b.PreferredUnitId) : existingUnitId;
       try {
         if (preferredPlotIds.length > 0) {
-          effectivePaymentPlanId = b.PaymentPlanId !== undefined && b.PaymentPlanId !== null && b.PaymentPlanId !== "" ? parseInt(b.PaymentPlanId) : null;
+          // Plot sales have no payment plan (see landSaleSchedule).
+          effectivePaymentPlanId = null;
         } else {
           effectivePaymentPlanId = await resolveApplicationPaymentPlan(pool, {
           preferredUnitId: effectiveUnitId,
