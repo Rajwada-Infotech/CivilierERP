@@ -64,7 +64,11 @@ import {
   CalendarDays,
   UserRound,
   ListChecks,
+  Printer,
+  FileDown,
 } from "lucide-react";
+import { printMasterPreview, downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
+import { toast } from "sonner";
 
 // ─── Approval chain types — matches GET /api/approval-workflows/trail ────────
 
@@ -401,6 +405,123 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
     </>
   );
 
+  // Print / Generate PDF both render this same shape — see
+  // masterPreviewPrint.ts's own comment on why that matters. Built from
+  // exactly what's already on screen (Overview, line items, Details,
+  // Approval Chain) so the exported doc can never show something the
+  // reviewer didn't actually see here.
+  const previewSections = (() => {
+    const sections: { title: string; fields: { label: string; value?: string | number | boolean | null }[] }[] = [];
+
+    const overviewFields: { label: string; value?: string | number | boolean | null }[] = [
+      { label: usesRungDetail ? "Start Date" : "Date", value: fmtDate(item.RecordDate) },
+      { label: "Party", value: party },
+      { label: "Created By", value: item.CreatedBy || "—" },
+      usesRungDetail
+        ? { label: "End Date", value: fmtDate(rungDetail?.assignment?.endDate ?? null) }
+        : { label: "Last Modified", value: fmtDate(item.LastModified) },
+    ];
+    if (item.Module === "goods-receipt" && item.SourceTransferDocNo) {
+      overviewFields.push({ label: "Transfer Ref", value: item.SourceTransferDocNo });
+    }
+    if (item.FromGodownName) overviewFields.push({ label: "From Godown", value: item.FromGodownName });
+    if (item.ToGodownName) overviewFields.push({ label: "To Godown", value: item.ToGodownName });
+    overviewFields.push({ label: usesRungDetail ? "Total Days" : "Total Amount", value: usesRungDetail ? (rungDetail?.assignment?.days != null ? `${rungDetail.assignment.days} day${rungDetail.assignment.days === 1 ? "" : "s"}` : "—") : fmtAmount(effectiveAmount) });
+    if (!usesRungDetail && rawTdsAmount > 0) {
+      overviewFields.push({ label: `TDS Deducted${tdsPercentage != null ? ` (${tdsPercentage}%)` : ""}`, value: `- ${fmtAmount(rawTdsAmount)}` });
+      overviewFields.push({ label: "Net Payable (After TDS)", value: fmtAmount(netPayableAfterTds) });
+    }
+    sections.push({ title: "Overview", fields: overviewFields });
+
+    if (lineItems.length > 0) {
+      const itemFields = isJournalVoucher
+        ? lineItems.map((li, i) => {
+            const debit = Number(li.DebitAmount) || 0;
+            const credit = Number(li.CreditAmount) || 0;
+            return {
+              label: `${i + 1}. ${(li.LHeadName as string) || "—"}`,
+              value: debit > 0 ? `Dr ${fmtAmount(debit)}` : `Cr ${fmtAmount(credit)}`,
+            };
+          })
+        : isMaterialRequest
+          ? lineItems.map((li, i) => {
+              const name = (li.ItemName ?? li.itemName ?? "—") as string;
+              const qty = Number(li.Quantity ?? li.quantity ?? 0);
+              const uom = (li.UOMName ?? li.UomName ?? li.UOMSymbol ?? li.UOMCode ?? li.uomCode ?? "") as string;
+              return { label: `${i + 1}. ${name}`, value: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""}` };
+            })
+          : lineItems.map((li, i) => {
+              const name = (li.ItemName ?? li.itemName ?? li.Description ?? li.itemDescription ?? "—") as string;
+              const qty = Number(li.Quantity ?? li.quantity ?? 0);
+              const uom = (li.UOMName ?? li.UomName ?? li.uomName ?? li.UOMSymbol ?? li.Symbol ?? li.UOMCode ?? li.uomCode ?? li.Unit ?? li.unit ?? li.uom ?? "") as string;
+              const rate = Number(li.Rate ?? li.rate ?? 0);
+              const amount = Number(li.LineAmount ?? li.AmountInclGst ?? li.amount ?? qty * rate);
+              return { label: `${i + 1}. ${name}`, value: `${qty.toLocaleString("en-IN")}${uom ? ` ${uom}` : ""} × ${fmtAmount(rate)} = ${fmtAmount(amount)}` };
+            });
+      sections.push({ title: isJournalVoucher ? "Journal Entry" : `Items (${lineItems.length})`, fields: itemFields });
+    }
+
+    if (!usesRungDetail && extraFields.length > 0) {
+      sections.push({ title: "Details", fields: extraFields.map(([k, v]) => ({ label: labelFor(k), value: formatPreviewValue(v) })) });
+    }
+
+    if (item.RejectionNote) {
+      sections.push({ title: "Rejection Note", fields: [{ label: "Note", value: item.RejectionNote }] });
+    }
+
+    if (chain && chain.steps.length > 0) {
+      sections.push({
+        title: "Approval Chain",
+        fields: chain.steps.map((step) => ({
+          label: step.label,
+          value: `${step.status}${step.approverName || step.approverEmail ? ` — ${displayName(step.approverName, step.approverEmail)}` : ""}${step.actionAt ? ` (${fmtWhen(step.actionAt)})` : ""}`,
+        })),
+      });
+    }
+
+    return sections;
+  })();
+
+  const previewTitle = item.Reference || `#${item.RecordId}`;
+  const docActions = (
+    <div className="flex items-center gap-1.5 shrink-0">
+      <button
+        onClick={() =>
+          printMasterPreview({
+            title: previewTitle,
+            subtitle: item.ModuleLabel,
+            code: item.Reference,
+            status: item.Status,
+            sections: previewSections,
+          })
+        }
+        title="Print"
+        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+      >
+        <Printer size={16} />
+      </button>
+      <button
+        onClick={() => {
+          const toastId = toast.loading("Generating PDF...");
+          downloadMasterPreviewPdf({
+            title: previewTitle,
+            subtitle: item.ModuleLabel,
+            code: item.Reference,
+            status: item.Status,
+            sections: previewSections,
+            filename: `${(item.Reference || item.RecordId || "document").replace(/[^\w-]+/g, "_")}.pdf`,
+          })
+            .then(() => toast.success("PDF downloaded", { id: toastId }))
+            .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+        }}
+        title="Generate PDF"
+        className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+      >
+        <FileDown size={16} />
+      </button>
+    </div>
+  );
+
   return createPortal(
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6">
       {/* Backdrop */}
@@ -439,6 +560,7 @@ export const ApprovalReviewPanel: React.FC<ApprovalReviewPanelProps> = ({ item, 
             </p>
           </div>
           <StatusBadge status={item.Status} />
+          {docActions}
           <button
             onClick={onClose}
             className="ml-2 p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors shrink-0"

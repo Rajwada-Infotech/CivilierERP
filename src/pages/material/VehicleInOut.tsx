@@ -74,8 +74,10 @@ import {
   Package,
   MessageCircle,
   Printer,
+  FileDown,
 } from "lucide-react";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
+import { downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
 import { exportToCsv, parseCsv } from "@/lib/export";
 import * as vehApi from "@/api/vehicleInOutApi";
 import type { VehicleInOutPayload } from "@/api/vehicleInOutApi";
@@ -292,6 +294,7 @@ function VehicleCard({
   onView,
   onEdit,
   onDelete,
+  onGeneratePdf,
   canEdit = true,
   canDelete = true,
 }: {
@@ -299,6 +302,7 @@ function VehicleCard({
   onView: (r: any) => void;
   onEdit: (r: any) => void;
   onDelete: (id: number) => void;
+  onGeneratePdf: (r: any) => void;
   canEdit?: boolean;
   canDelete?: boolean;
 }) {
@@ -382,6 +386,13 @@ function VehicleCard({
         >
           <Eye size={15} />
         </button>
+        <button
+          onClick={() => onGeneratePdf(rec)}
+          className="text-emerald-500 hover:bg-emerald-500/10 p-2 rounded-lg transition-colors"
+          title="Generate PDF"
+        >
+          <FileDown size={15} />
+        </button>
         {canEdit && (
           <button
             onClick={() => onEdit(rec)}
@@ -459,6 +470,7 @@ const buildEmpty = (activeFinYear?: string) => ({
 let _onView: (r: any) => void = () => {};
 let _onEdit: (r: any) => void = () => {};
 let _onDelete: (id: number) => void = () => {};
+let _onGeneratePdf: (r: any) => void = () => {};
 let _canEdit = true;
 let _canDelete = true;
 
@@ -574,6 +586,13 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
               title="View details"
             >
               <Eye size={15} />
+            </button>
+            <button
+              onClick={() => _onGeneratePdf(rec)}
+              className="p-1 rounded text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+              title="Generate PDF"
+            >
+              <FileDown size={15} />
             </button>
             {_canEdit && (
               <button
@@ -1244,6 +1263,65 @@ export default function VehicleInOut() {
       win.print();
     };
   };
+
+  // Same content as handlePrintVehicleRec above, as a downloaded .pdf
+  // instead of the browser's print dialog — built from the same fields so
+  // the two can never show different data for the same record.
+  //
+  // The list/grid row (list query's SELECT) never carries Items — only
+  // GET /:id does — so a rec passed straight from the grid's Actions
+  // column here always lacks Items. Refetch the full record so the PDF
+  // includes Received Items regardless of whether this was triggered from
+  // the grid row or the already-fully-loaded view modal.
+  const handleGeneratePdfVehicleRec = async (recIn: any) => {
+    const toastId = toast.loading("Generating PDF...");
+    let rec = recIn;
+    if (!Array.isArray(recIn.Items) && recIn.VehicleInOutID) {
+      try {
+        rec = await vehApi.getVehicleInOut(recIn.VehicleInOutID);
+      } catch {
+        // fall back to whatever was passed in — PDF still generates,
+        // just without the Items section.
+      }
+    }
+    const sections = [
+      {
+        title: "Overview",
+        fields: [
+          { label: "Company", value: rec.CompanyName || "—" },
+          { label: "Project", value: rec.ProjectName || "—" },
+          { label: "Supplier", value: rec.SupplierName || "—" },
+          { label: "PO No", value: rec.PONumber || "—" },
+          { label: "Vehicle No", value: rec.VehicleNo || "—" },
+          { label: "Challan No", value: rec.ChallanNo || "—" },
+          { label: "Entry Time", value: rec.EntryTime ? new Date(rec.EntryTime).toLocaleString("en-IN") : "—" },
+          { label: "Exit Time", value: rec.ExitTime ? new Date(rec.ExitTime).toLocaleString("en-IN") : "—" },
+        ],
+      },
+      ...(Array.isArray(rec.Items) && rec.Items.length > 0
+        ? [{
+            title: `Items (${rec.Items.length})`,
+            fields: rec.Items.map((it: any, i: number) => ({
+              label: `${i + 1}. ${it.ItemName ?? "—"}${it.Brand ? ` (${it.Brand})` : ""}${it.Quality ? ` [${it.Quality}]` : ""}`,
+              value: `${it.ReceivedQty ?? it.Quantity ?? "—"} ${it.UomName ?? ""}`.trim(),
+            })),
+          }]
+        : []),
+      ...(rec.Remarks ? [{ title: "Remarks", fields: [{ label: "Remarks", value: rec.Remarks }] }] : []),
+    ];
+
+    downloadMasterPreviewPdf({
+      title: rec.DocNo || "—",
+      subtitle: "Vehicle In/Out",
+      code: rec.DocNo,
+      status: rec.Status,
+      sections,
+      filename: `${(rec.DocNo || rec.VehicleInOutID || "vehicle-in-out").replace(/[^\w-]+/g, "_")}.pdf`,
+    })
+      .then(() => toast.success("PDF downloaded", { id: toastId }))
+      .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+  };
+  _onGeneratePdf = handleGeneratePdfVehicleRec;
 
   // ── Camera capture ───────────────────────────────────────────────────────────
   // Shared modal, two targets: capturingPoItemId set → the item's photo is
@@ -2299,6 +2377,7 @@ export default function VehicleInOut() {
                               onView={_onView}
                               onEdit={_onEdit}
                               onDelete={_onDelete}
+                              onGeneratePdf={_onGeneratePdf}
                               canEdit={rights.canEdit}
                               canDelete={rights.canDelete}
                             />
@@ -2668,6 +2747,12 @@ export default function VehicleInOut() {
                     className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-sm font-medium hover:bg-muted/80 transition-colors"
                   >
                     <Printer size={13} /> Print
+                  </button>
+                  <button
+                    onClick={() => handleGeneratePdfVehicleRec(viewingRec)}
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-muted border border-border text-sm font-medium hover:bg-muted/80 transition-colors"
+                  >
+                    <FileDown size={13} /> Generate PDF
                   </button>
                   {rights.canEdit && (
                     <button
