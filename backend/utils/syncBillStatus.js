@@ -42,18 +42,40 @@ async function syncBillStatus(pool, sql, expenseRef) {
     // routes/onAccount.js) — excluding them here prevents double-counting
     // against the OnAccountLedger sum below for any that still exist in
     // historical data, without having to delete those rows outright.
+    // Sums two disjoint sources of "paid toward this invoice": a normal
+    // single-invoice payment (PExpenseRef = this invoice's own EDocNo) and
+    // this invoice's own slice of a merged payment (migration 501,
+    // dbo.PaymentExpenseBookingLink — see services/paymentExpenseBookingLink.js).
+    // A merged payment's PExpenseRef is always NULL, so without the second
+    // branch every invoice folded into a merge would silently stop
+    // accumulating ETotalPaid/ERemainingAmount the moment it was merged.
     const payRes = await pool
       .request()
       .input("PExpenseRef", sql.NVarChar(100), expenseRef)
       .query(`
-        SELECT ISNULL(SUM(np.PAmount - ISNULL(np.BounceCharge, 0)), 0) AS TotalPaid
-        FROM dbo.NewPayment np
-        LEFT JOIN dbo.BankReconciliation br
-          ON  br.SourceType = 'PAYMENT' AND br.SourceID = np.PPaymentID
-        WHERE np.PExpenseRef = @PExpenseRef
-          AND np.Status = 'Approved'
-          AND ISNULL(np.PDocType, '') <> 'On Account Adjustment'
-          AND (br.IsBounced IS NULL OR br.IsBounced = 0)
+        SELECT
+          ISNULL((
+            SELECT SUM(np.PAmount - ISNULL(np.BounceCharge, 0))
+            FROM dbo.NewPayment np
+            LEFT JOIN dbo.BankReconciliation br
+              ON  br.SourceType = 'PAYMENT' AND br.SourceID = np.PPaymentID
+            WHERE np.PExpenseRef = @PExpenseRef
+              AND np.Status = 'Approved'
+              AND ISNULL(np.PDocType, '') <> 'On Account Adjustment'
+              AND (br.IsBounced IS NULL OR br.IsBounced = 0)
+          ), 0)
+          +
+          ISNULL((
+            SELECT SUM(pel.AllocatedAmount)
+            FROM dbo.PaymentExpenseBookingLink pel
+            JOIN dbo.NewPayment np2 ON np2.PPaymentID = pel.PPaymentID
+            LEFT JOIN dbo.BankReconciliation br2
+              ON  br2.SourceType = 'PAYMENT' AND br2.SourceID = np2.PPaymentID
+            WHERE pel.EDocNo = @PExpenseRef
+              AND np2.Status = 'Approved'
+              AND (br2.IsBounced IS NULL OR br2.IsBounced = 0)
+          ), 0)
+          AS TotalPaid
       `);
 
     // On Account adjustments settle the invoice without ever creating a

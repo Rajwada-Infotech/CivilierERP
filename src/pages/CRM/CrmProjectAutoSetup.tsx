@@ -99,26 +99,69 @@ function isDuplicateBlockName(name: string, idx: number, batch: string[], existi
   return batch.some((other, i) => i !== idx && other.trim().toLowerCase() === n);
 }
 
-const inputCls = "w-full text-sm border border-border rounded-lg px-2.5 py-1.5 bg-background";
-const labelCls = "text-xs text-muted-foreground block mb-1";
-const cardCls = "rounded-xl border border-border p-4 space-y-3";
+// Field/label/card styles shared with the rest of the app's forms (uppercase
+// tracked labels, soft muted inputs, card surfaces).
+const inputCls = "w-full text-sm border border-border rounded-lg px-3 py-2 bg-muted/30 focus:bg-background focus:outline-none focus:ring-2 focus:ring-ring/40 transition-colors";
+const labelCls = "text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground block mb-1.5";
+const cardCls = "rounded-xl border border-border bg-card p-4 sm:p-5 space-y-4 shadow-sm";
+// Touch-friendly pill used for blocks / floors / units chips.
+const chipCls = "inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border transition-colors";
 
-// Consistent section header across the Blocks/Floors/Units cards — a small
-// colored icon badge instead of a bare icon, so the three sections read as
-// distinct, color-coded areas of one page rather than a numbered "Step 1/2/3"
-// wizard (this is a resumable, all-editable dashboard now, not a strict
-// linear flow — the label shouldn't pretend otherwise).
-const SectionHeader: React.FC<{ icon: React.ElementType; colorClass: string; title: string; done?: boolean; right?: React.ReactNode }> =
-  ({ icon: Icon, colorClass, title, done, right }) => (
-    <div className="flex items-center gap-2">
-      <span className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 ${colorClass}`}>
-        <Icon size={13} />
+// Consistent section header across the Blocks/Floors/Units cards — a coloured
+// icon badge plus a one-line hint, so each section says what it is for. The
+// sections stay independently editable (a resumable dashboard, not a strict
+// wizard).
+const SectionHeader: React.FC<{ icon: React.ElementType; colorClass: string; title: string; hint?: string; done?: boolean; right?: React.ReactNode }> =
+  ({ icon: Icon, colorClass, title, hint, done, right }) => (
+    <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
+      <span className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${colorClass}`}>
+        <Icon size={17} />
       </span>
-      <h3 className="text-sm font-semibold">{title}</h3>
-      {done && <CheckCircle2 size={13} className="text-green-600" />}
-      {right}
+      <div className="min-w-0 flex-1">
+        <h3 className="text-sm sm:text-base font-heading font-semibold flex items-center gap-1.5">
+          {title}
+          {done && (
+            <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded-full">
+              <CheckCircle2 size={11} /> Done
+            </span>
+          )}
+        </h3>
+        {hint && <p className="text-xs text-muted-foreground mt-0.5">{hint}</p>}
+      </div>
+      {right && <div className="flex items-center gap-2 ml-auto">{right}</div>}
     </div>
   );
+
+// Blocks → Floors → Units progress, so it's obvious at a glance which part of
+// the setup is complete and what comes next.
+const SetupProgress: React.FC<{ steps: { label: string; detail: string; done: boolean; active: boolean }[] }> = ({ steps }) => (
+  <ol className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+    {steps.map((s, i) => (
+      <li
+        key={s.label}
+        className={`flex items-center gap-3 rounded-xl border px-3.5 py-3 transition-colors ${
+          s.done
+            ? "border-green-500/30 bg-green-500/5"
+            : s.active
+              ? "border-sky-500/40 bg-sky-500/5 ring-1 ring-sky-500/20"
+              : "border-border bg-card"
+        }`}
+      >
+        <span
+          className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold shrink-0 ${
+            s.done ? "bg-green-500 text-white" : s.active ? "btn-module text-white" : "bg-muted text-muted-foreground"
+          }`}
+        >
+          {s.done ? <CheckCircle2 size={16} /> : i + 1}
+        </span>
+        <div className="min-w-0">
+          <div className="text-sm font-heading font-semibold">{s.label}</div>
+          <div className="text-xs text-muted-foreground truncate">{s.detail}</div>
+        </div>
+      </li>
+    ))}
+  </ol>
+);
 
 const CrmProjectAutoSetup: React.FC = () => {
   const qc = useQueryClient();
@@ -673,22 +716,22 @@ const CrmProjectAutoSetup: React.FC = () => {
             CrmProjectAutoSetupParking.tsx); nothing below is shared with
             it, so a slow request or stale render on one side can never
             affect the other. */}
-        <div className="flex items-center gap-1 rounded-lg border border-border bg-muted/30 p-1 w-fit">
+        <div className="grid grid-cols-1 sm:grid-cols-2 sm:flex sm:w-fit items-center gap-1 rounded-xl border border-border bg-muted/30 p-1">
           <button
             onClick={() => setActiveTab("setup")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${
-              activeTab === "setup" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+            className={`flex items-center justify-center gap-1.5 px-3 sm:px-4 py-2 text-xs sm:text-sm rounded-lg font-medium transition-all ${
+              activeTab === "setup" ? "btn-module text-white shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-background/60"
             }`}
           >
-            <Building2 size={14} /> Block / Floor / Unit Setup
+            <Building2 size={15} className="shrink-0" /> <span className="truncate">Block / Floor / Unit</span>
           </button>
           <button
             onClick={() => setActiveTab("parking")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-medium transition-colors ${
-              activeTab === "parking" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground"
+            className={`flex items-center justify-center gap-1.5 px-3 sm:px-4 py-2 text-xs sm:text-sm rounded-lg font-medium transition-all ${
+              activeTab === "parking" ? "btn-module text-white shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-background/60"
             }`}
           >
-            <Car size={14} /> Parking Setup
+            <Car size={15} className="shrink-0" /> <span className="truncate">Parking Setup</span>
           </button>
         </div>
 
@@ -696,34 +739,68 @@ const CrmProjectAutoSetup: React.FC = () => {
           <CrmProjectAutoSetupParking />
         ) : (
         <>
+        {/* Company → Project picker, side by side on wider screens. */}
         <div className={cardCls}>
-          <label className={labelCls}>Company</label>
-          <select
-            value={companyId}
-            onChange={(e) => { setCompanyId(e.target.value); setProjectId(""); }}
-            className={inputCls}
-          >
-            <option value="">Select company</option>
-            {(companies as any[]).map((c: any) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
-          </select>
+          <SectionHeader
+            icon={Building2}
+            colorClass="bg-sky-500/10 text-sky-600"
+            title="Select Project"
+            hint="Choose the company and project you want to set up."
+          />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className={labelCls}>Company <span className="text-destructive">*</span></label>
+              <select
+                value={companyId}
+                onChange={(e) => { setCompanyId(e.target.value); setProjectId(""); }}
+                className={inputCls}
+              >
+                <option value="">Select company</option>
+                {(companies as any[]).map((c: any) => <option key={c.id} value={String(c.id)}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Project <span className="text-destructive">*</span></label>
+              <select
+                value={projectId}
+                onChange={(e) => setProjectId(e.target.value)}
+                disabled={!companyId}
+                className={`${inputCls} ${!companyId ? "opacity-50 cursor-not-allowed" : ""}`}
+              >
+                <option value="">{companyId ? "Select project" : "Select a Company first"}</option>
+                {projectsForCompany.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
+              </select>
+            </div>
+          </div>
         </div>
 
-        <div className={cardCls}>
-          <label className={labelCls}>Project</label>
-          <select
-            value={projectId}
-            onChange={(e) => setProjectId(e.target.value)}
-            disabled={!companyId}
-            className={`${inputCls} ${!companyId ? "opacity-50 cursor-not-allowed" : ""}`}
-          >
-            <option value="">{companyId ? "Select project" : "Select a Company first"}</option>
-            {projectsForCompany.map((p: any) => <option key={p.Id} value={String(p.Id)}>{p.Name}</option>)}
-          </select>
-        </div>
+        {!projectId && (
+          <div className="rounded-xl border border-dashed border-border bg-muted/10 px-6 py-10 text-center">
+            <Building2 size={28} className="mx-auto text-muted-foreground/60 mb-2" />
+            <p className="text-sm font-medium">No project selected</p>
+            <p className="text-xs text-muted-foreground mt-1">Pick a company and project above to see and manage its blocks, floors and units.</p>
+          </div>
+        )}
 
         {projectId && statusLoading && (
-          <div className="text-sm text-muted-foreground text-center py-6">Loading...</div>
+          <div className="space-y-3">
+            {[0, 1, 2].map((i) => <div key={i} className="h-20 rounded-xl bg-muted/40 animate-pulse" />)}
+          </div>
         )}
+
+        {/* Progress across the three setup sections. */}
+        {projectId && status && (() => {
+          const generatedUnits = floors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
+          return (
+            <SetupProgress
+              steps={[
+                { label: "Blocks", detail: step1Done ? `${blocks.length} block${blocks.length === 1 ? "" : "s"} created` : "Create the project's blocks", done: step1Done, active: !step1Done },
+                { label: "Floors", detail: step2Done ? `${floors.length} floor${floors.length === 1 ? "" : "s"} planned` : "Set floors for each block", done: step2Done, active: step1Done && !step2Done },
+                { label: "Units", detail: generatedUnits ? `${generatedUnits} unit${generatedUnits === 1 ? "" : "s"} generated` : "Define unit types & generate", done: step2Done && generatedUnits > 0 && !floors.some((f) => !f.IsGenerated && f.HasUnits && f.UnitCount > 0), active: step2Done },
+              ]}
+            />
+          );
+        })()}
 
         {projectId && status && !status.shortCodeValid && (
           <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
@@ -763,27 +840,37 @@ const CrmProjectAutoSetup: React.FC = () => {
               const totalUnitsGenerated = floors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
               const pendingFloorCount = floors.filter((f) => !f.IsGenerated && f.HasUnits && f.UnitCount > 0).length;
               return (
-                <div className="rounded-xl border border-border overflow-hidden">
-                  <div className="p-4 pb-3 flex items-center gap-2 border-b border-border bg-muted/20">
-                    <Building2 size={16} className="text-primary shrink-0" />
-                    <span className="text-sm font-semibold truncate">{status.project?.Name}</span>
+                <div className="rounded-xl border border-border bg-card overflow-hidden shadow-sm">
+                  <div className="px-4 sm:px-5 py-3.5 flex items-center gap-3 border-b border-border bg-muted/20">
+                    <span className="w-9 h-9 rounded-xl btn-module flex items-center justify-center shrink-0">
+                      <Building2 size={17} />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="text-sm sm:text-base font-heading font-semibold truncate">{status.project?.Name}</div>
+                      <div className="text-xs text-muted-foreground">Project overview — click a block to see its floors and units</div>
+                    </div>
                   </div>
-                  {/* Stat strip — the at-a-glance numbers a person actually
+                  {/* Stat cards — the at-a-glance numbers a person actually
                       scans for first, ahead of the per-block detail below. */}
-                  <div className="grid grid-cols-4 divide-x divide-border border-b border-border">
+                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 p-3 sm:p-4 border-b border-border">
                     {[
-                      { label: "Blocks", value: blocks.length },
-                      { label: "Floors", value: totalFloors },
-                      { label: "Units generated", value: totalUnitsGenerated },
-                      { label: "Floors pending", value: pendingFloorCount, accent: pendingFloorCount > 0 },
+                      { label: "Blocks", value: blocks.length, icon: Building2, tone: "text-violet-600 bg-violet-500/10" },
+                      { label: "Floors", value: totalFloors, icon: Layers, tone: "text-cyan-600 bg-cyan-500/10" },
+                      { label: "Units generated", value: totalUnitsGenerated, icon: Ruler, tone: "text-sky-600 bg-sky-500/10" },
+                      { label: "Floors pending", value: pendingFloorCount, icon: Lock, tone: pendingFloorCount > 0 ? "text-amber-600 bg-[#ffe2021a]" : "text-green-600 bg-green-500/10" },
                     ].map((stat) => (
-                      <div key={stat.label} className="px-4 py-2.5 text-center">
-                        <div className={`text-lg font-semibold ${stat.accent ? "text-sky-600" : "text-foreground"}`}>{stat.value}</div>
-                        <div className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">{stat.label}</div>
+                      <div key={stat.label} className="flex items-center gap-3 rounded-xl border border-border/60 bg-background/60 px-3 py-2.5">
+                        <span className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 ${stat.tone}`}>
+                          <stat.icon size={16} />
+                        </span>
+                        <div className="min-w-0">
+                          <div className="text-lg sm:text-xl font-heading font-bold leading-tight">{stat.value}</div>
+                          <div className="text-[0.6875rem] text-muted-foreground uppercase tracking-wide truncate">{stat.label}</div>
+                        </div>
                       </div>
                     ))}
                   </div>
-                  <div className="p-2">
+                  <div className="p-2 sm:p-3 space-y-1">
                     {blocks.map((b) => {
                       const blockFloors = floorsByBlock.get(b.Id) || [];
                       const totalUnits = blockFloors.reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
@@ -798,32 +885,39 @@ const CrmProjectAutoSetup: React.FC = () => {
                           ? `Generate units on ${pendingFloors.length} floor${pendingFloors.length === 1 ? "" : "s"}`
                           : null;
                       return (
-                        <div key={b.Id} className="text-xs rounded-lg hover:bg-muted/30">
-                          {/* Same 4-column layout as the stat-strip header
-                              above (Name | Floors | Units | Status), so this
-                              row actually fills the row's width with real
-                              data instead of one left-aligned label and a
-                              badge stranded far to the right. */}
+                        <div key={b.Id} className={`text-xs rounded-lg border transition-colors ${isExpanded ? "border-border bg-muted/20" : "border-transparent hover:bg-muted/30"}`}>
+                          {/* Name | Floors | Units | Status — stacks into two
+                              lines on phones so nothing gets squeezed. */}
                           <button onClick={() => setTreeExpandedBlocks((m) => ({ ...m, [b.Id]: !isExpanded }))}
-                            className="w-full grid grid-cols-4 items-center gap-2 px-2 py-1.5 text-left">
+                            className="w-full grid grid-cols-[1fr_auto] sm:grid-cols-4 items-center gap-x-3 gap-y-1 px-3 py-2.5 text-left">
                             <span className="flex items-center gap-2 min-w-0">
-                              {isExpanded ? <ChevronDown size={12} className="shrink-0" /> : <ChevronRight size={12} className="shrink-0" />}
-                              <span className="font-medium truncate">{b.BlockName}</span>
+                              {isExpanded ? <ChevronDown size={14} className="shrink-0 text-muted-foreground" /> : <ChevronRight size={14} className="shrink-0 text-muted-foreground" />}
+                              <span className="w-7 h-7 rounded-lg bg-violet-500/10 text-violet-600 flex items-center justify-center shrink-0">
+                                <Building2 size={13} />
+                              </span>
+                              <span className="text-sm font-semibold truncate">Block {b.BlockName}</span>
                             </span>
-                            <span className="text-muted-foreground">{blockFloors.length} floor{blockFloors.length === 1 ? "" : "s"}</span>
-                            <span className="text-muted-foreground">{totalUnits} unit{totalUnits === 1 ? "" : "s"} generated</span>
-                            <span>
+                            <span className="hidden sm:flex items-center gap-1.5 text-muted-foreground">
+                              <Layers size={12} /> {blockFloors.length} floor{blockFloors.length === 1 ? "" : "s"}
+                            </span>
+                            <span className="hidden sm:flex items-center gap-1.5 text-muted-foreground">
+                              <Ruler size={12} /> {totalUnits} unit{totalUnits === 1 ? "" : "s"} generated
+                            </span>
+                            <span className="justify-self-end sm:justify-self-start">
                               {pendingLabel ? (
-                                <span className="text-amber-600 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full">{pendingLabel}</span>
+                                <span className="inline-flex text-amber-600 bg-[#ffe2021a] px-2 py-0.5 rounded-full font-medium">{pendingLabel}</span>
                               ) : blockFloors.length > 0 ? (
-                                <span className="inline-flex items-center gap-1 text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded-full">
+                                <span className="inline-flex items-center gap-1 text-green-600 bg-green-500/10 px-2 py-0.5 rounded-full font-medium">
                                   <CheckCircle2 size={11} /> Done
                                 </span>
                               ) : null}
                             </span>
+                            <span className="sm:hidden col-span-2 pl-[3.25rem] text-muted-foreground">
+                              {blockFloors.length} floor{blockFloors.length === 1 ? "" : "s"} · {totalUnits} unit{totalUnits === 1 ? "" : "s"} generated
+                            </span>
                           </button>
                           {isExpanded && (
-                            <div className="ml-6 pl-3 border-l border-border pb-1.5">
+                            <div className="ml-5 sm:ml-8 mr-2 pl-3 border-l-2 border-border pb-2">
                               <BlockFloorTree
                                 blockFloors={blockFloors}
                                 expandedFloorId={overviewExpandedFloorId}
@@ -854,15 +948,31 @@ const CrmProjectAutoSetup: React.FC = () => {
                 header, chips, and the add-affordance all inline — instead
                 of stacked sections, since at rest there's nothing here but
                 a handful of short labels. */}
-            <div className={`${cardCls} border-l-2 border-l-violet-500`}>
-              <div className="flex items-center flex-wrap gap-x-2 gap-y-1.5">
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="w-6 h-6 rounded-full flex items-center justify-center bg-violet-500/10 text-violet-600">
-                    <Building2 size={13} />
-                  </span>
-                  <h3 className="text-sm font-semibold">Blocks</h3>
-                  {step1Done && <CheckCircle2 size={13} className="text-green-600" />}
-                </div>
+            <div className={`${cardCls} border-l-4 border-l-violet-500`}>
+              <SectionHeader
+                icon={Building2}
+                colorClass="bg-violet-500/10 text-violet-600"
+                title="1 · Blocks"
+                hint={step1Done ? "Click a block to see its floors. Use Edit to rename or remove blocks." : "Create the towers / blocks of this project."}
+                done={step1Done}
+                right={
+                  <>
+                    {rights.canEdit && step1Done && (
+                      <button onClick={() => { setBlocksEditMode((v) => !v); setEditingBlockId(null); }}
+                        className={`inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg font-medium ${blocksEditMode ? "btn-module text-white" : "text-muted-foreground hover:text-foreground border border-border hover:bg-muted/50"}`}>
+                        <Pencil size={12} /> {blocksEditMode ? "Done" : "Edit"}
+                      </button>
+                    )}
+                    {step1Done && !showAddBlockForm && (
+                      <button onClick={() => setShowAddBlockForm(true)}
+                        className="inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg font-medium border border-dashed border-primary/50 text-primary hover:bg-primary/5">
+                        + Add Blocks
+                      </button>
+                    )}
+                  </>
+                }
+              />
+              <div className="flex items-center flex-wrap gap-2">
 
                 {/* Locked, plain-label chips by default — someone just here
                     to see the project plan gets a calm, read-only list, not
@@ -871,7 +981,13 @@ const CrmProjectAutoSetup: React.FC = () => {
                     getBlockLockReason). Rename/delete only appear once
                     blocksEditMode is switched on via the toggle below. */}
                 {blocks.map((b) => (
-                  <span key={b.Id} className={`flex items-center gap-1 text-[0.6875rem] pl-2 pr-1.5 py-0.5 rounded-full font-medium ${blocksEditMode ? "bg-muted/70 border border-border" : "bg-muted/40"}`}>
+                  <span key={b.Id} className={`${chipCls} font-medium ${
+                    blocksEditMode
+                      ? "bg-muted/70 border-border"
+                      : blocksExpandedBlocks[b.Id]
+                        ? "bg-violet-500/10 border-violet-500/40 text-violet-700 dark:text-violet-300"
+                        : "bg-muted/40 border-border/60 hover:border-violet-500/40"
+                  }`}>
                     {editingBlockId === b.Id ? (
                       <input autoFocus type="text" value={editingBlockName}
                         autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
@@ -884,12 +1000,12 @@ const CrmProjectAutoSetup: React.FC = () => {
                       <>
                         <span>{b.BlockName}</span>
                         <button onClick={() => { setEditingBlockId(b.Id); setEditingBlockName(b.BlockName); }}
-                          className="text-muted-foreground hover:text-primary">
-                          <Pencil size={9} />
+                          title="Rename block" className="p-0.5 rounded text-muted-foreground hover:text-primary hover:bg-primary/10">
+                          <Pencil size={11} />
                         </button>
                         <button onClick={() => handleDeleteBlock(b)}
-                          className="text-muted-foreground hover:text-red-600">
-                          <X size={10} />
+                          title="Delete block" className="p-0.5 rounded text-muted-foreground hover:text-red-600 hover:bg-red-500/10">
+                          <X size={12} />
                         </button>
                       </>
                     ) : (
@@ -899,41 +1015,26 @@ const CrmProjectAutoSetup: React.FC = () => {
                       // its own independent expand state (blocksExpandedBlocks),
                       // so expanding it here doesn't also expand it up there.
                       <button onClick={() => setBlocksExpandedBlocks((m) => ({ ...m, [b.Id]: !m[b.Id] }))}
-                        className="flex items-center gap-1 hover:text-primary">
-                        {blocksExpandedBlocks[b.Id] ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
+                        className="flex items-center gap-1">
+                        {blocksExpandedBlocks[b.Id] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                         {b.BlockName}
                       </button>
                     )}
                   </span>
                 ))}
-
-                {rights.canEdit && step1Done && (
-                  <button onClick={() => { setBlocksEditMode((v) => !v); setEditingBlockId(null); }}
-                    className={`text-[0.6875rem] px-2 py-0.5 rounded-full font-medium ${blocksEditMode ? "btn-module text-white" : "text-muted-foreground hover:text-foreground border border-border"}`}>
-                    {blocksEditMode ? "Done" : "Edit"}
-                  </button>
-                )}
-
-                {/* "Add More Blocks" only opens on demand — a collapsed
-                    project already has its blocks; there's no reason to keep
-                    a whole create-form permanently open underneath them. A
-                    brand-new project (nothing to add "more" to yet) shows
-                    the form open by default instead of an empty collapsed
-                    card. */}
-                {step1Done && !showAddBlockForm && (
-                  <button onClick={() => setShowAddBlockForm(true)}
-                    className="text-[0.6875rem] text-primary hover:underline">
-                    + Add
-                  </button>
-                )}
+                {/* Edit / "+ Add Blocks" live in the section header. "Add
+                    More Blocks" only opens on demand; a brand-new project
+                    shows the create form open by default. */}
               </div>
 
               {/* Expanded Block(s) — its Floor tree, drilling further into
                   real Units per Floor, same as clicking through the
                   overview card above. */}
               {blocks.filter((b) => blocksExpandedBlocks[b.Id]).map((b) => (
-                <div key={b.Id} className="rounded-lg border border-border/50 p-2 text-xs">
-                  <div className="font-medium mb-1">{b.BlockName}</div>
+                <div key={b.Id} className="rounded-xl border border-violet-500/20 bg-violet-500/[0.03] p-3 text-xs">
+                  <div className="text-sm font-semibold mb-1.5 flex items-center gap-1.5">
+                    <Building2 size={13} className="text-violet-600" /> Block {b.BlockName}
+                  </div>
                   <BlockFloorTree
                     blockFloors={floorsByBlock.get(b.Id) || []}
                     expandedFloorId={blocksExpandedFloorId}
@@ -954,16 +1055,16 @@ const CrmProjectAutoSetup: React.FC = () => {
               ))}
 
               {(!step1Done || showAddBlockForm) && (
-                <div className={step1Done ? "pt-2 mt-2 border-t border-border space-y-3" : "space-y-3"}>
+                <div className={step1Done ? "rounded-xl border border-dashed border-border bg-muted/10 p-3 sm:p-4 space-y-4" : "space-y-4"}>
                   <div className="flex items-center justify-between">
-                    <div className="text-xs font-semibold text-foreground">{step1Done ? "Add More Blocks" : "Create Blocks"}</div>
+                    <div className="text-sm font-heading font-semibold text-foreground">{step1Done ? "Add More Blocks" : "Create Blocks"}</div>
                     {step1Done && (
-                      <button onClick={() => setShowAddBlockForm(false)} className="text-xs text-muted-foreground hover:text-foreground">
+                      <button onClick={() => setShowAddBlockForm(false)} className="text-xs px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50">
                         Cancel
                       </button>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className={labelCls}>Number of Blocks</label>
                       <input type="number" min={1} max={100} value={blockCount}
@@ -971,16 +1072,19 @@ const CrmProjectAutoSetup: React.FC = () => {
                     </div>
                     <div>
                       <label className={labelCls}>Naming Scheme</label>
-                      <div className="flex items-center gap-3 h-[34px]">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1 rounded-lg border border-border bg-muted/30 p-1">
                         {(["Alphabetical", "Numeric", "Custom"] as NamingScheme[]).map((s) => (
-                          <label key={s} className="flex items-center gap-1 text-xs cursor-pointer">
-                            <input type="radio" checked={namingScheme === s} onChange={() => setNamingScheme(s)} /> {s}
+                          <label key={s} className={`flex items-center justify-center gap-1 text-xs py-1.5 rounded-md cursor-pointer transition-colors ${
+                            namingScheme === s ? "bg-background shadow-sm font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+                          }`}>
+                            <input type="radio" className="sr-only" checked={namingScheme === s} onChange={() => setNamingScheme(s)} /> {s}
                           </label>
                         ))}
                       </div>
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <label className={labelCls}>Block Names</label>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2 -mt-2">
                     {blockNames.map((name, i) => {
                       const dupe = isDuplicateBlockName(name, i, blockNames, existingBlockNamesLower);
                       return (
@@ -995,10 +1099,12 @@ const CrmProjectAutoSetup: React.FC = () => {
                       );
                     })}
                   </div>
-                  <button onClick={handleSaveBlocks} disabled={savingBlocks || !rights.canCreate || blockNames.some((n, i) => isDuplicateBlockName(n, i, blockNames, existingBlockNamesLower))}
-                    className="px-4 py-2 text-sm btn-module text-white rounded-lg font-medium disabled:opacity-40">
-                    {step1Done ? "Add Blocks" : "OK — Create Blocks"}
-                  </button>
+                  <div className="flex justify-end pt-1">
+                    <button onClick={handleSaveBlocks} disabled={savingBlocks || !rights.canCreate || blockNames.some((n, i) => isDuplicateBlockName(n, i, blockNames, existingBlockNamesLower))}
+                      className="w-full sm:w-auto px-5 py-2.5 text-sm btn-module text-white rounded-lg font-semibold shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                      {savingBlocks ? "Saving…" : step1Done ? "Add Blocks" : "OK — Create Blocks"}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1010,17 +1116,19 @@ const CrmProjectAutoSetup: React.FC = () => {
                 block is always a safe no-op (POST /floors only ever adds
                 what's missing). */}
             {step1Done && (
-              <div className={`${cardCls} border-l-2 border-l-cyan-500`}>
-                <SectionHeader icon={Layers} colorClass="bg-cyan-500/10 text-cyan-600" title="Floor Plan" done={step2Done} right={
+              <div className={`${cardCls} border-l-4 border-l-cyan-500`}>
+                <SectionHeader icon={Layers} colorClass="bg-cyan-500/10 text-cyan-600" title="2 · Floor Plan" done={step2Done}
+                  hint={step2Done ? "Click a floor to see its units. Use Edit to remove empty floors." : "Enter how many floors each block has."}
+                  right={
                   rights.canEdit && step2Done && (
                     <button onClick={() => setFloorsEditMode((v) => !v)}
-                      className={`ml-auto text-[0.6875rem] px-2 py-0.5 rounded-full font-medium ${floorsEditMode ? "btn-module text-white" : "text-muted-foreground hover:text-foreground border border-border"}`}>
-                      {floorsEditMode ? "Done" : "Edit"}
+                      className={`inline-flex items-center gap-1 text-xs px-3 py-1.5 rounded-lg font-medium ${floorsEditMode ? "btn-module text-white" : "text-muted-foreground hover:text-foreground border border-border hover:bg-muted/50"}`}>
+                      <Pencil size={12} /> {floorsEditMode ? "Done" : "Edit"}
                     </button>
                   )
                 } />
 
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                   {blocks.map((b) => {
                     const blockFloors = floorsByBlock.get(b.Id) || [];
                     const hasFloors = blockFloors.length > 0;
@@ -1029,22 +1137,26 @@ const CrmProjectAutoSetup: React.FC = () => {
                     // more via the toggle below.
                     const isOpen = !hasFloors || !!floorFormOpenFor[b.Id];
                     return (
-                      <div key={b.Id} className="rounded-lg border border-border/50 p-2">
+                      <div key={b.Id} className="rounded-xl border border-border/60 bg-background/50 p-3">
                         {hasFloors && !isOpen ? (
                           // Collapsed tree row — this is the state a
                           // completed block sits in, instead of the input
                           // staying open forever.
                           <div>
-                            <div className="flex items-center flex-wrap gap-1.5">
-                              <span className="text-xs font-medium w-20 shrink-0 flex items-center gap-1">
-                                {b.BlockName} <CheckCircle2 size={11} className="text-green-600" />
+                            <div className="flex items-center flex-wrap gap-2">
+                              <span className="text-sm font-semibold flex items-center gap-1.5 w-full sm:w-auto">
+                                <Building2 size={13} className="text-violet-600" /> Block {b.BlockName}
+                                <CheckCircle2 size={13} className="text-green-600" />
+                                <span className="text-xs font-normal text-muted-foreground">· {blockFloors.length} floor{blockFloors.length === 1 ? "" : "s"}</span>
                               </span>
-                              <div className="flex flex-wrap items-center gap-1">
+                              <div className="flex flex-wrap items-center gap-1.5 order-last w-full">
                                 {blockFloors.map((f) => (
-                                  <span key={f.Id} className={`flex items-center gap-0.5 text-[0.6875rem] px-1.5 py-0.5 rounded text-muted-foreground ${
+                                  <span key={f.Id} className={`inline-flex items-center gap-1 text-xs min-w-[2rem] justify-center px-2 py-1 rounded-lg border text-muted-foreground transition-colors ${
                                     f.FloorNo === -1
-                                      ? "bg-sky-500/10 text-sky-600"
-                                      : floorsEditMode ? "bg-muted/70" : "bg-muted/40"
+                                      ? "bg-sky-500/10 text-sky-600 border-sky-500/30"
+                                      : floorPlanExpandedFloorId === f.Id
+                                        ? "bg-cyan-500/15 text-cyan-700 dark:text-cyan-300 border-cyan-500/40"
+                                        : floorsEditMode ? "bg-muted/70 border-border" : "bg-muted/40 border-border/50 hover:border-cyan-500/40"
                                   }`}>
                                     {/* Generated floors are clickable in view
                                         mode — same drill-into-Units tree as
@@ -1057,16 +1169,16 @@ const CrmProjectAutoSetup: React.FC = () => {
                                       <span>{f.FloorLabel}</span>
                                     )}
                                     {floorsEditMode && f.FloorNo !== -1 && (
-                                      <button onClick={() => handleDeleteFloor(f)} className="hover:text-red-600">
-                                        <X size={9} />
+                                      <button onClick={() => handleDeleteFloor(f)} title="Delete floor" className="rounded hover:text-red-600 hover:bg-red-500/10">
+                                        <X size={11} />
                                       </button>
                                     )}
                                   </span>
                                 ))}
                               </div>
                               <button onClick={() => setFloorFormOpenFor((m) => ({ ...m, [b.Id]: true }))}
-                                className="text-[0.6875rem] text-primary hover:underline ml-auto">
-                                + Add more floors
+                                className="text-xs px-2.5 py-1 rounded-lg border border-dashed border-primary/50 text-primary hover:bg-primary/5 ml-auto">
+                                + Add floors
                               </button>
                             </div>
                             {(() => {
@@ -1092,7 +1204,9 @@ const CrmProjectAutoSetup: React.FC = () => {
                         ) : (
                           <div className="space-y-1.5">
                             <div className="flex items-center gap-3">
-                              <span className="text-xs font-medium w-20 shrink-0">{b.BlockName}</span>
+                              <span className="text-sm font-semibold w-24 shrink-0 flex items-center gap-1.5">
+                                <Building2 size={13} className="text-violet-600" /> {b.BlockName}
+                              </span>
                               <input type="number" min={1} max={100} placeholder="Number of floors"
                                 value={floorCounts[b.Id] || ""}
                                 onChange={(e) => setFloorCounts((m) => ({ ...m, [b.Id]: e.target.value }))}
@@ -1105,17 +1219,17 @@ const CrmProjectAutoSetup: React.FC = () => {
                               )}
                             </div>
                             {hasFloors && (
-                              <div className="flex flex-wrap items-center gap-1 pl-[92px]">
+                              <div className="flex flex-wrap items-center gap-1.5 sm:pl-[108px]">
                                 {blockFloors.map((f) => (
-                                  <span key={f.Id} className={`flex items-center gap-0.5 text-[0.6875rem] px-1.5 py-0.5 rounded text-muted-foreground ${floorsEditMode ? "bg-muted/70" : "bg-muted/40"}`}>
+                                  <span key={f.Id} className={`inline-flex items-center gap-1 text-xs px-2 py-1 rounded-lg border border-border/50 text-muted-foreground ${floorsEditMode ? "bg-muted/70" : "bg-muted/40"}`}>
                                     {!floorsEditMode && f.IsGenerated ? (
                                       <button onClick={() => handleToggleFloorPlanFloor(f)} className="hover:text-primary">{f.FloorLabel}</button>
                                     ) : (
                                       <span>{f.FloorLabel}</span>
                                     )}
                                     {floorsEditMode && (
-                                      <button onClick={() => handleDeleteFloor(f)} className="hover:text-red-600">
-                                        <X size={9} />
+                                      <button onClick={() => handleDeleteFloor(f)} title="Delete floor" className="rounded hover:text-red-600 hover:bg-red-500/10">
+                                        <X size={11} />
                                       </button>
                                     )}
                                   </span>
@@ -1148,18 +1262,21 @@ const CrmProjectAutoSetup: React.FC = () => {
                   })}
                 </div>
                 {blocks.some((b) => !(floorsByBlock.get(b.Id) || []).length || floorFormOpenFor[b.Id]) && (
-                  <button onClick={async () => { await handleSaveFloors(); setFloorFormOpenFor({}); }} disabled={savingFloors}
-                    className="px-4 py-2 text-sm btn-module text-white rounded-lg font-medium disabled:opacity-40">
-                    {step2Done ? "Add Floors" : "OK — Generate Floors"}
-                  </button>
+                  <div className="flex justify-end pt-1 border-t border-border/60">
+                    <button onClick={async () => { await handleSaveFloors(); setFloorFormOpenFor({}); }} disabled={savingFloors}
+                      className="w-full sm:w-auto mt-3 px-5 py-2.5 text-sm btn-module text-white rounded-lg font-semibold shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                      {savingFloors ? "Saving…" : step2Done ? "Add Floors" : "OK — Generate Floors"}
+                    </button>
+                  </div>
                 )}
               </div>
             )}
 
             {/* Unit Types & Generation */}
             {step2Done && (
-              <div className={`${cardCls} border-l-2 border-l-sky-500`}>
-                <SectionHeader icon={Ruler} colorClass="bg-sky-500/10 text-sky-600" title="Unit Types & Generation" />
+              <div className={`${cardCls} border-l-4 border-l-sky-500`}>
+                <SectionHeader icon={Ruler} colorClass="bg-sky-500/10 text-sky-600" title="3 · Unit Types & Generation"
+                  hint="Define the unit mix per floor for each block, apply it to the floors, then generate the units." />
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
                   {blocks.map((b) => {
@@ -1179,35 +1296,35 @@ const CrmProjectAutoSetup: React.FC = () => {
                     const totalGeneratedUnits = (floorsByBlock.get(b.Id) || []).reduce((s, f) => s + (f.GeneratedUnitCount || 0), 0);
 
                     return (
-                      <div key={b.Id} className="rounded-lg border border-border/60 p-3 space-y-2">
+                      <div key={b.Id} className="rounded-xl border border-border/60 bg-background/50 p-3 sm:p-4 space-y-3">
                         {blockFullyGenerated && !unitTemplateOpenFor[b.Id] ? (
                           // Locked summary row — nothing pending here, so the
                           // template editor and per-floor forms stay closed
                           // instead of sitting open with nothing left to do.
                           <div className="space-y-1.5">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-semibold flex items-center gap-1">
-                                {b.BlockName} <CheckCircle2 size={12} className="text-green-600" />
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                              <span className="text-sm font-semibold flex items-center gap-1.5">
+                                <Building2 size={13} className="text-violet-600" /> Block {b.BlockName} <CheckCircle2 size={13} className="text-green-600" />
                               </span>
-                              <span className="text-[0.6875rem] text-muted-foreground">
+                              <span className="text-xs text-muted-foreground">
                                 {totalGeneratedUnits} unit{totalGeneratedUnits === 1 ? "" : "s"} generated
                               </span>
                               <button onClick={() => setUnitTemplateOpenFor((m) => ({ ...m, [b.Id]: true }))}
-                                className="text-[0.6875rem] text-primary hover:underline ml-auto">
+                                className="text-xs px-2.5 py-1 rounded-lg border border-border text-primary hover:bg-primary/5 ml-auto">
                                 Manage template / units
                               </button>
                             </div>
-                            <div className="flex flex-wrap gap-1">
+                            <div className="flex flex-wrap gap-1.5">
                               {groundFloor && (
                                 <button onClick={() => handleToggleExpandFloor(groundFloor)}
-                                  className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded bg-muted/40">
+                                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary px-2 py-1 rounded-lg border border-border/50 bg-muted/40 hover:border-sky-500/40">
                                   {expandedFloorId === groundFloor.Id ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
                                   <Lock size={9} /> Ground: {groundFloor.GeneratedUnitCount || 0}
                                 </button>
                               )}
                               {nonGroundFloors.map((f) => (
                                 <button key={f.Id} onClick={() => handleToggleExpandFloor(f)}
-                                  className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded bg-muted/40">
+                                  className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary px-2 py-1 rounded-lg border border-border/50 bg-muted/40 hover:border-sky-500/40">
                                   {expandedFloorId === f.Id ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
                                   <Lock size={9} /> {f.FloorLabel}: {f.GeneratedUnitCount}
                                 </button>
@@ -1234,14 +1351,17 @@ const CrmProjectAutoSetup: React.FC = () => {
                         ) : (
                           <>
                             <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-semibold">{b.BlockName}</span>
+                              <span className="text-sm font-semibold flex items-center gap-1.5">
+                                <Building2 size={13} className="text-violet-600" /> Block {b.BlockName}
+                              </span>
                               {blockFullyGenerated && (
                                 <button onClick={() => setUnitTemplateOpenFor((m) => ({ ...m, [b.Id]: false }))}
-                                  className="text-[0.6875rem] text-muted-foreground hover:text-foreground ml-auto">
+                                  className="text-xs px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted/50 ml-auto">
                                   Collapse
                                 </button>
                               )}
                             </div>
+                            <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Unit mix per floor</div>
 
                         {/* Unit Type template — defined ONCE per block, then
                             applied to every non-Ground floor in one click.
@@ -1255,7 +1375,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                             </p>
                           )}
                           {rows.map((row, idx) => (
-                            <div key={idx} className="rounded border border-border/50 bg-muted/20 p-2 space-y-1.5">
+                            <div key={idx} className="rounded-lg border border-border/60 bg-muted/20 p-2.5 space-y-2">
                               <div className="flex items-center gap-2">
                                 <select value={row.UnitType} onChange={(e) => updateTemplateRow(b.Id, idx, { UnitType: e.target.value })}
                                   title={unitTypesMaster.find((t) => t.label === row.UnitType)?.summary || undefined}
@@ -1266,11 +1386,11 @@ const CrmProjectAutoSetup: React.FC = () => {
                                 <input type="number" min={1} max={100} placeholder="Count" value={row.Count}
                                   onChange={(e) => updateTemplateRow(b.Id, idx, { Count: e.target.value })}
                                   className={`${inputCls} !py-1 !w-20`} />
-                                <button onClick={() => removeTemplateRow(b.Id, idx)} className="text-muted-foreground hover:text-red-600 shrink-0 ml-auto">
-                                  <X size={12} />
+                                <button onClick={() => removeTemplateRow(b.Id, idx)} title="Remove unit type" className="p-1 rounded text-muted-foreground hover:text-red-600 hover:bg-red-500/10 shrink-0 ml-auto">
+                                  <X size={14} />
                                 </button>
                               </div>
-                              <div className="grid grid-cols-2 sm:grid-cols-[1fr_1fr_1fr_1fr_1fr] gap-1.5">
+                              <div className="grid grid-cols-2 sm:grid-cols-3 2xl:grid-cols-6 gap-2">
                                 <div className="flex flex-col gap-0.5">
                                   <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide">Saleable (sqft)</span>
                                   <input type="number" min={0} placeholder="—" value={row.AreaSqFt}
@@ -1310,18 +1430,18 @@ const CrmProjectAutoSetup: React.FC = () => {
                               </div>
                             </div>
                           ))}
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => addTemplateRow(b.Id)} className="text-xs text-primary hover:underline">+ Add Type</button>
-                            <span className="text-[0.6875rem] text-muted-foreground ml-auto">Total: {templateTotal(b.Id)} unit(s)/floor</span>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button onClick={() => addTemplateRow(b.Id)} className="text-xs px-2.5 py-1.5 rounded-lg border border-dashed border-primary/50 text-primary hover:bg-primary/5">+ Add Type</button>
+                            <span className="text-xs text-muted-foreground ml-auto">Total: <span className="font-semibold text-foreground">{templateTotal(b.Id)}</span> unit(s)/floor</span>
                             {rights.canEdit && (
                               <button onClick={() => handleSaveTemplate(b.Id)} disabled={savingTemplateBlockId === b.Id}
-                                className="px-2.5 py-1 text-[0.6875rem] bg-muted rounded-lg font-medium hover:bg-muted/70 disabled:opacity-40">
+                                className="px-3 py-1.5 text-xs border border-border bg-background rounded-lg font-medium hover:bg-muted/60 disabled:opacity-40">
                                 Save Template
                               </button>
                             )}
                             {rights.canEdit && (
                               <button onClick={() => handleApplyTemplate(b.Id)} disabled={applyingTemplateBlockId === b.Id || !templateTotal(b.Id)}
-                                className="px-2.5 py-1 text-[0.6875rem] btn-module text-white rounded-lg font-medium disabled:opacity-40">
+                                className="px-3 py-1.5 text-xs btn-module text-white rounded-lg font-medium shadow-sm disabled:opacity-40">
                                 Apply to Floors
                               </button>
                             )}
@@ -1343,7 +1463,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                                           ? (m[b.Id] || []).filter((id) => id !== plan.Id)
                                           : [...(m[b.Id] || []), plan.Id],
                                       }))}
-                                      className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium transition-colors ${
+                                      className={`text-xs px-2.5 py-1 rounded-full border font-medium transition-colors ${
                                         selected
                                           ? "btn-module text-white border-primary"
                                           : "bg-muted/40 border-border text-muted-foreground hover:text-foreground"
@@ -1366,7 +1486,8 @@ const CrmProjectAutoSetup: React.FC = () => {
                         {/* Ground floor stays its own explicit row — never
                             covered by the block template above. */}
                         {groundFloor && (
-                          <div className="pt-1 border-t border-border/60">
+                          <div className="pt-3 border-t border-border/60 space-y-2">
+                            <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Ground floor</div>
                             {groundFloor.IsGenerated ? (
                               <button onClick={() => handleToggleExpandFloor(groundFloor)}
                                 className="text-xs text-muted-foreground flex items-center gap-1 hover:text-primary">
@@ -1408,17 +1529,19 @@ const CrmProjectAutoSetup: React.FC = () => {
                             (generated by the template above); a pencil
                             reveals the editable count for a real exception. */}
                         {nonGroundFloors.length > 0 && (
-                          <div className="flex flex-wrap gap-1 pt-1 border-t border-border/60">
+                          <div className="pt-3 border-t border-border/60 space-y-2">
+                          <div className="text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground">Units per floor</div>
+                          <div className="flex flex-wrap gap-1.5">
                             {nonGroundFloors.map((f) => (
                               <div key={f.Id} className="text-xs">
                                 {f.IsGenerated ? (
                                   <button onClick={() => handleToggleExpandFloor(f)}
-                                    className="flex items-center gap-1 text-muted-foreground hover:text-primary px-1.5 py-0.5 rounded bg-muted/40">
+                                    className="inline-flex items-center gap-1 text-muted-foreground hover:text-primary px-2 py-1 rounded-lg border border-border/50 bg-muted/40 hover:border-sky-500/40">
                                     {expandedFloorId === f.Id ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
                                     <Lock size={9} /> {f.FloorLabel}: {f.GeneratedUnitCount}
                                   </button>
                                 ) : editingFloorId === f.Id ? (
-                                  <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted/40">
+                                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-primary/40 bg-muted/40">
                                     {f.FloorLabel}:
                                     <input autoFocus type="number" min={0} max={500} value={f.UnitCount}
                                       onChange={(e) => handleFloorFieldSave(f, { UnitCount: parseInt(e.target.value, 10) || 0 })}
@@ -1428,9 +1551,9 @@ const CrmProjectAutoSetup: React.FC = () => {
                                   </span>
                                 ) : (
                                   <button onClick={() => setEditingFloorId(f.Id)}
-                                    className="group flex items-center gap-1 px-1.5 py-0.5 rounded bg-muted/40 hover:bg-muted/70">
+                                    className="group inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-border/50 bg-muted/40 hover:bg-muted/70" title="Edit unit count for this floor">
                                     <span>{f.FloorLabel}: {f.UnitCount}</span>
-                                    <Pencil size={8} className="opacity-0 group-hover:opacity-60" />
+                                    <Pencil size={10} className="opacity-40 group-hover:opacity-80" />
                                   </button>
                                 )}
                                 {expandedFloorId === f.Id && (
@@ -1452,6 +1575,7 @@ const CrmProjectAutoSetup: React.FC = () => {
                               </div>
                             ))}
                           </div>
+                          </div>
                         )}
                           </>
                         )}
@@ -1470,10 +1594,15 @@ const CrmProjectAutoSetup: React.FC = () => {
                   const g = bf.find((f) => f.FloorNo === 0);
                   return ng.some((f) => !f.IsGenerated && f.UnitCount > 0) || (!!g && !g.IsGenerated && !!g.HasUnits && g.UnitCount > 0);
                 }) && (
-                  <button onClick={handleGenerate} disabled={generating}
-                    className="px-4 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
-                    Generate Units
-                  </button>
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3 rounded-xl border border-sky-500/30 bg-sky-500/5 px-4 py-3">
+                    <div className="text-xs text-muted-foreground flex-1">
+                      <span className="font-semibold text-foreground">Ready to generate.</span> Units will be created for every floor that has a unit count and isn't generated yet.
+                    </div>
+                    <button onClick={handleGenerate} disabled={generating}
+                      className="w-full sm:w-auto px-5 py-2.5 text-sm btn-module text-white rounded-lg font-semibold shadow-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                      {generating ? "Generating…" : "Generate Units"}
+                    </button>
+                  </div>
                 )}
               </div>
             )}
@@ -1619,7 +1748,7 @@ const FloorUnitList: React.FC<{
             if (isEditing) {
               return (
                 <div key={u.Id} className="col-span-2 sm:col-span-3 lg:col-span-4 rounded-lg border border-primary/40 bg-muted/20 p-2 space-y-1.5">
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                     <input autoFocus value={editingUnit.UnitName}
                       autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                       name={`unit-name-${u.Id}`}

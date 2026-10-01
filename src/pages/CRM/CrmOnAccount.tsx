@@ -178,7 +178,7 @@ function AdjustDialog({ deposit, onClose, onDone }: { deposit: Deposit; onClose(
         <div className="space-y-3 pt-1">
 
           {/* Deposit strip */}
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
             {[
               { label: "Deposited", val: formatINR(deposit.Amount), cls: "border-border bg-muted/20 text-foreground" },
               { label: "Applied",   val: formatINR(deposit.AppliedAmount), cls: "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/20 dark:text-emerald-400" },

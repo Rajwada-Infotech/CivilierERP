@@ -223,9 +223,13 @@ export function DataTable<TData extends RowData>({
           // actually kick in; min-width:100% keeps narrow tables filling
           // the container exactly as before.
           const totalSize = allCols.reduce((s, c) => s + (c.columnDef.size ?? 150), 0);
-          const widthOf = (size: number | undefined) => size ?? 150;
+          // Column sizes are authored in px but applied in rem (size / 16) so
+          // they scale together with the rem-based text (e.g. the laptop
+          // 110% root size) instead of the text outgrowing its column and
+          // breaking IDs, dates and badges onto several lines.
+          const widthOf = (size: number | undefined) => `${(size ?? 150) / 16}rem`;
           return (
-        <table className="text-sm font-body" style={{ tableLayout: "fixed", width: totalSize, minWidth: "100%" }}>
+        <table className="text-sm font-body" style={{ tableLayout: "auto", width: "100%", minWidth: `${totalSize / 16}rem` }}>
           <thead>
             <tr className="border-b border-border bg-muted/30">
               {table.getHeaderGroups().map((hg) =>
@@ -237,7 +241,7 @@ export function DataTable<TData extends RowData>({
                       key={header.id}
                       colSpan={header.colSpan}
                       style={{ width: widthOf(header.column.columnDef.size) }}
-                      className={`px-5 py-3.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none text-left ${
+                      className={`px-4 py-3.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none text-left ${
                         canSort
                           ? "cursor-pointer hover:text-foreground transition-colors"
                           : ""
@@ -308,7 +312,7 @@ export function DataTable<TData extends RowData>({
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
-                      className={`px-5 py-4 text-foreground text-sm align-middle overflow-hidden ${(cell.column.columnDef.meta as any)?.className ?? ""}`}
+                      className={`px-4 py-3.5 text-foreground text-sm align-middle ${(cell.column.columnDef.meta as any)?.className ?? ""}`}
                     >
                       {flexRender(
                         cell.column.columnDef.cell,

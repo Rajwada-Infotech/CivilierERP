@@ -240,7 +240,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
             {picked && <p className="text-[0.6875rem] text-muted-foreground mt-1">Up to {fmt(remaining)} available from this source.</p>}
 
             {mode === "refund" && (
-              <div className="grid grid-cols-3 gap-2 pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
                   <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide block">Gross</span>
                   <span className="text-sm font-semibold tabular-nums">{fmt(amt)}</span>
@@ -300,7 +300,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                     <span className="text-[0.625rem] text-emerald-600 dark:text-emerald-400">Pre-filled from KYC — edit if it's changed</span>
                   )}
                 </div>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                   <input value={cbName} onChange={(e) => setCbName(e.target.value)} placeholder="Bank name" className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                   <input value={cbAcc} onChange={(e) => setCbAcc(e.target.value)} placeholder="Account No" className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                   <input value={cbIfsc} onChange={(e) => setCbIfsc(e.target.value)} placeholder="IFSC" className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
@@ -468,7 +468,7 @@ const CrmRefunds: React.FC = () => {
           <DialogContent className="max-w-md">
             <DialogHeader><DialogTitle className="font-heading">Finance-approve refund {financeDialog?.RefundNo}</DialogTitle></DialogHeader>
             <div className="space-y-3 text-sm">
-              <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-2 gap-2 text-xs">
+              <div className="rounded-lg border border-border bg-muted/20 p-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                 <div><span className="text-muted-foreground block">Customer</span>{financeDialog?.CustomerName}</div>
                 <div><span className="text-muted-foreground block">Net payout</span><span className="font-bold text-green-700">{fmt(financeDialog?.NetAmount)}</span></div>
                 <div className="col-span-2"><span className="text-muted-foreground block">To</span>{financeDialog?.CustomerBankName || "—"} {financeDialog?.CustomerAccountNo || ""} {financeDialog?.CustomerIfscCode || ""}</div>

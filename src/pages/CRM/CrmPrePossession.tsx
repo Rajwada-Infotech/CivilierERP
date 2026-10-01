@@ -140,7 +140,7 @@ function CheckCard({ c, checkLoading, onToggle, onSaved, navigate }: CheckCardPr
         </div>
 
         {/* Inline dates */}
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <div>
             <label className="text-[0.625rem] text-muted-foreground uppercase tracking-wide block mb-0.5">Inspection Scheduled</label>
             <DateInput value={sdt}

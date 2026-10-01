@@ -1094,9 +1094,11 @@ const InboxRow: React.FC<{
             return map[m[1]]?.[m[2]] ?? "var(--border)";
           })() }}
         />
-        <div className={`flex-1 grid grid-cols-[190px_100px_1fr_130px_120px_150px_110px_1fr] items-center gap-2 pl-3 pr-4 py-3.5`}>
+        {/* Wide screens: one table row. Narrower: a card — module on top,
+            labelled details in a grid, actions on their own line. */}
+        <div className={`flex-1 min-w-0 grid grid-cols-2 sm:grid-cols-3 2xl:grid-cols-[minmax(10rem,1.3fr)_6.5rem_minmax(7rem,1.2fr)_minmax(6rem,1fr)_8rem_minmax(7rem,1fr)_6.5rem_auto] items-center gap-x-3 gap-y-2.5 2xl:gap-2 pl-3 pr-3 sm:pr-4 py-3.5`}>
         {/* Col 1 — Module */}
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="col-span-2 sm:col-span-3 2xl:col-span-1 flex items-center gap-3 min-w-0">
           <div className={`p-2.5 rounded-xl shrink-0 shadow-sm ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
             <Icon size={15} />
           </div>
@@ -1112,10 +1114,13 @@ const InboxRow: React.FC<{
 
         {/* Col 2 — Date */}
         <div>
+          <span className="2xl:hidden block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Date</span>
           <p className="text-xs font-medium text-foreground">{fmtDate(item.RecordDate)}</p>
         </div>
 
         {/* Col 3 — Party / Transfer route */}
+        <div className="min-w-0">
+        <span className="2xl:hidden block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Party / Transfer</span>
         {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
           <div className="flex flex-col gap-0.5 min-w-0">
             <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground font-semibold">
@@ -1181,9 +1186,11 @@ const InboxRow: React.FC<{
         ) : (
           <p className="text-xs text-foreground truncate">{party}</p>
         )}
+        </div>
 
         {/* Col 4 — Project */}
         <div className="min-w-0">
+          <span className="2xl:hidden block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Project</span>
           {item.ProjectName ? (
             <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-foreground truncate max-w-full" title={item.ProjectName}>
               <Building2 size={10} className="shrink-0 text-muted-foreground" />
@@ -1195,13 +1202,18 @@ const InboxRow: React.FC<{
         </div>
 
         {/* Col 5 — Amount */}
+        <div className="min-w-0">
+        <span className="2xl:hidden block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Amount</span>
         <div className="inline-flex items-center px-2 py-1 rounded-lg bg-foreground/5 border border-border/60">
           <p className="text-[0.8125rem] font-mono font-bold text-foreground tabular-nums">
             {fmtAmount(effectiveAmount)}
           </p>
         </div>
+        </div>
 
         {/* Col 6 — Approved/Rejected By */}
+        <div className="min-w-0">
+        <span className="2xl:hidden block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Approved / Rejected by</span>
         <div className="flex items-center gap-1.5 min-w-0">
           {approvedBy && (
             <span className="flex items-center gap-1 text-[0.625rem] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full truncate max-w-[130px]">
@@ -1217,14 +1229,18 @@ const InboxRow: React.FC<{
             <span className="text-[0.625rem] text-muted-foreground/50 italic">—</span>
           )}
         </div>
+        </div>
 
         {/* Col 7 — Status */}
-        <div className="flex items-center">
-          <StatusBadge status={item.Status} />
+        <div>
+          <span className="2xl:hidden block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Status</span>
+          <div className="flex items-center">
+            <StatusBadge status={item.Status} />
+          </div>
         </div>
 
         {/* Col 8 — Actions */}
-        <div className="flex items-center gap-2 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
+        <div className="col-span-2 sm:col-span-3 2xl:col-span-1 flex flex-wrap items-center justify-end 2xl:justify-start gap-2 pt-2.5 2xl:pt-0 border-t border-border/60 2xl:border-0 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
           {actions}
         </div>
         </div>
@@ -1491,9 +1507,9 @@ const ApprovalInbox: React.FC = () => {
           ) : (
             <>
               {/* Desktop table header */}
-              <div className="hidden md:flex items-center border-b border-border rounded-t-xl bg-muted/40">
+              <div className="hidden 2xl:flex items-center border-b border-border rounded-t-xl bg-muted/40">
                 <div className="w-[3px] shrink-0 self-stretch" />
-                <div className="flex-1 grid grid-cols-[190px_100px_1fr_130px_120px_150px_110px_1fr] gap-2 pl-3 pr-4 py-2.5">
+                <div className="flex-1 grid 2xl:grid-cols-[minmax(10rem,1.3fr)_6.5rem_minmax(7rem,1.2fr)_minmax(6rem,1fr)_8rem_minmax(7rem,1fr)_6.5rem_auto] gap-2 pl-3 pr-4 py-2.5">
                 {[
                   "Module / Ref",
                   "Date",

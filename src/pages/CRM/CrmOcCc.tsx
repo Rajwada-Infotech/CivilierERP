@@ -140,7 +140,7 @@ function OcccCard({ row, canEdit, onClick }: { row: any; canEdit: boolean; onCli
         <OcccStepper status={row.Status} />
 
         {/* Key info grid */}
-        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
           <div>
             <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wide font-medium mb-0.5">Applied On</p>
             <p className="font-medium">{fmtDate(row.ApplicationDate) || "—"}</p>
@@ -270,7 +270,7 @@ function OcccForm({
         </>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="text-xs font-medium text-muted-foreground block mb-1">Certificate Type *</label>
           <select value={form.CertType} onChange={(e) => setForm((f) => ({ ...f, CertType: e.target.value }))} className={sel}>
@@ -285,7 +285,7 @@ function OcccForm({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <label className="text-xs font-medium text-muted-foreground block mb-1 flex items-center gap-1">
             <Calendar size={10} /> Application Date
@@ -616,7 +616,7 @@ const CrmOcCc: React.FC = () => {
 
               {editLocked ? (
                 /* View mode */
-                <div className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
                   {[
                     { label: "Certificate Type", value: detailRow.CertType },
                     { label: "Status",           value: detailRow.Status   },

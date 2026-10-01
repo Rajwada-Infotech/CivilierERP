@@ -527,7 +527,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                 placeholder="Search by booking no, applicant, mobile, or project..."
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
               <select value={hCompanyId} onChange={(e) => { setHCompanyId(e.target.value); setHProjectId(""); setHBlockId(""); }}
                 className="text-xs border border-border rounded-lg px-2 py-1.5 bg-background">
                 <option value="">Company: Any</option>
@@ -596,7 +596,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                   <button onClick={() => { setBookingId(null); setAckUnlinked(false); setBulkSelected(new Set()); }} className="text-xs text-muted-foreground hover:text-foreground">Change</button>
                 )}
               </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1 text-xs">
                 <div><span className="text-muted-foreground">Customer</span><div className="font-medium truncate">{booking.ApplicantName}</div></div>
                 <div><span className="text-muted-foreground">Company</span><div className="font-medium truncate">{booking.CompanyName || "—"}</div></div>
                 <div><span className="text-muted-foreground">Project</span><div className="font-medium truncate">{booking.ProjectName || "—"}</div></div>
@@ -745,7 +745,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
               </div>
             )}
             {(form.InvoiceType === "Maintenance" || form.InvoiceType === "Other") && (
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <input type="number" placeholder="Amount" value={form.Amount}
                   onChange={(e) => setForm((f) => ({ ...f, Amount: e.target.value }))}
                   className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />

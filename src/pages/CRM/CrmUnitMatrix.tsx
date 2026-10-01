@@ -291,7 +291,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
 
         <div className="rounded-xl border border-border p-4 space-y-2">
           <h3 className="text-sm font-semibold flex items-center gap-1.5"><FileText size={14} className="text-primary" /> Application & Customer</h3>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
             <div><span className="text-muted-foreground block">Application No</span><span className="font-semibold text-sm">{appNo || "—"}</span></div>
             <div><span className="text-muted-foreground block">Applicant</span><span className="font-semibold text-sm">{applicantName || "—"}</span></div>
             <div><span className="text-muted-foreground block">Mobile</span><span className="font-medium">{mobile || "—"}</span></div>
@@ -309,7 +309,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
               <Clock size={14} /> Hold Status
             </h3>
             {hasUnpaidBooking && (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs pt-1 border-t border-current/10">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs pt-1 border-t border-current/10">
                 <div><span className="text-muted-foreground block">Booking No</span><span className="font-semibold">{unit.BookingNo || "—"}</span></div>
                 <div>
                   <span className="text-muted-foreground block">Status</span>
@@ -328,7 +328,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
         ) : (
           <div className="rounded-xl border border-border p-4 space-y-2">
             <h3 className="text-sm font-semibold flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-600" /> Booking</h3>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
               <div><span className="text-muted-foreground block">Booking No</span><span className="font-semibold text-sm">{unit.BookingNo || "—"}</span></div>
               <div>
                 <span className="text-muted-foreground block">Status</span>
@@ -345,7 +345,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
         {(unit.TotalValue != null || unit.GrandTotal != null) && (
           <div className="rounded-xl border border-border p-4 space-y-2">
             <h3 className="text-sm font-semibold flex items-center gap-1.5"><IndianRupee size={14} className="text-primary" /> Financials</h3>
-            <div className="grid grid-cols-3 gap-2 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
               <div><span className="text-muted-foreground block">Unit Value</span><span className="font-bold text-sm">{fmtMoney(unit.TotalValue)}</span></div>
               <div><span className="text-muted-foreground block">Grand Total</span><span className="font-bold text-sm">{fmtMoney(unit.GrandTotal ?? unit.TotalValue)}</span></div>
               <div><span className="text-muted-foreground block">Booking Amt</span><span className="font-bold text-sm">{fmtMoney(unit.BookingAmount)}</span></div>
@@ -444,6 +444,16 @@ export function UnitMatrixPage() {
     queryKey: ["unit-matrix-projects"],
     queryFn: () => fetchOptions<Option>(`${API}/projects`),
   });
+
+  // Show the first project's matrix straight away instead of an empty
+  // "select a project" panel. Done once on load, so if the user clears the
+  // project picker afterwards it stays cleared.
+  const [autoPicked, setAutoPicked] = useState(false);
+  useEffect(() => {
+    if (autoPicked || projectId || !projects.length) return;
+    setAutoPicked(true);
+    setProjectId(String((projects as any[])[0].Id));
+  }, [projects, projectId, autoPicked]);
 
   const { data: blocks = [] } = useQuery({
     queryKey: ["unit-matrix-blocks", projectId],

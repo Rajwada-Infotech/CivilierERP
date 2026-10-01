@@ -332,7 +332,7 @@ function TicketDetailDialog({
               </div>
 
               {/* Meta grid */}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {[
                   { label: "Customer", value: t.customer_name },
                   { label: "Phone", value: t.customer_phone || "—" },
@@ -699,7 +699,7 @@ export default function AdminTicketPanel() {
         </div>
 
         {/* ── Tabs ── */}
-        <div className="grid grid-cols-4 border-b border-border">
+        <div className="grid grid-cols-2 lg:grid-cols-4 border-b border-border">
           {tabs.map((tab) => (
             <button
               key={tab.id}

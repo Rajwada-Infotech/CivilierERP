@@ -25,6 +25,11 @@ const {
   replaceAllocations,
   getAllocationsForMany,
 } = require("../services/expenseHeadAllocation");
+const {
+  replaceLinks,
+  getLinks,
+  getLinksForMany,
+} = require("../services/paymentExpenseBookingLink");
 
 // Approve/Reject are exempt from this blanket per-module permission gate —
 // transition() (approvalService.js) is the real authority there (role
@@ -52,6 +57,97 @@ const requireUserEmail = (req, res) => {
 function normalizeBankId(value) {
   const bankId = Number(value);
   return Number.isFinite(bankId) && bankId > 0 ? bankId : null;
+}
+
+// "Merge invoices into one payment" (migration 501) — validates a proposed
+// set of ExpenseBooking ids and returns everything the create-payment route
+// needs to build the merged payment from scratch: the per-invoice link rows
+// (full settlement each, TDS already netted out) and the ONE shared
+// company/project/supplier every invoice in the set must agree on. Throws
+// (with .status = 400) on any mismatch — never trusts the client's own
+// company/project/partyId fields for a merged payment, since those are
+// derived here from the invoices themselves, not re-validated against them.
+async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
+  const ids = [...new Set(expenseBookingIds)]
+    .map((id) => parseInt(id, 10))
+    .filter((id) => Number.isInteger(id) && id > 0);
+  if (ids.length < 2) {
+    const err = new Error("Merging invoices requires at least two.");
+    err.status = 400;
+    throw err;
+  }
+
+  const req = pool.request();
+  const placeholders = ids.map((id, i) => {
+    req.input(`id${i}`, sql.Int, id);
+    return `@id${i}`;
+  });
+  const result = await req.query(`
+    SELECT
+      eb.Eid, eb.EDocNo, eb.EStatus, eb.EEmiPayment, eb.EBillStatus,
+      eb.ECompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
+      ISNULL(eb.TDSAmount, 0) AS TDSAmount,
+      ISNULL(eb.ERemainingAmount, ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))) AS RemainingAmount,
+      CASE
+        WHEN eb.ESourceType = 'GRN'      AND eb.ESourceId IS NOT NULL THEN ahm.LHeadId
+        WHEN eb.ESourceType IN ('PO','WO_PO')                          THEN po_supp.LHeadId
+        WHEN eb.ESourceType = 'WORK_DONE'                              THEN wd_supp.LHeadId
+        WHEN eb.ESourceType = 'WO'                                     THEN wo_supp.LHeadId
+        ELSE eb.LHeadId
+      END AS SupplierId,
+      CASE WHEN EXISTS (
+        SELECT 1 FROM dbo.DebitNote dn WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
+      ) THEN 1 ELSE 0 END AS HasActiveDebitNote
+    FROM dbo.ExpenseBooking eb
+    LEFT JOIN dbo.GoodsReceiptNotes grn
+      ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+    LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = grn.SupplierID
+    LEFT JOIN dbo.PurchaseOrders po_supp_po
+      ON eb.ESourceType IN ('PO','WO_PO') AND po_supp_po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT)
+    LEFT JOIN dbo.AccountHeadMaster po_supp ON po_supp.LHeadId = po_supp_po.SupplierID
+    LEFT JOIN dbo.WorkDone wd_supp_wd
+      ON eb.ESourceType = 'WORK_DONE' AND wd_supp_wd.ID = TRY_CAST(eb.ESourceId AS INT)
+    LEFT JOIN dbo.AccountHeadMaster wd_supp ON wd_supp.LHeadId = wd_supp_wd.SupplierId
+    LEFT JOIN dbo.WorkOrderHeader wo_supp_wo
+      ON eb.ESourceType = 'WO' AND wo_supp_wo.Id = TRY_CAST(eb.ESourceId AS INT)
+    LEFT JOIN dbo.AccountHeadMaster wo_supp
+      ON wo_supp.LHeadId = COALESCE(wo_supp_wo.SupplierId, wo_supp_wo.ContractorId)
+    WHERE eb.Eid IN (${placeholders.join(",")})
+  `);
+
+  const rows = result.recordset;
+  const bad = (msg) => { const e = new Error(msg); e.status = 400; throw e; };
+
+  if (rows.length !== ids.length) bad("One or more invoices in this merge could not be found.");
+  for (const r of rows) {
+    if (r.EStatus !== "Approved") bad(`${r.EDocNo}: only Approved invoices can be paid.`);
+    if (r.EEmiPayment) bad(`${r.EDocNo}: EMI-enabled invoices are paid via their own installments, not a merge.`);
+    if (r.HasActiveDebitNote) bad(`${r.EDocNo}: has an active Debit Note — settle that first.`);
+    if (!r.SupplierId) bad(`${r.EDocNo}: could not resolve its supplier/party account.`);
+    if (Number(r.RemainingAmount) <= 0) bad(`${r.EDocNo}: already fully paid — nothing left to merge.`);
+  }
+
+  const distinctCompanies = new Set(rows.map((r) => r.ECompanyId));
+  const distinctProjects = new Set(rows.map((r) => r.ProjectId));
+  const distinctSuppliers = new Set(rows.map((r) => r.SupplierId));
+  if (distinctCompanies.size > 1) bad("All merged invoices must belong to the same company.");
+  if (distinctProjects.size > 1) bad("All merged invoices must belong to the same project.");
+  if (distinctSuppliers.size > 1) bad("All merged invoices must share the same supplier.");
+
+  const links = rows.map((r) => ({
+    expenseBookingId: r.Eid,
+    eDocNo: r.EDocNo,
+    allocatedAmount: Math.round(Number(r.RemainingAmount) * 100) / 100,
+    tdsAmount: Number(r.TDSAmount) || 0,
+  }));
+
+  return {
+    links,
+    companyId: rows[0].ECompanyId,
+    projectId: rows[0].ProjectId,
+    supplierId: rows[0].SupplierId,
+    totalAmount: Math.round(links.reduce((s, l) => s + l.allocatedAmount, 0) * 100) / 100,
+  };
 }
 
 function paymentReferenceForBrokerage(row) {
@@ -715,7 +811,7 @@ router.post("/deduct-cheque", requirePageRight("new-payment", "edit"), async (re
 
 // ── POST — Create payment ─────────────────────────────────────────────────────
 router.post("/", requirePageRight("new-payment", "create"), validateBody(paymentBodySchema), async (req, res) => {
-  const {
+  let {
     PPaymentName,
     PRemarks,
     PMode,
@@ -763,6 +859,12 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // Heads straight from the bank, with no linked invoice/contract/party.
     // See services/expenseHeadAllocation.js.
     EExpenseHeadAllocations,
+    // "Merge invoices into one payment" (migration 501) — pays off several
+    // Approved ExpenseBooking invoices at once. When set, this REPLACES
+    // PExpenseRef/PCompany/PProject/partyId/PAmount below with values
+    // resolved (and validated) from the invoices themselves — never
+    // trusting whatever the client happened to send for those fields.
+    ExpenseBookingIds,
   } = req.body;
 
   try {
@@ -770,6 +872,21 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     if (!userEmail) return;
 
     const pool = getPool();
+
+    let mergedLinks = null;
+    if (Array.isArray(ExpenseBookingIds) && ExpenseBookingIds.length > 0) {
+      try {
+        const resolved = await resolveMergedInvoices(pool, sql, ExpenseBookingIds);
+        mergedLinks = resolved.links;
+        PCompany = String(resolved.companyId);
+        PProject = String(resolved.projectId);
+        partyId = resolved.supplierId;
+        PAmount = resolved.totalAmount;
+        PExpenseRef = null;
+      } catch (err) {
+        return res.status(err.status || 400).json({ error: err.message });
+      }
+    }
 
     try {
       await assertProjectVisibleToCompany(pool, PProject, PCompany);
@@ -844,12 +961,18 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
     // this payment's own GL split on top of what the JV already withheld.
     const isInvoiceLinkedForTds = !!PExpenseRef && !ContractId;
     const isJvLinkedForTds = !!JVLineId;
+    // A merged payment (migration 501) is the same case as invoice-linked —
+    // every one of its invoices already had its own TDS withheld as its own
+    // liability leg when THAT invoice was posted, individually. Re-running
+    // fresh-TDS resolution against the shared supplier here would demand a
+    // TDS be selected all over again and then double-deduct it.
+    const isMergedForTds = !!mergedLinks;
     const companyIdForTds = await resolvePaymentCompanyId(pool, PCompany);
     const finYearIdForTds = await resolveFinYearId(pool, PDate);
     let tdsSnapshot;
     try {
       const { resolveInvoiceLinkedTds, resolveTds } = require("../services/tds");
-      if (isJvLinkedForTds) {
+      if (isJvLinkedForTds || isMergedForTds) {
         tdsSnapshot = { eligible: false, thresholdMet: false, tdsId: null, tdsAmount: 0, tdsNature: null, tdsName: null, tdsPercentage: null };
       } else if (isInvoiceLinkedForTds) {
         tdsSnapshot = await resolveInvoiceLinkedTds(pool, sql, {
@@ -1003,8 +1126,18 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
       await replaceAllocations(() => pool.request(), sql, "NewPayment", newId, expenseHeadAllocations);
     }
 
-    // Sync bill status on the referenced expense booking
-    if (PExpenseRef) await _syncBillStatus(pool, PExpenseRef);
+    if (mergedLinks && newId) {
+      await replaceLinks(() => pool.request(), sql, newId, mergedLinks);
+    }
+
+    // Sync bill status on the referenced expense booking(s) — a merged
+    // payment has no single PExpenseRef, so every one of its invoices
+    // needs its own sync instead of just one.
+    if (mergedLinks) {
+      for (const l of mergedLinks) await _syncBillStatus(pool, l.eDocNo);
+    } else if (PExpenseRef) {
+      await _syncBillStatus(pool, PExpenseRef);
+    }
 
     // NOTE: On Account hooks (excess credit / OA debit) fire on APPROVE, not here.
     // A Pending payment has not moved funds yet, so recording OA at creation would
@@ -1962,6 +2095,22 @@ router.get("/:id", async (req, res) => {
   }
 });
 
+// ── GET /:id/linked-invoices — merge breakdown for a merged payment ───────────
+// Empty array for a normal, single-invoice (or no-invoice) payment — only a
+// payment created via "Merge invoices" (migration 501) has any rows here.
+router.get("/:id/linked-invoices", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id)) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const links = await getLinks(pool, sql, id);
+    res.json(links);
+  } catch (err) {
+    console.error("Payment linked-invoices error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── POST /recalculate-balances — fix stale EBillStatus on all invoices ────────
 // One-time utility: recalculates ETotalPaid / ERemainingAmount / EBillStatus for
 // every ExpenseBooking that has at least one NewPayment, using the bounce-aware logic.
@@ -1971,7 +2120,11 @@ router.post("/recalculate-balances", async (req, res) => {
     const refs = await pool.request().query(`
       SELECT DISTINCT PExpenseRef FROM dbo.NewPayment
       WHERE PExpenseRef IS NOT NULL AND PExpenseRef <> ''
+      UNION
+      SELECT DISTINCT EDocNo FROM dbo.PaymentExpenseBookingLink
     `);
+    // UNION takes its column name from the first SELECT, so every row
+    // (PExpenseRef-sourced or EDocNo-sourced) comes back under PExpenseRef.
     const expenseRefs = refs.recordset.map((r) => r.PExpenseRef);
     let updated = 0;
     for (const ref of expenseRefs) {
@@ -2620,13 +2773,26 @@ router.post("/:id/post-to-gl", async (req, res) => {
       SELECT np.PPaymentID, np.DocNo, np.PAmount, np.PMode, np.PExpenseRef, np.PDate,
              np.PBankID, np.PBankName, np.ContractId, np.PPartyId, np.PCompany, np.JVLineId,
              ISNULL(np.TDSAmount, 0) AS TDSAmount,
-             eb.ECompanyId AS CompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId
+             -- A merged payment (migration 501) has no single PExpenseRef to
+             -- join ExpenseBooking through — fall back to its first merged
+             -- invoice's own Company/Project (every merged invoice shares
+             -- the same one, enforced at merge time).
+             COALESCE(eb.ECompanyId, ebLink.ECompanyId) AS CompanyId,
+             COALESCE(TRY_CAST(eb.EProjectName AS INT), TRY_CAST(ebLink.EProjectName AS INT)) AS ProjectId
       FROM dbo.NewPayment np
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
+      OUTER APPLY (
+        SELECT TOP 1 eb2.ECompanyId, eb2.EProjectName
+        FROM dbo.PaymentExpenseBookingLink pel
+        JOIN dbo.ExpenseBooking eb2 ON eb2.Eid = pel.ExpenseBookingId
+        WHERE pel.PPaymentID = np.PPaymentID
+        ORDER BY pel.LinkId
+      ) ebLink
       WHERE np.PPaymentID = @PPaymentID
     `);
     if (!pmtRes.recordset.length) return res.status(404).json({ error: "Payment not found" });
     const pmt = pmtRes.recordset[0];
+    const mergedLinks = await getLinks(pool, sql, pmtId);
 
     // Already posted?
     const alreadyPosted = await pool.request().input("SrcId", sql.Int, pmtId)
@@ -2656,7 +2822,7 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // This route previously skipped that guard, so a manual "Post to GL" on
     // an invoice-linked payment double-withheld the TDS amount. Same for a
     // payment settling a Journal Voucher line (JVLineId).
-    const tdsAmount = (pmt.PExpenseRef || pmt.JVLineId) ? 0 : parseFloat(pmt.TDSAmount) || 0;
+    const tdsAmount = (pmt.PExpenseRef || pmt.JVLineId || mergedLinks.length > 0) ? 0 : parseFloat(pmt.TDSAmount) || 0;
     if (tdsAmount > amount) {
       return res.status(422).json({ error: `TDS amount (₹${tdsAmount}) exceeds the payment amount (₹${amount}) — re-save the payment before posting.` });
     }
@@ -2695,8 +2861,18 @@ router.post("/:id/post-to-gl", async (req, res) => {
     // the credit side splits into Bank/Cash-in-Hand (net of TDS) + TDS Payable.
     const narrationRef = pmt.PExpenseRef ? `${pmt.DocNo} (${pmt.PExpenseRef})` : pmt.DocNo;
     const bankNarration = isCash ? "Cash-in-Hand" : `Bank (${pmt.PBankName || pmt.PMode})`;
+    // "Merge invoices into one payment" (migration 501) — one Dr-Supplier
+    // leg PER merged invoice (so the GL stays traceable to each invoice's
+    // own amount) instead of one lump line, same split postPaymentApproval
+    // uses when this payment auto-posts on approval instead of through this
+    // manual route.
     const legs = [
-      { lHeadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` },
+      ...(mergedLinks.length > 0
+        ? mergedLinks.map((l) => ({
+            lHeadId: supplierId, debit: l.allocatedAmount, credit: 0,
+            narration: `Payment: ${pmt.DocNo} (${l.eDocNo}) — Supplier/Creditor`,
+          }))
+        : [{ lHeadId: supplierId, debit: amount, credit: 0, narration: `Payment: ${narrationRef} — Supplier/Creditor` }]),
       { lHeadId: bankId,     debit: 0, credit: amount - tdsAmount, narration: `Payment: ${narrationRef} — ${bankNarration}` },
       ...(tdsAmount > 0
         ? [{ lHeadId: tdsPayableId, debit: 0, credit: tdsAmount, narration: `Payment: ${narrationRef} — TDS Payable` }]

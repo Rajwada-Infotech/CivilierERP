@@ -887,3 +887,54 @@ tr:has([data-row-view]:not([data-row-view="hide"])) {
   filter: brightness(1.05);
   box-shadow: 0 8px 18px -6px var(--mod-shadow);
 }
+
+/* ── CRM pages: consistent, touch-friendly form fields & tables ──────────
+   Scoped to the CRM module so other modules are untouched. Only visual
+   properties — no layout logic or behaviour changes. */
+[data-module="crm"] main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="hidden"]):not([type="file"]), select, textarea) {
+  border-radius: 0.5rem;
+  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+}
+[data-module="crm"] main :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):focus {
+  outline: none;
+  border-color: rgba(14, 165, 233, 0.6);
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+}
+[data-module="crm"] main select:not([multiple]),
+[data-module="crm"] main input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]) {
+  min-height: 2.25rem;
+}
+/* Tables: readable headers, comfortable rows, clear hover. */
+[data-module="crm"] main table thead th {
+  white-space: nowrap;
+  letter-spacing: 0.04em;
+}
+[data-module="crm"] main table tbody tr {
+  transition: background-color 0.12s;
+}
+[data-module="crm"] main table tbody tr:hover {
+  background-color: rgba(14, 165, 233, 0.05);
+}
+/* Very small helper text is bumped to a readable minimum. */
+[data-module="crm"] main .text-\[0\.5625rem\] {
+  font-size: 0.625rem;
+}
+@media (max-width: 767px) {
+  /* Bigger tap targets for icon buttons and form controls on phones. */
+  [data-module="crm"] main button:not(.btn-module):has(> svg:only-child) {
+    min-width: 2rem;
+    min-height: 2rem;
+  }
+  [data-module="crm"] main :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+    font-size: 16px; /* prevents iOS zoom-on-focus */
+  }
+}
+
+/* ── Table cells: keep short tokens on one line ──────────────────────────
+   IDs, dates, numbers and status/count pills read badly when broken across
+   lines ("CUST-/2026-/00017", "3 / applications"). Long free text (names,
+   addresses) still wraps normally. */
+main table td :is(.font-mono, .tabular-nums, .rounded-full, [class*="badge"], time),
+main table td :is(.font-mono, .tabular-nums, .rounded-full, [class*="badge"]) * {
+  white-space: nowrap;
+}

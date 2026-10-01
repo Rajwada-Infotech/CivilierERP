@@ -386,7 +386,7 @@ const CrmBrokerage: React.FC = () => {
             </div>
 
             {selectedBroker && (
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg bg-muted/20 border border-border p-2.5 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-1.5 rounded-lg bg-muted/20 border border-border p-2.5 text-xs">
                 {selectedBroker.LHeadPhone && <div><span className="text-muted-foreground">Phone: </span><span className="font-medium">{selectedBroker.LHeadPhone}</span></div>}
                 {selectedBroker.LHeadPan && <div><span className="text-muted-foreground">PAN: </span><span className="font-mono font-medium">{selectedBroker.LHeadPan}</span></div>}
                 {selectedBroker.LHeadRera && <div><span className="text-muted-foreground">RERA: </span><span className="font-mono font-medium">{selectedBroker.LHeadRera}</span></div>}
@@ -395,7 +395,7 @@ const CrmBrokerage: React.FC = () => {
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Firm (optional, for this deal)</label>
                 <input type="text" value={form.BrokerFirm} onChange={(e) => setForm((f) => ({ ...f, BrokerFirm: e.target.value }))}
@@ -410,7 +410,7 @@ const CrmBrokerage: React.FC = () => {
                 </select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs text-muted-foreground block mb-1">Rate Value * ({form.RateType === "Percentage" ? "%" : "₹"})</label>
                 <input type="number" value={form.RateValue} onChange={(e) => setForm((f) => ({ ...f, RateValue: e.target.value }))}
