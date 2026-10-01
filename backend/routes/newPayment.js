@@ -85,7 +85,22 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
   const result = await req.query(`
     SELECT
       eb.Eid, eb.EDocNo, eb.EStatus, eb.EEmiPayment, eb.EBillStatus,
-      eb.ECompanyId, TRY_CAST(eb.EProjectName AS INT) AS ProjectId,
+      eb.ECompanyId, eb.EProjectName,
+      -- EProjectName is stored inconsistently — a numeric enterprise id as
+      -- text for most bookings, but a literal project NAME for others (same
+      -- ambiguity NewPayment.PCompany/PProject already have, see
+      -- resolvePaymentCompanyId's comment below). TRY_CAST-ing it to an int
+      -- and comparing THAT silently treated two invoices as "different
+      -- projects" whenever one was the numeric-id shape and the other the
+      -- literal-name shape, even though they displayed (and had already
+      -- passed the picker's own name-based filter) as the exact same
+      -- project. ProjectKey instead resolves to the enterprise's own name
+      -- when the value is a valid id, falling back to the raw value when
+      -- it's already a name — the same COALESCE expenseBooking.js's own
+      -- /options route already uses to DISPLAY a project name, so "same
+      -- project" here means exactly what the picker already showed the
+      -- user as matching.
+      COALESCE(proj.name, eb.EProjectName) AS ProjectKey,
       ISNULL(eb.TDSAmount, 0) AS TDSAmount,
       ISNULL(eb.ERemainingAmount, ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0))) AS RemainingAmount,
       CASE
@@ -99,6 +114,7 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
         SELECT 1 FROM dbo.DebitNote dn WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
       ) THEN 1 ELSE 0 END AS HasActiveDebitNote
     FROM dbo.ExpenseBooking eb
+    LEFT JOIN dbo.enterprise proj ON proj.id = TRY_CAST(eb.EProjectName AS INT)
     LEFT JOIN dbo.GoodsReceiptNotes grn
       ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
     LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = grn.SupplierID
@@ -128,7 +144,7 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
   }
 
   const distinctCompanies = new Set(rows.map((r) => r.ECompanyId));
-  const distinctProjects = new Set(rows.map((r) => r.ProjectId));
+  const distinctProjects = new Set(rows.map((r) => r.ProjectKey));
   const distinctSuppliers = new Set(rows.map((r) => r.SupplierId));
   if (distinctCompanies.size > 1) bad("All merged invoices must belong to the same company.");
   if (distinctProjects.size > 1) bad("All merged invoices must belong to the same project.");
@@ -144,7 +160,10 @@ async function resolveMergedInvoices(pool, sql, expenseBookingIds) {
   return {
     links,
     companyId: rows[0].ECompanyId,
-    projectId: rows[0].ProjectId,
+    // Raw EProjectName (not ProjectKey) — PProject stores whatever shape
+    // the source invoice itself used (id-as-text or literal name), same
+    // convention a normal single-invoice payment already relies on.
+    projectRaw: rows[0].EProjectName,
     supplierId: rows[0].SupplierId,
     totalAmount: Math.round(links.reduce((s, l) => s + l.allocatedAmount, 0) * 100) / 100,
   };
@@ -879,7 +898,7 @@ router.post("/", requirePageRight("new-payment", "create"), validateBody(payment
         const resolved = await resolveMergedInvoices(pool, sql, ExpenseBookingIds);
         mergedLinks = resolved.links;
         PCompany = String(resolved.companyId);
-        PProject = String(resolved.projectId);
+        PProject = String(resolved.projectRaw ?? "");
         partyId = resolved.supplierId;
         PAmount = resolved.totalAmount;
         PExpenseRef = null;
