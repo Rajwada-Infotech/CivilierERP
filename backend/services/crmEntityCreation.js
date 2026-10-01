@@ -691,7 +691,7 @@ async function resolveApplicationPaymentPlan(pool, { preferredUnitId, paymentPla
 // ApplicationId -> BookingId backfill every other Application-stage capture
 // (bank/KYC, documents, parking) already gets a few lines below.
 
-const { priceBooking } = require("./bookingUnits");
+const { priceBooking, allocateConsideration } = require("./bookingUnits");
 
 async function createCrmBookingRecord(pool, b, actorUserId) {
   if (!b.ApplicationId) throw new CrmCreationError("ApplicationId is required");
@@ -924,8 +924,20 @@ async function createCrmBookingRecord(pool, b, actorUserId) {
 
     // Insert unit lines (Migration 485 support for multi-plot sales)
     // Primary flag set on the first unit in the array.
+    //
+    // When staff type a negotiated lump sum, the booking stores THAT total
+    // (see `total` above) — so the per-line values must be apportioned from it,
+    // not left at what rate x area would have produced. Otherwise each plot's
+    // AllocatedValue — the figure its own conveyance deed and stamp duty are
+    // drawn from — no longer sums to the agreement value a sub-registrar will
+    // compare it against, and with no rate entered at all every line was 0.
+    // allocateConsideration splits pro-rata by area and reconciles to the paisa.
+    const manualTotal = b.TotalValue != null && b.TotalValue !== "";
+    const lineValues = manualTotal
+      ? allocateConsideration({ lines: linesInput, totalConsideration: total }).map((l) => l.allocatedValue)
+      : pricing.lines.map((l) => l.allocatedValue);
     for (let i = 0; i < pricing.lines.length; i++) {
-      const line = pricing.lines[i];
+      const line = { ...pricing.lines[i], allocatedValue: lineValues[i] };
       await tx.request()
         .input("bid", sql.Int, bookingId)
         .input("uid", sql.Int, line.unitId)
