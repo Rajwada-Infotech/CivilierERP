@@ -51,6 +51,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { useDraftForm, preventEnterSubmit } from "@/hooks/useDraftForm";
 import TreeDropdown from "@/components/common/TreeDropdown";
 import { getAccountGroups } from "@/api/accountApi";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -265,7 +266,7 @@ function buildCustomerColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-start">
-              <span className="text-[11px] text-muted-foreground mr-1">
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                 Delete?
               </span>
               <button
@@ -285,7 +286,7 @@ function buildCustomerColumns(
         }
         return (
           <div className="flex items-center justify-start gap-2 w-full min-w-[120px]">
-            <button
+            <button data-row-view
               onClick={() => onView(row.original)}
               className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
@@ -295,7 +296,7 @@ function buildCustomerColumns(
             {canPrint && (
               <button
                 onClick={() => onPrint(row.original)}
-                className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
+                className="p-1 rounded text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                 title="Print"
               >
                 <Printer size={15} />
@@ -656,7 +657,7 @@ const CustomerMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Building2 size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Basic Information
                 </p>
               </div>
@@ -730,7 +731,7 @@ const CustomerMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Phone size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Contact Details
                 </p>
               </div>
@@ -826,7 +827,7 @@ const CustomerMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <FileText size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   GST &amp; Tax Details
                 </p>
               </div>
@@ -1023,7 +1024,7 @@ const CustomerMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -1079,7 +1080,7 @@ const CustomerMaster: React.FC = () => {
                 { label: "Address", value: viewRecord.LHeadAddress || "—" },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     {label}
                   </p>
                   <p
@@ -1092,7 +1093,7 @@ const CustomerMaster: React.FC = () => {
                 </div>
               ))}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <span
@@ -1130,7 +1131,7 @@ const CustomerMaster: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

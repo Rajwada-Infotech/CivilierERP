@@ -375,7 +375,7 @@ const MonthlyIncomeCard: React.FC<{
         >
           Monthly Income Growth
         </span>
-        <span className="text-[10px] text-muted-foreground ml-auto">
+        <span className="text-[0.625rem] text-muted-foreground ml-auto">
           From Trial Balance · current FY
         </span>
       </div>
@@ -399,7 +399,7 @@ const MonthlyIncomeCard: React.FC<{
                     className="w-2.5 h-2.5 rounded-sm"
                     style={{ background: l.color }}
                   />
-                  <span className="text-[10px] text-muted-foreground">{l.label}</span>
+                  <span className="text-[0.625rem] text-muted-foreground">{l.label}</span>
                 </div>
               ))}
             </div>
@@ -443,7 +443,7 @@ const MonthlyIncomeCard: React.FC<{
                         </p>
                         <p className="text-xs text-muted-foreground">{fmt(d.income)}</p>
                         <p
-                          className="text-[11px] font-medium mt-0.5"
+                          className="text-[0.6875rem] font-medium mt-0.5"
                           style={{ color: trendColor[d.trend] }}
                         >
                           {trendLabel}
@@ -786,7 +786,7 @@ const FinanceDashboard = () => {
                 </div>
                 <button
                   onClick={() => navigate("/payments")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: "#f43f5e" }}
                 >
                   View all →
@@ -834,7 +834,7 @@ const FinanceDashboard = () => {
                           <TableCell>
                             <Badge
                               variant="outline"
-                              className="text-[10px] border-rose-500/30 text-rose-500"
+                              className="text-[0.625rem] border-rose-500/30 text-rose-500"
                             >
                               {p.PMode || "—"}
                             </Badge>
@@ -882,7 +882,7 @@ const FinanceDashboard = () => {
                 </div>
                 <button
                   onClick={() => navigate("/received-payments")}
-                  className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+                  className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
                   style={{ color: "#10b981" }}
                 >
                   View all →
@@ -930,7 +930,7 @@ const FinanceDashboard = () => {
                           <TableCell>
                             <Badge
                               variant="outline"
-                              className="text-[10px] border-emerald-500/30 text-emerald-500"
+                              className="text-[0.625rem] border-emerald-500/30 text-emerald-500"
                             >
                               {r.RPMode || "—"}
                             </Badge>
@@ -943,7 +943,7 @@ const FinanceDashboard = () => {
                           </TableCell>
                           <TableCell>
                             <span
-                              className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                              className={`text-[0.625rem] px-2 py-0.5 rounded-full font-medium ${
                                 r.RPStatus === "Approved"
                                   ? "bg-emerald-500/15 text-emerald-500"
                                   : r.RPStatus === "Draft" || !r.RPStatus

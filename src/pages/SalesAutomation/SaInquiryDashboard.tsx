@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { AutoInput } from "@/components/ui/date-input";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { RefreshButton } from "@/components/ui/RefreshButton";
@@ -176,7 +177,7 @@ const SaInquiryDashboard: React.FC = () => {
                   className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedLeadId === (l.Id || parseInt(l._id)) ? "border-primary bg-primary/5" : "border-border hover:bg-accent"}`}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm font-medium text-foreground truncate">{l.CustomerName}</span>
-                    {l.Classification && <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${classColor(l.Classification)}`}>{l.Classification}</span>}
+                    {l.Classification && <span className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full ${classColor(l.Classification)}`}>{l.Classification}</span>}
                   </div>
                   <div className="text-xs text-muted-foreground mt-0.5">{l.Mobile}</div>
                   <div className="text-xs text-muted-foreground">{l.Status} · {l.CampaignName || l.PlatformName || "—"}</div>
@@ -277,7 +278,7 @@ const SaInquiryDashboard: React.FC = () => {
                   </div>
                 </div>
                 <button onClick={handleLogCall} disabled={submitting}
-                  className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg disabled:opacity-40 hover:bg-primary/90 transition-colors">
+                  className="px-4 py-2 btn-module text-white text-sm font-medium rounded-lg disabled:opacity-40 transition-colors">
                   {submitting ? "Logging..." : "Log Call"}
                 </button>
               </div>
@@ -293,7 +294,7 @@ const SaInquiryDashboard: React.FC = () => {
                   <div key={c.Id} className="px-4 py-3 border-b border-border last:border-0">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-medium text-foreground">{c.Outcome || "—"}</span>
-                      {c.Classification && <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${classColor(c.Classification)}`}>{c.Classification}</span>}
+                      {c.Classification && <span className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full ${classColor(c.Classification)}`}>{c.Classification}</span>}
                       <span className="text-xs text-muted-foreground">{c.CallTime ? String(c.CallTime).slice(0, 16).replace("T", " ") : "—"}</span>
                     </div>
                     {c.Remarks && <p className="text-xs text-muted-foreground mt-1">{c.Remarks}</p>}
@@ -326,7 +327,7 @@ const SaInquiryDashboard: React.FC = () => {
             ].map(({ key, label, type }) => (
               <div key={key}>
                 <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-                <input
+                <AutoInput
                   type={type}
                   value={visitForm[key as keyof typeof visitForm]}
                   onChange={(e) => setVisitForm((f) => ({ ...f, [key]: e.target.value }))}
@@ -375,7 +376,7 @@ const SaInquiryDashboard: React.FC = () => {
             <button
               onClick={handleScheduleVisit}
               disabled={schedulingVisit}
-              className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 transition-colors"
+              className="px-4 py-1.5 rounded-lg text-xs font-semibold btn-module text-white disabled:opacity-40 transition-colors"
             >{schedulingVisit ? "Scheduling..." : "Schedule Visit"}</button>
           </div>
         </DialogContent>

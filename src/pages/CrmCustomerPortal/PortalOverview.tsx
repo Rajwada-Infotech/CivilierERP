@@ -11,8 +11,8 @@ function StatCard({ icon: Icon, label, value, sub }: { icon: any; label: string;
     <Card className="p-4">
       <div className="w-9 h-9 rounded-lg flex items-center justify-center mb-3" style={{ background: GOLD_SOFT, color: GOLD }}><Icon size={16} /></div>
       <p className="text-xl font-semibold leading-none" style={{ ...serif, color: TEXT }}>{value}</p>
-      <p className="text-[11px] mt-1.5" style={{ color: TEXT_MUTED }}>{label}</p>
-      {sub && <p className="text-[10px] mt-0.5" style={{ color: TEXT_FAINT }}>{sub}</p>}
+      <p className="text-[0.6875rem] mt-1.5" style={{ color: TEXT_MUTED }}>{label}</p>
+      {sub && <p className="text-[0.625rem] mt-0.5" style={{ color: TEXT_FAINT }}>{sub}</p>}
     </Card>
   );
 }

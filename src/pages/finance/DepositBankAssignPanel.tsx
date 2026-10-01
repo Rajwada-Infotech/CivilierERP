@@ -73,7 +73,7 @@ export function DepositBankAssignPanel({
 
   return (
     <div className="mx-5 mb-3 rounded-lg border border-amber-500/40 bg-amber-500/5 px-3 py-2.5 space-y-2">
-      <p className="flex items-center gap-1.5 text-[11px] font-heading font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+      <p className="flex items-center gap-1.5 text-[0.6875rem] font-heading font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-400">
         <Landmark size={12} /> CRM payment — {hasBank ? "deposit bank assigned" : "assign the deposit bank before approval"}
       </p>
       {canEdit ? (
@@ -99,9 +99,9 @@ export function DepositBankAssignPanel({
       )}
       {hasBank && !changed && (
         <div className="flex items-center justify-between gap-2 pt-1 border-t border-amber-500/20">
-          <span className="text-[11px] text-muted-foreground">Bank: <span className="font-medium text-foreground">{currentBankName}</span> — sent for final approval.</span>
+          <span className="text-[0.6875rem] text-muted-foreground">Bank: <span className="font-medium text-foreground">{currentBankName}</span> — sent for final approval.</span>
           <Link to="/admin/approval/inbox"
-            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg text-[11px] font-heading font-semibold text-primary border border-primary/40 hover:bg-primary/10">
+            className="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg text-[0.6875rem] font-heading font-semibold text-primary border border-primary/40 hover:bg-primary/10">
             Final approval in Approval Inbox <ArrowRight size={11} />
           </Link>
         </div>

@@ -110,7 +110,7 @@ function BlueprintUploadField({
         <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
           <Upload size={13} className="text-muted-foreground shrink-0" />
           <span className="flex-1 truncate">{pendingFile.name}</span>
-          <span className="text-[10px] text-muted-foreground shrink-0">Will upload on save</span>
+          <span className="text-[0.625rem] text-muted-foreground shrink-0">Will upload on save</span>
         </div>
       ) : existingName ? (
         <button
@@ -120,7 +120,7 @@ function BlueprintUploadField({
         >
           <FileText size={13} className="text-muted-foreground shrink-0" />
           <span className="flex-1 truncate font-medium text-foreground">{existingName}</span>
-          <span className="text-[10px] text-muted-foreground shrink-0">View current</span>
+          <span className="text-[0.625rem] text-muted-foreground shrink-0">View current</span>
         </button>
       ) : (
         <p className="text-xs text-muted-foreground">No blueprint uploaded yet.</p>
@@ -254,7 +254,7 @@ function UnitRoomConfigCard({ unitId }: { unitId: string }) {
           type="button"
           onClick={handleGenerate}
           disabled={generating || templateTotal === 0 || allCreated}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-gradient-to-r from-cyan-500 to-teal-400 text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium btn-module text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
         >
           {generating ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
           {allCreated ? "All rooms created" : "Create Rooms"}
@@ -279,14 +279,14 @@ function UnitRoomConfigCard({ unitId }: { unitId: string }) {
 
       {activeExisting.length > 0 && (
         <div className="space-y-1">
-          <p className="text-[11px] font-medium text-muted-foreground">
+          <p className="text-[0.6875rem] font-medium text-muted-foreground">
             {activeExisting.length} room{activeExisting.length === 1 ? "" : "s"} already tagged to this unit:
           </p>
           <div className="flex flex-wrap gap-1.5">
             {activeExisting.map((r) => (
               <span
                 key={r.Id}
-                className="inline-flex items-center gap-1 text-[11px] bg-background border border-border px-2 py-0.5 rounded-full"
+                className="inline-flex items-center gap-1 text-[0.6875rem] bg-background border border-border px-2 py-0.5 rounded-full"
               >
                 <CheckCircle2 size={10} className="text-emerald-500 shrink-0" />
                 {r.RoomName}
@@ -368,7 +368,7 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
     <div className="rounded-xl border border-border bg-card p-4 flex flex-wrap items-end gap-3">
       <div className="flex-1 min-w-[14rem]">
         <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Generate Rooms in Bulk</p>
-        <p className="text-[11px] text-muted-foreground mt-0.5">
+        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
           Syncs every unit's rooms to its Unit Composition layout — adds missing rooms and removes unused empty ones.
         </p>
       </div>
@@ -384,7 +384,7 @@ function BulkGenerateRoomsPanel({ units }: { units: UnitOption[] }) {
         type="button"
         onClick={handleRun}
         disabled={!projectId || running || unitCount === 0}
-        className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-medium bg-gradient-to-r from-cyan-500 to-teal-400 text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+        className="flex items-center gap-1.5 h-8 px-3 rounded-lg text-xs font-medium btn-module text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
       >
         {running ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
         {running ? "Generating…" : projectId ? `Generate for ${unitCount} unit(s)` : "Generate"}
@@ -427,8 +427,8 @@ function TreeRow({ depth, expanded, onToggle, icon, label, units, rooms, strong 
         {custom && <CustomBadge />}
         {chips}
         <span className="ml-auto flex items-center gap-1.5 shrink-0">
-          <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{units} unit{units === 1 ? "" : "s"}</span>
-          <span className="text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rooms} room{rooms === 1 ? "" : "s"}</span>
+          <span className="text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{units} unit{units === 1 ? "" : "s"}</span>
+          <span className="text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">{rooms} room{rooms === 1 ? "" : "s"}</span>
         </span>
       </button>
       <div className="mr-3 flex items-center gap-1 shrink-0 w-[124px] justify-end">
@@ -447,7 +447,7 @@ function TreeRow({ depth, expanded, onToggle, icon, label, units, rooms, strong 
 
 function CustomBadge() {
   return (
-    <span className="text-[9px] font-semibold uppercase tracking-wide bg-violet-500/15 text-violet-600 dark:text-violet-400 px-1.5 py-0.5 rounded shrink-0"
+    <span className="text-[0.5625rem] font-semibold uppercase tracking-wide bg-violet-500/15 text-violet-600 dark:text-violet-400 px-1.5 py-0.5 rounded shrink-0"
       title="This level has its own layout (overrides the one above)">
       Custom
     </span>
@@ -457,7 +457,7 @@ function CustomBadge() {
 function EditLayoutButton({ onClick, active = false }: { onClick: () => void; active?: boolean }) {
   return (
     <button type="button" onClick={onClick} aria-expanded={active}
-      className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md border transition-colors ${
+      className={`shrink-0 inline-flex items-center gap-1 text-[0.625rem] font-medium px-2 py-1 rounded-md border transition-colors ${
         active ? "border-cyan-500 text-cyan-600 dark:text-cyan-400 bg-cyan-500/10" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
       title="View / set this level's room layout">
       <LayoutGrid size={11} /> Layout
@@ -472,7 +472,7 @@ function LayoutChips({ items }: { items: { label: string; total: number; text: s
     <span className="hidden md:flex items-center gap-1 min-w-0 overflow-hidden">
       {items.map((i) => (
         <span key={i.label} title={`${i.label}: ${i.text || "no rooms"}`}
-          className="text-[10px] text-muted-foreground border border-border px-1.5 py-0.5 rounded shrink-0">
+          className="text-[0.625rem] text-muted-foreground border border-border px-1.5 py-0.5 rounded shrink-0">
           {i.label} · {i.total}
         </span>
       ))}
@@ -1039,17 +1039,17 @@ const RoomMaster: React.FC = () => {
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border bg-muted/20">
           <div>
             <p className="text-sm font-heading font-semibold text-foreground">Room Records</p>
-            <p className="text-[11px] text-muted-foreground">{mappedData.length} record{mappedData.length === 1 ? "" : "s"}</p>
+            <p className="text-[0.6875rem] text-muted-foreground">{mappedData.length} record{mappedData.length === 1 ? "" : "s"}</p>
           </div>
           <div className="flex items-center gap-2">
           {roomTree.length > 0 && (
             <>
               <button type="button" onClick={() => setExpandedUnits(new Set(allTreeKeys))}
-                className="text-[11px] font-medium px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                className="text-[0.6875rem] font-medium px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
                 Expand all
               </button>
               <button type="button" onClick={() => setExpandedUnits(new Set())}
-                className="text-[11px] font-medium px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
+                className="text-[0.6875rem] font-medium px-2.5 py-1 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
                 Collapse all
               </button>
             </>
@@ -1136,7 +1136,7 @@ const RoomMaster: React.FC = () => {
                                 <Building2 size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
                                 <span className="text-sm font-medium text-foreground">{g.unitName || "—"}</span>
                                 {g.bhkType && (
-                                  <span className="text-[10px] font-medium text-cyan-700 dark:text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full shrink-0">
+                                  <span className="text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded-full shrink-0">
                                     {g.bhkType}
                                   </span>
                                 )}
@@ -1147,12 +1147,12 @@ const RoomMaster: React.FC = () => {
                                   const active = g.rooms.filter((r) => r.isActive && r.roomCategoryId != null).length;
                                   const exp = expectedRooms(g);
                                   return exp != null && active !== exp ? (
-                                    <span className="ml-auto inline-flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full shrink-0"
+                                    <span className="ml-auto inline-flex items-center gap-1 text-[0.625rem] font-semibold text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-2 py-0.5 rounded-full shrink-0"
                                       title={`Has ${active} active room(s); its layout calls for ${exp}. Run "Generate" in Generate Rooms in Bulk, or check the layout.`}>
                                       <AlertTriangle size={10} /> {active}/{exp} rooms
                                     </span>
                                   ) : (
-                                    <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+                                    <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
                                       {g.rooms.length} room{g.rooms.length === 1 ? "" : "s"}
                                     </span>
                                   );
@@ -1181,7 +1181,7 @@ const RoomMaster: React.FC = () => {
                                 <div className="overflow-x-auto">
                                   <table className="w-full text-sm">
                                     <thead>
-                                      <tr className="border-b border-border text-left text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide bg-muted/10">
+                                      <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide bg-muted/10">
                                         <th className="pr-3 py-2" style={{ paddingLeft: 16 + 4 * 20 + 8 }}>Room Name</th>
                                         <th className="px-3 py-2">Floor</th>
                                         <th className="px-3 py-2">Status</th>
@@ -1206,7 +1206,7 @@ const RoomMaster: React.FC = () => {
                                           </td>
                                           <td className="px-5 py-2.5">
                                             <div className="flex items-center justify-end gap-1">
-                                              <button
+                                              <button data-row-view
                                                 onClick={() => setViewRoom(room)}
                                                 className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
                                                 title="View"
@@ -1215,7 +1215,7 @@ const RoomMaster: React.FC = () => {
                                               </button>
                                               <button
                                                 onClick={() => printRoom(room)}
-                                                className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                                                className="p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                                                 title="Print"
                                               >
                                                 <Printer size={13} />
@@ -1269,7 +1269,7 @@ const RoomMaster: React.FC = () => {
             <div className="space-y-3 pt-1">
               {roomViewFields.map((f) => (
                 <div key={f.key} className="space-y-0.5">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">{f.label}</p>
+                  <p className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">{f.label}</p>
                   <div className="text-sm text-foreground">
                     {f.render ? f.render(viewRoom[f.key], viewRoom) : String(viewRoom[f.key] ?? "—")}
                   </div>

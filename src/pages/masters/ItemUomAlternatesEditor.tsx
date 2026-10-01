@@ -75,7 +75,7 @@ export function AlternateUomTagger({
                   </option>
                 ))}
             </select>
-            <span className="text-[11px] text-muted-foreground shrink-0">
+            <span className="text-[0.6875rem] text-muted-foreground shrink-0">
               1 unit =
             </span>
             <input
@@ -87,7 +87,7 @@ export function AlternateUomTagger({
               className="w-24 px-2.5 py-1.5 rounded-lg text-xs font-mono bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
               placeholder="0.3"
             />
-            <span className="text-[11px] text-muted-foreground shrink-0 font-mono">
+            <span className="text-[0.6875rem] text-muted-foreground shrink-0 font-mono">
               {baseLabel}
             </span>
             <button

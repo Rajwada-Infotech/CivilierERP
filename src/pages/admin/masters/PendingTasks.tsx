@@ -42,6 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -208,7 +209,7 @@ function PriorityPill({ priority }: { priority: TaskPriority | null }) {
       dot: "bg-red-500",
     },
     medium: {
-      bg: "bg-amber-500/10 text-amber-600 border border-amber-500/20",
+      bg: "bg-[#ffe2021a] text-amber-600 border border-amber-500/20",
       dot: "bg-amber-500",
     },
     low: {
@@ -872,8 +873,7 @@ export default function PendingTasksPage() {
                 </label>
                 <div className="relative">
                   <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                  <input
-                    type="date"
+                  <DateInput
                     value={form.dueDate}
                     onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
                     className="w-full pl-8 pr-3 py-2 rounded-xl text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"

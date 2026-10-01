@@ -222,11 +222,11 @@ const SetupDropdown = ({
               <Settings size={15} strokeWidth={2} />
             </div>
             <div>
-              <p className="text-[11px] font-heading font-bold text-foreground uppercase tracking-widest leading-none">
+              <p className="text-[0.6875rem] font-heading font-bold text-foreground uppercase tracking-widest leading-none">
                 Setup
               </p>
               <p
-                className="text-[10px] font-heading mt-0.5 leading-none"
+                className="text-[0.625rem] font-heading mt-0.5 leading-none"
                 style={{
                   color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)`,
                 }}
@@ -236,7 +236,7 @@ const SetupDropdown = ({
             </div>
           </div>
           <span
-            className="text-[10px] font-heading font-semibold px-2.5 py-1 rounded-full border tracking-wide"
+            className="text-[0.625rem] font-heading font-semibold px-2.5 py-1 rounded-full border tracking-wide"
             style={{
               color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l))`,
               borderColor: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35)`,
@@ -305,7 +305,7 @@ const SetupDropdown = ({
                   />
                 </div>
                 <span
-                  className={`text-[9px] font-heading text-center leading-tight line-clamp-2 transition-colors duration-150
+                  className={`text-[0.5625rem] font-heading text-center leading-tight line-clamp-2 transition-colors duration-150
                     ${isActivePath ? "font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
                   style={
                     isActivePath
@@ -329,7 +329,7 @@ const SetupDropdown = ({
           background: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.04)`,
         }}
       >
-        <p className="text-[9px] text-muted-foreground font-heading">
+        <p className="text-[0.5625rem] text-muted-foreground font-heading">
           {items.length} configuration{items.length !== 1 ? "s" : ""}
         </p>
         <div className="flex items-center gap-1">
@@ -340,7 +340,7 @@ const SetupDropdown = ({
             }}
           />
           <p
-            className="text-[9px] font-heading font-medium"
+            className="text-[0.5625rem] font-heading font-medium"
             style={{
               color: `hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.8)`,
             }}
@@ -441,13 +441,13 @@ const UserMenuContent: React.FC<{
         <div className="relative z-10 mt-2.5">
           {accent ? (
             <span
-              className="inline-flex items-center text-[10px] px-2 py-0.5 rounded-full font-heading font-semibold"
+              className="inline-flex items-center text-[0.625rem] px-2 py-0.5 rounded-full font-heading font-semibold"
               style={{ background: `${accent.color}1A`, color: accent.color }}
             >
               {accent.label}
             </span>
           ) : (
-            <span className="inline-flex items-center text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
+            <span className="inline-flex items-center text-[0.625rem] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
               User · {currentUser?.pagePermissions?.length || 0} pages
             </span>
           )}

@@ -35,6 +35,7 @@ import {
   Lock,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface AccountGroup {
@@ -125,7 +126,7 @@ function buildGLColumns(
           </span>
           {row.original.IsSystemGenerated && (
             <span
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold"
+              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold"
               style={{ background: "rgba(99,102,241,0.12)", color: "#818cf8", border: "1px solid rgba(99,102,241,0.25)" }}
               title="System-generated — protected"
             >
@@ -168,7 +169,7 @@ function buildGLColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[11px] text-muted-foreground mr-1">
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                 Delete?
               </span>
               <button
@@ -188,7 +189,7 @@ function buildGLColumns(
         }
         return (
           <div className="flex items-center justify-end gap-1">
-            <button
+            <button data-row-view
               onClick={() => onView(row.original)}
               className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10"
               title="View details"
@@ -558,7 +559,7 @@ const GeneralLedgerMaster: React.FC = () => {
               <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Ledger Account" : "Add Ledger Account"}
               </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 Fields marked <span className="text-destructive">*</span> are required
               </p>
             </div>
@@ -570,7 +571,7 @@ const GeneralLedgerMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <BookOpen size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Account Details
                 </p>
               </div>
@@ -622,7 +623,7 @@ const GeneralLedgerMaster: React.FC = () => {
                       className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                     />
                   </div>
-                  <p className="text-[11px] text-muted-foreground/70">
+                  <p className="text-[0.6875rem] text-muted-foreground/70">
                     Auto-generated from account name (you can override manually)
                   </p>
                 </div>
@@ -694,7 +695,7 @@ const GeneralLedgerMaster: React.FC = () => {
 
           {/* Card footer — actions */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground hidden sm:block">
+            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
               {canSave
                 ? <span className="text-emerald-500 font-medium">Ready to save</span>
                 : "Fill in the required fields to save"}
@@ -821,7 +822,7 @@ const GeneralLedgerMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -843,7 +844,7 @@ const GeneralLedgerMaster: React.FC = () => {
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Account Name
                 </p>
                 <p className="text-sm font-medium text-foreground">
@@ -851,7 +852,7 @@ const GeneralLedgerMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Short Code
                 </p>
                 <p className="font-mono text-sm font-semibold text-primary">
@@ -859,7 +860,7 @@ const GeneralLedgerMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Account Group
                 </p>
                 <p className="text-sm text-foreground">
@@ -871,7 +872,7 @@ const GeneralLedgerMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <span
@@ -882,7 +883,7 @@ const GeneralLedgerMaster: React.FC = () => {
               </div>
               {viewRecord.IsSystemGenerated && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     Protection
                   </p>
                   <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold"
@@ -911,7 +912,7 @@ const GeneralLedgerMaster: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

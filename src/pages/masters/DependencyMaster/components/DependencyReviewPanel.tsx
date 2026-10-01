@@ -22,19 +22,19 @@ export function DependencyReviewPanel({ resolvedPath, alias, workType, rungs }: 
       </div>
 
       <div>
-        <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">Path</p>
+        <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">Path</p>
         <p className="text-xs font-mono text-foreground">{resolvedPath}</p>
       </div>
 
       <div className="flex items-center gap-6">
         <div>
-          <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">Alias</p>
+          <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">Alias</p>
           <p className="text-sm font-medium text-foreground">{alias}</p>
         </div>
         <div>
-          <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">Work Type</p>
+          <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-0.5">Work Type</p>
           <span
-            className={`text-[10px] font-heading uppercase tracking-wide px-2 py-0.5 rounded ${
+            className={`text-[0.625rem] font-heading uppercase tracking-wide px-2 py-0.5 rounded ${
               workType === "INTERNAL" ? "bg-orange-500/10 text-orange-500" : "bg-sky-500/10 text-sky-500"
             }`}
           >
@@ -44,13 +44,13 @@ export function DependencyReviewPanel({ resolvedPath, alias, workType, rungs }: 
       </div>
 
       <div>
-        <p className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">
+        <p className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mb-1">
           Activity Chain ({rungs.length})
         </p>
         <ol className="space-y-1">
           {rungs.map((r) => (
             <li key={r.sequenceNo} className="flex items-center gap-2 text-xs text-foreground">
-              <span className="w-4 h-4 rounded-full bg-primary/15 text-primary text-[9px] font-bold flex items-center justify-center shrink-0">
+              <span className="w-4 h-4 rounded-full bg-primary/15 text-primary text-[0.5625rem] font-bold flex items-center justify-center shrink-0">
                 {r.sequenceNo}
               </span>
               {r.activityName}

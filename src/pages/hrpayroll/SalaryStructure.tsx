@@ -27,6 +27,8 @@ import {
   type ValidationError,
   type CalculationResult,
 } from "@/api/salaryStructureApi";
+import { DateInput } from "@/components/ui/date-input";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const RESERVED_KEYWORDS = [
   "CTC",
@@ -92,7 +94,7 @@ const emptyHeader = () => ({
 
 const inputBase =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
-const labelBase = "block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
+const labelBase = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 const smallInput = inputBase + " py-1.5 text-xs";
 
 const SalaryStructure: React.FC = () => {
@@ -387,7 +389,7 @@ const SalaryStructure: React.FC = () => {
                   <h2 className="font-heading font-semibold text-foreground text-sm">
                     {editingId !== null ? `Edit Salary Structure${header.isActive ? "" : " (Draft)"}` : "New Salary Structure"}
                   </h2>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                     {editingId !== null ? "Modify the template below and save." : "Define the header, add Salary Head lines, then validate and activate."}
                   </p>
                 </div>
@@ -426,11 +428,11 @@ const SalaryStructure: React.FC = () => {
                   </div>
                   <div>
                     <label className={labelBase}>Effective From</label>
-                    <input type="date" value={header.effectiveFrom} onChange={(e) => setHeader((h) => ({ ...h, effectiveFrom: e.target.value }))} className={inputBase} />
+                    <DateInput value={header.effectiveFrom} onChange={(e) => setHeader((h) => ({ ...h, effectiveFrom: e.target.value }))} className={inputBase} />
                   </div>
                   <div>
                     <label className={labelBase}>Effective To</label>
-                    <input type="date" value={header.effectiveTo} onChange={(e) => setHeader((h) => ({ ...h, effectiveTo: e.target.value }))} className={inputBase} />
+                    <DateInput value={header.effectiveTo} onChange={(e) => setHeader((h) => ({ ...h, effectiveTo: e.target.value }))} className={inputBase} />
                   </div>
                   <div>
                     <label className={labelBase}>CTC Frequency</label>
@@ -441,7 +443,7 @@ const SalaryStructure: React.FC = () => {
                   </div>
                   <div className="flex items-end gap-2">
                     <label className={labelBase + " mb-0"}>Status</label>
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${header.isActive ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" : "bg-muted text-muted-foreground border-border"}`}>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border ${header.isActive ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" : "bg-muted text-muted-foreground border-border"}`}>
                       {header.isActive ? "Active" : "Draft / Inactive"}
                     </span>
                   </div>
@@ -463,7 +465,7 @@ const SalaryStructure: React.FC = () => {
                         <div key={idx} className="rounded-lg border border-border p-3 bg-muted/10">
                           <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end">
                             <div className="md:col-span-4">
-                              <label className="text-[10px] uppercase tracking-widest text-muted-foreground">Salary Head</label>
+                              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Salary Head</label>
                               <select value={line.deductionAdditionId} onChange={(e) => updateLine(idx, { deductionAdditionId: e.target.value })} className={smallInput}>
                                 <option value="">Select...</option>
                                 {heads.map((h) => (
@@ -472,7 +474,7 @@ const SalaryStructure: React.FC = () => {
                               </select>
                             </div>
                             <div className="md:col-span-2">
-                              <label className="text-[10px] uppercase tracking-widest text-muted-foreground">Calc Type</label>
+                              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Calc Type</label>
                               <select value={line.calculationType} onChange={(e) => updateLine(idx, { calculationType: e.target.value as CalculationType })} className={smallInput}>
                                 {CALCULATION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
                               </select>
@@ -480,28 +482,28 @@ const SalaryStructure: React.FC = () => {
                             <div className="md:col-span-4">
                               {line.calculationType === "Fixed" && (
                                 <>
-                                  <label className="text-[10px] uppercase tracking-widest text-muted-foreground">Fixed Amount</label>
+                                  <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Fixed Amount</label>
                                   <input type="number" value={line.amount} onChange={(e) => updateLine(idx, { amount: e.target.value })} className={smallInput} placeholder="Amount" />
                                 </>
                               )}
                               {line.calculationType === "Percentage" && (
                                 <div className="grid grid-cols-2 gap-2">
                                   <div>
-                                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground">Base</label>
+                                    <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Base</label>
                                     <select value={line.calculationBase} onChange={(e) => updateLine(idx, { calculationBase: e.target.value })} className={smallInput}>
                                       <option value="">Select...</option>
                                       {calculationBaseOptions.map((c) => <option key={c} value={c}>{c}</option>)}
                                     </select>
                                   </div>
                                   <div>
-                                    <label className="text-[10px] uppercase tracking-widest text-muted-foreground">Percentage</label>
+                                    <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Percentage</label>
                                     <input type="number" value={line.percentage} onChange={(e) => updateLine(idx, { percentage: e.target.value })} className={smallInput} placeholder="%" />
                                   </div>
                                 </div>
                               )}
                               {line.calculationType === "Formula" && (
                                 <>
-                                  <label className="text-[10px] uppercase tracking-widest text-muted-foreground">Formula</label>
+                                  <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Formula</label>
                                   <div className="flex gap-1.5">
                                     <input type="text" value={line.formula} onChange={(e) => updateLine(idx, { formula: e.target.value })} className={smallInput + " font-mono"} placeholder="e.g. GROSS - BASIC - HRA" />
                                     <button type="button" onClick={() => setFormulaBuilderIdx(idx)} className="px-2.5 py-1.5 rounded-lg text-xs border border-border hover:bg-muted transition-colors whitespace-nowrap">
@@ -526,15 +528,15 @@ const SalaryStructure: React.FC = () => {
 
                           <div className="grid grid-cols-2 md:grid-cols-6 gap-2 mt-2">
                             <div>
-                              <label className="text-[10px] uppercase tracking-widest text-muted-foreground">Min Amount</label>
+                              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Min Amount</label>
                               <input type="number" value={line.minAmount} onChange={(e) => updateLine(idx, { minAmount: e.target.value })} className={smallInput} />
                             </div>
                             <div>
-                              <label className="text-[10px] uppercase tracking-widest text-muted-foreground">Max Amount</label>
+                              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Max Amount</label>
                               <input type="number" value={line.maxAmount} onChange={(e) => updateLine(idx, { maxAmount: e.target.value })} className={smallInput} />
                             </div>
                             <div>
-                              <label className="text-[10px] uppercase tracking-widest text-muted-foreground">Rounding</label>
+                              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground">Rounding</label>
                               <select value={line.roundingRule} onChange={(e) => updateLine(idx, { roundingRule: e.target.value as RoundingRule })} className={smallInput}>
                                 {ROUNDING_RULES.map((r) => <option key={r} value={r}>{r}</option>)}
                               </select>
@@ -561,7 +563,7 @@ const SalaryStructure: React.FC = () => {
                             </div>
                           </div>
                           {head && (
-                            <p className="text-[10px] text-muted-foreground mt-1.5">
+                            <p className="text-[0.625rem] text-muted-foreground mt-1.5">
                               {head.Code} · {head.Type}{head.LedgerName ? ` · ${head.LedgerName}` : ""}
                             </p>
                           )}
@@ -584,7 +586,7 @@ const SalaryStructure: React.FC = () => {
               </div>
 
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl flex-wrap">
-                <p className="text-[11px] text-muted-foreground hidden sm:block">
+                <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
                   {canSave ? <span className="text-emerald-500 font-medium">Ready to save</span> : "Fill in the required fields to save"}
                 </p>
                 <div className="flex items-center gap-2 flex-wrap sm:ml-auto">
@@ -617,7 +619,7 @@ const SalaryStructure: React.FC = () => {
           <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
             <div className="px-5 sm:px-6 py-4 border-b border-border bg-muted/20">
               <h3 className="font-heading font-semibold text-foreground text-sm">Preview Calculator</h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Enter a test CTC and calculate the salary breakup this template produces.</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">Enter a test CTC and calculate the salary breakup this template produces.</p>
             </div>
             <div className="p-5 space-y-4">
               <div className="flex flex-wrap items-end gap-3">
@@ -649,7 +651,7 @@ const SalaryStructure: React.FC = () => {
                 <div className="rounded-lg border border-border overflow-hidden">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="bg-muted/30 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                      <tr className="bg-muted/30 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
                         <th className="text-left px-3 py-2">Salary Head</th>
                         <th className="text-left px-3 py-2">Type</th>
                         <th className="text-left px-3 py-2">Calculation</th>
@@ -697,20 +699,20 @@ const SalaryStructure: React.FC = () => {
             <div className="flex items-center justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60 rounded-t-xl">
               <div>
                 <h3 className="font-heading font-semibold text-foreground text-sm">Salary Structure Records</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">{structures.length} record{structures.length !== 1 ? "s" : ""}</p>
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{structures.length} record{structures.length !== 1 ? "s" : ""}</p>
               </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/10">
-                    <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Name</th>
-                    <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Code</th>
-                    <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Version</th>
-                    <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Company</th>
-                    <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Lines</th>
-                    <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
-                    <th className="text-right px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
+                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Name</th>
+                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Code</th>
+                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Version</th>
+                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Company</th>
+                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Lines</th>
+                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
+                    <th className="text-right px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -725,7 +727,7 @@ const SalaryStructure: React.FC = () => {
                         <td className="px-4 py-2.5 text-muted-foreground">{row.CompanyName || "-"}</td>
                         <td className="px-4 py-2.5 text-muted-foreground">{row.Lines.length}</td>
                         <td className="px-4 py-2.5">
-                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${row.IsActive ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" : "bg-muted text-muted-foreground border-border"}`}>
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border ${row.IsActive ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30" : "bg-muted text-muted-foreground border-border"}`}>
                             {row.IsActive ? "Active" : "Draft"}
                           </span>
                         </td>
@@ -754,8 +756,8 @@ const SalaryStructure: React.FC = () => {
                             {rights.canDelete && (
                               deleteConfirmId === row.SalaryStructureId ? (
                                 <div className="flex items-center gap-1">
-                                  <button onClick={() => handleDelete(row.SalaryStructureId)} className="px-2 py-1 rounded text-[11px] font-medium bg-destructive text-destructive-foreground">Confirm</button>
-                                  <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 rounded text-[11px] font-medium border border-border">Cancel</button>
+                                  <button onClick={() => handleDelete(row.SalaryStructureId)} className="px-2 py-1 rounded text-[0.6875rem] font-medium bg-destructive text-destructive-foreground">Confirm</button>
+                                  <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 rounded text-[0.6875rem] font-medium border border-border">Cancel</button>
                                 </div>
                               ) : (
                                 <button onClick={() => setDeleteConfirmId(row.SalaryStructureId)} title="Delete" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-destructive">
@@ -787,7 +789,7 @@ const SalaryStructure: React.FC = () => {
       )}
 
       {copyTargetId !== null && (
-        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCopyTargetId(null)}>
+        <BodyPortal><div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setCopyTargetId(null)}>
           <div className="bg-card border border-border rounded-xl shadow-lg p-5 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
             <h3 className="font-heading font-semibold text-foreground text-sm mb-3">Copy Structure</h3>
             <div className="space-y-3">
@@ -805,7 +807,7 @@ const SalaryStructure: React.FC = () => {
               <button onClick={handleCopy} disabled={!copyCode.trim()} className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40">Copy</button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

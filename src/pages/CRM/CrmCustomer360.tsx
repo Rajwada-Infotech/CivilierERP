@@ -55,7 +55,7 @@ const CustomerTimeline: React.FC<{ data: any }> = ({ data }) => {
   }
   if (data.serviceTickets) {
     data.serviceTickets.forEach((t: any) => {
-      if (t.CreatedAt) events.push({ id: `ticket-${t.Id}`, date: new Date(t.CreatedAt), type: "Ticket", title: `[${t.TicketNo}] ${t.Category}`, desc: t.Subject, icon: Wrench, color: "text-orange-500" });
+      if (t.CreatedAt) events.push({ id: `ticket-${t.Id}`, date: new Date(t.CreatedAt), type: "Ticket", title: `[${t.TicketNo}] ${t.Category}`, desc: t.Subject, icon: Wrench, color: "text-sky-500" });
     });
   }
   if (data.bookings) {
@@ -155,7 +155,7 @@ const CrmCustomer360: React.FC = () => {
                 className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
             </div>
             <button onClick={() => { setSearchTerm(search.trim()); setPage(1); }}
-              className="px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+              className="px-4 py-2 btn-module text-white text-sm font-medium rounded-lg ">
               Filter
             </button>
             <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
@@ -182,7 +182,7 @@ const CrmCustomer360: React.FC = () => {
                   </span>
                   <div className="text-right shrink-0 w-28">
                     <div className="text-xs text-muted-foreground">Outstanding</div>
-                    <div className="text-sm font-semibold text-orange-600">{fmt(c.TotalOutstanding)}</div>
+                    <div className="text-sm font-semibold text-sky-600">{fmt(c.TotalOutstanding)}</div>
                   </div>
                   <ChevronRight size={16} className="text-muted-foreground shrink-0" />
                 </button>
@@ -310,7 +310,7 @@ const CrmCustomer360: React.FC = () => {
                           <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 mt-2 text-xs">
                             <div><span className="text-muted-foreground">Value: </span>{fmt(b.GrandTotal ?? b.TotalValue)}</div>
                             <div><span className="text-muted-foreground">Paid: </span><span className="text-green-600 font-medium">{fmt(b.TotalPaid)}</span></div>
-                            <div><span className="text-muted-foreground">Balance: </span><span className="text-orange-600 font-medium">{fmt(b.TotalOutstanding)}</span></div>
+                            <div><span className="text-muted-foreground">Balance: </span><span className="text-sky-600 font-medium">{fmt(b.TotalOutstanding)}</span></div>
                             <div><span className="text-muted-foreground">Agreement: </span>{b.AgreementStatus || "—"}</div>
                             <div><span className="text-muted-foreground">Handover: </span>{b.HandoverStatus || "—"}</div>
                             <div><span className="text-muted-foreground">Legal: </span>{b.LegalMilestoneStatus || "—"}</div>
@@ -334,7 +334,7 @@ const CrmCustomer360: React.FC = () => {
                             {b.HasCancellation > 0 && <div className="text-red-600 font-medium">Cancellation pending</div>}
                           </div>
                           {!expanded && (
-                            <div className="text-[11px] text-muted-foreground mt-1.5">
+                            <div className="text-[0.6875rem] text-muted-foreground mt-1.5">
                               {ledgerCount > 0 ? `${ledgerCount} ledger record${ledgerCount === 1 ? "" : "s"} — click to view` : "No ledger records yet"}
                             </div>
                           )}
@@ -459,13 +459,13 @@ const CrmCustomer360: React.FC = () => {
 const TONE_CLASSES: Record<string, string> = {
   default: "text-foreground",
   green: "text-green-600",
-  orange: "text-orange-600",
+  orange: "text-sky-600",
   sky: "text-sky-600",
 };
 
 const SummaryTile: React.FC<{ label: string; value: string; tone?: keyof typeof TONE_CLASSES }> = ({ label, value, tone = "default" }) => (
   <div className="rounded-xl border border-border p-3">
-    <div className="text-[11px] text-muted-foreground flex items-center gap-1"><IndianRupee size={11} /> {label}</div>
+    <div className="text-[0.6875rem] text-muted-foreground flex items-center gap-1"><IndianRupee size={11} /> {label}</div>
     <div className={`text-sm font-semibold mt-0.5 ${TONE_CLASSES[tone]}`}>{value}</div>
   </div>
 );

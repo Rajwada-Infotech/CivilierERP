@@ -109,7 +109,7 @@ const CrmBrokerPayments: React.FC = () => {
         return (
           <div className="text-xs space-y-0.5">
             <div className="text-muted-foreground">₹{gross.toLocaleString("en-IN")}</div>
-            {tds > 0 && <div className="text-orange-600">TDS: ₹{tds.toLocaleString("en-IN")}</div>}
+            {tds > 0 && <div className="text-sky-600">TDS: ₹{tds.toLocaleString("en-IN")}</div>}
             <div className="font-bold text-foreground">Net: ₹{net.toLocaleString("en-IN")}</div>
           </div>
         );
@@ -203,8 +203,8 @@ const CrmBrokerPayments: React.FC = () => {
           {!isError && (
             <>
               {totalPending > 0 && (
-                <div className="flex items-center gap-1.5 text-sm bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
-                  <IndianRupee size={14} className="text-orange-600" />
+                <div className="flex items-center gap-1.5 text-sm bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
+                  <IndianRupee size={14} className="text-sky-600" />
                   <span className="text-orange-600">Pending approval:</span>
                   <span className="font-semibold text-orange-700">₹{totalPending.toLocaleString("en-IN")}</span>
                 </div>

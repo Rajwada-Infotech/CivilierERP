@@ -96,7 +96,7 @@ export function PayablePartyCombobox({
             ) : (
               filteredGroups.map((g) => (
                 <div key={g.prefix}>
-                  <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-widest text-muted-foreground font-medium">
+                  <div className="px-3 pt-2 pb-1 text-[0.625rem] uppercase tracking-widest text-muted-foreground font-medium">
                     {g.label}
                   </div>
                   {g.options.map((o) => {

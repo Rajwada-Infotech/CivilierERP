@@ -32,6 +32,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -137,7 +138,7 @@ function getModuleColor(module?: string | null): string {
     sales: "bg-blue-500/10 text-blue-500 border border-blue-500/20",
     agreement:
       "bg-emerald-500/10 text-emerald-500 border border-emerald-500/20",
-    construction: "bg-amber-500/10 text-amber-500 border border-amber-500/20",
+    construction: "bg-[#ffe2021a] text-amber-500 border border-amber-500/20",
     closure: "bg-rose-500/10 text-rose-500 border border-rose-500/20",
   };
   const key = (module || "").toLowerCase();
@@ -485,7 +486,7 @@ export default function FollowupReminders() {
             icon={Clock}
             accent="bg-amber-500"
             borderL="border-l-amber-500"
-            iconClass="bg-amber-500/10 text-amber-500"
+            iconClass="bg-[#ffe2021a] text-amber-500"
             sublabel="Upcoming"
           />
           <StatCard
@@ -699,8 +700,7 @@ export default function FollowupReminders() {
                 </label>
                 <div className="relative">
                   <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-foreground pointer-events-none opacity-70" />
-                  <input
-                    type="date"
+                  <DateInput
                     value={form.dueDate}
                     onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
                     className="w-full pl-8 pr-3 py-2 rounded-xl text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert [&::-webkit-calendar-picker-indicator]:cursor-pointer"

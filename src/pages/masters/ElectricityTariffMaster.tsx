@@ -14,9 +14,10 @@ import {
   getElectricityProviders,
   type ElectricityTariff,
 } from "@/api/electricityMaintenanceApi";
+import { DateInput } from "@/components/ui/date-input";
 
 const PAGE_KEY = "electricity-tariff-master";
-const labelCls = "block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
+const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 const fieldCls = "w-full px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 text-foreground";
 const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 const fmt = (n: number) => `₹${(Number(n) || 0).toLocaleString("en-IN")}`;
@@ -55,7 +56,7 @@ export default function ElectricityTariffMaster() {
         {rows.length > 0 && (
           <div className="rounded-xl border border-border overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
                 <tr>
                   <th className="text-left px-4 py-2.5">Provider</th>
                   <th className="text-left px-4 py-2.5">Tariff Name</th>
@@ -77,7 +78,7 @@ export default function ElectricityTariffMaster() {
                     <td className="px-4 py-2.5 text-muted-foreground">{t.BillingCycle}</td>
                     <td className="px-4 py-2.5 text-muted-foreground">{t.SlabCount}</td>
                     <td className="px-4 py-2.5">
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${t.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>{t.Status}</span>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${t.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>{t.Status}</span>
                     </td>
                     <td className="px-4 py-2.5">
                       <div className="flex items-center justify-end gap-1">
@@ -202,8 +203,8 @@ function TariffFormDialog({ tariffId, onClose, onSaved }: { tariffId: number | n
             </div>
 
             <div className="grid grid-cols-3 gap-3">
-              <div><label className={labelCls}>Effective From</label><input type="date" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} className={fieldCls} /></div>
-              <div><label className={labelCls}>Effective To</label><input type="date" value={effectiveTo} onChange={(e) => setEffectiveTo(e.target.value)} className={fieldCls} /></div>
+              <div><label className={labelCls}>Effective From</label><DateInput value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} className={fieldCls} /></div>
+              <div><label className={labelCls}>Effective To</label><DateInput value={effectiveTo} onChange={(e) => setEffectiveTo(e.target.value)} className={fieldCls} /></div>
               <div>
                 <label className={labelCls}>Billing Cycle</label>
                 <select value={billingCycle} onChange={(e) => setBillingCycle(e.target.value)} className={fieldCls}>
@@ -238,9 +239,9 @@ function TariffFormDialog({ tariffId, onClose, onSaved }: { tariffId: number | n
                 <table className="w-full text-xs">
                   <thead className="bg-muted/30">
                     <tr>
-                      <th className="text-left px-2 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">From (units)</th>
-                      <th className="text-left px-2 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">To (units, blank = open-ended)</th>
-                      <th className="text-left px-2 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">Rate / Unit (₹)</th>
+                      <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">From (units)</th>
+                      <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">To (units, blank = open-ended)</th>
+                      <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Rate / Unit (₹)</th>
                       <th className="w-8" />
                     </tr>
                   </thead>
@@ -260,7 +261,7 @@ function TariffFormDialog({ tariffId, onClose, onSaved }: { tariffId: number | n
                   </tbody>
                 </table>
               </div>
-              <p className="text-[10px] text-muted-foreground mt-1">e.g. 0–100 units @ ₹5/unit, 100–200 units @ ₹7/unit, 200+ units @ ₹9/unit.</p>
+              <p className="text-[0.625rem] text-muted-foreground mt-1">e.g. 0–100 units @ ₹5/unit, 100–200 units @ ₹7/unit, 200+ units @ ₹9/unit.</p>
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-border">

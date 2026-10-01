@@ -1,4 +1,5 @@
 import { CrmStatus } from "@/constants/crmStatuses";
+import { AutoInput } from "@/components/ui/date-input";
 import React, { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -185,7 +186,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
   const field = (key: keyof typeof form, label: string, type = "text") => (
     <div>
       <label className="text-xs text-muted-foreground block mb-1">{label}</label>
-      <input type={type} value={form[key]} readOnly={locked}
+      <AutoInput type={type} value={form[key]} readOnly={locked}
         onChange={(e) => {
           if (locked) return;
           const val = UPPERCASE_FIELDS.includes(key) ? e.target.value.toUpperCase() : e.target.value;
@@ -193,7 +194,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
         }}
         onBlur={() => setTouched(true)}
         className={`w-full text-sm border rounded-lg px-2.5 py-2 ${locked ? "bg-muted/30 text-muted-foreground cursor-not-allowed" : "bg-background"} ${touched && errors[key] ? "border-rose-400" : "border-border"}`} />
-      {touched && errors[key] && <p className="text-[11px] text-rose-500 mt-0.5">{errors[key]}</p>}
+      {touched && errors[key] && <p className="text-[0.6875rem] text-rose-500 mt-0.5">{errors[key]}</p>}
     </div>
   );
 
@@ -215,7 +216,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
         </DialogHeader>
 
         {!canEdit ? (
-          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          <div className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
             <Lock size={13} /> This record is locked — only the assigned salesperson or an admin can edit it.
           </div>
         ) : uiLocked ? (
@@ -243,13 +244,13 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
                 </div>
               </div>
             </div>
-            <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium shrink-0 ${isComplete ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-amber-600 bg-amber-50 border-amber-200"}`}>
+            <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium shrink-0 ${isComplete ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-sky-600 bg-sky-50 border-sky-200"}`}>
               {isComplete ? "KYC Complete" : `${progressPct}% Complete`}
             </span>
           </div>
 
           <div className="space-y-1">
-            <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+            <div className="flex items-center justify-between text-[0.6875rem] text-muted-foreground">
               <span>{filledCount} of {REQUIRED_KEYS.length} fields captured (none mandatory)</span>
               <span className="font-medium text-foreground">{progressPct}%</span>
             </div>
@@ -271,7 +272,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
                 Agreement: {checklist.agreement.Status} <ChevronRight size={11} />
               </button>
             ) : isComplete && !checklist?.welcomeCall?.done ? (
-              <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border border-amber-200 text-amber-600 bg-amber-50 ml-auto">
+              <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full border border-sky-200 text-sky-600 bg-sky-50 ml-auto">
                 <AlertTriangle size={12} /> Welcome call needed to trigger agreement prep
               </span>
             ) : null}
@@ -290,7 +291,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
         </SectionCard>
 
         <div className="grid grid-cols-2 gap-4">
-          <SectionCard icon={IdCard} iconClass="bg-amber-500/10 text-amber-600" title="Identity">
+          <SectionCard icon={IdCard} iconClass="bg-sky-500/10 text-sky-600" title="Identity">
             {field("PanNo", "PAN Number")}
             {field("AadhaarNo", "Aadhaar Number")}
           </SectionCard>
@@ -316,7 +317,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
             </div>
           </div>
           {form.FinancingType === "LoanFinanced" && !loanDetail?.HasLoanRecord && (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+            <div className="flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs text-sky-700">
               <AlertTriangle size={13} /> No loan record on file yet — capture it on Home Loan Tracking once the customer's bank/sanction details are known.
             </div>
           )}
@@ -333,7 +334,7 @@ function BankDetailDialog({ row, onClose, onSaved }: { row: any; onClose: () => 
               <>
                 <button onClick={() => { setUiLocked(true); onClose(); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                 <button onClick={handleSave} disabled={saving}
-                  className="flex items-center gap-1.5 px-4 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 disabled:opacity-40">
+                  className="flex items-center gap-1.5 px-4 py-1.5 btn-module text-white text-sm font-medium rounded-lg hover:shadow-lg disabled:opacity-40">
                   <Save size={14} /> {saving ? "Saving..." : "Save Details"}
                 </button>
               </>
@@ -411,7 +412,7 @@ const CrmCustomerBankDetails: React.FC = () => {
               ["Complete", counts.complete],
             ] as [StatusFilter, number][]).map(([key, count]) => (
               <button key={key} onClick={() => setStatusFilter(key)}
-                className={`px-3 py-2 text-xs font-medium ${statusFilter === key ? "bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}>
+                className={`px-3 py-2 text-xs font-medium ${statusFilter === key ? "btn-module text-white" : "bg-background hover:bg-muted"}`}>
                 {key} ({count})
               </button>
             ))}
@@ -441,10 +442,10 @@ const CrmCustomerBankDetails: React.FC = () => {
                   {r.Mobile} · {r.ProjectName || "—"}{r.UnitNo ? ` · Unit ${r.UnitNo}` : ""}
                 </div>
               </div>
-              <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium shrink-0 ${r.LastCallOutcome === "Welcomed" ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
+              <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium shrink-0 ${r.LastCallOutcome === "Welcomed" ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-muted-foreground bg-muted/50 border-border"}`}>
                 {r.LastCallOutcome === "Welcomed" ? "Called" : "Not Called"}
               </span>
-              <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium shrink-0 ${r.IsComplete ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-amber-600 bg-amber-50 border-amber-200"}`}>
+              <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium shrink-0 ${r.IsComplete ? "text-emerald-600 bg-emerald-50 border-emerald-200" : "text-sky-600 bg-sky-50 border-sky-200"}`}>
                 {r.IsComplete ? "KYC Complete" : "KYC Pending"}
               </span>
               <ChevronRight size={14} className="text-muted-foreground shrink-0" />

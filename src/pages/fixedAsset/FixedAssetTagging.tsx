@@ -22,6 +22,7 @@ import {
   updateFixedAssetTagging, deleteFixedAssetTagging,
   type EligibleAssetItem, type PendingBatch, type TaggingListItem,
 } from "@/api/fixedAssetTaggingApi";
+import { DateInput } from "@/components/ui/date-input";
 
 function ensureArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -599,7 +600,7 @@ export default function FixedAssetTagging() {
               <ArrowLeft size={13} /> Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
               <Hash size={13} /> {saving ? "Generating…" : "Generate ID"}
             </button>
           </div>
@@ -631,7 +632,7 @@ export default function FixedAssetTagging() {
               </div>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Date *</label>
-                <input type="date" value={form.docDate}
+                <DateInput value={form.docDate}
                   onChange={(e) => setForm((p) => ({ ...p, docDate: e.target.value, itemId: "" }))}
                   className={inputCls} />
               </div>
@@ -678,7 +679,7 @@ export default function FixedAssetTagging() {
               {selectedItem && (
                 <>
                   <div className="sm:col-span-2">
-                    <p className="text-[10px] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 border-b border-border/60 pb-1.5 mb-3">
+                    <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 border-b border-border/60 pb-1.5 mb-3">
                       Stock Item Info
                     </p>
                     <div className="grid grid-cols-3 gap-3">
@@ -692,7 +693,7 @@ export default function FixedAssetTagging() {
                     <input type="number" min="1" step="1" max={selectedItem.UntaggedQty}
                       value={form.numberOfItems} onChange={(e) => setField("numberOfItems", e.target.value)}
                       placeholder="0" className={`${inputCls} font-semibold border-yellow-500/30 focus:ring-yellow-500/30 bg-yellow-500/[0.03]`} />
-                    <p className="text-[11px] text-muted-foreground mt-1">
+                    <p className="text-[0.6875rem] text-muted-foreground mt-1">
                       Clicking "Generate ID" creates this many unique FA Item Codes and saves them.
                     </p>
                   </div>
@@ -746,7 +747,7 @@ export default function FixedAssetTagging() {
             </button>
             <button onClick={handleImportClick} disabled={importValidating}
               title={importMode === "individual" ? "Import FA Inventory rows from Excel/CSV — one row per unit" : "Bulk import FA Inventory rows from Excel/CSV"}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
               {importValidating ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
               {importValidating ? "Validating…" : "Import from Excel"}
             </button>
@@ -794,11 +795,11 @@ export default function FixedAssetTagging() {
             </div>
             <div>
               <label className={labelCls}><Calendar size={11} /> From Date</label>
-              <input type="date" value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} className={inputCls} />
+              <DateInput value={filterFromDate} onChange={(e) => setFilterFromDate(e.target.value)} className={inputCls} />
             </div>
             <div>
               <label className={labelCls}><Calendar size={11} /> To Date</label>
-              <input type="date" value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} className={inputCls} />
+              <DateInput value={filterToDate} onChange={(e) => setFilterToDate(e.target.value)} className={inputCls} />
             </div>
           </div>
 
@@ -834,7 +835,7 @@ export default function FixedAssetTagging() {
               <p className="text-sm">No tagging entries found</p>
               {rights.canCreate && (
                 <button onClick={goToCreate}
-                  className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+                  className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
                   <Plus size={13} /> Add First Tagging
                 </button>
               )}
@@ -857,12 +858,12 @@ export default function FixedAssetTagging() {
                 </thead>
                 <tbody className="divide-y divide-border">
                   {filteredPending.map((b) => (
-                    <tr key={`pending-${b.AssetId}`} className="bg-amber-500/5 hover:bg-amber-500/10 transition-colors">
+                    <tr key={`pending-${b.AssetId}`} className="bg-amber-500/5 hover:bg-[#ffe2021a] transition-colors">
                       <td className="px-4 py-3 font-mono text-xs">{b.SourceDocNo || "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(b.DocDate)}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium truncate">{b.AssetName}</p>
-                        <p className="text-[11px] text-muted-foreground">{b.SourceType === "GRN" ? "Received via GRN" : "Inventory Import"} · Qty {fmt(b.Quantity)}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground">{b.SourceType === "GRN" ? "Received via GRN" : "Inventory Import"} · Qty {fmt(b.Quantity)}</p>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">—</td>
                       <td className="px-4 py-3 text-muted-foreground">
@@ -897,7 +898,7 @@ export default function FixedAssetTagging() {
                       <td className="px-4 py-3 text-muted-foreground">{fmtDate(t.DocDate)}</td>
                       <td className="px-4 py-3">
                         <p className="font-medium truncate">{t.AssetName || "—"}</p>
-                        <p className="text-[11px] text-muted-foreground font-mono truncate">{t.AssetCode || "—"}</p>
+                        <p className="text-[0.6875rem] text-muted-foreground font-mono truncate">{t.AssetCode || "—"}</p>
                       </td>
                       <td className="px-4 py-3 font-mono text-xs text-yellow-600 dark:text-yellow-400">{t.FAItemCode || "—"}</td>
                       <td className="px-4 py-3 text-muted-foreground">
@@ -960,7 +961,7 @@ export default function FixedAssetTagging() {
               </p>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Date *</label>
-                <input type="date" value={editDocDate} onChange={(e) => setEditDocDate(e.target.value)} className={inputCls} />
+                <DateInput value={editDocDate} onChange={(e) => setEditDocDate(e.target.value)} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}>Remarks</label>
@@ -973,7 +974,7 @@ export default function FixedAssetTagging() {
                   Cancel
                 </button>
                 <button onClick={handleSaveEdit} disabled={updateMut.isPending}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
                   <Check size={13} /> {updateMut.isPending ? "Saving…" : "Save"}
                 </button>
               </div>
@@ -1104,13 +1105,13 @@ export default function FixedAssetTagging() {
                 </button>
                 <button onClick={handleConfirmImport}
                   disabled={importSubmitting || !importPreview?.some((r) => r.status === "valid")}
-                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+                  className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
                   {importSubmitting ? "Importing…" : `Import ${importPreview?.filter((r) => r.status === "valid").length || 0} Valid Row(s)`}
                 </button>
               </>
             ) : (
               <button onClick={closeImportDialog}
-                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
                 Close
               </button>
             )}

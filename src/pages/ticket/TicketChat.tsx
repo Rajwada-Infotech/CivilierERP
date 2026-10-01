@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -169,7 +170,7 @@ function AttachmentImage({ url, filename, isMine }: { url: string; filename: str
       <div className="flex h-28 w-40 items-center justify-center rounded-2xl border border-border/60 bg-muted/20 backdrop-blur-sm">
         <div className="flex flex-col items-center gap-2">
           <Loader2 size={16} className="animate-spin text-muted-foreground/60" />
-          <span className="text-[10px] text-muted-foreground/50">Loading…</span>
+          <span className="text-[0.625rem] text-muted-foreground/50">Loading…</span>
         </div>
       </div>
     );
@@ -183,7 +184,7 @@ function AttachmentImage({ url, filename, isMine }: { url: string; filename: str
       )}>
         <Paperclip size={12} />
         <span className="max-w-[140px] truncate">{filename}</span>
-        <span className="text-[10px] opacity-60">Failed</span>
+        <span className="text-[0.625rem] opacity-60">Failed</span>
       </div>
     );
   }
@@ -207,7 +208,7 @@ function AttachmentImage({ url, filename, isMine }: { url: string; filename: str
       </div>
 
       {lightbox && (
-        <div
+        <BodyPortal><div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-md"
           onClick={() => setLightbox(false)}
         >
@@ -223,10 +224,10 @@ function AttachmentImage({ url, filename, isMine }: { url: string; filename: str
             className="max-h-[88vh] max-w-[88vw] rounded-2xl object-contain shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
-          <p className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full bg-black/40 px-4 py-1.5 text-[11px] text-white/70 backdrop-blur-sm">
+          <p className="absolute bottom-5 left-1/2 -translate-x-1/2 rounded-full bg-black/40 px-4 py-1.5 text-[0.6875rem] text-white/70 backdrop-blur-sm">
             {filename}
           </p>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );
@@ -280,7 +281,7 @@ function AttachmentPDF({ url, filename, isMine }: { url: string; filename: strin
           {displayName}
         </p>
         <p className={cn(
-          "mt-0.5 text-[10px]",
+          "mt-0.5 text-[0.625rem]",
           isMine ? "text-white/50" : "text-muted-foreground/60",
         )}>
           {loading ? "Loading…" : error ? "Failed to load" : "Click to open PDF"}
@@ -330,7 +331,7 @@ function MessageContent({
 
       {/* Pending indicator */}
       {pending && (
-        <span className="inline-flex items-center gap-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
+        <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium uppercase tracking-widest text-muted-foreground">
           <Loader2 size={10} className="animate-spin" />
           Sending
         </span>
@@ -419,7 +420,7 @@ function mergeMessages(
 
 function bubbleStyles(message: TicketChatMessage, isMine: boolean) {
   const isInternal = message.is_internal === 1 || message.is_internal === true;
-  if (isInternal) return "border-amber-400/30 bg-amber-500/10 text-amber-950 dark:text-amber-100";
+  if (isInternal) return "border-amber-400/30 bg-[#ffe2021a] text-amber-950 dark:text-amber-100";
   if (isMine) return "border-indigo-500/30 bg-indigo-600 text-white shadow-indigo-500/20";
   return "border-border/60 bg-card text-foreground shadow-sm";
 }
@@ -671,16 +672,16 @@ export function TicketChat({
           </div>
           <div className="min-w-0">
             <p className="text-sm font-semibold text-foreground">Conversation</p>
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-[0.6875rem] text-muted-foreground">
               {messages.length} message{messages.length === 1 ? "" : "s"}
             </p>
           </div>
         </div>
 
         {canWriteInternal && (
-          <div className="flex items-center gap-2 rounded-full border border-amber-400/20 bg-amber-500/10 px-3 py-1.5">
+          <div className="flex items-center gap-2 rounded-full border border-amber-400/20 bg-[#ffe2021a] px-3 py-1.5">
             <ShieldAlert size={12} className="text-amber-700" />
-            <span className="text-[11px] font-medium text-amber-800">Internal</span>
+            <span className="text-[0.6875rem] font-medium text-amber-800">Internal</span>
             <Switch
               checked={isInternalNote}
               onCheckedChange={setIsInternalNote}
@@ -731,7 +732,7 @@ export function TicketChat({
             {/* Date divider */}
             <div className="flex items-center gap-3 py-1">
               <div className="h-px flex-1 bg-border/50" />
-              <span className="rounded-full border border-border/50 bg-background/80 px-3 py-0.5 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/70 backdrop-blur-sm">
+              <span className="rounded-full border border-border/50 bg-background/80 px-3 py-0.5 text-[0.5625rem] font-semibold uppercase tracking-widest text-muted-foreground/70 backdrop-blur-sm">
                 {group.label}
               </span>
               <div className="h-px flex-1 bg-border/50" />
@@ -749,7 +750,7 @@ export function TicketChat({
                   <div key={message.id ?? message.tempId} className={cn("flex gap-2.5", alignmentClass)}>
                     {/* Avatar */}
                     <Avatar className="h-8 w-8 shrink-0 border border-border/60 shadow-sm">
-                      <AvatarFallback className={cn("text-[10px] font-bold", roleTone(message.author_role))}>
+                      <AvatarFallback className={cn("text-[0.625rem] font-bold", roleTone(message.author_role))}>
                         {getInitials(message.author_name || "U")}
                       </AvatarFallback>
                     </Avatar>
@@ -757,18 +758,18 @@ export function TicketChat({
                     <div className={cn("flex min-w-0 max-w-[78%] flex-col gap-1", textAlignment)}>
                       {/* Author meta row */}
                       <div className={cn("flex flex-wrap items-center gap-1.5", isMine ? "justify-end" : "justify-start")}>
-                        <span className="text-[11px] font-semibold text-foreground">
+                        <span className="text-[0.6875rem] font-semibold text-foreground">
                           {message.author_name}
                         </span>
-                        <Badge variant="outline" className="h-4 rounded-full px-1.5 text-[9px] capitalize text-muted-foreground border-border/50">
+                        <Badge variant="outline" className="h-4 rounded-full px-1.5 text-[0.5625rem] capitalize text-muted-foreground border-border/50">
                           {(message.author_role || "user").replaceAll("_", " ")}
                         </Badge>
                         {internal && (
-                          <Badge className="h-4 rounded-full bg-amber-500/15 px-1.5 text-[9px] text-amber-700 hover:bg-amber-500/15 border-amber-400/20">
+                          <Badge className="h-4 rounded-full bg-amber-500/15 px-1.5 text-[0.5625rem] text-amber-700 hover:bg-amber-500/15 border-amber-400/20">
                             Internal
                           </Badge>
                         )}
-                        <span className="text-[10px] text-muted-foreground/50">
+                        <span className="text-[0.625rem] text-muted-foreground/50">
                           {formatTime(message.created_at)}
                         </span>
                       </div>
@@ -779,7 +780,7 @@ export function TicketChat({
                           "relative rounded-2xl border px-3.5 py-2.5 shadow-sm transition-opacity",
                           bubbleClass,
                           isMine ? "rounded-tr-sm" : "rounded-tl-sm",
-                          internal && "border-amber-400/30 bg-amber-500/10 rounded-tr-sm",
+                          internal && "border-amber-400/30 bg-[#ffe2021a] rounded-tr-sm",
                           message.pending && "opacity-60",
                         )}
                       >
@@ -849,7 +850,7 @@ export function TicketChat({
             />
 
             <div className="flex items-center justify-between gap-3">
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 Press Enter to send, Shift+Enter for a new line
               </p>
               <Button

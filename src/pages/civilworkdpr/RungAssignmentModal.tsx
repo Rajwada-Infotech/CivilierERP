@@ -21,6 +21,7 @@ import { getRoomBlueprint } from "@/api/roomMasterApi";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Checkbox } from "@/components/ui/checkbox";
 import BlueprintAnnotationEditor from "./BlueprintAnnotationEditor";
+import { DateInput } from "@/components/ui/date-input";
 
 const inputCls =
   "w-full px-3 py-2.5 rounded-lg text-sm bg-muted border border-border text-foreground transition-all focus:outline-none focus:ring-2 focus:ring-cyan-500/30 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -112,14 +113,14 @@ function ApprovalLevelsEditor({
         <button
           type="button"
           onClick={addLevel}
-          className="inline-flex items-center gap-1 text-[11px] font-medium text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300 transition-colors"
+          className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300 transition-colors"
         >
           <Plus size={11} /> Add Approver Level
         </button>
       </div>
 
       {levels.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground italic">
+        <p className="text-[0.6875rem] text-muted-foreground italic">
           No approvers set — only super_admin can approve this activity's work. Add a level to name who else can.
         </p>
       ) : (
@@ -128,7 +129,7 @@ function ApprovalLevelsEditor({
             const isLast = i === levels.length - 1;
             return (
               <div key={level.id} className="flex items-center gap-2">
-                <span className="shrink-0 w-16 text-[10px] font-heading font-bold uppercase tracking-wide text-muted-foreground">
+                <span className="shrink-0 w-16 text-[0.625rem] font-heading font-bold uppercase tracking-wide text-muted-foreground">
                   {isLast ? "Final" : `Step ${i + 1}`}
                 </span>
                 <div className="flex-1">
@@ -144,9 +145,9 @@ function ApprovalLevelsEditor({
                     type="button"
                     onClick={() => updateLevel(level.id, { mode: level.mode === "any" ? "all" : "any" })}
                     title={level.mode === "any" ? "Any one of them can approve — click to require all" : "All must approve — click to allow any one of them"}
-                    className={`shrink-0 inline-flex items-center gap-1 text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full transition-colors ${
+                    className={`shrink-0 inline-flex items-center gap-1 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full transition-colors ${
                       level.mode === "any"
-                        ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                        ? "bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
                         : "bg-muted text-muted-foreground"
                     }`}
                   >
@@ -164,7 +165,7 @@ function ApprovalLevelsEditor({
               </div>
             );
           })}
-          <p className="text-[10px] text-muted-foreground/70 pt-0.5">
+          <p className="text-[0.625rem] text-muted-foreground/70 pt-0.5">
             Steps approve one after another. If the final step has more than one person, toggle "Any one" so just one of them clears it.
           </p>
         </div>
@@ -221,11 +222,11 @@ function BlueprintPreviewSection({ roomId, rungId, roomLabel }: { roomId: number
             </div>
           )}
           {annotation && (
-            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-emerald-500/90 text-white">
+            <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold bg-emerald-500/90 text-white">
               Marked
             </span>
           )}
-          <span className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[10px] px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <span className="absolute inset-x-0 bottom-0 bg-black/60 text-white text-[0.625rem] px-2 py-1 opacity-0 group-hover:opacity-100 transition-opacity">
             Click to mark up
           </span>
         </button>
@@ -470,8 +471,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                 <label className={labelCls}>
                   <CalendarDays size={11} /> Start Date
                 </label>
-                <input
-                  type="date"
+                <DateInput
                   value={startDate}
                   onChange={(e) => handleStartDateChange(e.target.value)}
                   className={inputCls}
@@ -490,8 +490,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
               </div>
               <div>
                 <label className={labelCls}>End Date</label>
-                <input
-                  type="date"
+                <DateInput
                   value={endDate}
                   onChange={(e) => handleEndDateChange(e.target.value)}
                   className={inputCls}
@@ -525,7 +524,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   </select>
                   {labourSource && (
                     <span
-                      className={`shrink-0 text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[labourSource].className}`}
+                      className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[labourSource].className}`}
                     >
                       {SOURCE_META[labourSource].label}
                     </span>
@@ -556,7 +555,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                   </select>
                   {materialSource && (
                     <span
-                      className={`shrink-0 text-[10px] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[materialSource].className}`}
+                      className={`shrink-0 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-2 py-1 rounded-full ${SOURCE_META[materialSource].className}`}
                     >
                       {SOURCE_META[materialSource].label}
                     </span>
@@ -580,7 +579,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                 className={`${inputCls} resize-none`}
               />
               {!descriptionTouched && (
-                <p className="text-[10px] text-muted-foreground mt-1">Auto-filled from location — edit freely.</p>
+                <p className="text-[0.625rem] text-muted-foreground mt-1">Auto-filled from location — edit freely.</p>
               )}
             </div>
 
@@ -612,7 +611,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-foreground truncate">{item.itemName}</p>
                         {item.itemCode && (
-                          <p className="text-[10px] text-muted-foreground">{item.itemCode}</p>
+                          <p className="text-[0.625rem] text-muted-foreground">{item.itemCode}</p>
                         )}
                       </div>
                       <input
@@ -626,7 +625,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                         }
                         className="w-20 px-2 py-1.5 rounded-md text-xs bg-background border border-border text-foreground text-right focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
                       />
-                      {item.uom && <span className="text-[10px] text-muted-foreground w-8 shrink-0">{item.uom}</span>}
+                      {item.uom && <span className="text-[0.625rem] text-muted-foreground w-8 shrink-0">{item.uom}</span>}
                     </div>
                   ))}
                 </div>
@@ -661,12 +660,12 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
                       </div>
                       <span className="text-sm text-foreground flex-1 truncate">{cp.fieldName}</span>
                       {cp.isDaily && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full shrink-0">
+                        <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 px-1.5 py-0.5 rounded-full shrink-0">
                           <CalendarDays size={9} /> Daily
                         </span>
                       )}
                       {cp.minWaitDays != null && cp.minWaitDays > 0 && (
-                        <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded-full shrink-0">
+                        <span className="inline-flex items-center gap-1 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400 bg-[#ffe2021a] px-1.5 py-0.5 rounded-full shrink-0">
                           <Timer size={9} /> {cp.minWaitDays}d wait
                         </span>
                       )}
@@ -704,7 +703,7 @@ export function RungAssignmentModal({ rung, chain, onClose }: Props) {
             type="button"
             onClick={() => saveMutation.mutate()}
             disabled={saveMutation.isPending || isLoading}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-cyan-500 to-teal-400 hover:from-cyan-600 hover:to-teal-500 transition-all disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50"
           >
             {saveMutation.isPending && <Loader2 size={12} className="animate-spin" />}
             Save

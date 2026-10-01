@@ -28,6 +28,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DateInput } from "@/components/ui/date-input";
 
 const REPORT_API = "/api/task-performance-report";
 const ACCENT = "#0d9488";
@@ -190,7 +191,7 @@ function useGlass() {
 function Badge({ label, color }: { label: string; color: string }) {
   return (
     <span
-      className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
+      className="inline-flex items-center text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md border whitespace-nowrap"
       style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
     >
       {label}
@@ -230,7 +231,7 @@ function StatCard({
         <Icon size={15} />
       </div>
       <div className="min-w-0">
-        <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider truncate">{label}</p>
+        <p className="text-[0.625rem] text-muted-foreground font-heading uppercase tracking-wider truncate">{label}</p>
         <p className="text-base font-bold font-mono text-foreground mt-0.5 truncate">{value}</p>
       </div>
     </div>
@@ -253,7 +254,7 @@ function FilterField({
 }) {
   return (
     <div className="min-w-0">
-      <label className="block text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-1">
+      <label className="block text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1">
         {label}
       </label>
       <div className="relative">
@@ -513,12 +514,12 @@ const TaskPerformanceReport: React.FC = () => {
         {/* ── Filters ────────────────────────────────────────────────────── */}
         <div className="no-print rounded-xl p-4 mb-5" style={glassCard}>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT_SOFT }}>
+            <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT_SOFT }}>
               Filters
             </p>
             <button
               onClick={resetFilters}
-              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+              className="inline-flex items-center gap-1 text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
             >
               <RotateCcw size={11} /> Reset
             </button>
@@ -600,8 +601,7 @@ const TaskPerformanceReport: React.FC = () => {
             </FilterField>
 
             <FilterField icon={Calendar} label="Start Date">
-              <input
-                type="date"
+              <DateInput
                 className={inputCls}
                 value={filters.startDate}
                 onChange={(e) => updateFilter({ startDate: e.target.value })}
@@ -609,8 +609,7 @@ const TaskPerformanceReport: React.FC = () => {
             </FilterField>
 
             <FilterField icon={Calendar} label="End Date">
-              <input
-                type="date"
+              <DateInput
                 className={inputCls}
                 value={filters.endDate}
                 onChange={(e) => updateFilter({ endDate: e.target.value })}

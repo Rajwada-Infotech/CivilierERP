@@ -26,6 +26,7 @@ import {
   AlertCircle,
   Info,
 } from "lucide-react";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -163,7 +164,7 @@ function KpiCard({
     <div className={`relative flex-1 min-w-[150px] rounded-xl border bg-gradient-to-br p-3.5 ${colorMap[resolvedVariant]} transition-all duration-200 hover:shadow-md`}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/70 mb-1 truncate">{label}</p>
+          <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/70 mb-1 truncate">{label}</p>
           <p className={`text-sm font-bold tabular-nums leading-tight ${
             resolvedVariant === "neutral"
               ? "text-foreground"
@@ -171,7 +172,7 @@ function KpiCard({
           }`}>
             {amount < -0.005 ? "(" : ""}{fmt(amount)}{amount < -0.005 ? ")" : ""}
           </p>
-          {subtitle && <p className="text-[9px] text-muted-foreground/60 mt-0.5">{subtitle}</p>}
+          {subtitle && <p className="text-[0.5625rem] text-muted-foreground/60 mt-0.5">{subtitle}</p>}
         </div>
         <div className={`rounded-lg p-1.5 bg-background/60 ${iconColorMap[resolvedVariant]}`}>
           <Icon size={13} />
@@ -207,7 +208,7 @@ function StatementSheet({
       <div className="px-6 pt-5 pb-4 text-center border-b border-border bg-gradient-to-b from-muted/30 to-transparent">
         <div className="flex items-center justify-center gap-2 mb-1">
           {entityType && (
-            <span className="text-[9px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium uppercase tracking-wider">
+            <span className="text-[0.5625rem] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-medium uppercase tracking-wider">
               {classLabels[entityClass]} · {entityType}
             </span>
           )}
@@ -216,8 +217,8 @@ function StatementSheet({
           {companyName || "Consolidated — All Companies"}
         </h2>
         <h3 className="text-xs font-semibold text-foreground mt-1.5">{statementName}</h3>
-        <p className="text-[11px] text-muted-foreground mt-0.5">{periodLabel}</p>
-        <p className="text-[9px] text-muted-foreground/55 mt-1">
+        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{periodLabel}</p>
+        <p className="text-[0.5625rem] text-muted-foreground/55 mt-1">
           (All amounts in Indian Rupees ₹, unless otherwise stated) · As per Schedule III, Division II, Companies Act 2013
         </p>
       </div>
@@ -270,7 +271,7 @@ function StructuredStatement({
         <td colSpan={showPrior ? 6 : 5} className="pb-2">
           <div className="ml-8 border-l-2 border-primary/20 pl-3 space-y-0.5 py-1">
             {heads.map((h) => (
-              <div key={h.id ?? h.name} className="flex items-center justify-between text-[10px] text-muted-foreground group">
+              <div key={h.id ?? h.name} className="flex items-center justify-between text-[0.625rem] text-muted-foreground group">
                 <span className="truncate pr-3 group-hover:text-foreground transition-colors">{h.name}</span>
                 <span className="tabular-nums shrink-0 font-medium">{fmt(h.amount)}</span>
               </div>
@@ -294,19 +295,19 @@ function StructuredStatement({
           className={`${clickable ? "cursor-pointer hover:bg-muted/30" : ""} ${emphasis ? "bg-muted/20" : ""} transition-colors`}
           onClick={() => clickable && toggle(rowKey!)}
         >
-          <td className="py-1.5 pr-1.5 text-[10px] text-muted-foreground align-top w-7 font-mono">{numeral}.</td>
+          <td className="py-1.5 pr-1.5 text-[0.625rem] text-muted-foreground align-top w-7 font-mono">{numeral}.</td>
           <td className={`py-1.5 pr-3 text-xs text-foreground ${emphasis ? "font-semibold" : ""}`}>
             {label}
-            {formula && <span className="text-[10px] text-muted-foreground ml-1">{formula}</span>}
+            {formula && <span className="text-[0.625rem] text-muted-foreground ml-1">{formula}</span>}
             {clickable && (
               printExpandAll || openKey === rowKey
                 ? <ChevronDown size={10} className="inline ml-1.5 -mt-0.5 text-primary/60" />
                 : <ChevronRight size={10} className="inline ml-1.5 -mt-0.5 text-muted-foreground/60" />
             )}
           </td>
-          <td className="py-1.5 text-right text-[10px] text-muted-foreground/50 w-20 pr-2">
+          <td className="py-1.5 text-right text-[0.625rem] text-muted-foreground/50 w-20 pr-2">
             {rowKey && heads?.length ? (
-              <span className="text-[9px] italic">Note</span>
+              <span className="text-[0.5625rem] italic">Note</span>
             ) : null}
           </td>
           <td className={`py-1.5 text-right text-xs tabular-nums whitespace-nowrap w-32 ${emphasis ? "font-semibold text-foreground" : "text-foreground"}`}>
@@ -317,7 +318,7 @@ function StructuredStatement({
               {priorAmount !== undefined ? <Signed amount={priorAmount} /> : "—"}
             </td>
           )}
-          <td className="py-1.5 text-right text-[10px] tabular-nums whitespace-nowrap w-16 text-muted-foreground/50">
+          <td className="py-1.5 text-right text-[0.625rem] tabular-nums whitespace-nowrap w-16 text-muted-foreground/50">
             <PctCell amount={amount} base={base} />
           </td>
         </tr>
@@ -338,8 +339,8 @@ function StructuredStatement({
           className={`${clickable ? "cursor-pointer hover:bg-muted/30" : ""} transition-colors`}
           onClick={() => clickable && toggle(rowKey)}
         >
-          <td className="py-1 pr-1.5 text-[10px] text-muted-foreground/60 align-top w-7 pl-5 font-mono">({letter})</td>
-          <td className="py-1 pr-3 text-[11px] text-foreground">
+          <td className="py-1 pr-1.5 text-[0.625rem] text-muted-foreground/60 align-top w-7 pl-5 font-mono">({letter})</td>
+          <td className="py-1 pr-3 text-[0.6875rem] text-foreground">
             {label}
             {clickable && (
               printExpandAll || openKey === rowKey
@@ -347,18 +348,18 @@ function StructuredStatement({
                 : <ChevronRight size={9} className="inline ml-1.5 -mt-0.5 text-muted-foreground/50" />
             )}
           </td>
-          <td className="py-1 text-right text-[10px] text-muted-foreground/40 w-20 pr-2">
-            {clickable ? <span className="text-[9px]">{heads.length}</span> : null}
+          <td className="py-1 text-right text-[0.625rem] text-muted-foreground/40 w-20 pr-2">
+            {clickable ? <span className="text-[0.5625rem]">{heads.length}</span> : null}
           </td>
-          <td className="py-1 text-right text-[11px] tabular-nums text-foreground whitespace-nowrap w-32">
+          <td className="py-1 text-right text-[0.6875rem] tabular-nums text-foreground whitespace-nowrap w-32">
             <Signed amount={amount} />
           </td>
           {showPrior && (
-            <td className="py-1 text-right text-[11px] tabular-nums text-muted-foreground/70 whitespace-nowrap w-32">
+            <td className="py-1 text-right text-[0.6875rem] tabular-nums text-muted-foreground/70 whitespace-nowrap w-32">
               {priorAmount !== undefined ? <Signed amount={priorAmount} /> : "—"}
             </td>
           )}
-          <td className="py-1 text-right text-[10px] tabular-nums text-muted-foreground/50 whitespace-nowrap w-16">
+          <td className="py-1 text-right text-[0.625rem] tabular-nums text-muted-foreground/50 whitespace-nowrap w-16">
             <PctCell amount={amount} base={base} />
           </td>
         </tr>
@@ -394,9 +395,9 @@ function StructuredStatement({
     return (
       <tr className={`${isDouble ? `border-t-2 border-double ${doubleBorderColor}` : "border-t border-border/70"} ${grandStyle}`}>
         <td className="py-1.5 pr-1.5 w-7" />
-        <td className={`py-1.5 pr-3 text-xs font-bold text-foreground ${variant === "grand" ? "text-[11px]" : ""}`}>
+        <td className={`py-1.5 pr-3 text-xs font-bold text-foreground ${variant === "grand" ? "text-[0.6875rem]" : ""}`}>
           {label}
-          {formula && <span className="text-[10px] font-normal text-muted-foreground ml-1">{formula}</span>}
+          {formula && <span className="text-[0.625rem] font-normal text-muted-foreground ml-1">{formula}</span>}
         </td>
         <td className="py-1.5 w-20 pr-2" />
         <td className={`py-1.5 text-right text-xs font-bold tabular-nums whitespace-nowrap w-32 ${
@@ -411,7 +412,7 @@ function StructuredStatement({
             {priorAmount !== undefined ? <Signed amount={priorAmount} /> : "—"}
           </td>
         )}
-        <td className="py-1.5 text-right text-[10px] tabular-nums text-muted-foreground/50 whitespace-nowrap w-16">
+        <td className="py-1.5 text-right text-[0.625rem] tabular-nums text-muted-foreground/50 whitespace-nowrap w-16">
           <PctCell amount={amount} base={base} />
         </td>
       </tr>
@@ -452,21 +453,21 @@ function StructuredStatement({
         <thead>
           <tr className="border-b-2 border-foreground/20">
             <th className="pb-2.5 pr-1.5 text-left w-7" />
-            <th className="pb-2.5 pr-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+            <th className="pb-2.5 pr-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
               Particulars
             </th>
-            <th className="pb-2.5 pr-2 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-20">
+            <th className="pb-2.5 pr-2 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-20">
               Note
             </th>
-            <th className="pb-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-32">
+            <th className="pb-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-32">
               {showPrior ? "Current ₹" : "Amount ₹"}
             </th>
             {showPrior && (
-              <th className="pb-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 w-32">
+              <th className="pb-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 w-32">
                 {priorPeriodLabel} ₹
               </th>
             )}
-            <th className="pb-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground/50 w-16">
+            <th className="pb-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/50 w-16">
               % Rev
             </th>
           </tr>
@@ -580,7 +581,7 @@ function StructuredStatement({
 
       {/* ── Notes to Accounts reference ── */}
       <div className="mt-4 pt-3 border-t border-border/50">
-        <p className="text-[9px] text-muted-foreground/50 italic">
+        <p className="text-[0.5625rem] text-muted-foreground/50 italic">
           The accompanying notes form an integral part of these financial statements. Click any row with a chevron (›) to expand and view individual ledger head details.
         </p>
       </div>
@@ -616,15 +617,15 @@ function ClassicStatement({
         <table className="w-full border-collapse min-w-[600px]">
           <thead>
             <tr className="border-b-2 border-foreground/25">
-              <th className="pb-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground pr-3">
+              <th className="pb-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground pr-3">
                 Expenditure (Dr.)
               </th>
-              <th className="pb-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-28">Amount ₹</th>
+              <th className="pb-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-28">Amount ₹</th>
               <th className="w-6" />
-              <th className="pb-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground border-l border-border pl-4 pr-3">
+              <th className="pb-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground border-l border-border pl-4 pr-3">
                 Income (Cr.)
               </th>
-              <th className="pb-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground w-28">Amount ₹</th>
+              <th className="pb-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground w-28">Amount ₹</th>
             </tr>
           </thead>
           <tbody>
@@ -640,11 +641,11 @@ function ClassicStatement({
                 const inc = income[i];
                 return (
                   <tr key={i} className="align-top border-b border-border/25 hover:bg-muted/20 transition-colors">
-                    <td className="py-1.5 pr-3 text-[11px] text-foreground">{e ? `To ${e.groupName}` : ""}</td>
-                    <td className="py-1.5 text-right text-[11px] tabular-nums text-foreground whitespace-nowrap">{e ? fmt(e.total) : ""}</td>
+                    <td className="py-1.5 pr-3 text-[0.6875rem] text-foreground">{e ? `To ${e.groupName}` : ""}</td>
+                    <td className="py-1.5 text-right text-[0.6875rem] tabular-nums text-foreground whitespace-nowrap">{e ? fmt(e.total) : ""}</td>
                     <td className="border-r border-border/30" />
-                    <td className="py-1.5 pr-3 text-[11px] text-foreground border-l border-border/30 pl-4">{inc ? `By ${inc.groupName}` : ""}</td>
-                    <td className="py-1.5 text-right text-[11px] tabular-nums text-foreground whitespace-nowrap">{inc ? fmt(inc.total) : ""}</td>
+                    <td className="py-1.5 pr-3 text-[0.6875rem] text-foreground border-l border-border/30 pl-4">{inc ? `By ${inc.groupName}` : ""}</td>
+                    <td className="py-1.5 text-right text-[0.6875rem] tabular-nums text-foreground whitespace-nowrap">{inc ? fmt(inc.total) : ""}</td>
                   </tr>
                 );
               })
@@ -653,10 +654,10 @@ function ClassicStatement({
             {/* Net Profit carried forward — balancing entry on Dr side */}
             {isProfit && (
               <tr className="border-t border-border">
-                <td className="py-1.5 pr-3 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                <td className="py-1.5 pr-3 text-[0.6875rem] font-semibold text-emerald-700 dark:text-emerald-400">
                   To Net Profit c/f
                 </td>
-                <td className="py-1.5 text-right text-[11px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
+                <td className="py-1.5 text-right text-[0.6875rem] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400 whitespace-nowrap">
                   {fmt(totals.netProfit)}
                 </td>
                 <td /><td className="border-l border-border/30" /><td />
@@ -667,10 +668,10 @@ function ClassicStatement({
             {!isProfit && Math.abs(totals.netProfit) > 0.005 && (
               <tr className="border-t border-border">
                 <td /><td /><td />
-                <td className="border-l border-border/30 pl-4 py-1.5 text-[11px] font-semibold text-red-700 dark:text-red-400">
+                <td className="border-l border-border/30 pl-4 py-1.5 text-[0.6875rem] font-semibold text-red-700 dark:text-red-400">
                   By Net Loss c/f
                 </td>
-                <td className="py-1.5 text-right text-[11px] font-semibold tabular-nums text-red-700 dark:text-red-400 whitespace-nowrap">
+                <td className="py-1.5 text-right text-[0.6875rem] font-semibold tabular-nums text-red-700 dark:text-red-400 whitespace-nowrap">
                   {fmt(Math.abs(totals.netProfit))}
                 </td>
               </tr>
@@ -701,9 +702,9 @@ function QuickFYButton({ label, active, onClick }: { label: string; active: bool
   return (
     <button
       onClick={onClick}
-      className={`px-2.5 h-7 rounded-md text-[10px] font-medium transition-all ${
+      className={`px-2.5 h-7 rounded-md text-[0.625rem] font-medium transition-all ${
         active
-          ? "bg-primary text-primary-foreground shadow-sm"
+          ? "btn-module text-white shadow-sm"
           : "bg-muted/60 text-muted-foreground hover:bg-muted hover:text-foreground border border-border/50"
       }`}
     >
@@ -849,7 +850,7 @@ export default function ProfitAndLoss() {
 
           {/* Quick FY Buttons */}
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 mr-1">Quick Select</span>
+            <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 mr-1">Quick Select</span>
             <QuickFYButton
               label={`FY ${fyYear}–${String(fyYear + 1).slice(-2)}`}
               active={isActiveFy}
@@ -864,7 +865,7 @@ export default function ProfitAndLoss() {
             <div className="ml-auto flex items-center gap-2">
               <button
                 onClick={() => setShowComparison((v) => !v)}
-                className={`flex items-center gap-1.5 h-7 px-3 rounded-md text-[10px] font-medium transition-all border ${
+                className={`flex items-center gap-1.5 h-7 px-3 rounded-md text-[0.625rem] font-medium transition-all border ${
                   showComparison
                     ? "bg-primary/10 border-primary/30 text-primary"
                     : "bg-background border-border text-muted-foreground hover:text-foreground"
@@ -880,29 +881,27 @@ export default function ProfitAndLoss() {
           <div className="flex flex-wrap items-end gap-3">
 
             <div className="flex flex-col gap-0.5">
-              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
                 <CalendarDays size={9} /> From
               </span>
-              <input
-                type="date" value={from}
+              <DateInput value={from}
                 onChange={(e) => setFrom(e.target.value)}
                 className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
 
             <div className="flex flex-col gap-0.5">
-              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
                 <CalendarDays size={9} /> To
               </span>
-              <input
-                type="date" value={to}
+              <DateInput value={to}
                 onChange={(e) => setTo(e.target.value)}
                 className="h-8 px-2.5 rounded-lg text-xs bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
               />
             </div>
 
             <div className="flex flex-col gap-0.5 min-w-[160px]">
-              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
                 <Building size={9} /> Company
               </span>
               <select
@@ -916,7 +915,7 @@ export default function ProfitAndLoss() {
             </div>
 
             <div className="flex flex-col gap-0.5 min-w-[160px]">
-              <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+              <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
                 <FolderKanban size={9} /> Project
               </span>
               <select
@@ -931,7 +930,7 @@ export default function ProfitAndLoss() {
 
             {costCentres.length > 0 && (
               <div className="flex flex-col gap-0.5 min-w-[160px]">
-                <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+                <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
                   <Target size={9} /> Cost Centre
                 </span>
                 <select
@@ -997,7 +996,7 @@ export default function ProfitAndLoss() {
                       : "from-red-500/10 to-red-500/5 border-red-500/25"
                   }`}>
                     <div>
-                      <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/70 mb-0.5">
+                      <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/70 mb-0.5">
                         {st.netProfit >= 0 ? "Net Profit After Tax" : "Net Loss After Tax"}
                       </p>
                       <p className={`text-2xl font-bold tabular-nums tracking-tight ${
@@ -1007,7 +1006,7 @@ export default function ProfitAndLoss() {
                       }`}>
                         {st.netProfit < 0 ? "(" : ""}{fmt(st.netProfit)}{st.netProfit < 0 ? ")" : ""}
                       </p>
-                      <p className="text-[10px] text-muted-foreground/60 mt-0.5">{periodLabel}</p>
+                      <p className="text-[0.625rem] text-muted-foreground/60 mt-0.5">{periodLabel}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       {/* Net profit margin badge */}
@@ -1017,7 +1016,7 @@ export default function ProfitAndLoss() {
                             ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
                             : "bg-red-500/15 text-red-700 dark:text-red-400"
                         }`}>
-                          <p className="text-[9px] font-heading uppercase tracking-widest opacity-70">Net Margin</p>
+                          <p className="text-[0.5625rem] font-heading uppercase tracking-widest opacity-70">Net Margin</p>
                           <p className="text-lg font-bold">{pct(st.netProfit, st.totalRevenue)}</p>
                         </div>
                       )}
@@ -1066,7 +1065,7 @@ export default function ProfitAndLoss() {
                   )}
                   {showComparison && !priorLoading && priorData && pst && (
                     <div className="mt-3 flex flex-wrap gap-2 items-center">
-                      <span className="text-[10px] text-muted-foreground/60 font-heading uppercase tracking-wider">vs Prior Year:</span>
+                      <span className="text-[0.625rem] text-muted-foreground/60 font-heading uppercase tracking-wider">vs Prior Year:</span>
                       {[
                         { label: "Revenue", cur: st.totalRevenue, pri: pst.totalRevenue },
                         { label: "Gross Profit", cur: st.grossProfit, pri: pst.grossProfit },
@@ -1075,7 +1074,7 @@ export default function ProfitAndLoss() {
                         const delta = cur - pri;
                         const isUp = delta >= 0;
                         return (
-                          <span key={label} className={`flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border ${
+                          <span key={label} className={`flex items-center gap-1 text-[0.625rem] px-2 py-0.5 rounded-full border ${
                             isUp
                               ? "bg-emerald-50/50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800/40 text-emerald-700 dark:text-emerald-400"
                               : "bg-red-50/50 dark:bg-red-950/30 border-red-200 dark:border-red-800/40 text-red-700 dark:text-red-400"
@@ -1121,7 +1120,7 @@ export default function ProfitAndLoss() {
 
               {/* Entity-type info note */}
               {data.entityType && (
-                <div className="mt-4 flex items-start gap-2 text-[10px] text-muted-foreground/60">
+                <div className="mt-4 flex items-start gap-2 text-[0.625rem] text-muted-foreground/60">
                   <Info size={11} className="shrink-0 mt-0.5" />
                   <span>
                     <strong>{data.entityType}</strong> · Presenting as{" "}

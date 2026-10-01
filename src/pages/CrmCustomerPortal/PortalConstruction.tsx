@@ -108,7 +108,7 @@ const PortalConstruction: React.FC = () => {
           <div className="h-2.5 rounded-full overflow-hidden" style={{ background: HAIRLINE }}>
             <div className="h-full rounded-full transition-all" style={{ width: `${Math.min(100, latest.PercentComplete)}%`, background: GOLD }} />
           </div>
-          <p className="text-[11px] mt-2" style={{ color: TEXT_FAINT }}>Last updated {fmtDateTime(latest.UpdateDate)}</p>
+          <p className="text-[0.6875rem] mt-2" style={{ color: TEXT_FAINT }}>Last updated {fmtDateTime(latest.UpdateDate)}</p>
         </Card>
       )}
 
@@ -205,14 +205,14 @@ const PortalConstruction: React.FC = () => {
                 <Card className="p-4">
                   <div className="flex items-center justify-between mb-1.5">
                     <span className="text-sm font-semibold flex items-center gap-1.5" style={{ ...serif, color: TEXT }}><HardHat size={14} style={{ color: GOLD }} /> {u.Stage}</span>
-                    <span className="text-[11px]" style={{ color: TEXT_FAINT }}>{fmtDate(u.UpdateDate)}</span>
+                    <span className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>{fmtDate(u.UpdateDate)}</span>
                   </div>
                   {u.PercentComplete != null && (
                     <div className="mb-2">
                       <div className="h-2 rounded-full overflow-hidden" style={{ background: HAIRLINE }}>
                         <div className="h-full rounded-full" style={{ width: `${Math.min(100, u.PercentComplete)}%`, background: GOLD }} />
                       </div>
-                      <p className="text-[11px] mt-1" style={{ color: TEXT_FAINT }}>{u.PercentComplete}% complete</p>
+                      <p className="text-[0.6875rem] mt-1" style={{ color: TEXT_FAINT }}>{u.PercentComplete}% complete</p>
                     </div>
                   )}
                   {u.Summary && <p className="text-sm" style={{ color: TEXT_MUTED }}>{u.Summary}</p>}

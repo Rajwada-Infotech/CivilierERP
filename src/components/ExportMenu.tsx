@@ -202,7 +202,7 @@ export function ExportMenu({
           "
         >
           <div className="px-3 py-2 border-b border-border">
-            <p className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+            <p className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
               {fetchData ? "Export all matching records" : `Export ${data.length} record${data.length !== 1 ? "s" : ""}`}
             </p>
           </div>
@@ -238,7 +238,7 @@ export function ExportMenu({
                       <span className="text-xs font-medium text-foreground leading-tight">
                         {opt.label}
                       </span>
-                      <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                      <span className="text-[0.625rem] text-muted-foreground leading-tight mt-0.5">
                         {opt.desc}
                       </span>
                     </span>
@@ -273,7 +273,7 @@ export function ExportMenu({
                       <span className="text-xs font-medium text-foreground leading-tight">
                         Print
                       </span>
-                      <span className="text-[10px] text-muted-foreground leading-tight mt-0.5">
+                      <span className="text-[0.625rem] text-muted-foreground leading-tight mt-0.5">
                         Open the browser print dialog
                       </span>
                     </span>

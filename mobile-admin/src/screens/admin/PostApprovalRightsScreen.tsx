@@ -236,7 +236,7 @@ export default function PostApprovalRightsScreen() {
               </Text>
             </View>
             {dirty && (
-              <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: "#f59e0b1a", borderWidth: 1, borderColor: "#f59e0b40" }}>
+              <View style={{ paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: "#ffe2021a", borderWidth: 1, borderColor: "#f59e0b40" }}>
                 <Text style={{ color: "#f59e0b", fontSize: 10.5, fontFamily: fonts.heading.semibold }}>Unsaved</Text>
               </View>
             )}

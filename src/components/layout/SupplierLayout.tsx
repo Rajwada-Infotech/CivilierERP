@@ -57,7 +57,7 @@ function UserDropdown({ open, onClose, onToggle, handleLogout }: {
             </div>
           </div>
           <div className="relative mt-2">
-            <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+            <span className="inline-flex items-center gap-1 text-[0.625rem] px-2 py-0.5 rounded-full font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
               <Building2 size={9} /> Supplier Portal
             </span>
           </div>
@@ -111,7 +111,7 @@ function SupplierBell() {
     >
       <Bell size={16} />
       {urgentCount > 0 && (
-        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-[9px] font-bold text-white flex items-center justify-center leading-none">
+        <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-[0.5625rem] font-bold text-white flex items-center justify-center leading-none">
           {urgentCount > 9 ? "9+" : urgentCount}
         </span>
       )}

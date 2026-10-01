@@ -384,12 +384,12 @@ function ItemSearchRow({
                       <p className="text-xs font-medium text-foreground truncate">
                         {a.itemName}
                       </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                      <p className="text-[0.625rem] text-muted-foreground mt-0.5">
                         {a.uom}
                       </p>
                     </div>
                     <span
-                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
+                      className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
                         a.available > 0
                           ? "bg-emerald-500/10 text-emerald-600"
                           : "bg-red-500/10 text-red-500"
@@ -409,7 +409,7 @@ function ItemSearchRow({
       {/* Available badge */}
       <div className="col-span-1 flex items-center h-9">
         {item.itemId && (
-          <span className="text-[10px] text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap">
+          <span className="text-[0.625rem] text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap">
             {fmtNum(item.availableQty)}
           </span>
         )}
@@ -430,12 +430,12 @@ function ItemSearchRow({
           }`}
         />
         {overLimit && (
-          <p className="text-[10px] text-red-500 mt-0.5">
+          <p className="text-[0.625rem] text-red-500 mt-0.5">
             Max: {fmtNum(item.availableQty)}
           </p>
         )}
         {overMrPending && (
-          <p className="text-[10px] text-red-500 mt-0.5">
+          <p className="text-[0.625rem] text-red-500 mt-0.5">
             Max: {fmtNum(item.mrPendingQty!)} (MR pending)
           </p>
         )}
@@ -729,7 +729,7 @@ function TransferPreviewModal({
               {linkedGRNs.map((g) => (
                 <span
                   key={g.GRNID}
-                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border font-mono"
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] bg-muted text-muted-foreground border border-border font-mono"
                 >
                   <FileText size={9} /> {g.GRNNo || g.DocNo}
                 </span>
@@ -909,7 +909,7 @@ function ICTPreviewModal({
                   {DOC_LINKS.filter((d) => d.id).map((d) => (
                     <span
                       key={d.label}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border"
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] bg-muted text-muted-foreground border border-border"
                     >
                       <FileText size={9} /> {d.label} #{d.id}
                     </span>
@@ -933,7 +933,7 @@ function ICTPreviewModal({
           <div className="px-5 py-4 space-y-3 max-h-[60vh] overflow-y-auto">
             <div className="flex items-center gap-2">
               <BookOpen size={13} className="text-primary" />
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                 Journal Entry — Inter-Company Transfer Posting
               </span>
             </div>
@@ -943,7 +943,7 @@ function ICTPreviewModal({
               const totalCredit = v.rows.filter((r) => r.side === "credit").reduce((s, r) => s + r.amount, 0);
               return (
                 <div key={vi} className="rounded-lg border border-border overflow-hidden">
-                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-3 py-2 text-[9px] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
+                  <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-3 py-2 text-[0.5625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-2">
                     <span>
                       {v.companyName ? `${v.companyName} — ` : ""}Account
                       {v.jvNo ? ` · ${v.jvNo}` : ""}
@@ -966,7 +966,7 @@ function ICTPreviewModal({
                     </div>
                   ))}
                   <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-3 py-2 bg-muted/30 border-t-2 border-border text-xs font-bold gap-2">
-                    <span className="uppercase tracking-widest text-muted-foreground text-[9px]">Total</span>
+                    <span className="uppercase tracking-widest text-muted-foreground text-[0.5625rem]">Total</span>
                     <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtNum(totalDebit)}</span>
                     <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtNum(totalCredit)}</span>
                   </div>
@@ -977,14 +977,14 @@ function ICTPreviewModal({
             {posting.isPosted ? (
               <div className="flex items-center gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2.5">
                 <CheckCircle2 size={12} className="text-emerald-500 shrink-0" />
-                <p className="text-[11px] text-emerald-700 dark:text-emerald-400">
+                <p className="text-[0.6875rem] text-emerald-700 dark:text-emerald-400">
                   Posted to General Ledger. Entries are visible in the Trial Balance.
                 </p>
               </div>
             ) : (
               <div className="flex items-center gap-2 rounded-lg border border-border bg-muted/20 px-3 py-2.5">
                 <AlertCircle size={12} className="text-muted-foreground shrink-0" />
-                <p className="text-[11px] text-muted-foreground">
+                <p className="text-[0.6875rem] text-muted-foreground">
                   Not yet posted — this is a preview of what will post once the transfer is approved.
                 </p>
               </div>
@@ -1157,13 +1157,13 @@ function TransferHistory() {
           </div>
           <div className="flex items-center gap-2">
             {ictTransfers.length > 0 && (
-              <div className="flex items-center rounded-lg border border-border p-0.5 text-[10px] font-medium">
+              <div className="flex items-center rounded-lg border border-border p-0.5 text-[0.625rem] font-medium">
                 <button
                   onClick={() => setIctGstMode("excl")}
                   title="Show Inter-Company amounts excl. GST"
                   className={`px-2 py-1 rounded-md transition-colors ${
                     ictGstMode === "excl"
-                      ? "bg-primary text-primary-foreground"
+                      ? "btn-module text-white"
                       : "text-muted-foreground hover:bg-muted"
                   }`}
                 >
@@ -1174,7 +1174,7 @@ function TransferHistory() {
                   title="Show Inter-Company amounts incl. GST"
                   className={`px-2 py-1 rounded-md transition-colors ${
                     ictGstMode === "incl"
-                      ? "bg-primary text-primary-foreground"
+                      ? "btn-module text-white"
                       : "text-muted-foreground hover:bg-muted"
                   }`}
                 >
@@ -1250,7 +1250,7 @@ function TransferHistory() {
                       >
                         <td className="px-3 py-2.5 font-mono text-foreground font-semibold whitespace-nowrap">
                           <div>{t.DocNo}</div>
-                          <div className="text-[10px] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
+                          <div className="text-[0.625rem] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
                         </td>
                         <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap hidden sm:table-cell">
                           {fmtDate(t.TransferDate)}
@@ -1264,7 +1264,7 @@ function TransferHistory() {
                             <span className="text-emerald-600 dark:text-emerald-400">
                               {t.ReceiverProjectName}
                             </span>
-                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] bg-muted text-muted-foreground border border-border ml-1">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.5625rem] bg-muted text-muted-foreground border border-border ml-1">
                               Inter-Company
                             </span>
                           </div>
@@ -1278,23 +1278,23 @@ function TransferHistory() {
                         </td>
                         <td className="px-3 py-2.5">
                           {t.Status === "Completed" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
                               <CheckCircle2 size={10} /> Completed (auto)
                             </span>
                           ) : t.Status === "Approved" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-green-500/10 text-green-700 dark:text-green-400 border border-green-400/30">
                               <CheckCircle2 size={10} /> Approved
                             </span>
                           ) : t.Status === "Pending" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-[#ffe2021a] text-amber-700 dark:text-amber-400 border border-amber-400/30">
                               Pending approval
                             </span>
                           ) : t.Status === "Rejected" ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-red-500/10 text-red-700 dark:text-red-400 border border-red-400/30">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-red-500/10 text-red-700 dark:text-red-400 border border-red-400/30">
                               Rejected
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-muted-foreground border border-border">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-muted text-muted-foreground border border-border">
                               {t.Status}
                             </span>
                           )}
@@ -1341,7 +1341,7 @@ function TransferHistory() {
                     >
                       <td className="px-3 py-2.5 font-mono text-foreground font-semibold whitespace-nowrap">
                         <div>{t.DocNo}</div>
-                        <div className="text-[10px] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
+                        <div className="text-[0.625rem] text-muted-foreground font-sans font-normal sm:hidden">{fmtDate(t.TransferDate)}</div>
                       </td>
                       <td className="px-3 py-2.5 text-muted-foreground whitespace-nowrap hidden sm:table-cell">
                         {fmtDate(t.TransferDate)}
@@ -1380,7 +1380,7 @@ function TransferHistory() {
                           {hasGRN ? (
                             <span
                               title={linkedGRNs.map((g) => g.GRNNo || g.DocNo).join(", ")}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] bg-muted text-muted-foreground border border-border font-mono whitespace-nowrap"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[0.625rem] bg-muted text-muted-foreground border border-border font-mono whitespace-nowrap"
                             >
                               <FileText size={9} /> {linkedGRNs.length > 1 ? `${linkedGRNs.length} GRNs` : linkedGRNs[0].GRNNo || linkedGRNs[0].DocNo}
                             </span>
@@ -1965,7 +1965,7 @@ export default function StockTransfer() {
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                   Filters
                 </p>
-                <span className="text-[10px] text-muted-foreground/60">
+                <span className="text-[0.625rem] text-muted-foreground/60">
                   — narrow godowns by company or project
                 </span>
                 {(filterCompanyId || filterProjectId) && (
@@ -1977,7 +1977,7 @@ export default function StockTransfer() {
                       setToGodownId(null);
                       setItems([emptyItem()]);
                     }}
-                    className="ml-auto text-[10px] text-muted-foreground hover:text-red-500 flex items-center gap-1 transition-colors"
+                    className="ml-auto text-[0.625rem] text-muted-foreground hover:text-red-500 flex items-center gap-1 transition-colors"
                   >
                     <X size={10} /> Clear filters
                   </button>
@@ -2152,7 +2152,7 @@ export default function StockTransfer() {
               {(filterCompanyId || filterProjectId) && (
                 <div className="flex flex-wrap gap-2 pt-1">
                   {filterCompanyId && (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-muted text-foreground border border-border font-medium">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.6875rem] bg-muted text-foreground border border-border font-medium">
                       <Building2 size={10} />
                       {
                         companyOptions.find((o) => o.value === filterCompanyId)
@@ -2173,7 +2173,7 @@ export default function StockTransfer() {
                     </span>
                   )}
                   {filterProjectId && (
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-muted text-foreground border border-border font-medium">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[0.6875rem] bg-muted text-foreground border border-border font-medium">
                       <FolderKanban size={10} />
                       {
                         projectSelectOptions.find(
@@ -2193,7 +2193,7 @@ export default function StockTransfer() {
                       </button>
                     </span>
                   )}
-                  <span className="text-[10px] text-muted-foreground self-center">
+                  <span className="text-[0.625rem] text-muted-foreground self-center">
                     {companyGodowns.length} godown
                     {companyGodowns.length !== 1 ? "s" : ""} available
                   </span>
@@ -2262,7 +2262,7 @@ export default function StockTransfer() {
                     {["#", "Item", "Avail", "Qty", "UOM", ""].map((h, i) => (
                       <span
                         key={i}
-                        className={`text-[10px] font-semibold text-muted-foreground uppercase tracking-wider ${
+                        className={`text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wider ${
                           i === 0
                             ? "col-span-1"
                             : i === 1
@@ -2312,10 +2312,10 @@ export default function StockTransfer() {
                   {transferMode === "inter" && (
                     <div className="rounded-lg border border-border bg-muted/20 px-3 py-3 text-xs space-y-2">
                       <div className="flex items-center justify-between gap-2">
-                        <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[10px]">
+                        <p className="font-semibold text-muted-foreground uppercase tracking-wider text-[0.625rem]">
                           Posting Preview
                         </p>
-                        <label className="flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground shrink-0 cursor-pointer select-none">
+                        <label className="flex items-center gap-1.5 text-[0.625rem] font-medium text-muted-foreground shrink-0 cursor-pointer select-none">
                           <input
                             type="checkbox"
                             checked={applyGst}
@@ -2344,16 +2344,16 @@ export default function StockTransfer() {
                               if (it.needsManualRate) {
                                 return (
                                   <div key={it.itemId} className="rounded-md bg-amber-500/5 border border-amber-400/30 px-3 py-2 space-y-1.5">
-                                    <div className="flex items-center justify-between gap-3 text-[11px] font-medium">
+                                    <div className="flex items-center justify-between gap-3 text-[0.6875rem] font-medium">
                                       <span className="text-foreground truncate">
                                         {it.itemName || it.itemId} — {it.qty} {it.unit}
                                       </span>
                                     </div>
-                                    <p className="text-[10px] text-amber-600 dark:text-amber-400">
+                                    <p className="text-[0.625rem] text-amber-600 dark:text-amber-400">
                                       No purchase history found under this company — enter a rate to price this item.
                                     </p>
                                     <div className="flex items-center gap-1.5">
-                                      <span className="text-[11px] text-muted-foreground">₹</span>
+                                      <span className="text-[0.6875rem] text-muted-foreground">₹</span>
                                       <input
                                         type="number"
                                         min="0.01"
@@ -2365,14 +2365,14 @@ export default function StockTransfer() {
                                         placeholder="Rate per unit"
                                         className="w-32 px-2 py-1 rounded-md border border-amber-400/40 bg-background text-xs text-foreground outline-none focus:ring-2 focus:ring-amber-500/30"
                                       />
-                                      <span className="text-[10px] text-muted-foreground">per {it.unit}</span>
+                                      <span className="text-[0.625rem] text-muted-foreground">per {it.unit}</span>
                                     </div>
                                   </div>
                                 );
                               }
                               return (
                                 <div key={it.itemId} className="rounded-md bg-muted/30 border border-border/40 px-3 py-2 space-y-0.5">
-                                  <div className="flex items-center justify-between gap-3 text-[11px] font-medium">
+                                  <div className="flex items-center justify-between gap-3 text-[0.6875rem] font-medium">
                                     <span className="text-foreground truncate">
                                       {it.itemName || it.itemId} — {it.qty} {it.unit}
                                     </span>
@@ -2380,16 +2380,16 @@ export default function StockTransfer() {
                                       ₹{inclAmt.toLocaleString("en-IN")}
                                     </span>
                                   </div>
-                                  <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                                  <div className="flex items-center justify-between text-[0.625rem] text-muted-foreground">
                                     <span>Excl. GST: ₹{fmtRate(it.rate)}/unit × {it.qty} = ₹{it.amount.toLocaleString("en-IN")}</span>
                                   </div>
                                   {gstPct > 0 ? (
-                                    <div className="flex items-center justify-between text-[10px] text-amber-600 dark:text-amber-400">
+                                    <div className="flex items-center justify-between text-[0.625rem] text-amber-600 dark:text-amber-400">
                                       <span>GST @ {gstPct}%</span>
                                       <span>+ ₹{gstAmt.toLocaleString("en-IN")}</span>
                                     </div>
                                   ) : (
-                                    <div className="text-[10px] text-muted-foreground/60">GST: N/A (0%)</div>
+                                    <div className="text-[0.625rem] text-muted-foreground/60">GST: N/A (0%)</div>
                                   )}
                                 </div>
                               );
@@ -2397,7 +2397,7 @@ export default function StockTransfer() {
                           </div>
 
                           {/* Totals summary */}
-                          <div className="border-t border-border/60 pt-2 space-y-1 text-[11px]">
+                          <div className="border-t border-border/60 pt-2 space-y-1 text-[0.6875rem]">
                             <div className="flex items-center justify-between">
                               <span className="text-muted-foreground">Subtotal (excl. GST)</span>
                               <span className="font-mono">₹{interPreview.totalAmount.toLocaleString("en-IN")}</span>
@@ -2419,8 +2419,8 @@ export default function StockTransfer() {
                           </div>
 
                           {/* GL posting lines */}
-                          <div className="border-t border-border/60 pt-2 space-y-1 text-[10px]">
-                            <p className="text-muted-foreground/60 uppercase tracking-wider text-[9px] font-semibold">GL Posting</p>
+                          <div className="border-t border-border/60 pt-2 space-y-1 text-[0.625rem]">
+                            <p className="text-muted-foreground/60 uppercase tracking-wider text-[0.5625rem] font-semibold">GL Posting</p>
                             <div className="flex items-center justify-between">
                               <span className="text-muted-foreground">
                                 {interPreview.senderCompanyName} — Inter-Company A/c debited

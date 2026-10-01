@@ -89,9 +89,9 @@ const TypeToggle: React.FC<{
       <button
         key={vt}
         onClick={() => onChange(vt)}
-        className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] transition-colors ${
+        className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-[0.6875rem] transition-colors ${
           value === vt
-            ? "bg-primary text-primary-foreground border-primary"
+            ? "btn-module text-white border-primary"
             : "border-border bg-muted text-muted-foreground hover:bg-muted/80"
         }`}
       >
@@ -362,9 +362,9 @@ const PaymentPlanMaster: React.FC = () => {
               <button
                 key={f}
                 onClick={() => setFilterType(f)}
-                className={`px-2.5 py-1 text-[11px] rounded-lg border whitespace-nowrap transition-colors ${
+                className={`px-2.5 py-1 text-[0.6875rem] rounded-lg border whitespace-nowrap transition-colors ${
                   filterType === f
-                    ? "bg-primary text-primary-foreground border-primary"
+                    ? "btn-module text-white border-primary"
                     : "border-border bg-muted text-muted-foreground hover:bg-muted/80"
                 }`}
               >
@@ -420,7 +420,7 @@ const PaymentPlanMaster: React.FC = () => {
                 <button
                   onClick={handleAdd}
                   disabled={saving || !rights.canCreate}
-                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg btn-module text-white text-sm font-semibold disabled:opacity-50"
                 >
                   {saving ? (
                     <Loader2 size={14} className="animate-spin" />
@@ -510,7 +510,7 @@ const PaymentPlanMaster: React.FC = () => {
                         <button
                           onClick={handleEdit}
                           disabled={saving || !rights.canEdit}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-50"
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg btn-module text-white text-sm font-semibold disabled:opacity-50"
                         >
                           {saving ? (
                             <Loader2 size={14} className="animate-spin" />
@@ -535,7 +535,7 @@ const PaymentPlanMaster: React.FC = () => {
                         </p>
                         <div className="flex items-center gap-2 mt-1">
                           <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-heading ${meta.badge}`}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[0.6875rem] font-heading ${meta.badge}`}
                           >
                             {meta.icon} {meta.label}
                           </span>
@@ -543,7 +543,7 @@ const PaymentPlanMaster: React.FC = () => {
                             {formatValue(term)}
                           </span>
                           {term.CreditDays != null && (
-                            <span className="text-[11px] text-muted-foreground">
+                            <span className="text-[0.6875rem] text-muted-foreground">
                               {term.CreditDays} credit days
                             </span>
                           )}
@@ -681,7 +681,7 @@ const PaymentPlanMaster: React.FC = () => {
                       <button
                         onClick={handleAdd}
                         disabled={saving || !rights.canCreate}
-                        className="w-7 h-7 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-all"
+                        className="w-7 h-7 flex items-center justify-center rounded-lg btn-module text-white disabled:opacity-50 transition-all"
                       >
                         {saving ? (
                           <Loader2 size={13} className="animate-spin" />
@@ -768,7 +768,7 @@ const PaymentPlanMaster: React.FC = () => {
                           />
                         ) : (
                           <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-heading ${meta.badge}`}
+                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[0.6875rem] font-heading ${meta.badge}`}
                           >
                             {meta.icon} {meta.label}
                           </span>
@@ -844,7 +844,7 @@ const PaymentPlanMaster: React.FC = () => {
                               <button
                                 onClick={handleEdit}
                                 disabled={saving}
-                                className="w-7 h-7 flex items-center justify-center rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-all"
+                                className="w-7 h-7 flex items-center justify-center rounded-lg btn-module text-white disabled:opacity-50 transition-all"
                               >
                                 {saving ? (
                                   <Loader2 size={13} className="animate-spin" />

@@ -141,7 +141,7 @@ const statusColors: Record<string, string> = {
   "Fully Received": "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   Ordered: "bg-violet-500/10 text-violet-600 border-violet-400/20",
   "Partially Ordered": "bg-purple-500/10 text-purple-600 border-purple-400/20",
-  Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+  Pending: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
   Draft: "bg-muted text-muted-foreground border-border",
   Open: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   "Partially Received": "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
@@ -154,7 +154,7 @@ function StatusBadge({ status }: { status: string }) {
     statusColors[status] ?? "bg-muted text-muted-foreground border-border";
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cls}`}
     >
       {status || "Draft"}
     </span>
@@ -206,7 +206,7 @@ function StatCard({
       <div className="absolute top-0 left-0 right-0 h-px" style={{ background: `linear-gradient(90deg, transparent, ${accentColor}50, transparent)` }} />
       <div className="relative z-10 p-4 flex flex-col gap-3">
         <div className="flex items-start justify-between gap-2">
-          <span className="text-[10px] font-heading font-semibold uppercase tracking-widest leading-tight" style={{ color: accentColor, opacity: 0.85 }}>
+          <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest leading-tight" style={{ color: accentColor, opacity: 0.85 }}>
             {label}
           </span>
           <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: `${accentColor}18`, border: `1px solid ${accentColor}30` }}>
@@ -224,7 +224,7 @@ function StatCard({
             {trend === "down" && (
               <ArrowDownRight size={12} className="text-red-500" />
             )}
-            <span className="text-[11px] text-muted-foreground leading-tight">
+            <span className="text-[0.6875rem] text-muted-foreground leading-tight">
               {sub}
             </span>
           </div>
@@ -395,7 +395,7 @@ function SectionHeader({
           {title}
         </span>
         {sub && (
-          <span className="text-[10px] text-muted-foreground hidden sm:inline">
+          <span className="text-[0.625rem] text-muted-foreground hidden sm:inline">
             {sub}
           </span>
         )}
@@ -403,7 +403,7 @@ function SectionHeader({
       {action && onAction && (
         <button
           onClick={onAction}
-          className="text-[10px] font-medium hover:opacity-70 transition-opacity"
+          className="text-[0.625rem] font-medium hover:opacity-70 transition-opacity"
           style={{ color: accentColor }}
         >
           {action} →
@@ -660,7 +660,7 @@ const REQUEST_DASH_COLS: ColumnDef<any, unknown>[] = [
             : "bg-muted text-muted-foreground border-border";
       return (
         <span
-          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
+          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cls}`}
         >
           {p || "Normal"}
         </span>
@@ -1406,11 +1406,11 @@ export default function MaterialDashboard() {
                       </span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 ml-2">
-                      <span className="text-[10px] text-emerald-600 font-medium">
+                      <span className="text-[0.625rem] text-emerald-600 font-medium">
                         +{fmtNum(item.TotalIn)}
                       </span>
                       {item.TotalOut > 0 && (
-                        <span className="text-[10px] text-red-500 font-medium">
+                        <span className="text-[0.625rem] text-red-500 font-medium">
                           -{fmtNum(item.TotalOut)}
                         </span>
                       )}

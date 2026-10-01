@@ -310,7 +310,7 @@ export default function ContractDetailScreen() {
             </View>
 
             {ledgerData.summary.OverBilled && (
-              <View className="flex-row items-center gap-2 px-3.5 py-2.5 rounded-xl mb-2" style={{ backgroundColor: "#f59e0b1a", borderWidth: 1, borderColor: "#f59e0b33" }}>
+              <View className="flex-row items-center gap-2 px-3.5 py-2.5 rounded-xl mb-2" style={{ backgroundColor: "#ffe2021a", borderWidth: 1, borderColor: "#f59e0b33" }}>
                 <AlertTriangle size={13} color="#f59e0b" />
                 <Text style={{ color: "#f59e0b", fontSize: 10.5, fontFamily: fonts.body.medium, flex: 1 }}>
                   Total documented exceeds contract value — expected for change orders, worth a look otherwise.

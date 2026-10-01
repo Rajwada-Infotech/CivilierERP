@@ -15,6 +15,7 @@ import {
   type DepreciationSetup, type DepreciationPayload,
 } from "@/api/depreciationApi";
 import { ASSET_CATEGORIES, CATEGORY_ICONS, CATEGORY_COLORS } from "./assetCategories";
+import { DateInput } from "@/components/ui/date-input";
 
 const DEPRECIATION_TYPES = [
   { value: "SLM", label: "SLM — Straight Line Method" },
@@ -149,7 +150,7 @@ export default function DepreciationSetupPage() {
       action={
         rights.canCreate && (
           <button onClick={openCreate}
-            className="inline-flex items-center gap-2 h-9 px-4 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 text-white text-sm font-semibold hover:shadow-lg transition">
+            className="inline-flex items-center gap-2 h-9 px-4 rounded-lg btn-module text-white text-sm font-semibold hover:shadow-lg transition">
             <Plus size={16} /> New Rate
           </button>
         )
@@ -231,7 +232,7 @@ export default function DepreciationSetupPage() {
           <p className="text-sm">No depreciation rates found</p>
           {rights.canCreate && (
             <button onClick={openCreate}
-              className="mt-2 inline-flex items-center gap-1.5 h-8 px-4 rounded-lg bg-primary text-primary-foreground text-sm font-medium">
+              className="mt-2 inline-flex items-center gap-1.5 h-8 px-4 rounded-lg btn-module text-white text-sm font-medium">
               <Plus size={13} /> Add First Rate
             </button>
           )}
@@ -349,7 +350,7 @@ export default function DepreciationSetupPage() {
 
               <div>
                 <label className={labelCls}>Effective From *</label>
-                <input type="date" value={form.effectiveFrom}
+                <DateInput value={form.effectiveFrom}
                   onChange={(e) => setForm((p) => ({ ...p, effectiveFrom: e.target.value }))}
                   className={inputCls} />
               </div>
@@ -371,7 +372,7 @@ export default function DepreciationSetupPage() {
                 Cancel
               </button>
               <button onClick={handleSave} disabled={saving}
-                className="h-9 px-4 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-1.5 hover:shadow-lg transition">
+                className="h-9 px-4 rounded-lg btn-module text-white text-sm font-semibold disabled:opacity-50 inline-flex items-center gap-1.5 hover:shadow-lg transition">
                 {saving ? "Saving…" : <><Check size={14} /> Save</>}
               </button>
             </div>

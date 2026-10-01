@@ -110,22 +110,22 @@ export default function GLPostingFailures() {
                   ) : (
                     rows.map((row) => (
                       <TableRow key={row.LogId} className="text-xs">
-                        <TableCell className="font-mono text-[11px]">{row.Module}</TableCell>
-                        <TableCell className="font-mono text-[11px]">#{row.RecordId}</TableCell>
+                        <TableCell className="font-mono text-[0.6875rem]">{row.Module}</TableCell>
+                        <TableCell className="font-mono text-[0.6875rem]">#{row.RecordId}</TableCell>
                         <TableCell>
-                          <Badge className={`text-[10px] ${OUTCOME_STYLE[row.Outcome] || ""}`}>{row.Outcome}</Badge>
+                          <Badge className={`text-[0.625rem] ${OUTCOME_STYLE[row.Outcome] || ""}`}>{row.Outcome}</Badge>
                         </TableCell>
                         <TableCell className="max-w-[320px]">
                           <span className="text-muted-foreground break-words">{row.Reason || "—"}</span>
                         </TableCell>
                         <TableCell>{row.ApproverEmail || "—"}</TableCell>
-                        <TableCell className="text-[11px] whitespace-nowrap">{fmtDateTime(row.CreatedAt)}</TableCell>
+                        <TableCell className="text-[0.6875rem] whitespace-nowrap">{fmtDateTime(row.CreatedAt)}</TableCell>
                         <TableCell className="text-right">
                           {row.Outcome !== "posted" && (
                             <Button
                               variant="outline"
                               size="sm"
-                              className="h-6 text-[11px] gap-1 px-2"
+                              className="h-6 text-[0.6875rem] gap-1 px-2"
                               disabled={retryingId === row.LogId}
                               onClick={() => retryMutation.mutate(row.LogId)}
                             >

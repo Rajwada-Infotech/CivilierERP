@@ -86,7 +86,7 @@ const Maintenance = () => {
         <div className="mt-12">
           <button
             onClick={handleGoBack}
-            className="group inline-flex items-center gap-3 px-8 py-3.5 bg-primary text-primary-foreground font-semibold rounded-2xl text-lg transition-all duration-300 hover:scale-105 active:scale-95 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30"
+            className="group inline-flex items-center gap-3 px-8 py-3.5 btn-module text-white font-semibold rounded-2xl text-lg transition-all duration-300 hover:scale-105 active:scale-95 shadow-lg shadow-primary/20 hover:shadow-xl "
           >
             {currentUser ? "Take me back" : "Go to Login"}
             <span className="group-hover:rotate-45 transition-transform duration-300">

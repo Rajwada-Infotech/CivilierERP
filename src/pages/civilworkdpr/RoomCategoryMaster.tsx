@@ -195,7 +195,7 @@ export default function RoomCategoryMaster() {
         rights.canCreate ? (
           <button
             onClick={openCreate}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-cyan-500 to-teal-400 text-white hover:opacity-90 transition-opacity"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium btn-module text-white hover:opacity-90 transition-opacity"
           >
             <Plus size={14} /> New Room Type
           </button>
@@ -243,7 +243,7 @@ export default function RoomCategoryMaster() {
                 onChange={(e) => setForm((p) => ({ ...p, categoryName: e.target.value }))}
                 disabled={!!editing}
               />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 {editing
                   ? "Kept stable once set — only the Alias above should normally change."
                   : "Used internally; auto-uppercased. Renaming the Alias later never breaks anything already saved."}
@@ -283,7 +283,7 @@ export default function RoomCategoryMaster() {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-cyan-500 to-teal-400 text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                className="px-4 py-2 rounded-lg text-sm font-medium btn-module text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
               >
                 {saving ? "Saving…" : editing ? "Update" : "Create"}
               </button>

@@ -101,7 +101,7 @@ export function CheckpointDailyUpdates({
 
   if (!checkpointId) {
     return (
-      <p className="text-[11px] text-muted-foreground italic">Save the allocation, then reopen it — you can then log a daily photo update here.</p>
+      <p className="text-[0.6875rem] text-muted-foreground italic">Save the allocation, then reopen it — you can then log a daily photo update here.</p>
     );
   }
 
@@ -136,7 +136,7 @@ export function CheckpointDailyUpdates({
               modifiersClassNames={{ logged: "[&_button]:bg-emerald-500/20 [&_button]:font-semibold [&_button]:text-emerald-700 dark:[&_button]:text-emerald-300" }}
               defaultMonth={fromYmd(date)}
             />
-            <p className="px-3 pb-2 text-[10px] text-muted-foreground">Green days already have an update.</p>
+            <p className="px-3 pb-2 text-[0.625rem] text-muted-foreground">Green days already have an update.</p>
           </PopoverContent>
         </Popover>
 
@@ -149,7 +149,7 @@ export function CheckpointDailyUpdates({
           <Camera size={12} /> {current?.hasPhoto ? "Retake" : "Take photo"}
         </button>
 
-        <span className="text-[11px] text-muted-foreground ml-auto">
+        <span className="text-[0.6875rem] text-muted-foreground ml-auto">
           {updates.length === 0 ? "No updates yet" : `${updates.length} day${updates.length === 1 ? "" : "s"} logged`}
         </span>
       </div>
@@ -165,7 +165,7 @@ export function CheckpointDailyUpdates({
       {current && (
         <div className="flex items-center gap-2.5">
           <UpdatePhoto update={current} />
-          <div className="flex-1 min-w-0 text-[11px] text-muted-foreground">
+          <div className="flex-1 min-w-0 text-[0.6875rem] text-muted-foreground">
             <p className="text-foreground font-medium">{fmt(current.date)}</p>
             {current.note && <p className="truncate">{current.note}</p>}
             {current.createdBy && <p className="truncate">by {current.createdBy}</p>}

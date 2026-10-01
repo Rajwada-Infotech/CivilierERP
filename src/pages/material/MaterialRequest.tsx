@@ -64,6 +64,7 @@ import {
 } from "@/lib/itemUomAlternates";
 import { getAllItemUomAlternates } from "@/api/itemUomAlternatesApi";
 import { printMasterPreview } from "@/utils/masterPreviewPrint";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─── Template columns ─────────────────────────────────────────────────────────
 const MR_TEMPLATE_COLUMNS = [
@@ -791,11 +792,11 @@ export default function MaterialRequest() {
             />
             {pending &&
               (pending.totalPending > 0 ? (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border border-amber-500/20">
                   Pending &middot; {pending.totalPending} Qty
                 </span>
               ) : pending.totalOrdered > 0 ? (
-                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                   Completed
                 </span>
               ) : null)}
@@ -813,7 +814,7 @@ export default function MaterialRequest() {
         return (
           <div className="flex items-center justify-end gap-2">
             {/* View — always visible */}
-            <button
+            <button data-row-view
               type="button"
               onClick={() => handleView(row.original)}
               className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
@@ -919,7 +920,7 @@ export default function MaterialRequest() {
                   }}
                   className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                     statusFilter === s
-                      ? "bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white border-transparent shadow-sm"
+                      ? "btn-module text-white border-transparent shadow-sm"
                       : "bg-background text-muted-foreground border-border hover:border-emerald-500/40"
                   }`}
                 >
@@ -1186,8 +1187,7 @@ export default function MaterialRequest() {
                   size={13}
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                 />
-                <input
-                  type="date"
+                <DateInput
                   value={header.requestDate}
                   onChange={(e) => setH("requestDate", e.target.value)}
                   className={`${inputCls} pl-8`}
@@ -1200,8 +1200,7 @@ export default function MaterialRequest() {
                   size={13}
                   className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                 />
-                <input
-                  type="date"
+                <DateInput
                   value={header.requiredByDate}
                   min={minRequiredByDate || undefined}
                   onChange={(e) => setH("requiredByDate", e.target.value)}
@@ -1209,7 +1208,7 @@ export default function MaterialRequest() {
                 />
               </div>
               {maxDaysOfSupply > 0 && (
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 text-[0.6875rem] text-muted-foreground">
                   Earliest possible: {minRequiredByDate} ({maxDaysOfSupply}-day supply lead time)
                 </p>
               )}
@@ -1283,13 +1282,13 @@ export default function MaterialRequest() {
         <CardContent className="p-6 space-y-4">
           {/* Column headers — visible on md+ */}
           <div className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_auto] gap-4 px-1 pb-1 border-b border-border/50">
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+            <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
               Item
             </span>
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+            <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
               Unit (UOM)
             </span>
-            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+            <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
               Quantity
             </span>
             <span className="w-8" />
@@ -1301,7 +1300,7 @@ export default function MaterialRequest() {
               className="group relative rounded-xl border border-border bg-card hover:border-emerald-500/30 hover:shadow-sm transition-all duration-150"
             >
               {/* Row number pill */}
-              <div className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold text-muted-foreground shadow-sm">
+              <div className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-muted border border-border flex items-center justify-center text-[0.625rem] font-bold text-muted-foreground shadow-sm">
                 {idx + 1}
               </div>
 
@@ -1310,7 +1309,7 @@ export default function MaterialRequest() {
                 <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_auto] gap-3 items-start">
                   {/* Item selector */}
                   <div className="space-y-1.5">
-                    <label className="md:hidden text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    <label className="md:hidden text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                       Item *
                     </label>
                     <ItemPicker
@@ -1324,7 +1323,7 @@ export default function MaterialRequest() {
                         from nowhere, since the min-date hint near the date
                         field itself is easy to miss/scroll past. */}
                     {Number(itemMap[ci.ItemId]?.DaysOfSupply ?? 0) > 0 && (
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-[0.625rem] text-muted-foreground">
                         {Number(itemMap[ci.ItemId].DaysOfSupply)}-day supply lead time
                       </p>
                     )}
@@ -1332,7 +1331,7 @@ export default function MaterialRequest() {
 
                   {/* UOM selector */}
                   <div className="space-y-1.5">
-                    <label className="md:hidden text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    <label className="md:hidden text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                       Unit (UOM) *
                     </label>
                     <div className="relative">
@@ -1479,7 +1478,7 @@ export default function MaterialRequest() {
 
                   {/* Quantity */}
                   <div className="space-y-1.5">
-                    <label className="md:hidden text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    <label className="md:hidden text-[0.625rem] font-semibold uppercase tracking-widest text-muted-foreground">
                       Quantity *
                     </label>
                     <div className="relative">
@@ -1543,7 +1542,7 @@ export default function MaterialRequest() {
                         }
                         if (others.length === 0) return null;
                         return (
-                          <p className="text-[10px] text-muted-foreground mt-1">
+                          <p className="text-[0.625rem] text-muted-foreground mt-1">
                             ≈{" "}
                             {others
                               .map(
@@ -1621,7 +1620,7 @@ export default function MaterialRequest() {
 
       {/* Save bar */}
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-        <p className="text-[11px] text-muted-foreground hidden sm:block">
+        <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
           {canSave ? (
             <span className="text-emerald-500 font-medium">Ready to save</span>
           ) : (
@@ -1646,7 +1645,7 @@ export default function MaterialRequest() {
           <button
             onClick={onSave}
             disabled={!canSave || isSaving || saved}
-            className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+            className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
           >
             {saved ? (
               <Check size={14} />
@@ -1699,11 +1698,11 @@ export default function MaterialRequest() {
                 const pending = pendingSummaryByMRId.get(viewingRecord.MRId);
                 if (!pending) return null;
                 return pending.totalPending > 0 ? (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border border-amber-500/20">
                     Pending &middot; {pending.totalPending} Qty
                   </span>
                 ) : pending.totalOrdered > 0 ? (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                     Completed
                   </span>
                 ) : null;
@@ -1712,7 +1711,7 @@ export default function MaterialRequest() {
                 {priority}
               </span>
             </div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Material Request</p>
+            <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Material Request</p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
               <button
@@ -1756,7 +1755,7 @@ export default function MaterialRequest() {
             {rights.canEdit && viewingRecord.Status !== "Short Closed" && (viewingRecord.Status === "Draft" || viewingRecord.Status === "Approved" || viewingRecord.Status === "Rejected" || isAdmin) && (
               <button
                 onClick={() => { closeOverlay(); handleEdit(viewingRecord); }}
-                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
+                className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold btn-module shadow-sm transition"
               >
                 <Edit3 size={13} /><span className="hidden sm:inline">Edit</span>
               </button>
@@ -1789,7 +1788,7 @@ export default function MaterialRequest() {
 
           {/* ── Request Details ── */}
           <div>
-            <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+            <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
               <FileText size={10} className="text-emerald-500" /> Request Details
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
@@ -1803,7 +1802,7 @@ export default function MaterialRequest() {
                 { label: "Created By", value: viewingRecord.CreatedBy },
               ] as { label: string; value: any; mono?: boolean }[]).map(({ label, value, mono }) => (
                 <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
                   <p className={`text-xs font-semibold truncate ${mono ? "font-mono text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{value || "—"}</p>
                 </div>
               ))}
@@ -1815,13 +1814,13 @@ export default function MaterialRequest() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {viewingRecord.Reason && (
                 <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">Reason for Request</p>
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-1">Reason for Request</p>
                   <p className="text-xs text-foreground leading-relaxed">{viewingRecord.Reason}</p>
                 </div>
               )}
               {viewingRecord.Remarks && (
                 <div className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">Remarks</p>
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-1">Remarks</p>
                   <p className="text-xs text-foreground leading-relaxed">{viewingRecord.Remarks}</p>
                 </div>
               )}
@@ -1830,18 +1829,18 @@ export default function MaterialRequest() {
 
           {/* ── Requested Items ── */}
           <div>
-            <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
+            <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-3 flex items-center gap-1.5">
               <ShoppingCart size={10} className="text-emerald-500" /> Requested Items
-              <span className="ml-1 font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded-full border border-border">{items.length}</span>
+              <span className="ml-1 font-mono text-[0.625rem] bg-muted px-1.5 py-0.5 rounded-full border border-border">{items.length}</span>
             </p>
             <div className="rounded-xl border border-border overflow-x-auto">
               <table className="w-full text-xs" style={{ tableLayout: "auto" }}>
                 <thead className="bg-muted/40 border-b border-border">
                   <tr>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Item</th>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">UOM</th>
-                    <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Qty</th>
-                    <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Remarks</th>
+                    <th className="px-4 py-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Item</th>
+                    <th className="px-4 py-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">UOM</th>
+                    <th className="px-4 py-2.5 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Qty</th>
+                    <th className="px-4 py-2.5 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Remarks</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/60">
@@ -1956,7 +1955,7 @@ export default function MaterialRequest() {
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
@@ -1964,7 +1963,7 @@ export default function MaterialRequest() {
               {rights.canCreate && (
                 <Button
                   onClick={() => setViewMode("form")}
-                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 transition-all"
+                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
                 >
                   <Plus size={13} /> New Request
                 </Button>

@@ -312,7 +312,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
       ) : (
         <div className="rounded-xl border border-border overflow-hidden">
           {/* Header */}
-          <div className="hidden sm:grid sm:grid-cols-[1fr_72px_96px_84px_88px_28px] text-[10px] uppercase tracking-widest font-semibold text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border gap-1">
+          <div className="hidden sm:grid sm:grid-cols-[1fr_72px_96px_84px_88px_28px] text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border gap-1">
             <span>Description</span>
             <span className="text-center">Qty</span>
             <span className="text-center">UOM</span>
@@ -434,7 +434,7 @@ export function DirectItemsTable({ items, onChange, onTotalChange, readOnly = fa
       )}
 
       {!readOnly && items.length > 0 && (
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-[0.625rem] text-muted-foreground">
           Basic Amount is automatically calculated from the sum of all line items (qty x rate).
         </p>
       )}

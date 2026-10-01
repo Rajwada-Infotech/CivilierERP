@@ -1764,7 +1764,7 @@ export default function MaterialExpenseBooking() {
                 onClick={handleImportClick}
                 disabled={importing}
                 title="Import from CSV"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 {importing ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
                 <span className="hidden sm:inline">{importing ? "Importing..." : "Import CSV"}</span>
@@ -1772,7 +1772,7 @@ export default function MaterialExpenseBooking() {
               {rights.canCreate && (
                 <Button
                   onClick={openNew}
-                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 transition-all"
+                  className="gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
                 >
                   <Plus size={13} /> New Invoice
                 </Button>
@@ -1823,13 +1823,13 @@ export default function MaterialExpenseBooking() {
                     <div className="w-6 h-6 rounded-md bg-indigo-500/10 flex items-center justify-center shrink-0">
                       <SlidersHorizontal size={12} className="text-indigo-500" />
                     </div>
-                    <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">
+                    <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground">
                       Party &amp; Project
                     </p>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                         <Building2 size={11} className="shrink-0" />
                         Company
                         <span className="text-destructive">*</span>
@@ -1871,7 +1871,7 @@ export default function MaterialExpenseBooking() {
                       </Select>
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                         <FolderKanban size={11} className="shrink-0" />
                         Project
                       </p>
@@ -1913,13 +1913,13 @@ export default function MaterialExpenseBooking() {
                         </SelectContent>
                       </Select>
                       {selectedDoc?.projectId && (
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[0.625rem] text-muted-foreground">
                           Pre-filled from linked order
                         </p>
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                         <CalendarDays size={11} className="shrink-0" />
                         Year
                       </p>
@@ -1939,13 +1939,13 @@ export default function MaterialExpenseBooking() {
                         </SelectContent>
                       </Select>
                       {selectedTod && (
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[0.625rem] text-muted-foreground">
                           Changing year updates the booking reference number
                         </p>
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                         <User size={11} className="shrink-0" />
                         {vendorLabel}
                       </p>
@@ -1999,13 +1999,13 @@ export default function MaterialExpenseBooking() {
                         />
                       )}
                       {effectiveVendorLabel && (
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[0.625rem] text-muted-foreground">
                           {`Auto-filled from ${effectiveSourceKind === "PO" ? "Purchase Order (supplier)" : effectiveSourceKind === "GRN" ? "GRN (supplier)" : "Work Done (contractor)"}`}
                         </p>
                       )}
                     </div>
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                      <p className="flex items-center gap-1.5 text-[0.625rem] uppercase tracking-widest text-muted-foreground">
                         <ShoppingCart size={11} className="shrink-0" />
                         Filter by PO
                       </p>
@@ -2076,7 +2076,7 @@ export default function MaterialExpenseBooking() {
                         </SelectContent>
                       </Select>
                       {filterPOId != null && (
-                        <p className="text-[10px] text-muted-foreground">
+                        <p className="text-[0.625rem] text-muted-foreground">
                           Showing this PO's GRNs in the GRN tab below
                         </p>
                       )}
@@ -2097,13 +2097,13 @@ export default function MaterialExpenseBooking() {
                             ? form.sourceDocNo || `${form.eSourceType}-${form.poId ?? ""}`
                             : "Direct Entry"}
                         </span>
-                        <span className="ml-auto text-[10px] text-muted-foreground italic">
+                        <span className="ml-auto text-[0.625rem] text-muted-foreground italic">
                           Locked — the source document can't be changed once a booking exists.
                         </span>
                       </div>
                     ) : (
                       <>
-                    <p className="text-[11px] text-muted-foreground -mt-1">
+                    <p className="text-[0.6875rem] text-muted-foreground -mt-1">
                       Pick a Purchase Order, confirmed Work Done entry, or GRN
                       to auto-fill booking details, or choose a document type
                       from Other Expenses for standalone expense entries.
@@ -2172,7 +2172,7 @@ export default function MaterialExpenseBooking() {
                               </>
                             )}
                           <span
-                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"}`}
+                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[0.625rem] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400"}`}
                           >
                             {selectedDoc.kind === "WORK_DONE"
                               ? "Work Done"
@@ -2229,7 +2229,7 @@ export default function MaterialExpenseBooking() {
 
                 {/* ── Sub-section: Dates & Payment ── */}
                 <div className="space-y-2">
-                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Dates &amp; Payment</p>
+                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground/60">Dates &amp; Payment</p>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <Field label="Booking Date" required>
                       <DateField value={form.bookingDate} onChange={(val) => set("bookingDate", val)} />
@@ -2271,7 +2271,7 @@ export default function MaterialExpenseBooking() {
 
                 {/* ── Sub-section: Vendor Invoice ── */}
                 <div className="space-y-2">
-                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Vendor Invoice</p>
+                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground/60">Vendor Invoice</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Field label="Vendor Invoice No">
                       <Input value={form.vendorInvoiceNo ?? ""} onChange={(e) => set("vendorInvoiceNo", e.target.value)} placeholder="Supplier invoice number" />
@@ -2284,7 +2284,7 @@ export default function MaterialExpenseBooking() {
 
                 {/* ── Sub-section: Accounting ── */}
                 <div className="space-y-2">
-                  <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground/60">Accounting</p>
+                  <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground/60">Accounting</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <Field
                       label="Cost Center"
@@ -2595,7 +2595,7 @@ export default function MaterialExpenseBooking() {
                 );
                 return (
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden">
-                    <p className="text-[11px] text-muted-foreground hidden sm:block">
+                    <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
                       {saved ? (
                         <span className="text-emerald-500 font-medium">
                           Saved!
@@ -2620,7 +2620,7 @@ export default function MaterialExpenseBooking() {
                       <button
                         onClick={handleSave}
                         disabled={saving || saved || !ebCanSave}
-                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                        className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
                       >
                         {saved ? (
                           <Check size={14} />
@@ -2778,20 +2778,20 @@ export default function MaterialExpenseBooking() {
                                   <TableCell className="py-3">
                                     {rec.status === "Draft" ? (
                                       <p
-                                        className="text-[11px] font-semibold text-amber-500 dark:text-amber-400 leading-tight max-w-[180px] truncate"
+                                        className="text-[0.6875rem] font-semibold text-amber-500 dark:text-amber-400 leading-tight max-w-[180px] truncate"
                                         title={rec.bookingReference || ""}
                                       >
                                         {rec.bookingReference || "—"}
                                       </p>
                                     ) : (
                                       <p
-                                        className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight max-w-[160px] truncate"
+                                        className="font-mono text-[0.6875rem] font-semibold text-emerald-600 dark:text-emerald-400 leading-tight max-w-[160px] truncate"
                                         title={rec.bookingReference || ""}
                                       >
                                         {rec.bookingReference || "—"}
                                       </p>
                                     )}
-                                    <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
+                                    <p className="text-[0.625rem] text-muted-foreground mt-0.5 flex items-center gap-1 flex-wrap">
                                       {rec.bookingDate && (
                                         <span>{rec.bookingDate}</span>
                                       )}
@@ -2801,7 +2801,7 @@ export default function MaterialExpenseBooking() {
                                         </span>
                                       ) : null}
                                       {rec.emi?.enabled ? (
-                                        <span className="inline-flex items-center gap-0.5 text-[9px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
+                                        <span className="inline-flex items-center gap-0.5 text-[0.5625rem] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
                                           <CreditCard size={8} />
                                           {rec.emi.installmentCount}x
                                         </span>
@@ -2812,10 +2812,10 @@ export default function MaterialExpenseBooking() {
                                     <p className="truncate">{rec.supplier || "—"}</p>
                                     {rec.supplierGstRegistered !== undefined ? (
                                       <span
-                                        className={`inline-flex items-center mt-1 text-[9px] font-heading font-semibold px-1.5 py-0.5 rounded-full border ${
+                                        className={`inline-flex items-center mt-1 text-[0.5625rem] font-heading font-semibold px-1.5 py-0.5 rounded-full border ${
                                           rec.supplierGstRegistered
                                             ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
-                                            : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+                                            : "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20"
                                         }`}
                                       >
                                         {rec.supplierGstRegistered ? "GST Bill" : "Non GST Bill"}
@@ -2826,7 +2826,7 @@ export default function MaterialExpenseBooking() {
                                     <p className="text-xs truncate max-w-[110px]">
                                       {rec.companyName || "—"}
                                     </p>
-                                    <p className="text-[10px] text-muted-foreground truncate max-w-[110px]">
+                                    <p className="text-[0.625rem] text-muted-foreground truncate max-w-[110px]">
                                       {rec.projectName || "—"}
                                     </p>
                                   </TableCell>
@@ -2889,7 +2889,7 @@ export default function MaterialExpenseBooking() {
                                   </TableCell>
                                   <TableCell className="py-3">
                                     {rec.status === "Draft" ? (
-                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25">
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/25">
                                         <Package
                                           size={10}
                                           className="shrink-0"
@@ -2900,7 +2900,7 @@ export default function MaterialExpenseBooking() {
                                     <ApprovalStatusChain
                                       table="ExpenseBooking"
                                       recordId={rec.id}
-                                      fallback={<StatusBadge status={rec.status} className="text-[10px] px-2 py-0.5" />}
+                                      fallback={<StatusBadge status={rec.status} className="text-[0.625rem] px-2 py-0.5" />}
                                     />
                                   </TableCell>
                                   <TableCell className="py-3" onClick={(e) => e.stopPropagation()}>
@@ -2984,7 +2984,7 @@ export default function MaterialExpenseBooking() {
                 simply continues from its current max, so removing a
                 document permanently leaves a gap (e.g. deleting #6 and #7
                 out of #1-#10 means the next new invoice is #11, not #6). */}
-            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+            <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-[#ffe2021a] px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
               <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
               <span>
                 {(() => {

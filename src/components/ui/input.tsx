@@ -1,9 +1,19 @@
 import * as React from "react";
 
 import { cn } from "@/lib/utils";
+import { DateInput, DateTimeInput, MonthInput, type DateInputProps } from "@/components/ui/date-input";
 
 const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
   ({ className, type, ...props }, ref) => {
+    if (type === "date") {
+      return <DateInput ref={ref} className={cn("h-10", className)} {...(props as DateInputProps)} />;
+    }
+    if (type === "month") {
+      return <MonthInput ref={ref} className={cn("h-10", className)} {...(props as DateInputProps)} />;
+    }
+    if (type === "datetime-local") {
+      return <DateTimeInput ref={ref} className={cn("h-10", className)} {...(props as DateInputProps)} />;
+    }
     return (
       <input
         type={type}

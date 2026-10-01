@@ -117,7 +117,7 @@ export const EmployeeDocumentsModal: React.FC<{
             <h2 className="text-sm font-heading font-semibold text-foreground flex items-center gap-2">
               <FileText size={15} /> Documents
             </h2>
-            <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{employeeName}</p>
+            <p className="text-[0.6875rem] text-muted-foreground mt-0.5 truncate">{employeeName}</p>
           </div>
           <button
             type="button"
@@ -176,7 +176,7 @@ export const EmployeeDocumentsModal: React.FC<{
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-medium text-foreground truncate">{d.FileName}</p>
-                    <p className="text-[10px] text-muted-foreground">
+                    <p className="text-[0.625rem] text-muted-foreground">
                       {d.DocType} - {formatSize(d.FileSize)}
                       {d.UploadedAt ? " - " + new Date(d.UploadedAt).toLocaleDateString("en-IN") : ""}
                     </p>

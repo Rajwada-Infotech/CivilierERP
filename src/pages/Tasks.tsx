@@ -170,10 +170,10 @@ const TaskCard = ({ task, onClick }: { task: Task; onClick: () => void }) => {
       {totalCount > 0 && (
         <div className="mt-3">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[10px] text-muted-foreground font-heading">
+            <span className="text-[0.625rem] text-muted-foreground font-heading">
               Quality
             </span>
-            <span className="text-[10px] text-muted-foreground font-heading">
+            <span className="text-[0.625rem] text-muted-foreground font-heading">
               {metCount}/{totalCount}
             </span>
           </div>
@@ -191,12 +191,12 @@ const TaskCard = ({ task, onClick }: { task: Task; onClick: () => void }) => {
 
       <div className="mt-3 flex items-center justify-between">
         <span
-          className={`px-2 py-0.5 rounded-full text-[11px] font-heading ${cfg.bg} ${cfg.color}`}
+          className={`px-2 py-0.5 rounded-full text-[0.6875rem] font-heading ${cfg.bg} ${cfg.color}`}
         >
           {cfg.label}
         </span>
         {task.comments.length > 0 && (
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-[0.625rem] text-muted-foreground">
             {task.comments.length} comment
             {task.comments.length !== 1 ? "s" : ""}
           </span>

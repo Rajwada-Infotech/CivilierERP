@@ -152,18 +152,18 @@ const TaskRow: React.FC<{
       <Checkbox checked={checked} onCheckedChange={onToggle} className="mt-0.5" />
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest truncate">
+          <span className="text-[0.6875rem] font-mono text-muted-foreground uppercase tracking-widest truncate">
             {task.TaskNo || `#${task.Id}`}
           </span>
           <span
-            className="shrink-0 inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-md border"
+            className="shrink-0 inline-flex items-center text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-md border"
             style={{ borderColor: `${color}4d`, color, background: `${color}1A` }}
           >
             {task.Priority}
           </span>
         </div>
         <p className="text-sm font-medium text-foreground truncate">{task.Subject}</p>
-        <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-2 text-[0.6875rem] text-muted-foreground">
           <span
             className="inline-flex items-center px-1.5 py-0.5 rounded-md"
             style={{ background: "rgba(100,116,139,0.14)", color: "#64748b" }}
@@ -208,7 +208,7 @@ const UserPanel: React.FC<{
     <div className="rounded-xl p-4 flex-1 min-w-0 flex flex-col" style={glassCard}>
       <div className="flex items-center gap-2 mb-3">
         <Users size={14} style={{ color: ACCENT_SOFT }} />
-        <p className="text-[11px] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT_SOFT }}>
+        <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT_SOFT }}>
           {title}
         </p>
       </div>
@@ -252,7 +252,7 @@ const UserPanel: React.FC<{
               Select all ({tasks.length})
             </label>
             {checkedIds.size > 0 && (
-              <span className="text-[11px] font-semibold" style={{ color: ACCENT }}>
+              <span className="text-[0.6875rem] font-semibold" style={{ color: ACCENT }}>
                 {checkedIds.size} selected
               </span>
             )}
@@ -431,10 +431,10 @@ const TaskTransfer: React.FC = () => {
       <div className="rounded-xl p-4" style={glassCard}>
         <div className="flex items-center gap-2 mb-3">
           <History size={14} style={{ color: ACCENT_SOFT }} />
-          <p className="text-[11px] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT_SOFT }}>
+          <p className="text-[0.6875rem] font-heading font-semibold uppercase tracking-widest" style={{ color: ACCENT_SOFT }}>
             Transfer History
           </p>
-          <span className="text-[10px] text-muted-foreground">{history.length}</span>
+          <span className="text-[0.625rem] text-muted-foreground">{history.length}</span>
         </div>
 
         {loadingHistory ? (

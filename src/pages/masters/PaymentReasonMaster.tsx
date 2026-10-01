@@ -203,7 +203,7 @@ export default function PaymentReasonMaster() {
         rights.canCreate ? (
           <button
             onClick={openCreate}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 transition-opacity"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium btn-module text-white hover:opacity-90 transition-opacity"
           >
             <Plus size={14} /> New Reason
           </button>
@@ -266,7 +266,7 @@ export default function PaymentReasonMaster() {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="px-4 py-2 rounded-lg text-sm font-medium bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+                className="px-4 py-2 rounded-lg text-sm font-medium btn-module text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
               >
                 {saving ? "Saving…" : editing ? "Update" : "Create"}
               </button>

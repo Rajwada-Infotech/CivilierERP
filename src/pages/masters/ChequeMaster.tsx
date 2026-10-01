@@ -167,9 +167,9 @@ function MicrBreakdown({ value }: { value: string }) {
     <div className="flex items-center gap-2 mt-1 flex-wrap">
       {segments.map((s, i) => (
         <span key={i} className="flex items-center gap-1">
-          <span className={`font-mono text-[11px] font-semibold ${s.color}`}>{s.val.trim() || "···"}</span>
-          <span className="text-[10px] text-muted-foreground">{s.label}</span>
-          {i < segments.length - 1 && <span className="text-muted-foreground/40 text-[10px]">·</span>}
+          <span className={`font-mono text-[0.6875rem] font-semibold ${s.color}`}>{s.val.trim() || "···"}</span>
+          <span className="text-[0.625rem] text-muted-foreground">{s.label}</span>
+          {i < segments.length - 1 && <span className="text-muted-foreground/40 text-[0.625rem]">·</span>}
         </span>
       ))}
     </div>
@@ -264,7 +264,7 @@ function buildChequeColumns(
         if (deleteId === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[11px] text-muted-foreground mr-1">
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                 Delete?
               </span>
               <button
@@ -284,7 +284,7 @@ function buildChequeColumns(
         }
         return (
           <div className="flex items-center justify-end gap-1">
-            <button
+            <button data-row-view
               onClick={() => onView(row.original)}
               className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
@@ -294,7 +294,7 @@ function buildChequeColumns(
             {canPrint && (
               <button
                 onClick={() => onPrint(row.original)}
-                className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                className="p-1.5 rounded-lg text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                 title="Print"
               >
                 <Printer size={13} />
@@ -844,7 +844,7 @@ const ChequeMaster: React.FC = () => {
               <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? "Edit Cheque Lot" : "Add Cheque Lot"}
               </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 Fields marked <span className="text-destructive">*</span> are
                 required
               </p>
@@ -858,7 +858,7 @@ const ChequeMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Landmark size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Bank Details
                 </p>
               </div>
@@ -898,7 +898,7 @@ const ChequeMaster: React.FC = () => {
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     Bank Name <span className="text-destructive">*</span>
                     {form.companyId && (
-                      <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                      <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
                         ({selectedCompanyLabel} only)
                       </span>
                     )}
@@ -942,7 +942,7 @@ const ChequeMaster: React.FC = () => {
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     Account Number <span className="text-destructive">*</span>
-                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                    <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
                       (auto-filled)
                     </span>
                   </label>
@@ -961,7 +961,7 @@ const ChequeMaster: React.FC = () => {
                       className={`${inp} pl-8 font-mono tracking-widest ${errors.accountNumber ? "border-destructive" : ""}`}
                     />
                     {form.accountNumber && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.5625rem] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
                         AUTO
                       </span>
                     )}
@@ -977,7 +977,7 @@ const ChequeMaster: React.FC = () => {
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     IFSC Code
-                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                    <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
                       (auto-filled)
                     </span>
                   </label>
@@ -994,7 +994,7 @@ const ChequeMaster: React.FC = () => {
                       className={`${inp} pl-8 font-mono tracking-widest bg-muted/50 cursor-default text-muted-foreground`}
                     />
                     {form.ifscCode && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.5625rem] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
                         AUTO
                       </span>
                     )}
@@ -1009,7 +1009,7 @@ const ChequeMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <BookOpen size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Cheque Lot
                 </p>
               </div>
@@ -1043,7 +1043,7 @@ const ChequeMaster: React.FC = () => {
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     First Cheque Number <span className="text-destructive">*</span>
-                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                    <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
                       (6 digits, or full 15-char MICR)
                     </span>
                   </label>
@@ -1071,7 +1071,7 @@ const ChequeMaster: React.FC = () => {
                 <div className="space-y-1.5">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     Last Cheque Number <span className="text-destructive">*</span>
-                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                    <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
                       (6 digits, or full 15-char MICR)
                     </span>
                   </label>
@@ -1103,7 +1103,7 @@ const ChequeMaster: React.FC = () => {
                 <div className="space-y-1.5 sm:col-span-3">
                   <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
                     Total Cheques
-                    <span className="normal-case text-[10px] text-muted-foreground/60 font-normal">
+                    <span className="normal-case text-[0.625rem] text-muted-foreground/60 font-normal">
                       (auto-calculated)
                     </span>
                   </label>
@@ -1126,7 +1126,7 @@ const ChequeMaster: React.FC = () => {
                       >
                         {rangeValid ? totalCheques.toLocaleString() : "—"}
                       </p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                      <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                         {rangeValid
                           ? `Cheques from ${form.chqStart} to ${form.chqEnd}`
                           : "Enter start and end numbers above"}
@@ -1134,7 +1134,7 @@ const ChequeMaster: React.FC = () => {
                     </div>
                     {rangeValid && (
                       <div className="ml-auto text-right hidden sm:block">
-                        <p className="text-[10px] font-heading text-muted-foreground uppercase tracking-widest">
+                        <p className="text-[0.625rem] font-heading text-muted-foreground uppercase tracking-widest">
                           Range
                         </p>
                         <p className="text-xs font-mono text-foreground">
@@ -1153,7 +1153,7 @@ const ChequeMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <FileText size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Additional
                 </p>
               </div>
@@ -1196,7 +1196,7 @@ const ChequeMaster: React.FC = () => {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-            <p className="text-[11px] text-muted-foreground hidden sm:block">
+            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
               {canSave ? (
                 <span className="text-emerald-500 font-medium">
                   Ready to save
@@ -1235,7 +1235,7 @@ const ChequeMaster: React.FC = () => {
               <h3 className="font-heading font-semibold text-foreground text-sm">
                 Cheque Lot Records
               </h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 {filtered.length} lot{filtered.length !== 1 ? "s" : ""}
                 {filtered.length > 0 && (
                   <span className="ml-1 text-primary font-semibold">
@@ -1388,7 +1388,7 @@ const ChequeMaster: React.FC = () => {
                 },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
-                  <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                  <p className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
                     {label}
                   </p>
                   <p
@@ -1411,7 +1411,7 @@ const ChequeMaster: React.FC = () => {
             )}
             <button
               onClick={() => setViewRow(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
             >
               Close
             </button>

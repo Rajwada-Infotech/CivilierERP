@@ -32,6 +32,7 @@ import {
   TrendingUp,
   Activity,
 } from "lucide-react";
+import { DateInput } from "@/components/ui/date-input";
 
 const ACCENT = "#f97316"; // orange — matches Engineering's ModuleStrip color
 
@@ -172,7 +173,7 @@ const STATUS_COLORS: Record<string, string> = {
   Closed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/30",
   Completed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/30",
   "Fully Received": "bg-emerald-500/10 text-emerald-600 border-emerald-400/30",
-  Pending: "bg-amber-500/10  text-amber-600  border-amber-400/30",
+  Pending: "bg-[#ffe2021a]  text-amber-600  border-amber-400/30",
   "In Progress": "bg-blue-500/10   text-blue-600   border-blue-400/30",
   Draft: "bg-muted         text-muted-foreground border-border",
   Open: "bg-blue-500/10   text-blue-600   border-blue-400/30",
@@ -187,7 +188,7 @@ function StatusBadge({ status }: { status: string }) {
     STATUS_COLORS[status] ?? "bg-muted text-muted-foreground border-border";
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold border tracking-wide ${cls}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border tracking-wide ${cls}`}
     >
       {status || "Draft"}
     </span>
@@ -230,7 +231,7 @@ function SectionHeader({
         <h3 className="text-xs font-heading font-bold text-foreground tracking-wide">
           {title}
         </h3>
-        <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
+        <span className="text-[0.625rem] text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
           {count}
         </span>
       </div>
@@ -252,7 +253,7 @@ function BOQTable({ rows }: { rows: BOQRow[] }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-muted/50 text-muted-foreground text-[11px] uppercase tracking-wider">
+            <tr className="bg-muted/50 text-muted-foreground text-[0.6875rem] uppercase tracking-wider">
               <th className="text-left px-4 py-2.5 font-semibold">Doc No</th>
               <th className="text-left px-4 py-2.5 font-semibold">Company</th>
               <th className="text-left px-4 py-2.5 font-semibold">Project</th>
@@ -280,7 +281,7 @@ function BOQTable({ rows }: { rows: BOQRow[] }) {
                     {r.DocNo || r.BoqNo || `BOQ-${r.BoqID}`}
                   </span>
                   {r.DocTypePrefix && (
-                    <span className="ml-1 text-[10px] text-muted-foreground">
+                    <span className="ml-1 text-[0.625rem] text-muted-foreground">
                       [{r.DocTypePrefix}]
                     </span>
                   )}
@@ -352,7 +353,7 @@ function WorkOrderTable({ rows }: { rows: WorkOrderRow[] }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-muted/50 text-muted-foreground text-[11px] uppercase tracking-wider">
+            <tr className="bg-muted/50 text-muted-foreground text-[0.6875rem] uppercase tracking-wider">
               <th className="w-8 px-2 py-2.5" />
               <th className="text-left px-4 py-2.5 font-semibold">Doc No</th>
               <th className="text-left px-4 py-2.5 font-semibold">Company</th>
@@ -407,12 +408,12 @@ function WorkOrderTable({ rows }: { rows: WorkOrderRow[] }) {
                           {r.DocNo || r.DocumentNumber || `WO-${r.Id}`}
                         </span>
                         {isPartial && (
-                          <span className="text-[9px] font-bold text-violet-600 bg-violet-500/10 border border-violet-400/30 px-1.5 py-0.5 rounded-full">
+                          <span className="text-[0.5625rem] font-bold text-violet-600 bg-violet-500/10 border border-violet-400/30 px-1.5 py-0.5 rounded-full">
                             PARTIAL
                           </span>
                         )}
                         {r.DocTypePrefix && (
-                          <span className="text-[10px] text-muted-foreground">
+                          <span className="text-[0.625rem] text-muted-foreground">
                             [{r.DocTypePrefix}]
                           </span>
                         )}
@@ -429,7 +430,7 @@ function WorkOrderTable({ rows }: { rows: WorkOrderRow[] }) {
                     </td>
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {r.BoqDocNo ? (
-                        <span className="font-mono text-[11px] text-blue-600 bg-blue-500/8 px-1.5 py-0.5 rounded">
+                        <span className="font-mono text-[0.6875rem] text-blue-600 bg-blue-500/8 px-1.5 py-0.5 rounded">
                           {r.BoqDocNo}
                         </span>
                       ) : (
@@ -461,13 +462,13 @@ function WorkOrderTable({ rows }: { rows: WorkOrderRow[] }) {
                     <tr>
                       <td colSpan={12} className="px-0 py-0 bg-muted/10">
                         <div className="mx-6 my-3 rounded-lg border border-border overflow-hidden">
-                          <div className="px-3 py-2 bg-muted/50 text-[10px] uppercase tracking-wider font-semibold text-muted-foreground flex items-center gap-1.5">
+                          <div className="px-3 py-2 bg-muted/50 text-[0.625rem] uppercase tracking-wider font-semibold text-muted-foreground flex items-center gap-1.5">
                             <Activity size={11} />
                             Activities — {r.DocNo || `WO-${r.Id}`}
                           </div>
                           <table className="w-full text-xs">
                             <thead>
-                              <tr className="bg-muted/30 text-muted-foreground text-[10px] uppercase tracking-wider">
+                              <tr className="bg-muted/30 text-muted-foreground text-[0.625rem] uppercase tracking-wider">
                                 <th className="text-left px-3 py-2 font-semibold">
                                   Activity Group
                                 </th>
@@ -523,7 +524,7 @@ function WorkOrderTable({ rows }: { rows: WorkOrderRow[] }) {
                                             }}
                                           />
                                         </div>
-                                        <span className="text-[10px] font-semibold">
+                                        <span className="text-[0.625rem] font-semibold">
                                           {a.CompletionPercentage}%
                                         </span>
                                       </div>
@@ -538,7 +539,7 @@ function WorkOrderTable({ rows }: { rows: WorkOrderRow[] }) {
                               <tr className="bg-muted/40 border-t border-border">
                                 <td
                                   colSpan={5}
-                                  className="px-3 py-2 text-[10px] font-semibold text-muted-foreground"
+                                  className="px-3 py-2 text-[0.625rem] font-semibold text-muted-foreground"
                                 >
                                   {r.activities.length} activit
                                   {r.activities.length !== 1 ? "ies" : "y"}
@@ -595,7 +596,7 @@ function WorkDoneTable({ rows }: { rows: WorkDoneRow[] }) {
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
-            <tr className="bg-muted/50 text-muted-foreground text-[11px] uppercase tracking-wider">
+            <tr className="bg-muted/50 text-muted-foreground text-[0.6875rem] uppercase tracking-wider">
               <th className="text-left px-4 py-2.5 font-semibold">Doc No</th>
               <th className="text-left px-4 py-2.5 font-semibold">Company</th>
               <th className="text-left px-4 py-2.5 font-semibold">Project</th>
@@ -636,7 +637,7 @@ function WorkDoneTable({ rows }: { rows: WorkDoneRow[] }) {
                       {r.DocNo || `WD-${r.ID}`}
                     </span>
                     {r.DocTypePrefix && (
-                      <span className="text-[10px] text-muted-foreground">
+                      <span className="text-[0.625rem] text-muted-foreground">
                         [{r.DocTypePrefix}]
                       </span>
                     )}
@@ -653,7 +654,7 @@ function WorkDoneTable({ rows }: { rows: WorkDoneRow[] }) {
                 </td>
                 <td className="px-4 py-3 text-xs text-muted-foreground">
                   {r.WorkOrderNo ? (
-                    <span className="font-mono text-[11px] text-orange-600 bg-orange-500/8 px-1.5 py-0.5 rounded">
+                    <span className="font-mono text-[0.6875rem] text-orange-600 bg-orange-500/8 px-1.5 py-0.5 rounded">
                       {r.WorkOrderNo}
                     </span>
                   ) : (
@@ -1260,8 +1261,7 @@ export default function DailyProgressReport() {
                 size={14}
                 className="absolute left-2.5 text-muted-foreground pointer-events-none"
               />
-              <input
-                type="date"
+              <DateInput
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 className="pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-colors"

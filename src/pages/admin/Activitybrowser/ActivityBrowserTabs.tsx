@@ -72,7 +72,7 @@ const ACTION_LOG_COLUMNS: ColumnDef<SessionEvent, unknown>[] = [
     cell: ({ row }) => (
       <div>
         <p className="font-medium text-sm text-foreground leading-tight">{row.original.userName}</p>
-        <p className="text-[11px] text-muted-foreground">{row.original.userEmail}</p>
+        <p className="text-[0.6875rem] text-muted-foreground">{row.original.userEmail}</p>
       </div>
     ),
   },
@@ -83,7 +83,7 @@ const ACTION_LOG_COLUMNS: ColumnDef<SessionEvent, unknown>[] = [
       const label = getActionLabel(row.original);
       const color = ACTION_COLORS[row.original.actionType as keyof typeof ACTION_COLORS] ?? "bg-muted text-muted-foreground";
       return (
-        <span className={`px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold tracking-wide ${color}`}>
+        <span className={`px-2 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold tracking-wide ${color}`}>
           {label}
         </span>
       );
@@ -123,7 +123,7 @@ const ACTION_LOG_COLUMNS: ColumnDef<SessionEvent, unknown>[] = [
       return (
         <div>
           <p className="text-xs text-foreground">{date}</p>
-          <p className="text-[11px] text-muted-foreground">{time}</p>
+          <p className="text-[0.6875rem] text-muted-foreground">{time}</p>
         </div>
       );
     },
@@ -260,7 +260,7 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
                           {session.userEmail}
                         </p>
                         <span
-                          className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-heading uppercase tracking-wider ${ROLE_COLORS[session.userRole] || ""}`}
+                          className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[0.625rem] font-heading uppercase tracking-wider ${ROLE_COLORS[session.userRole] || ""}`}
                         >
                           {roleLabel(session.userRole)}
                         </span>
@@ -283,7 +283,7 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
                           size={12}
                           className="shrink-0 text-muted-foreground"
                         />
-                        <span className="truncate font-mono text-[10px] text-muted-foreground">
+                        <span className="truncate font-mono text-[0.625rem] text-muted-foreground">
                           {session.deviceFingerprint !== "Unknown"
                             ? session.deviceFingerprint.slice(0, 16) + "…"
                             : "unknown"}
@@ -338,7 +338,7 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
                         <Timer size={12} />
                         {formatDuration(session.durationMs)}
                       </div>
-                      <Badge variant="secondary" className="text-[10px]">
+                      <Badge variant="secondary" className="text-[0.625rem]">
                         {session.actions.length} actions
                       </Badge>
                     </div>

@@ -14,6 +14,7 @@ import {
   Circle,
   PackageSearch,
 } from "lucide-react";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const rateCls =
   "w-full text-sm rounded-lg border border-border/60 px-2.5 py-1.5 bg-background/60 text-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500/40 transition text-right font-medium [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none";
@@ -102,13 +103,13 @@ export default function SupplierCatalog() {
   return (
     <div className="min-h-[calc(100vh-3.5rem)] bg-background">
       {/* Page-level emerald glow (matches dashboard) */}
-      <div className="fixed inset-0 pointer-events-none z-0">
+      <BodyPortal><div className="fixed inset-0 pointer-events-none z-0">
         <div style={{
           position: "absolute", top: "-10%", left: "50%", transform: "translateX(-50%)",
           width: "70vw", height: "40vh",
           background: "radial-gradient(ellipse at 50% 0%, rgba(16,185,129,0.06) 0%, transparent 70%)",
         }} />
-      </div>
+      </div></BodyPortal>
 
       <div className="relative z-10 max-w-6xl mx-auto px-4 py-8 space-y-5">
 
@@ -172,7 +173,7 @@ export default function SupplierCatalog() {
               type="button"
               onClick={() => saveMutation.mutate()}
               disabled={dirty.size === 0 || saveMutation.isPending}
-              className="gap-1.5 shrink-0 bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 border-0 disabled:opacity-40"
+              className="gap-1.5 shrink-0 btn-module text-white hover:opacity-90 border-0 disabled:opacity-40"
             >
               {saveMutation.isPending ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
               {saveMutation.isPending ? "Saving…" : dirty.size > 0 ? `Save (${dirty.size})` : "Save Changes"}
@@ -188,7 +189,7 @@ export default function SupplierCatalog() {
             </div>
             <div>
               <p className="text-2xl font-bold">{totalCount}</p>
-              <p className="text-[11px] text-muted-foreground">Total items</p>
+              <p className="text-[0.6875rem] text-muted-foreground">Total items</p>
             </div>
           </div>
           <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.04] px-5 py-4 flex items-center gap-3">
@@ -197,16 +198,16 @@ export default function SupplierCatalog() {
             </div>
             <div>
               <p className="text-2xl font-bold text-emerald-500">{pricedCount}</p>
-              <p className="text-[11px] text-muted-foreground">Priced</p>
+              <p className="text-[0.6875rem] text-muted-foreground">Priced</p>
             </div>
           </div>
           <div className={`rounded-xl px-5 py-4 flex items-center gap-3 ${unpricedCount > 0 ? "border border-amber-500/20 bg-amber-500/[0.03]" : "border border-border/60 bg-card/60"}`}>
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${unpricedCount > 0 ? "bg-amber-500/10" : "bg-muted/40"}`}>
+            <div className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${unpricedCount > 0 ? "bg-[#ffe2021a]" : "bg-muted/40"}`}>
               <Circle size={16} className={unpricedCount > 0 ? "text-amber-500" : "text-muted-foreground"} />
             </div>
             <div>
               <p className={`text-2xl font-bold ${unpricedCount > 0 ? "text-amber-500" : ""}`}>{unpricedCount}</p>
-              <p className="text-[11px] text-muted-foreground">Not priced</p>
+              <p className="text-[0.6875rem] text-muted-foreground">Not priced</p>
             </div>
           </div>
         </div>
@@ -218,7 +219,7 @@ export default function SupplierCatalog() {
             <div className="flex items-center gap-2.5">
               <span className="text-sm font-semibold text-foreground">Items</span>
               {search && (
-                <span className="text-[11px] text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full">
+                <span className="text-[0.6875rem] text-muted-foreground bg-muted/60 px-2 py-0.5 rounded-full">
                   {filteredRows.length} result{filteredRows.length !== 1 ? "s" : ""}
                 </span>
               )}
@@ -244,11 +245,11 @@ export default function SupplierCatalog() {
                 <thead>
                   <tr className="border-b border-border/60">
                     <th className="pl-5 pr-2 py-3 w-5" />
-                    <th className="px-2 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Item</th>
-                    <th className="px-3 py-3 text-center text-[10px] font-bold uppercase tracking-widest text-muted-foreground w-20">UOM</th>
-                    <th className="px-3 py-3 text-right text-[10px] font-bold uppercase tracking-widest text-muted-foreground w-36">Rate (₹)</th>
-                    <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground w-40">Supply Lead Time</th>
-                    <th className="px-3 py-3 text-left text-[10px] font-bold uppercase tracking-widest text-muted-foreground w-44">Quality</th>
+                    <th className="px-2 py-3 text-left text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground">Item</th>
+                    <th className="px-3 py-3 text-center text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground w-20">UOM</th>
+                    <th className="px-3 py-3 text-right text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground w-36">Rate (₹)</th>
+                    <th className="px-3 py-3 text-left text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground w-40">Supply Lead Time</th>
+                    <th className="px-3 py-3 text-left text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground w-44">Quality</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -331,7 +332,7 @@ export default function SupplierCatalog() {
                   <span className="text-emerald-500 font-semibold">{pricedCount}</span> of {totalCount} items priced
                 </p>
                 {dirty.size > 0 && (
-                  <span className="text-[10px] text-amber-500 bg-amber-500/10 px-2 py-0.5 rounded-full font-medium">
+                  <span className="text-[0.625rem] text-amber-500 bg-[#ffe2021a] px-2 py-0.5 rounded-full font-medium">
                     {dirty.size} unsaved
                   </span>
                 )}
@@ -341,7 +342,7 @@ export default function SupplierCatalog() {
                 size="sm"
                 onClick={() => saveMutation.mutate()}
                 disabled={dirty.size === 0 || saveMutation.isPending}
-                className="gap-1.5 bg-gradient-to-r from-emerald-500 to-teal-400 text-white hover:opacity-90 border-0 disabled:opacity-40"
+                className="gap-1.5 btn-module text-white hover:opacity-90 border-0 disabled:opacity-40"
               >
                 {saveMutation.isPending ? <RefreshCw size={12} className="animate-spin" /> : <Save size={12} />}
                 {saveMutation.isPending ? "Saving…" : dirty.size > 0 ? `Save (${dirty.size})` : "Save"}

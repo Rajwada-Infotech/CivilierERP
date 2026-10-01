@@ -475,7 +475,7 @@ export function ExpenseBookingPreviewModal({
                 </h2>
                 <StatusBadge status={previewRecord.status} />
               </div>
-              <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Invoice</p>
+              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5 ml-9">Invoice</p>
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <button
@@ -487,7 +487,7 @@ export function ExpenseBookingPreviewModal({
               {canEdit && (
                 <button
                   onClick={() => { onClose(); onEdit(previewRecord); }}
-                  className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 shadow-sm transition"
+                  className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-white text-xs font-semibold btn-module shadow-sm transition"
                 >
                   <Edit size={13} /><span className="hidden sm:inline">Edit</span>
                 </button>
@@ -525,7 +525,7 @@ export function ExpenseBookingPreviewModal({
               )}
               {tab === "details" ? "Details" : tab === "posting" ? "Posting" : "Adjustments"}
               {tab === "adjustments" && oaAdjustments.length > 0 && (
-                <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[9px] bg-muted text-muted-foreground leading-none">
+                <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[0.5625rem] bg-muted text-muted-foreground leading-none">
                   {oaAdjustments.length}
                 </span>
               )}
@@ -539,14 +539,14 @@ export function ExpenseBookingPreviewModal({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Wallet size={14} className="text-emerald-600" />
-                <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+                <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
                   Journal Entry — Invoice Posting
                 </span>
               </div>
               {invPostingLoading ? (
-                <span className="text-[10px] text-muted-foreground">Loading…</span>
+                <span className="text-[0.625rem] text-muted-foreground">Loading…</span>
               ) : invPostingData?.isPosted ? (
-                <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
+                <span className="text-[0.625rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-medium">
                   Posted · {invPostingData.jvNo}
                 </span>
               ) : null}
@@ -747,16 +747,16 @@ export function ExpenseBookingPreviewModal({
               return (
                 <>
                   {isGrnLinked ? (
-                    <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
+                    <div className="text-[0.625rem] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
                       GRN-linked invoice — Provision for Pending GRN is debited (reversing the GRN posting); Supplier is credited.
                       {isMultiGrn && " Combines multiple GRNs — grouped below by GRN with its own entry date."}
                     </div>
                   ) : hasAllocations ? (
-                    <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
+                    <div className="text-[0.625rem] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
                       Direct booking — split across {postingAllocations.length} Expense Head{postingAllocations.length > 1 ? "s" : ""} below (each its own debit leg); Supplier is credited for the total.
                     </div>
                   ) : (
-                    <div className="text-[10px] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
+                    <div className="text-[0.625rem] text-muted-foreground bg-muted/30 rounded-lg px-3 py-1.5 border border-border/50">
                       Direct booking — debited to <span className="font-medium text-foreground">{purchaseLabel}</span>{purchaseCode ? ` (${purchaseCode})` : ""}; Supplier is credited.
                       {hasDirectItems && " Broken down by line item below."}
                     </div>
@@ -764,7 +764,7 @@ export function ExpenseBookingPreviewModal({
 
                   {isGrnLinked && Array.isArray(invPostingData.costCentreBreakdown) && invPostingData.costCentreBreakdown.length > 1 && (
                     <div className="rounded-xl border border-border overflow-hidden">
-                      <div className="px-3 sm:px-4 py-2 bg-muted/40 border-b border-border text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+                      <div className="px-3 sm:px-4 py-2 bg-muted/40 border-b border-border text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold">
                         Cost Centre — Money Breakdown
                       </div>
                       <div className="divide-y divide-border/50">
@@ -779,7 +779,7 @@ export function ExpenseBookingPreviewModal({
                   )}
 
                   <div className="rounded-xl border border-border overflow-hidden">
-                    <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[9px] sm:text-[10px] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
+                    <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] bg-muted/40 border-b border-border px-2 sm:px-4 py-2.5 text-[0.5625rem] sm:text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold gap-1 sm:gap-2">
                       <span>Account</span>
                       <span className="text-right">Debit (₹)</span>
                       <span className="text-right">Credit (₹)</span>
@@ -788,13 +788,13 @@ export function ExpenseBookingPreviewModal({
                       <div key={group.groupKey}>
                         {group.itemName ? (
                           <div className="px-2 sm:px-4 pt-3 pb-1.5 bg-muted/10 flex items-baseline justify-between gap-2 border-b border-border/30">
-                            <span className="text-[11px] sm:text-xs font-semibold text-foreground truncate">
+                            <span className="text-[0.6875rem] sm:text-xs font-semibold text-foreground truncate">
                               {group.itemName}
-                              {group.costCentreName && <span className="ml-2 text-[10px] font-normal text-muted-foreground">[{group.costCentreName}]</span>}
-                              {group.docNo && <span className="ml-2 text-[10px] font-mono font-normal text-primary">{group.docNo}</span>}
+                              {group.costCentreName && <span className="ml-2 text-[0.625rem] font-normal text-muted-foreground">[{group.costCentreName}]</span>}
+                              {group.docNo && <span className="ml-2 text-[0.625rem] font-mono font-normal text-primary">{group.docNo}</span>}
                             </span>
                             {(group.qty != null || group.rate != null) && (
-                              <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                              <span className="text-[0.625rem] text-muted-foreground flex-shrink-0">
                                 {group.qty != null ? `${group.qty}${group.uom ? ` ${group.uom}` : ""}` : ""}
                                 {group.qty != null && group.rate != null ? " × " : ""}
                                 {group.rate != null ? `₹${fmtAmt(group.rate)}` : ""}
@@ -803,15 +803,15 @@ export function ExpenseBookingPreviewModal({
                           </div>
                         ) : isMultiGrn && group.docNo && (
                           <div className="flex items-center gap-2 px-2 sm:px-4 py-1.5 bg-muted/20 border-b border-border/50">
-                            <span className="text-[10px] font-mono font-semibold text-primary">{group.docNo}</span>
-                            <span className="text-[10px] text-muted-foreground">{fmtGrnDate(group.date)}</span>
+                            <span className="text-[0.625rem] font-mono font-semibold text-primary">{group.docNo}</span>
+                            <span className="text-[0.625rem] text-muted-foreground">{fmtGrnDate(group.date)}</span>
                           </div>
                         )}
                         {group.rows.map((row) => (
                           <div key={row.key} className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 border-b border-border/50 last:border-b-0 items-center gap-1 sm:gap-2">
                             <div className="flex items-center gap-2 min-w-0">
                               <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${row.side === "debit" ? "bg-emerald-500" : "bg-rose-500"}`} />
-                              <span className="text-[11px] sm:text-xs text-foreground break-words sm:truncate min-w-0" title={row.code ? `${row.label} (${row.code})` : row.label}>
+                              <span className="text-[0.6875rem] sm:text-xs text-foreground break-words sm:truncate min-w-0" title={row.code ? `${row.label} (${row.code})` : row.label}>
                                 {row.label}{row.code ? ` (${row.code})` : ""}
                               </span>
                             </div>
@@ -826,7 +826,7 @@ export function ExpenseBookingPreviewModal({
                       </div>
                     ))}
                     <div className="grid grid-cols-[minmax(0,2.5fr)_minmax(0,0.9fr)_minmax(0,0.9fr)] px-2 sm:px-4 py-3 bg-muted/30 border-t-2 border-border text-xs font-bold gap-1 sm:gap-2">
-                      <span className="uppercase tracking-widest text-muted-foreground text-[10px]">Total</span>
+                      <span className="uppercase tracking-widest text-muted-foreground text-[0.625rem]">Total</span>
                       <span className="text-right text-emerald-600 dark:text-emerald-400 font-mono">{fmtAmt(totalAmount)}</span>
                       <span className="text-right text-rose-600 dark:text-rose-400 font-mono">{fmtAmt(totalAmount)}</span>
                     </div>
@@ -864,7 +864,7 @@ export function ExpenseBookingPreviewModal({
           <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-4">
             <div className="flex items-center gap-2">
               <ArrowDownCircle size={14} className="text-emerald-600 dark:text-emerald-400" />
-              <span className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+              <span className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
                 On Account Adjustment History
               </span>
             </div>
@@ -907,9 +907,9 @@ export function ExpenseBookingPreviewModal({
                       <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10 border-b border-border/60">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold text-foreground">{adj.partyName}</span>
-                          <span className="text-[10px] text-muted-foreground">On A/C Source</span>
+                          <span className="text-[0.625rem] text-muted-foreground">On A/C Source</span>
                           {adj.mode && (
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
+                            <span className="px-1.5 py-0.5 rounded text-[0.5625rem] font-semibold uppercase tracking-wide bg-muted text-muted-foreground">
                               {adj.mode}
                             </span>
                           )}
@@ -931,23 +931,23 @@ export function ExpenseBookingPreviewModal({
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 px-4 py-3 text-xs">
                         <div>
-                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground/80">Adjustment Date</p>
+                          <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground/80">Adjustment Date</p>
                           <p className="font-medium text-foreground mt-0.5">
                             {adj.date ? new Date(adj.date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground/80">Adjustment Doc No</p>
+                          <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground/80">Adjustment Doc No</p>
                           <p className="font-mono font-medium text-foreground mt-0.5 truncate" title={adj.adjustmentDocNo || undefined}>
                             {adj.adjustmentDocNo || "—"}
                           </p>
                         </div>
                         <div>
-                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground/80">Remaining On A/C Balance</p>
+                          <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground/80">Remaining On A/C Balance</p>
                           <p className="font-mono font-medium text-foreground mt-0.5">₹{fmt(adj.partyRemainingBalance)}</p>
                         </div>
                         <div>
-                          <p className="text-[9px] uppercase tracking-widest text-muted-foreground/80">Performed By</p>
+                          <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground/80">Performed By</p>
                           <p className="font-medium text-foreground mt-0.5 truncate" title={adj.performedBy || undefined}>
                             {adj.performedBy || "—"}
                           </p>
@@ -965,7 +965,7 @@ export function ExpenseBookingPreviewModal({
         <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-5">
           {/* ── Section 1: Booking Info ── */}
           <div>
-            <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+            <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
               <CalendarDays size={10} className="text-emerald-600 dark:text-emerald-400" />
               Booking Information
             </p>
@@ -994,7 +994,7 @@ export function ExpenseBookingPreviewModal({
                 { label: "Project / Site", value: previewRecord.projectName || (previewRecord.projectId ? `Project #${previewRecord.projectId}` : null) },
               ] as { label: string; value: any; mono?: boolean }[]).map(({ label, value, mono }) => (
                 <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
                   <p className={`text-xs font-semibold truncate ${mono ? "font-mono text-emerald-600 dark:text-emerald-400" : "text-foreground"}`}>{value || "—"}</p>
                 </div>
               ))}
@@ -1003,7 +1003,7 @@ export function ExpenseBookingPreviewModal({
 
           {/* ── Section 2: Vendor / Supplier ── */}
           <div className="border-t border-border/60 pt-4">
-            <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+            <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
               <Truck
                 size={10}
                 className="text-emerald-600 dark:text-emerald-400"
@@ -1019,7 +1019,7 @@ export function ExpenseBookingPreviewModal({
                   />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                     Supplier / Contractor
                   </p>
                   <p className="text-sm font-semibold truncate">
@@ -1033,7 +1033,7 @@ export function ExpenseBookingPreviewModal({
                     <Package size={14} className="text-emerald-500" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                       Material Category
                     </p>
                     <p className="text-sm font-semibold truncate">
@@ -1047,7 +1047,7 @@ export function ExpenseBookingPreviewModal({
 
           {/* ── Section 3: Amount Breakdown ── */}
           <div className="border-t border-border/60 pt-4">
-            <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+            <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
               <Banknote
                 size={10}
                 className="text-emerald-600 dark:text-emerald-400"
@@ -1061,7 +1061,7 @@ export function ExpenseBookingPreviewModal({
                 <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/[0.03] overflow-hidden">
                   <div className="flex items-center gap-2 px-3 py-2 border-b border-emerald-500/15 bg-emerald-500/[0.05]">
                     <Truck size={11} className="text-emerald-500 shrink-0" />
-                    <span className="text-[10px] font-heading font-semibold text-emerald-700 dark:text-emerald-300">
+                    <span className="text-[0.625rem] font-heading font-semibold text-emerald-700 dark:text-emerald-300">
                       GST Breakdown by Item
                     </span>
                   </div>
@@ -1073,22 +1073,22 @@ export function ExpenseBookingPreviewModal({
                         grnBreakdown.items.length === 0 ? "none" : undefined,
                     }}
                   >
-                    <table className="w-full text-[11px]">
+                    <table className="w-full text-[0.6875rem]">
                       <thead>
                         <tr className="border-b border-emerald-500/10 bg-muted/10">
-                          <th className="px-3 py-1.5 text-left text-muted-foreground font-heading uppercase tracking-wider text-[9px]">
+                          <th className="px-3 py-1.5 text-left text-muted-foreground font-heading uppercase tracking-wider text-[0.5625rem]">
                             Item
                           </th>
-                          <th className="px-3 py-1.5 text-right text-muted-foreground font-heading uppercase tracking-wider text-[9px]">
+                          <th className="px-3 py-1.5 text-right text-muted-foreground font-heading uppercase tracking-wider text-[0.5625rem]">
                             Qty
                           </th>
-                          <th className="px-3 py-1.5 text-right text-foreground font-heading uppercase tracking-wider text-[9px]">
+                          <th className="px-3 py-1.5 text-right text-foreground font-heading uppercase tracking-wider text-[0.5625rem]">
                             Incl.
                           </th>
-                          <th className="px-3 py-1.5 text-right text-emerald-600 dark:text-emerald-400 font-heading uppercase tracking-wider text-[9px]">
+                          <th className="px-3 py-1.5 text-right text-emerald-600 dark:text-emerald-400 font-heading uppercase tracking-wider text-[0.5625rem]">
                             Base
                           </th>
-                          <th className="px-3 py-1.5 text-right text-orange-600 dark:text-orange-400 font-heading uppercase tracking-wider text-[9px]">
+                          <th className="px-3 py-1.5 text-right text-orange-600 dark:text-orange-400 font-heading uppercase tracking-wider text-[0.5625rem]">
                             Tax
                           </th>
                         </tr>
@@ -1118,7 +1118,7 @@ export function ExpenseBookingPreviewModal({
                         <tr>
                           <td
                             colSpan={2}
-                            className="px-3 py-1.5 text-[9px] font-heading uppercase text-muted-foreground"
+                            className="px-3 py-1.5 text-[0.5625rem] font-heading uppercase text-muted-foreground"
                           >
                             Totals
                           </td>
@@ -1213,12 +1213,12 @@ export function ExpenseBookingPreviewModal({
                         >
                           <TrendingUp size={10} />
                           {t.masterTermName || `Term ${i + 1}`}
-                          <span className="font-mono text-[10px] opacity-70">
+                          <span className="font-mono text-[0.625rem] opacity-70">
                             {t.type === "percentage"
                               ? `${t.value ?? 0}%`
                               : `₹${fmt(t.value ?? 0)}`}
                           </span>
-                          <span className="text-[10px] text-muted-foreground/60">
+                          <span className="text-[0.625rem] text-muted-foreground/60">
                             ({isPreGst ? "pre-GST" : "post-GST"})
                           </span>
                         </p>
@@ -1236,7 +1236,7 @@ export function ExpenseBookingPreviewModal({
                       <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
                         <div>
                           <p className="text-xs font-medium">Basic Amount</p>
-                          <p className="text-[10px] text-muted-foreground">
+                          <p className="text-[0.625rem] text-muted-foreground">
                             Pre-tax value (excl. GST)
                           </p>
                         </div>
@@ -1251,7 +1251,7 @@ export function ExpenseBookingPreviewModal({
                             <p className="text-xs text-muted-foreground">
                               CGST
                             </p>
-                            <p className="text-[10px] text-muted-foreground">
+                            <p className="text-[0.625rem] text-muted-foreground">
                               Central GST
                             </p>
                           </div>
@@ -1266,7 +1266,7 @@ export function ExpenseBookingPreviewModal({
                             <p className="text-xs text-muted-foreground">
                               SGST
                             </p>
-                            <p className="text-[10px] text-muted-foreground">
+                            <p className="text-[0.625rem] text-muted-foreground">
                               State GST
                             </p>
                           </div>
@@ -1278,7 +1278,7 @@ export function ExpenseBookingPreviewModal({
                       <div className="flex items-center justify-between px-4 py-2.5 bg-muted/20">
                         <div>
                           <p className="text-xs font-medium">Gross Amount</p>
-                          <p className="text-[10px] text-muted-foreground">
+                          <p className="text-[0.625rem] text-muted-foreground">
                             Basic + CGST + SGST
                           </p>
                         </div>
@@ -1305,7 +1305,7 @@ export function ExpenseBookingPreviewModal({
                         <TrendingUp size={10} />
                         TDS Deducted
                         {previewRecord.tdsPercentage != null && (
-                          <span className="font-mono text-[10px] bg-amber-500/10 px-1.5 py-0.5 rounded">
+                          <span className="font-mono text-[0.625rem] bg-[#ffe2021a] px-1.5 py-0.5 rounded">
                             {previewRecord.tdsPercentage}%
                           </span>
                         )}
@@ -1397,12 +1397,12 @@ export function ExpenseBookingPreviewModal({
                         >
                           <TrendingUp size={10} />
                           {t.masterTermName || `Term ${i + 1}`}
-                          <span className="font-mono text-[10px] bg-current/10 px-1.5 py-0.5 rounded opacity-70">
+                          <span className="font-mono text-[0.625rem] bg-current/10 px-1.5 py-0.5 rounded opacity-70">
                             {t.type === "percentage"
                               ? `${t.value ?? 0}%`
                               : `₹${fmt(t.value ?? 0)}`}
                           </span>
-                          <span className="text-[10px] text-muted-foreground/60">
+                          <span className="text-[0.625rem] text-muted-foreground/60">
                             ({isPreGst ? "pre-GST" : "post-GST"})
                           </span>
                         </p>
@@ -1422,7 +1422,7 @@ export function ExpenseBookingPreviewModal({
                         Discount
                         {previewRecord.discount?.type === "percentage" &&
                         previewRecord.discount?.value ? (
-                          <span className="font-mono text-[10px] bg-red-500/10 px-1.5 py-0.5 rounded">
+                          <span className="font-mono text-[0.625rem] bg-red-500/10 px-1.5 py-0.5 rounded">
                             {previewRecord.discount.value}%
                           </span>
                         ) : null}
@@ -1448,7 +1448,7 @@ export function ExpenseBookingPreviewModal({
                         <TrendingUp size={10} />
                         TDS Deducted
                         {previewRecord.tdsPercentage != null && (
-                          <span className="font-mono text-[10px] bg-amber-500/10 px-1.5 py-0.5 rounded">
+                          <span className="font-mono text-[0.625rem] bg-[#ffe2021a] px-1.5 py-0.5 rounded">
                             {previewRecord.tdsPercentage}%
                           </span>
                         )}
@@ -1474,7 +1474,7 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 4: EMI Details ── */}
           {hasEmi && (
             <div className="border-t border-border/60 pt-4">
-              <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+              <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
                 <CreditCard
                   size={10}
                   className="text-emerald-600 dark:text-emerald-400"
@@ -1483,40 +1483,40 @@ export function ExpenseBookingPreviewModal({
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-1">
                     Installments
                   </p>
                   <p className="font-mono text-lg font-bold text-violet-600 dark:text-violet-400">
                     {previewRecord.emi!.installmentCount}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">total</p>
+                  <p className="text-[0.625rem] text-muted-foreground">total</p>
                 </div>
                 <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-1">
                     Per EMI
                   </p>
                   <p className="font-mono text-base font-bold text-violet-600 dark:text-violet-400">
                     ₹{fmt(previewRecord.emi!.emiAmount ?? 0)}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">amount</p>
+                  <p className="text-[0.625rem] text-muted-foreground">amount</p>
                 </div>
                 <div className="bg-muted/30 border border-border rounded-xl p-3 text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-1">
                     Start Date
                   </p>
                   <p className="text-sm font-semibold">
                     {previewRecord.emi!.startDate || "—"}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">first emi</p>
+                  <p className="text-[0.625rem] text-muted-foreground">first emi</p>
                 </div>
                 <div className="bg-muted/30 border border-border rounded-xl p-3 text-center">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
+                  <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider mb-1">
                     Frequency
                   </p>
                   <p className="text-sm font-semibold capitalize">
                     {previewRecord.emi!.frequency || "Monthly"}
                   </p>
-                  <p className="text-[10px] text-muted-foreground">cycle</p>
+                  <p className="text-[0.625rem] text-muted-foreground">cycle</p>
                 </div>
               </div>
             </div>
@@ -1527,13 +1527,13 @@ export function ExpenseBookingPreviewModal({
             Array.isArray(previewRecord.grnItems) &&
             previewRecord.grnItems.length > 0 && (
               <div className="border-t border-border/60 pt-4">
-                <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
                   <Truck
                     size={10}
                     className="text-emerald-600 dark:text-emerald-400"
                   />{" "}
                   GRN Items Summary
-                  <span className="ml-auto font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded-full border border-border">
+                  <span className="ml-auto font-mono text-[0.625rem] bg-muted px-1.5 py-0.5 rounded-full border border-border">
                     {previewRecord.grnItems.length} items
                   </span>
                 </p>
@@ -1542,19 +1542,19 @@ export function ExpenseBookingPreviewModal({
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-muted/40 border-b border-border">
-                          <th className="text-left px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                          <th className="text-left px-3 py-2 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                             Item
                           </th>
-                          <th className="text-right px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                          <th className="text-right px-3 py-2 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                             Ordered
                           </th>
-                          <th className="text-right px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                          <th className="text-right px-3 py-2 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground">
                             Received
                           </th>
-                          <th className="text-right px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground hidden sm:table-cell">
+                          <th className="text-right px-3 py-2 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground hidden sm:table-cell">
                             Remaining
                           </th>
-                          <th className="text-left px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground hidden sm:table-cell">
+                          <th className="text-left px-3 py-2 text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground hidden sm:table-cell">
                             UOM
                           </th>
                         </tr>
@@ -1606,7 +1606,7 @@ export function ExpenseBookingPreviewModal({
             (previewRecord.additionalCharges &&
               previewRecord.additionalCharges.length > 0)) && (
             <div className="border-t border-border/60 pt-4">
-              <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+              <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
                 <FileText
                   size={10}
                   className="text-emerald-600 dark:text-emerald-400"
@@ -1632,21 +1632,21 @@ export function ExpenseBookingPreviewModal({
                   .filter((f) => !!f.value)
                   .map(({ label, value, mono, accent }) => (
                     <div key={label} className="px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                      <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                      <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
                       <p className={`text-xs font-semibold truncate ${mono ? `font-mono ${accent ?? "text-emerald-600 dark:text-emerald-400"}` : "text-foreground"}`}>{value}</p>
                     </div>
                   ))}
               </div>
               {previewRecord.expenseHeadAllocations && previewRecord.expenseHeadAllocations.length > 0 ? (
                 <div className="mt-3 rounded-xl border border-border overflow-hidden">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
                     Expense Head{previewRecord.expenseHeadAllocations.length > 1 ? "s" : ""}
                   </p>
                   {previewRecord.expenseHeadAllocations.map((a) => (
                     <div key={a._key} className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/50 last:border-b-0">
                       <span className="text-xs text-foreground truncate">
                         {a.label}
-                        {a.code ? <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">({a.code})</span> : null}
+                        {a.code ? <span className="ml-1.5 font-mono text-[0.625rem] text-muted-foreground">({a.code})</span> : null}
                       </span>
                       <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
                         ₹{Number(a.amount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
@@ -1656,7 +1656,7 @@ export function ExpenseBookingPreviewModal({
                 </div>
               ) : previewRecord.glAccountId ? (
                 <div className="mt-3 px-3 py-2.5 rounded-xl bg-muted/30 border border-border/50">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1.5">Expense Head (Chart of Accounts)</p>
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-1.5">Expense Head (Chart of Accounts)</p>
                   <GLAccountPath
                     glAccountName={previewRecord.glAccountName || previewRecord.glAccount}
                     glAccountGroupId={previewRecord.glAccountGroupId}
@@ -1665,7 +1665,7 @@ export function ExpenseBookingPreviewModal({
               ) : null}
               {previewRecord.tdsId && (
                 <div className="mt-3 rounded-xl border border-border overflow-hidden">
-                  <p className="text-[9px] uppercase tracking-widest text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                  <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
                     TDS Details
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3">
@@ -1676,7 +1676,7 @@ export function ExpenseBookingPreviewModal({
                       { label: "TDS Amount", value: previewRecord.tdsAmount != null ? `₹${Number(previewRecord.tdsAmount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : null },
                     ].map(({ label, value }) => (
                       <div key={label}>
-                        <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
+                        <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-0.5">{label}</p>
                         <p className="text-xs font-semibold text-foreground truncate">{value ?? "—"}</p>
                       </div>
                     ))}
@@ -1686,7 +1686,7 @@ export function ExpenseBookingPreviewModal({
               {previewRecord.additionalCharges &&
                 previewRecord.additionalCharges.length > 0 && (
                   <div className="mt-3 rounded-xl border border-border overflow-hidden">
-                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                    <p className="text-[0.625rem] uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
                       Additional Charges
                     </p>
                     <div className="divide-y divide-border/50">
@@ -1726,7 +1726,7 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 7: Bill Status & Payment Summary ── */}
           {previewRecord.billStatus && (
             <div className="border-t border-border/60 pt-4">
-              <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+              <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
                 <Wallet
                   size={10}
                   className="text-emerald-600 dark:text-emerald-400"
@@ -1739,7 +1739,7 @@ export function ExpenseBookingPreviewModal({
                     previewRecord.billStatus === "Paid"
                       ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
                       : previewRecord.billStatus === "Partially Paid"
-                        ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                        ? "bg-[#ffe2021a] border-amber-500/20 text-amber-700 dark:text-amber-400"
                         : "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400"
                   }`}
                 >
@@ -1817,13 +1817,13 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 7b: Traceability Chain — clickable Linked Documents ── */}
           <DocumentChainPanel docType="expense" id={previewRecord.id ? Number(previewRecord.id) : null} />
           {previewRecord.billStatus && (
-            <div className="flex items-center gap-1.5 text-[10px] -mt-2">
+            <div className="flex items-center gap-1.5 text-[0.625rem] -mt-2">
               <span
                 className={`px-2.5 py-1.5 rounded-lg font-semibold border ${
                   previewRecord.billStatus === "Paid"
                     ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
                     : previewRecord.billStatus === "Partially Paid"
-                      ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                      ? "bg-[#ffe2021a] border-amber-500/20 text-amber-700 dark:text-amber-400"
                       : "bg-muted border-border text-muted-foreground"
                 }`}
               >
@@ -1835,7 +1835,7 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 8: Billing Terms ── */}
           {billingTerms.length > 0 && (
             <div className="border-t border-border/60 pt-4">
-              <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+              <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
                 <Receipt
                   size={10}
                   className="text-emerald-600 dark:text-emerald-400"
@@ -1866,11 +1866,11 @@ export function ExpenseBookingPreviewModal({
                             ? `${t?.value ?? 0}%`
                             : `₹${fmt(t?.value ?? 0)}`}
                           {t?.appliedOn === "pre-gst" ? (
-                            <span className="ml-1 text-[10px] text-muted-foreground/60">
+                            <span className="ml-1 text-[0.625rem] text-muted-foreground/60">
                               (pre-GST)
                             </span>
                           ) : t?.appliedOn === "post-gst" ? (
-                            <span className="ml-1 text-[10px] text-muted-foreground/60">
+                            <span className="ml-1 text-[0.625rem] text-muted-foreground/60">
                               (post-GST)
                             </span>
                           ) : null}
@@ -1888,7 +1888,7 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 9: Remarks ── */}
           {previewRecord.remarks && (
             <div className="border-t border-border/60 pt-4">
-              <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+              <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
                 <StickyNote
                   size={10}
                   className="text-emerald-600 dark:text-emerald-400"
@@ -1903,7 +1903,7 @@ export function ExpenseBookingPreviewModal({
 
           {/* ── Section 10: Approval Status ── */}
           <div className="border-t border-border/60 pt-4">
-            <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+            <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
               <CheckCircle2
                 size={10}
                 className="text-emerald-600 dark:text-emerald-400"
@@ -1918,17 +1918,17 @@ export function ExpenseBookingPreviewModal({
                 </span>
               </div>
               {previewRecord.status === "Approved" && (
-                <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl">
+                <div className="flex items-center gap-1.5 text-[0.625rem] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl">
                   <CheckCircle2 size={11} /> Approved & Processed
                 </div>
               )}
               {previewRecord.status === "Pending" && (
-                <div className="flex items-center gap-1.5 text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl">
+                <div className="flex items-center gap-1.5 text-[0.625rem] text-amber-600 dark:text-amber-400 bg-[#ffe2021a] border border-amber-500/20 px-3 py-2 rounded-xl">
                   <Clock size={11} /> Awaiting Approval
                 </div>
               )}
               {previewRecord.status === "Rejected" && (
-                <div className="flex items-center gap-1.5 text-[10px] text-red-600 dark:text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-xl">
+                <div className="flex items-center gap-1.5 text-[0.625rem] text-red-600 dark:text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-xl">
                   <AlertCircle size={11} /> Rejected — Review Required
                 </div>
               )}
@@ -1938,7 +1938,7 @@ export function ExpenseBookingPreviewModal({
         )}
 
         <div className="border-t border-border px-5 sm:px-6 py-3 bg-muted/10 expense-preview-print-hide">
-          <p className="text-[10px] text-muted-foreground">
+          <p className="text-[0.625rem] text-muted-foreground">
             ID: <span className="font-mono">{previewRecord.id || "—"}</span>
           </p>
         </div>

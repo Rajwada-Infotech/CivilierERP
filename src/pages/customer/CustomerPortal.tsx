@@ -208,7 +208,7 @@ export default function CustomerPortal() {
           </div>
           <button
             onClick={() => navigate("/ticket/create")}
-            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition-colors shadow-sm"
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl btn-module text-white text-sm font-semibold transition-colors shadow-sm"
           >
             <Plus size={16} /> New Ticket
           </button>
@@ -256,7 +256,7 @@ export default function CustomerPortal() {
                 {(["All","Open","Pending","InProgress","Resolved","Closed"] as StatusFilter[]).map((s) => (
                   <button key={s} onClick={() => setStatusFilter(s)}
                     className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                      statusFilter === s ? "bg-primary text-primary-foreground border-primary shadow-sm" : "bg-card text-muted-foreground border-border hover:border-primary/40 hover:text-foreground hover:bg-accent/50"
+                      statusFilter === s ? "btn-module text-white border-primary shadow-sm" : "bg-card text-muted-foreground border-border hover:border-primary/40 hover:text-foreground hover:bg-accent/50"
                     }`}
                   >{s === "InProgress" ? "Resolving" : s}</button>
                 ))}
@@ -285,7 +285,7 @@ export default function CustomerPortal() {
                   <p className="text-xs text-muted-foreground mt-1">{search || statusFilter !== "All" ? "Try changing your filters" : "Raise a ticket and our team will get back to you"}</p>
                 </div>
                 {!search && statusFilter === "All" && (
-                  <button onClick={() => navigate("/ticket/create")} className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 shadow-sm transition-colors">
+                  <button onClick={() => navigate("/ticket/create")} className="mt-2 inline-flex items-center gap-2 px-4 py-2 rounded-xl btn-module text-white text-sm font-semibold shadow-sm transition-colors">
                     <Plus size={16} /> Raise Ticket
                   </button>
                 )}

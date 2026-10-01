@@ -98,7 +98,7 @@ const columnRenderers = {
         {String(value ?? "")}
       </p>
       {row.remarks && (
-        <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
+        <p className="text-[0.625rem] text-muted-foreground mt-0.5 line-clamp-1">
           {String(row.remarks)}
         </p>
       )}
@@ -195,7 +195,7 @@ export default function TCMaster() {
         icon={FileText}
       >
       <MasterPage
-        saveButtonClass="bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500"
+        saveButtonClass="btn-module "
         title="T&C Master"
         fields={FIELDS}
         columns={COLUMNS}

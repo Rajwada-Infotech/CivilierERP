@@ -153,14 +153,14 @@ function PlaceHoldDialog({ unit, projectId, onClose }: { unit: MatrixUnit; proje
               ))}
             </select>
             {apps.length === 0 && (
-              <p className="text-[11px] text-amber-600 mt-1">No open Applications for this Project yet — only Applications for the same Project as this unit can hold it.</p>
+              <p className="text-[0.6875rem] text-amber-600 mt-1">No open Applications for this Project yet — only Applications for the same Project as this unit can hold it.</p>
             )}
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Hold for how many days? *</label>
             <input type="number" min={1} max={90} value={holdDays} onChange={(e) => setHoldDays(e.target.value)}
               className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            <p className="text-[11px] text-muted-foreground mt-1">Auto-reverts to Available once this expires — a daily reminder goes to both sides until then.</p>
+            <p className="text-[0.6875rem] text-muted-foreground mt-1">Auto-reverts to Available once this expires — a daily reminder goes to both sides until then.</p>
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Reason (optional)</label>
@@ -172,7 +172,7 @@ function PlaceHoldDialog({ unit, projectId, onClose }: { unit: MatrixUnit; proje
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
           {rights.canCreate && (
             <button onClick={handlePlace} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Placing..." : "Place Hold"}
             </button>
           )}
@@ -298,14 +298,14 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
             <div>
               <span className="text-muted-foreground flex items-center gap-1"><User size={11} /> Salesperson</span>
               <span className="font-medium">{assignedName || "—"}</span>
-              {assignedEmail && <span className="block text-[11px] text-muted-foreground">{assignedEmail}</span>}
+              {assignedEmail && <span className="block text-[0.6875rem] text-muted-foreground">{assignedEmail}</span>}
             </div>
           </div>
         </div>
 
         {isHold ? (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-amber-800">
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-sky-800">
               <Clock size={14} /> Hold Status
             </h3>
             {hasUnpaidBooking && (
@@ -313,14 +313,14 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
                 <div><span className="text-muted-foreground block">Booking No</span><span className="font-semibold">{unit.BookingNo || "—"}</span></div>
                 <div>
                   <span className="text-muted-foreground block">Status</span>
-                  <span className={`inline-block text-[11px] px-1.5 py-0.5 rounded-full border font-medium ${BOOKING_STATUS_STYLE[unit.BookingStatus || ""] || ""}`}>
+                  <span className={`inline-block text-[0.6875rem] px-1.5 py-0.5 rounded-full border font-medium ${BOOKING_STATUS_STYLE[unit.BookingStatus || ""] || ""}`}>
                     {unit.BookingStatus || "—"}
                   </span>
                 </div>
               </div>
             )}
             {hasUnpaidBooking && (
-              <p className="text-[11px] text-amber-700 bg-amber-100/60 border border-amber-200 rounded px-2 py-1.5 flex items-center gap-1.5">
+              <p className="text-[0.6875rem] text-sky-700 bg-sky-100/60 border border-sky-200 rounded px-2 py-1.5 flex items-center gap-1.5">
                 <CheckCircle2 size={12} className="shrink-0" /> Booking amount not yet paid — this tile flips to Booked automatically once it's received.
               </p>
             )}
@@ -332,7 +332,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
               <div><span className="text-muted-foreground block">Booking No</span><span className="font-semibold text-sm">{unit.BookingNo || "—"}</span></div>
               <div>
                 <span className="text-muted-foreground block">Status</span>
-                <span className={`inline-block text-[11px] px-1.5 py-0.5 rounded-full border font-medium ${BOOKING_STATUS_STYLE[unit.BookingStatus || ""] || ""}`}>
+                <span className={`inline-block text-[0.6875rem] px-1.5 py-0.5 rounded-full border font-medium ${BOOKING_STATUS_STYLE[unit.BookingStatus || ""] || ""}`}>
                   {unit.BookingStatus || "—"}
                 </span>
               </div>
@@ -362,7 +362,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
             </div>
             {rights.canEdit && (
               <button onClick={handleExtend} disabled={extending}
-                className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                className="px-3 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                 {extending ? "Extending..." : "Confirm"}
               </button>
             )}
@@ -386,7 +386,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
                 </button>
               )}
               <button onClick={() => navigate(`/crm/bookings?applicationId=${unit.ApplicationId}`)}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium ">
                 Open Booking
               </button>
             </>
@@ -399,7 +399,7 @@ function TileInfoDialog({ unit, onClose }: { unit: MatrixUnit; onClose: () => vo
             )
           ) : (
             <button onClick={() => navigate(`/crm/bookings?applicationId=${unit.ApplicationId}`)}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium ">
               Open Booking
             </button>
           )}
@@ -579,7 +579,7 @@ export function UnitMatrixPage() {
                 <div key={label} className="rounded-xl border border-border bg-card p-4">
                   <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
                   <p className="text-2xl font-bold font-heading text-foreground leading-none">{value}</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">{label}</p>
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1">{label}</p>
                 </div>
               ))}
             </div>
@@ -619,7 +619,7 @@ export function UnitMatrixPage() {
                               >
                                 <div className="flex items-center justify-between gap-2 mb-1.5">
                                   <span className="font-bold text-sm text-foreground truncate">{u.UnitName}</span>
-                                  <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_STYLE[u.Status]}`}>
+                                  <span className={`shrink-0 text-[0.625rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_STYLE[u.Status]}`}>
                                     {u.Status === "OnHold" ? "Hold" : u.Status}
                                   </span>
                                 </div>

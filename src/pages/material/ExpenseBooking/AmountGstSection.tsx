@@ -137,14 +137,14 @@ export function AmountGstSection({
                 <button
                   type="button"
                   onClick={() => onChangeGstMode("cgst_sgst")}
-                  className={`px-2.5 py-1 text-[11px] font-semibold transition-colors ${gstMode === "cgst_sgst" ? "bg-emerald-500 text-white" : "bg-background text-muted-foreground hover:text-foreground"}`}
+                  className={`px-2.5 py-1 text-[0.6875rem] font-semibold transition-colors ${gstMode === "cgst_sgst" ? "bg-emerald-500 text-white" : "bg-background text-muted-foreground hover:text-foreground"}`}
                 >
                   CGST + SGST
                 </button>
                 <button
                   type="button"
                   onClick={() => onChangeGstMode("igst")}
-                  className={`px-2.5 py-1 text-[11px] font-semibold transition-colors border-l border-border ${gstMode === "igst" ? "bg-emerald-500 text-white" : "bg-background text-muted-foreground hover:text-foreground"}`}
+                  className={`px-2.5 py-1 text-[0.6875rem] font-semibold transition-colors border-l border-border ${gstMode === "igst" ? "bg-emerald-500 text-white" : "bg-background text-muted-foreground hover:text-foreground"}`}
                 >
                   IGST
                 </button>

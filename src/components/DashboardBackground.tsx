@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 /** Reads a CSS HSL variable and returns an "r,g,b" string for canvas usage. */
 function hslVarToRgb(variable: string): string {
@@ -230,7 +231,7 @@ function ParticleCanvas() {
 
 function GrainOverlay() {
   return (
-    <div
+    <BodyPortal><div
       className="fixed inset-0 pointer-events-none"
       style={{
         zIndex: 2,
@@ -239,7 +240,7 @@ function GrainOverlay() {
         backgroundRepeat: "repeat",
         backgroundSize: "160px 160px",
       }}
-    />
+    /></BodyPortal>
   );
 }
 
@@ -247,13 +248,13 @@ function GrainOverlay() {
 
 function VignetteOverlay() {
   return (
-    <div
+    <BodyPortal><div
       className="fixed inset-0 pointer-events-none"
       style={{
         zIndex: 3,
         background: `radial-gradient(ellipse 110% 110% at 50% 50%, transparent 55%, hsl(var(--background) / 0.55) 100%)`,
       }}
-    />
+    /></BodyPortal>
   );
 }
 

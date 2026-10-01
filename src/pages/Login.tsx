@@ -277,23 +277,23 @@ function HeroCards({ stats }: { stats: PublicStats | null }) {
           { label: "In Progress", pct: Math.min(100, Math.max(0, 100 - pct)), col: "#a78bfa" },
         ].map((p) => (
           <div key={p.label} className="mb-2 last:mb-0">
-            <div className="flex justify-between text-[10px] text-white/45 mb-1"><span>{p.label}</span><span style={{ color: p.col }}>{p.pct}%</span></div>
+            <div className="flex justify-between text-[0.625rem] text-white/45 mb-1"><span>{p.label}</span><span style={{ color: p.col }}>{p.pct}%</span></div>
             <div className="h-1 rounded-full bg-white/10"><div className="h-full rounded-full" style={{ width: `${p.pct}%`, background: p.col }} /></div>
           </div>
         ))}
         {stats && (
-          <p className="text-[9px] text-white/25 mt-2">{(stats.workOrders ?? 0).toLocaleString("en-IN")} total work orders</p>
+          <p className="text-[0.5625rem] text-white/25 mt-2">{(stats.workOrders ?? 0).toLocaleString("en-IN")} total work orders</p>
         )}
       </FloatingCard>
 
       <FloatingCard delay={0.6} className="top-[32%] right-[2%] w-44 p-4" style={{ zIndex: 2 }}>
-        <p className="text-[10px] text-white/35 mb-1 uppercase tracking-widest">Active Projects</p>
+        <p className="text-[0.625rem] text-white/35 mb-1 uppercase tracking-widest">Active Projects</p>
         {stats ? (
           <p className="text-xl font-bold text-white">{(stats.projects ?? 0).toLocaleString("en-IN")}</p>
         ) : (
           <div className="h-6 w-10 rounded bg-white/10 animate-pulse mb-1" />
         )}
-        <p className="text-[10px] mt-1 flex items-center gap-1 text-white/30">
+        <p className="text-[0.625rem] mt-1 flex items-center gap-1 text-white/30">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(167,139,250,0.6)" strokeWidth="2.5"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
           Tracking live progress
         </p>
@@ -312,7 +312,7 @@ function HeroCards({ stats }: { stats: PublicStats | null }) {
           <div>
             <p className="text-xs font-semibold text-white/80">Supplier Network</p>
             {stats ? (
-              <p className="text-[10px] text-white/35">{stats.activeSuppliers ?? 0} active · {stats.quotations ?? 0} quotations</p>
+              <p className="text-[0.625rem] text-white/35">{stats.activeSuppliers ?? 0} active · {stats.quotations ?? 0} quotations</p>
             ) : (
               <div className="h-2.5 w-24 rounded bg-white/10 animate-pulse mt-1" />
             )}
@@ -323,14 +323,14 @@ function HeroCards({ stats }: { stats: PublicStats | null }) {
       <FloatingCard delay={1.2} className="bottom-[8%] right-[4%] w-48 p-3.5" style={{ zIndex: 2 }}>
         <div className="flex items-center gap-2 mb-2">
           <div className="w-2 h-2 rounded-full animate-pulse bg-emerald-400" />
-          <span className="text-[10px] font-semibold uppercase tracking-widest" style={{ color: "rgba(167,139,250,0.8)" }}>GRN Module</span>
+          <span className="text-[0.625rem] font-semibold uppercase tracking-widest" style={{ color: "rgba(167,139,250,0.8)" }}>GRN Module</span>
         </div>
         {stats ? (
           <p className="text-xs text-white/60">{(stats.grns ?? 0).toLocaleString("en-IN")} receipts recorded</p>
         ) : (
           <div className="h-3 w-32 rounded bg-white/10 animate-pulse" />
         )}
-        <p className="text-[10px] text-white/35 mt-1">Goods receipt tracking</p>
+        <p className="text-[0.625rem] text-white/35 mt-1">Goods receipt tracking</p>
       </FloatingCard>
     </div>
   );
@@ -430,7 +430,7 @@ function PasswordStrength({ password }: { password: string }) {
             transition={{ duration: 0.3, delay: i * 0.05 }} />
         ))}
       </div>
-      <motion.p className="text-[10px] font-medium text-right" style={{ color: colors[strength] }}
+      <motion.p className="text-[0.625rem] font-medium text-right" style={{ color: colors[strength] }}
         animate={{ opacity: [0, 1] }} key={strength}>
         {labels[strength]}
       </motion.p>
@@ -666,7 +666,7 @@ export default function Login() {
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.18)", backdropFilter: "blur(12px)", minWidth: 110 }}>
               <div className="flex items-center justify-between">
                 <AnimatePresence mode="wait">
-                  <motion.span key={`c1-label-${spotlight}`} className="text-[10px] font-semibold uppercase tracking-widest text-white/35"
+                  <motion.span key={`c1-label-${spotlight}`} className="text-[0.625rem] font-semibold uppercase tracking-widest text-white/35"
                     initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.3 }}>
                     {spotlight === 0 ? "Projects" : "Active Suppliers"}
                   </motion.span>
@@ -696,7 +696,7 @@ export default function Login() {
             <div className="flex flex-col gap-2 px-4 py-3 rounded-2xl overflow-hidden"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.18)", backdropFilter: "blur(12px)", minWidth: 120 }}>
               <AnimatePresence mode="wait">
-                <motion.span key={`c2-label-${spotlight}`} className="text-[10px] font-semibold uppercase tracking-widest text-white/35"
+                <motion.span key={`c2-label-${spotlight}`} className="text-[0.625rem] font-semibold uppercase tracking-widest text-white/35"
                   initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.3 }}>
                   {spotlight === 0 ? "GRNs Received" : "Quotations"}
                 </motion.span>
@@ -716,7 +716,7 @@ export default function Login() {
                   { label: "Suppliers", val: stats?.activeSuppliers },
                   { label: "Quotations", val: stats?.quotations },
                 ].map((m) => (
-                  <div key={m.label} className="flex justify-between text-[9px] text-white/30">
+                  <div key={m.label} className="flex justify-between text-[0.5625rem] text-white/30">
                     <span>{m.label}</span>
                     {m.val !== undefined ? <span className="text-white/50 font-medium">{m.val}</span> : <span className="w-6 h-2.5 rounded bg-white/10 animate-pulse inline-block" />}
                   </div>
@@ -727,7 +727,7 @@ export default function Login() {
             {/* Card 3 — Work orders */}
             <div className="flex flex-col gap-2 px-4 py-3 rounded-2xl"
               style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(167,139,250,0.18)", backdropFilter: "blur(12px)", minWidth: 108 }}>
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-white/35">Work Orders</span>
+              <span className="text-[0.625rem] font-semibold uppercase tracking-widest text-white/35">Work Orders</span>
               {stats ? (
                 <span className="text-2xl font-bold text-white leading-none">{(stats.workOrders ?? 0).toLocaleString("en-IN")}</span>
               ) : (
@@ -749,7 +749,7 @@ export default function Login() {
                   ) : (
                     <div className="h-3 w-8 rounded bg-white/10 animate-pulse mb-1" />
                   )}
-                  <p className="text-[9px] text-white/30">Completed</p>
+                  <p className="text-[0.5625rem] text-white/30">Completed</p>
                 </div>
               </div>
             </div>
@@ -867,7 +867,7 @@ export default function Login() {
                   </ShimmerButton>
                 </motion.form>
 
-                <p className="text-center text-[10px] text-white/20 mt-5">
+                <p className="text-center text-[0.625rem] text-white/20 mt-5">
                   Secure access · Role-based permissions · v{appVersion}
                 </p>
 
@@ -879,7 +879,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => navigate("/download-android-app")}
-                  className="group flex items-center justify-center gap-1.5 mx-auto mt-3 text-[11px] font-medium text-white/35 hover:text-violet-300 transition-colors"
+                  className="group flex items-center justify-center gap-1.5 mx-auto mt-3 text-[0.6875rem] font-medium text-white/35 hover:text-violet-300 transition-colors"
                 >
                   <Smartphone size={12} className="text-violet-300/70 group-hover:text-violet-300 transition-colors" />
                   Get the Android app
@@ -887,7 +887,7 @@ export default function Login() {
 
                 {/* Other portals */}
                 <div className="mt-5 pt-5" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                  <p className="text-center text-[10px] font-semibold tracking-wider uppercase text-white/25 mb-3">
+                  <p className="text-center text-[0.625rem] font-semibold tracking-wider uppercase text-white/25 mb-3">
                     Looking for a different portal?
                   </p>
                   <div className="grid grid-cols-2 gap-2.5">
@@ -911,7 +911,7 @@ export default function Login() {
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/80">Supplier</p>
-                        <p className="text-[10px] text-white/35">Vendor &amp; order portal</p>
+                        <p className="text-[0.625rem] text-white/35">Vendor &amp; order portal</p>
                       </div>
                     </motion.button>
 
@@ -935,7 +935,7 @@ export default function Login() {
                       </div>
                       <div>
                         <p className="text-xs font-semibold text-white/80">Customer</p>
-                        <p className="text-[10px] text-white/35">Booking &amp; owner portal</p>
+                        <p className="text-[0.625rem] text-white/35">Booking &amp; owner portal</p>
                       </div>
                     </motion.button>
                   </div>

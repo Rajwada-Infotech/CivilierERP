@@ -54,6 +54,7 @@ import {
   Video,
 } from "lucide-react";
 import { toast } from "sonner";
+import { DateInput } from "@/components/ui/date-input";
 
 type AdStatus = "active" | "paused" | "pending" | "completed";
 
@@ -399,7 +400,7 @@ export default function AdsManager() {
       >
       <div className="flex items-start gap-3 bg-violet-500/8 border border-violet-500/20 rounded-lg p-3">
         <Info size={15} className="text-violet-500 shrink-0 mt-0.5" />
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-[0.6875rem] text-muted-foreground">
           <strong className="text-violet-700">DBA-Only Advertising.</strong>
           Tenants contact our team to initiate a campaign. We handle all
           planning, execution & reporting and retain <strong>40%</strong> of ad
@@ -443,7 +444,7 @@ export default function AdsManager() {
               <s.icon size={18} className={s.color} />
               <div>
                 <div className="text-lg font-bold leading-none">{s.value}</div>
-                <div className="text-[10px] text-muted-foreground mt-0.5">
+                <div className="text-[0.625rem] text-muted-foreground mt-0.5">
                   {s.label}
                 </div>
               </div>
@@ -506,15 +507,15 @@ export default function AdsManager() {
                     return (
                       <TableRow key={ad.id} className="text-xs">
                         <TableCell>
-                          <div className="font-medium text-[11px] max-w-[160px] truncate">
+                          <div className="font-medium text-[0.6875rem] max-w-[160px] truncate">
                             {ad.title}
                           </div>
-                          <div className="text-muted-foreground text-[10px]">
+                          <div className="text-muted-foreground text-[0.625rem]">
                             {ad.tenantName}
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="text-[10px]">
+                          <div className="text-[0.625rem]">
                             ₹{ad.spent.toLocaleString()} / ₹
                             {ad.budget.toLocaleString()}
                           </div>
@@ -524,7 +525,7 @@ export default function AdsManager() {
                               style={{ width: `${Math.min(spentPct, 100)}%` }}
                             />
                           </div>
-                          <div className="text-[9px] text-muted-foreground">
+                          <div className="text-[0.5625rem] text-muted-foreground">
                             {spentPct}% used
                           </div>
                         </TableCell>
@@ -535,7 +536,7 @@ export default function AdsManager() {
                         </TableCell>
                         <TableCell>
                           <div>{ad.clicks.toLocaleString()}</div>
-                          <div className="text-muted-foreground text-[10px]">
+                          <div className="text-muted-foreground text-[0.625rem]">
                             CTR: {ctr(ad)}%
                           </div>
                         </TableCell>
@@ -546,7 +547,7 @@ export default function AdsManager() {
                         </TableCell>
                         <TableCell>
                           <button
-                            className="flex items-center gap-1 text-[10px] hover:text-violet-600 transition-colors"
+                            className="flex items-center gap-1 text-[0.625rem] hover:text-violet-600 transition-colors"
                             onClick={() => {
                               setCreativesTarget(ad);
                               setUploadingFiles([]);
@@ -558,21 +559,21 @@ export default function AdsManager() {
                           </button>
                         </TableCell>
                         <TableCell>
-                          <div className="text-[10px] text-muted-foreground">
+                          <div className="text-[0.625rem] text-muted-foreground">
                             {ad.startDate}
                           </div>
-                          <div className="text-[10px] text-muted-foreground">
+                          <div className="text-[0.625rem] text-muted-foreground">
                             → {ad.endDate}
                           </div>
                         </TableCell>
                         <TableCell>
-                          <Badge className={`text-[10px] ${SC.color}`}>
+                          <Badge className={`text-[0.625rem] ${SC.color}`}>
                             {SC.label}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center gap-1 justify-end">
-                            <Button
+                            <Button data-row-view
                               variant="ghost"
                               size="sm"
                               className="h-6 w-6 p-0"
@@ -628,7 +629,7 @@ export default function AdsManager() {
                   <p className="text-sm font-medium">
                     Upload Banners or Videos
                   </p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                     PNG, JPG, GIF for banners · MP4, MOV for videos · Max 100MB
                     per file
                   </p>
@@ -731,34 +732,34 @@ export default function AdsManager() {
                                 className="text-violet-500 shrink-0"
                               />
                             )}
-                            <span className="font-mono text-[10px] truncate max-w-[160px]">
+                            <span className="font-mono text-[0.625rem] truncate max-w-[160px]">
                               {c.name}
                             </span>
                           </div>
                         </TableCell>
                         <TableCell>
                           <Badge
-                            className={`text-[10px] ${c.type === "video" ? "bg-blue-500/15 text-blue-600 border-blue-500/30" : "bg-violet-500/15 text-violet-600 border-violet-500/30"}`}
+                            className={`text-[0.625rem] ${c.type === "video" ? "bg-blue-500/15 text-blue-600 border-blue-500/30" : "bg-violet-500/15 text-violet-600 border-violet-500/30"}`}
                           >
                             {c.type === "video" ? "Video" : "Banner"}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <div className="text-[10px] font-medium">
+                          <div className="text-[0.625rem] font-medium">
                             {c.tenantName}
                           </div>
-                          <div className="text-[10px] text-muted-foreground truncate max-w-[140px]">
+                          <div className="text-[0.625rem] text-muted-foreground truncate max-w-[140px]">
                             {c.adTitle}
                           </div>
                         </TableCell>
-                        <TableCell className="text-muted-foreground text-[10px]">
+                        <TableCell className="text-muted-foreground text-[0.625rem]">
                           {c.size}
                         </TableCell>
-                        <TableCell className="font-mono text-[10px] text-muted-foreground">
+                        <TableCell className="font-mono text-[0.625rem] text-muted-foreground">
                           {c.uploadedOn}
                         </TableCell>
                         <TableCell>
-                          <Badge className={`text-[10px] ${CS.color}`}>
+                          <Badge className={`text-[0.625rem] ${CS.color}`}>
                             {CS.label}
                           </Badge>
                         </TableCell>
@@ -769,7 +770,7 @@ export default function AdsManager() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-6 px-2 text-[10px] text-green-600"
+                                  className="h-6 px-2 text-[0.625rem] text-green-600"
                                   onClick={() =>
                                     approveCreative(c.id, "approved")
                                   }
@@ -779,7 +780,7 @@ export default function AdsManager() {
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="h-6 px-2 text-[10px] text-red-500"
+                                  className="h-6 px-2 text-[0.625rem] text-red-500"
                                   onClick={() =>
                                     approveCreative(c.id, "rejected")
                                   }
@@ -870,14 +871,14 @@ export default function AdsManager() {
                       className="mx-auto mb-1 text-muted-foreground"
                     />
                     <div className="font-bold text-sm">{m.value}</div>
-                    <div className="text-[9px] text-muted-foreground">
+                    <div className="text-[0.5625rem] text-muted-foreground">
                       {m.label}
                     </div>
                   </div>
                 ))}
               </div>
               <div className="space-y-1.5">
-                <div className="flex justify-between text-[10px]">
+                <div className="flex justify-between text-[0.625rem]">
                   <span className="text-muted-foreground">Budget Used</span>
                   <span className="font-bold">
                     ₹{selectedAd.spent.toLocaleString()} / ₹
@@ -933,7 +934,7 @@ export default function AdsManager() {
               <p className="text-xs text-muted-foreground">
                 Click to upload banners or videos
               </p>
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-[0.625rem] text-muted-foreground">
                 PNG, JPG, GIF, MP4, MOV · Max 100MB
               </p>
             </div>
@@ -982,7 +983,7 @@ export default function AdsManager() {
 
             {creativesTarget && creativesTarget.creatives.length > 0 && (
               <div className="space-y-1.5">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider">
                   Uploaded Creatives
                 </p>
                 {creativesTarget.creatives.map((c) => {
@@ -998,14 +999,14 @@ export default function AdsManager() {
                         ) : (
                           <Image size={11} className="text-violet-500" />
                         )}
-                        <span className="truncate max-w-[200px] font-mono text-[10px]">
+                        <span className="truncate max-w-[200px] font-mono text-[0.625rem]">
                           {c.name}
                         </span>
-                        <span className="text-muted-foreground text-[10px]">
+                        <span className="text-muted-foreground text-[0.625rem]">
                           {c.size}
                         </span>
                       </div>
-                      <Badge className={`text-[9px] ${CS.color}`}>
+                      <Badge className={`text-[0.5625rem] ${CS.color}`}>
                         {CS.label}
                       </Badge>
                     </div>
@@ -1063,7 +1064,7 @@ export default function AdsManager() {
                 size={12}
                 className="text-violet-500 mt-0.5 shrink-0"
               />
-              <p className="text-[10px] text-violet-700">
+              <p className="text-[0.625rem] text-violet-700">
                 This campaign will be fully managed by DBA. Platform retains 40%
                 of all ad spend as the service fee.
               </p>
@@ -1170,8 +1171,7 @@ export default function AdsManager() {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Start Date *</Label>
-                <Input
-                  type="date"
+                <DateInput
                   className="text-xs h-8"
                   value={form.startDate}
                   onChange={(e) =>
@@ -1181,8 +1181,7 @@ export default function AdsManager() {
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">End Date *</Label>
-                <Input
-                  type="date"
+                <DateInput
                   className="text-xs h-8"
                   value={form.endDate}
                   onChange={(e) =>
@@ -1193,7 +1192,7 @@ export default function AdsManager() {
             </div>
 
             <div className="border-t pt-2 space-y-2">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-medium">
                 Creative
               </p>
               <div className="space-y-1">
@@ -1217,7 +1216,7 @@ export default function AdsManager() {
             </div>
 
             <div className="border-t pt-2 space-y-2">
-              <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+              <p className="text-[0.625rem] text-muted-foreground uppercase tracking-wider font-medium">
                 Tenant Contact
               </p>
               <div className="grid grid-cols-2 gap-3">

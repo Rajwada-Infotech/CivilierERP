@@ -209,7 +209,7 @@ const SaLeadDistribution: React.FC = () => {
                 <div className="flex gap-2">
                   {([1, 2] as const).map((l) => (
                     <button key={l} onClick={() => { setLevel(l); setSelectedLeads([]); }}
-                      className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${level === l ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}>
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${level === l ? "btn-module text-white border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}>
                       Level {l} {l === 1 ? "(Admin ? TL)" : "(TL ? SP)"}
                     </button>
                   ))}
@@ -220,14 +220,14 @@ const SaLeadDistribution: React.FC = () => {
                 <div className="flex gap-2">
                   {(["Equal", "Percentage", "Manual"] as const).map((m) => (
                     <button key={m} onClick={() => setMethod(m)}
-                      className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${method === m ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}>
+                      className={`px-3 py-1.5 rounded-md text-sm font-medium border transition-colors ${method === m ? "btn-module text-white border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}>
                       {m}
                     </button>
                   ))}
                 </div>
               </div>
               <button onClick={handleDistribute} disabled={!selectedLeads.length}
-                className="px-4 py-2 rounded-md bg-primary text-primary-foreground text-sm font-medium disabled:opacity-40 hover:bg-primary/90 transition-colors">
+                className="px-4 py-2 rounded-md btn-module text-white text-sm font-medium disabled:opacity-40 transition-colors">
                 Distribute {selectedLeads.length ? `(${selectedLeads.length})` : ""}
               </button>
               {canAutoDistribute && (

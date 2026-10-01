@@ -20,6 +20,7 @@ import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { cn } from "@/lib/utils";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { DateInput } from "@/components/ui/date-input";
 
 const API = "/api/crm/possession-notice";
 const DELIVERY_MODES = ["Email", "Post", "Courier", "InPerson"];
@@ -38,8 +39,8 @@ function deadlineInfo(dl?: string | null, status?: string) {
   if (!dl || status !== "Sent") return null;
   const diff = Math.ceil((new Date(dl).getTime() - Date.now()) / 86_400_000);
   if (diff < 0)  return { label: `Overdue by ${Math.abs(diff)}d`, cls: "text-red-600 bg-red-50 border-red-200" };
-  if (diff <= 3) return { label: `${diff}d left`, cls: "text-orange-600 bg-orange-50 border-orange-200" };
-  if (diff <= 7) return { label: `${diff}d left`, cls: "text-amber-600 bg-amber-50 border-amber-200" };
+  if (diff <= 3) return { label: `${diff}d left`, cls: "text-sky-600 bg-sky-50 border-sky-200" };
+  if (diff <= 7) return { label: `${diff}d left`, cls: "text-sky-600 bg-sky-50 border-sky-200" };
   return null;
 }
 
@@ -77,7 +78,7 @@ const MODE_ICON: Record<string, string> = { Email: "✉", Post: "📮", Courier:
 function ModeBadge({ mode }: { mode?: string | null }) {
   if (!mode) return <span className="text-xs text-muted-foreground">—</span>;
   return (
-    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground bg-muted/50 border border-border rounded px-1.5 py-0.5">
+    <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-muted-foreground bg-muted/50 border border-border rounded px-1.5 py-0.5">
       <span>{MODE_ICON[mode] ?? "📄"}</span>{mode}
     </span>
   );
@@ -138,22 +139,22 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
                 <Loader2 size={12} className="animate-spin" /> Loading eligible bookings…
               </div>
             ) : noEligible ? (
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2.5">
-                <p className="text-sm font-semibold text-amber-800 flex items-center gap-2">
+              <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 space-y-2.5">
+                <p className="text-sm font-semibold text-sky-800 flex items-center gap-2">
                   <ShieldAlert size={15} /> No eligible bookings
                 </p>
-                <p className="text-xs text-amber-700 leading-relaxed">Both gates must be cleared before a notice can be issued:</p>
-                <ul className="space-y-1.5 text-xs text-amber-700">
+                <p className="text-xs text-sky-700 leading-relaxed">Both gates must be cleared before a notice can be issued:</p>
+                <ul className="space-y-1.5 text-xs text-sky-700">
                   <li className="flex items-start gap-2">
-                    <span className="w-4 h-4 rounded-full bg-amber-200 text-amber-800 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">1</span>
+                    <span className="w-4 h-4 rounded-full bg-sky-200 text-sky-800 font-bold text-[0.625rem] flex items-center justify-center shrink-0 mt-0.5">1</span>
                     <span><strong>Pre-Possession Ready</strong> — all 4 checks must pass (Dues, Documentation, Quality, Utility)</span>
                   </li>
                   <li className="flex items-start gap-2">
-                    <span className="w-4 h-4 rounded-full bg-amber-200 text-amber-800 font-bold text-[10px] flex items-center justify-center shrink-0 mt-0.5">2</span>
+                    <span className="w-4 h-4 rounded-full bg-sky-200 text-sky-800 font-bold text-[0.625rem] flex items-center justify-center shrink-0 mt-0.5">2</span>
                     <span><strong>OC/CC Received</strong> — project Occupancy or Completion Certificate must be on file</span>
                   </li>
                 </ul>
-                <p className="text-[10px] text-amber-600 pt-1 leading-relaxed">
+                <p className="text-[0.625rem] text-sky-600 pt-1 leading-relaxed">
                   Note: the notice may be issued even if dues are outstanding — it serves as a formal offer with a dues statement attached. All dues must be cleared before the actual <strong>Handover</strong>.
                 </p>
                 <div className="flex gap-4 pt-1">
@@ -187,7 +188,7 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
                     <CalendarDays size={10} className="inline mr-1" />Offered Date
                   </label>
-                  <input type="date" value={form.OfferedDate}
+                  <DateInput value={form.OfferedDate}
                     onChange={(e) => setForm((f) => ({ ...f, OfferedDate: e.target.value }))}
                     className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background" />
                 </div>
@@ -195,7 +196,7 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
                     <Clock size={10} className="inline mr-1" />Response Deadline
                   </label>
-                  <input type="date" value={form.ResponseDeadline}
+                  <DateInput value={form.ResponseDeadline}
                     onChange={(e) => setForm((f) => ({ ...f, ResponseDeadline: e.target.value }))}
                     className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background" />
                 </div>
@@ -236,7 +237,7 @@ function CreateDialog({ onClose, onCreated, navigate, prefillBookingId }: Create
           </button>
           {!noEligible && (
             <button onClick={handleCreate} disabled={saving || !form.BookingId}
-              className="px-5 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40">
+              className="px-5 py-2 text-sm btn-module text-white rounded-lg font-semibold hover:shadow-lg disabled:opacity-40">
               {saving ? "Creating…" : "Create Notice"}
             </button>
           )}
@@ -276,13 +277,13 @@ function NoticeCard({ n, onMarkSent, onEdit, onDelete, onAcknowledge, onDispute,
             <div className="flex items-center gap-2.5 flex-wrap">
               <span className="font-mono text-sm font-bold text-primary">{n.NoticeNo}</span>
               <span className={cn(
-                "inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border",
+                "inline-flex items-center gap-1 text-[0.6875rem] font-semibold px-2 py-0.5 rounded-full border",
                 cfg.badgeCls,
               )}>
                 <Icon size={10} />{cfg.label}
               </span>
               {dl && (
-                <span className={cn("inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded border", dl.cls)}>
+                <span className={cn("inline-flex items-center gap-1 text-[0.625rem] font-semibold px-1.5 py-0.5 rounded border", dl.cls)}>
                   <Clock size={9} />{dl.label}
                 </span>
               )}
@@ -290,7 +291,7 @@ function NoticeCard({ n, onMarkSent, onEdit, onDelete, onAcknowledge, onDispute,
 
             <div className="mt-1.5">
               <div className="text-sm font-semibold text-foreground leading-tight">{n.ApplicantName}</div>
-              <div className="text-[11px] text-muted-foreground mt-0.5">{n.BookingNo} · {n.UnitNo}</div>
+              <div className="text-[0.6875rem] text-muted-foreground mt-0.5">{n.BookingNo} · {n.UnitNo}</div>
             </div>
           </div>
 
@@ -299,13 +300,13 @@ function NoticeCard({ n, onMarkSent, onEdit, onDelete, onAcknowledge, onDispute,
             <div className="flex items-center justify-end gap-2">
               <ModeBadge mode={n.DeliveryMode} />
             </div>
-            <div className="text-[11px] text-muted-foreground flex items-center justify-end gap-1">
+            <div className="text-[0.6875rem] text-muted-foreground flex items-center justify-end gap-1">
               <CalendarDays size={10} />
               <span>Offered {fmtDate(n.OfferedDate)}</span>
             </div>
             {n.ResponseDeadline && (
               <div className={cn(
-                "text-[11px] flex items-center justify-end gap-1",
+                "text-[0.6875rem] flex items-center justify-end gap-1",
                 dl ? dl.cls.split(" ")[0] : "text-muted-foreground",
               )}>
                 <Clock size={10} />
@@ -325,7 +326,7 @@ function NoticeCard({ n, onMarkSent, onEdit, onDelete, onAcknowledge, onDispute,
                 <> · ₹{Math.round(n.OutstandingBalance).toLocaleString("en-IN")} due</>
               )}
             </span>
-            <span className="ml-auto text-[10px] font-normal text-red-500">Must be cleared before Handover</span>
+            <span className="ml-auto text-[0.625rem] font-normal text-red-500">Must be cleared before Handover</span>
           </div>
         )}
         {(n.OutstandingMilestones === 0) && (
@@ -365,13 +366,13 @@ function NoticeCard({ n, onMarkSent, onEdit, onDelete, onAcknowledge, onDispute,
                 <AlertTriangle size={11} /> Dispute
               </button>
               <div className="h-4 w-px bg-border mx-1" />
-              <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wide">Off-portal:</span>
+              <span className="text-[0.625rem] text-muted-foreground font-semibold uppercase tracking-wide">Off-portal:</span>
               <button onClick={() => onProxyAck(n.Id)}
-                className="flex items-center gap-1 text-xs text-amber-700 hover:underline font-medium">
+                className="flex items-center gap-1 text-xs text-sky-700 hover:underline font-medium">
                 <UserCircle2 size={11} /> Ack
               </button>
               <button onClick={() => onProxyDispute(n.Id)}
-                className="flex items-center gap-1 text-xs text-amber-700 hover:underline font-medium">
+                className="flex items-center gap-1 text-xs text-sky-700 hover:underline font-medium">
                 <UserCircle2 size={11} /> Dispute
               </button>
             </>
@@ -379,14 +380,14 @@ function NoticeCard({ n, onMarkSent, onEdit, onDelete, onAcknowledge, onDispute,
 
           {n.Status === "Disputed" && (
             <button onClick={() => onRetract(n.Id)}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-amber-500 text-white hover:bg-amber-600 transition-colors">
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-sky-500 text-white hover:bg-sky-600 transition-colors">
               <RotateCcw size={11} /> Retract Dispute
             </button>
           )}
 
           {n.Status === "Acknowledged" && (
             <button onClick={() => onHandover(n.BookingId)}
-              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
+              className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg btn-module text-white transition-colors">
               Schedule Handover <ArrowRight size={11} />
             </button>
           )}
@@ -620,7 +621,7 @@ const CrmPossessionNotice: React.FC = () => {
           <div className="flex items-center gap-3">
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
             <button onClick={() => { setSp({}, { replace: true }); setCreateOpen(true); }}
-              className="flex items-center gap-1.5 px-4 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-lg hover:bg-primary/90">
+              className="flex items-center gap-1.5 px-4 py-2 btn-module text-white text-sm font-semibold rounded-lg ">
               <Plus size={14} /> New Notice
             </button>
           </div>
@@ -638,7 +639,7 @@ const CrmPossessionNotice: React.FC = () => {
                   )}>
                   {t.label}
                   <span className={cn(
-                    "text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center",
+                    "text-[0.625rem] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center",
                     statusFilter === t.key ? "bg-white/20" : "bg-muted/80",
                   )}>
                     {t.count}
@@ -714,7 +715,7 @@ const CrmPossessionNotice: React.FC = () => {
                   Pre-Possession <ChevronRight size={14} />
                 </button>
                 <button onClick={() => { setSp({}, { replace: true }); setCreateOpen(true); }}
-                  className="flex items-center gap-1.5 text-sm px-4 py-2 bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90">
+                  className="flex items-center gap-1.5 text-sm px-4 py-2 btn-module text-white rounded-lg font-semibold ">
                   <Plus size={13} /> New Notice
                 </button>
               </div>
@@ -727,13 +728,13 @@ const CrmPossessionNotice: React.FC = () => {
                 {[
                   { label: "Draft",        sub: "Fill details & delivery mode",    cls: "bg-slate-100 border-slate-300 text-slate-700" },
                   { label: "Mark Sent",    sub: "Dispatch via chosen channel",     cls: "bg-blue-50 border-blue-200 text-blue-700" },
-                  { label: "Customer Acts", sub: "Acknowledges or raises dispute",  cls: "bg-amber-50 border-amber-200 text-amber-700" },
+                  { label: "Customer Acts", sub: "Acknowledges or raises dispute",  cls: "bg-sky-50 border-sky-200 text-sky-700" },
                   { label: "Acknowledged", sub: "Handover can now be scheduled",   cls: "bg-green-50 border-green-200 text-green-700" },
                 ].map(({ label, sub, cls }, idx, arr) => (
                   <React.Fragment key={label}>
                     <div className="flex-1 min-w-[80px]">
                       <div className={cn("text-xs font-bold px-2.5 py-1 rounded-lg border text-center mb-1", cls)}>{label}</div>
-                      <div className="text-[10px] text-muted-foreground text-center leading-tight">{sub}</div>
+                      <div className="text-[0.625rem] text-muted-foreground text-center leading-tight">{sub}</div>
                     </div>
                     {idx < arr.length - 1 && (
                       <ArrowRight size={14} className="text-muted-foreground/40 shrink-0 mt-2 hidden sm:block" />
@@ -796,13 +797,13 @@ const CrmPossessionNotice: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Offered Date</label>
-                  <input type="date" value={editForm.OfferedDate}
+                  <DateInput value={editForm.OfferedDate}
                     onChange={(e) => setEditForm((f) => ({ ...f, OfferedDate: e.target.value }))}
                     className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background" />
                 </div>
                 <div>
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">Response Deadline</label>
-                  <input type="date" value={editForm.ResponseDeadline}
+                  <DateInput value={editForm.ResponseDeadline}
                     onChange={(e) => setEditForm((f) => ({ ...f, ResponseDeadline: e.target.value }))}
                     className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background" />
                 </div>
@@ -832,7 +833,7 @@ const CrmPossessionNotice: React.FC = () => {
               <button onClick={() => setEditTarget(null)}
                 className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleEdit} disabled={editSaving}
-                className="px-5 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-semibold hover:bg-primary/90 disabled:opacity-40">
+                className="px-5 py-2 text-sm btn-module text-white rounded-lg font-semibold hover:shadow-lg disabled:opacity-40">
                 {editSaving ? "Saving…" : "Save Changes"}
               </button>
             </div>
@@ -895,7 +896,7 @@ const CrmPossessionNotice: React.FC = () => {
           <DialogContent accent="crm" className="max-w-sm">
             <DialogHeader>
               <DialogTitle className="font-heading flex items-center gap-2 text-base">
-                <RotateCcw size={16} className="text-amber-600" /> Retract Dispute
+                <RotateCcw size={16} className="text-sky-600" /> Retract Dispute
               </DialogTitle>
             </DialogHeader>
             <p className="text-sm text-muted-foreground">Returns the notice to Draft so it can be revised and re-sent. Document the resolution.</p>
@@ -909,7 +910,7 @@ const CrmPossessionNotice: React.FC = () => {
               <button onClick={() => { setRetractDialog(null); setRetractReason(""); }}
                 className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleRetractDispute} disabled={!retractReason.trim()}
-                className="px-5 py-2 text-sm bg-amber-600 text-white rounded-lg font-semibold hover:bg-amber-700 disabled:opacity-40">
+                className="px-5 py-2 text-sm btn-module text-white rounded-lg font-semibold hover:shadow-lg disabled:opacity-40">
                 Retract &amp; Return to Draft
               </button>
             </div>

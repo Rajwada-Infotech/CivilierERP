@@ -6,6 +6,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { exportToXlsx, exportToPdf, type ExportColumn } from "@/lib/export";
 import { Download, FileSpreadsheet } from "lucide-react";
+import { DateInput } from "@/components/ui/date-input";
 
 const REPORTS = [
   { key: "lead-source", label: "Lead Source Report", cols: ["Platform", "TotalLeads", "Bookings", "Lost"] },
@@ -83,12 +84,12 @@ const SaReports: React.FC = () => {
             {/* Date range filter */}
             <div className="flex items-center gap-1.5">
               <label className="text-xs text-muted-foreground">From</label>
-              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
+              <DateInput value={dateFrom} onChange={(e) => setDateFrom(e.target.value)}
                 className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
             </div>
             <div className="flex items-center gap-1.5">
               <label className="text-xs text-muted-foreground">To</label>
-              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)}
+              <DateInput value={dateTo} onChange={(e) => setDateTo(e.target.value)}
                 className="text-xs border border-border rounded px-2 py-1.5 bg-background" />
             </div>
             {(dateFrom || dateTo) && (
@@ -111,7 +112,7 @@ const SaReports: React.FC = () => {
             <button
               key={r.key}
               onClick={() => setSelected(r.key)}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${selected === r.key ? "bg-primary text-primary-foreground border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium border transition-colors ${selected === r.key ? "btn-module text-white border-primary" : "border-border text-muted-foreground hover:bg-accent"}`}
             >
               {r.label}
             </button>

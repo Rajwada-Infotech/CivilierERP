@@ -36,6 +36,7 @@ import {
 } from "@/api/maintenanceBillApi";
 import { getMaintenanceDirectory } from "@/api/maintenanceApi";
 import { getActiveChargeHeads, type ChargeHeadRow } from "@/api/chargeHeadApi";
+import { DateInput } from "@/components/ui/date-input";
 
 const fmt = (n: number | null | undefined) =>
   `₹${(Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -130,15 +131,13 @@ export default function MaintenanceBills() {
               <option key={s} value={s}>{s}</option>
             ))}
           </select>
-          <input
-            type="date"
+          <DateInput
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
             className="px-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
           />
           <span className="text-xs text-muted-foreground">to</span>
-          <input
-            type="date"
+          <DateInput
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
             className="px-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground"
@@ -181,7 +180,7 @@ export default function MaintenanceBills() {
         {rows.length > 0 && (
           <div className="rounded-xl border border-border overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
                 <tr>
                   <th className="text-left px-4 py-2.5">Bill No</th>
                   <th className="text-left px-4 py-2.5">Customer</th>
@@ -206,7 +205,7 @@ export default function MaintenanceBills() {
                     <td className="px-4 py-2.5 text-right font-mono font-semibold text-foreground">{fmt(b.GrandTotal)}</td>
                     <td className="px-4 py-2.5">
                       <span
-                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+                        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${
                           b.Status === "Active"
                             ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600"
                             : "bg-red-500/10 border-red-500/20 text-red-600"
@@ -218,7 +217,7 @@ export default function MaintenanceBills() {
                     </td>
                     <td className="px-2 py-2.5">
                       <div className="flex items-center justify-end gap-1">
-                        <button
+                        <button data-row-view
                           onClick={() => setViewingBillId(b.Id)}
                           title="View"
                           className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -282,7 +281,7 @@ export default function MaintenanceBills() {
               Cancel bill <span className="font-mono font-medium text-foreground">{cancellingBill?.BillNo}</span>? This keeps the record for history but marks it Cancelled.
             </p>
             <div>
-              <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+              <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                 Reason (optional)
               </label>
               <textarea
@@ -382,15 +381,14 @@ function LedgerSheet({
           { label: "Flat No.", value: unitLabel },
         ].map((f) => (
           <div key={f.label} className="px-3 py-2">
-            <p className="text-[9px] uppercase tracking-widest text-muted-foreground">{f.label}</p>
+            <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground">{f.label}</p>
             <p className={`text-xs font-semibold text-foreground mt-0.5 ${f.mono ? "font-mono" : ""}`}>{f.value || "—"}</p>
           </div>
         ))}
         <div className="px-3 py-2">
-          <p className="text-[9px] uppercase tracking-widest text-muted-foreground">Due Date</p>
+          <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Due Date</p>
           {edit ? (
-            <input
-              type="date"
+            <DateInput
               value={dueDate}
               onChange={(e) => edit.onDueDateChange(e.target.value)}
               className="w-full mt-0.5 text-xs font-semibold bg-transparent border-none p-0 text-foreground focus:outline-none"
@@ -403,7 +401,7 @@ function LedgerSheet({
 
       {/* Name */}
       <div className="px-3 py-2 border-b border-border">
-        <p className="text-[9px] uppercase tracking-widest text-muted-foreground">Name</p>
+        <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Name</p>
         <p className="text-sm font-semibold text-foreground mt-0.5">{customerName || "—"}</p>
       </div>
 
@@ -411,9 +409,9 @@ function LedgerSheet({
       <table className="w-full text-xs">
         <thead className="bg-muted/30">
           <tr>
-            <th className="w-10 text-left px-2 py-1.5 border-b border-border text-[9px] uppercase tracking-widest text-muted-foreground">Sr.</th>
-            <th className="text-left px-2 py-1.5 border-b border-border text-[9px] uppercase tracking-widest text-muted-foreground">Description</th>
-            <th className="w-28 text-right px-3 py-1.5 border-b border-border text-[9px] uppercase tracking-widest text-muted-foreground">Amount</th>
+            <th className="w-10 text-left px-2 py-1.5 border-b border-border text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Sr.</th>
+            <th className="text-left px-2 py-1.5 border-b border-border text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Description</th>
+            <th className="w-28 text-right px-3 py-1.5 border-b border-border text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Amount</th>
             {edit && <th className="w-8 border-b border-border" />}
           </tr>
         </thead>
@@ -485,7 +483,7 @@ function LedgerSheet({
 
       {/* Notes */}
       <div className="px-3 py-2.5 border-t border-border">
-        <p className="text-[9px] uppercase tracking-widest text-muted-foreground mb-1">Notes</p>
+        <p className="text-[0.5625rem] uppercase tracking-widest text-muted-foreground mb-1">Notes</p>
         {edit ? (
           <textarea
             value={notes}
@@ -504,7 +502,7 @@ function LedgerSheet({
       {/* Signature footer */}
       <div className="px-3 py-4 border-t border-border text-right">
         <p className="text-sm font-heading font-bold text-foreground">For {companyName}</p>
-        <p className="text-[10px] text-muted-foreground mt-6">Secretary / Chairman / Treasurer</p>
+        <p className="text-[0.625rem] text-muted-foreground mt-6">Secretary / Chairman / Treasurer</p>
       </div>
     </div>
   );
@@ -635,7 +633,7 @@ function BillFormDialog({
           <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
             {!isEdit && (
               <div>
-                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Customer / Flat
                 </label>
                 <select
@@ -752,7 +750,7 @@ function BillViewModal({
         >
           <div>
             <h2 className="font-heading font-bold text-base">{bill?.BillNo || "Bill"}</h2>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-widest mt-0.5">Maintenance Bill</p>
+            <p className="text-[0.625rem] text-muted-foreground uppercase tracking-widest mt-0.5">Maintenance Bill</p>
           </div>
           <div className="flex items-center gap-2 print:hidden">
             {canExport && bill && (

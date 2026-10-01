@@ -5,7 +5,7 @@ import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
 interface CrmShellProps {
   title: string;
-  subtitle?: string;
+  subtitle?: React.ReactNode;
   icon?: React.ElementType;
   action?: React.ReactNode;
   children: React.ReactNode;
@@ -16,7 +16,7 @@ interface CrmShellProps {
  * Provides ambient amber glow, frosted header band, and consistent layout —
  * same structure as FinanceShell/MaterialShell, tinted to match the CRM
  * module's established amber identity (previously borrowed from
- * SalesAutoShell — same #f59e0b accent, just under its own component now).
+ * SalesAutoShell — same #0ea5e9 accent, just under its own component now).
  */
 export const CrmShell: React.FC<CrmShellProps> = ({
   title,
@@ -31,7 +31,7 @@ export const CrmShell: React.FC<CrmShellProps> = ({
   const glassCard = isDark
     ? {
         background: "rgba(15, 12, 3, 0.45)",
-        border: "1px solid rgba(245,158,11,0.18)",
+        border: "1px solid rgba(14,165,233,0.18)",
         backdropFilter: "blur(20px) saturate(160%)",
         WebkitBackdropFilter: "blur(20px) saturate(160%)",
         boxShadow:
@@ -39,11 +39,11 @@ export const CrmShell: React.FC<CrmShellProps> = ({
       }
     : {
         background: "rgba(255,255,255,0.72)",
-        border: "1px solid rgba(245,158,11,0.20)",
+        border: "1px solid rgba(14,165,233,0.20)",
         backdropFilter: "blur(20px) saturate(180%)",
         WebkitBackdropFilter: "blur(20px) saturate(180%)",
         boxShadow:
-          "0 8px 32px rgba(245,158,11,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
+          "0 8px 32px rgba(14,165,233,0.08), inset 0 1px 0 rgba(255,255,255,0.9)",
       };
 
   return (
@@ -55,8 +55,8 @@ export const CrmShell: React.FC<CrmShellProps> = ({
           className="absolute -top-24 -left-24 w-96 h-96 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(circle, rgba(245,158,11,0.10) 0%, transparent 70%)"
-              : "radial-gradient(circle, rgba(245,158,11,0.07) 0%, transparent 70%)",
+              ? "radial-gradient(circle, rgba(14,165,233,0.10) 0%, transparent 70%)"
+              : "radial-gradient(circle, rgba(14,165,233,0.07) 0%, transparent 70%)",
           }}
         />
         {/* Bottom-right amber/orange bloom */}
@@ -73,8 +73,8 @@ export const CrmShell: React.FC<CrmShellProps> = ({
           className="absolute top-1/3 left-1/2 -translate-x-1/2 w-[600px] h-48 rounded-full"
           style={{
             background: isDark
-              ? "radial-gradient(ellipse, rgba(245,158,11,0.04) 0%, transparent 70%)"
-              : "radial-gradient(ellipse, rgba(245,158,11,0.03) 0%, transparent 70%)",
+              ? "radial-gradient(ellipse, rgba(14,165,233,0.04) 0%, transparent 70%)"
+              : "radial-gradient(ellipse, rgba(14,165,233,0.03) 0%, transparent 70%)",
           }}
         />
       </div>
@@ -92,7 +92,7 @@ export const CrmShell: React.FC<CrmShellProps> = ({
           className="absolute inset-0 pointer-events-none rounded-xl"
           style={{
             background:
-              "linear-gradient(135deg, rgba(245,158,11,0.10) 0%, transparent 60%)",
+              "linear-gradient(135deg, rgba(14,165,233,0.10) 0%, transparent 60%)",
           }}
         />
         {/* Left accent stripe */}
@@ -100,7 +100,7 @@ export const CrmShell: React.FC<CrmShellProps> = ({
           className="absolute left-0 top-0 bottom-0 w-0.5 rounded-l-xl"
           style={{
             background:
-              "linear-gradient(to bottom, transparent 10%, #f59e0b 30%, #f59e0b 70%, transparent 90%)",
+              "linear-gradient(to bottom, transparent 10%, #0ea5e9 30%, #0ea5e9 70%, transparent 90%)",
           }}
         />
 
@@ -110,14 +110,14 @@ export const CrmShell: React.FC<CrmShellProps> = ({
             <div
               className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
               style={{
-                background: "rgba(245,158,11,0.18)",
-                border: "1px solid rgba(245,158,11,0.35)",
-                boxShadow: "0 0 12px rgba(245,158,11,0.2)",
+                background: "rgba(14,165,233,0.18)",
+                border: "1px solid rgba(14,165,233,0.35)",
+                boxShadow: "0 0 12px rgba(14,165,233,0.2)",
               }}
             >
               {PageIcon
-                ? <PageIcon size={14} style={{ color: "#fbbf24" }} />
-                : <Users size={14} style={{ color: "#fbbf24" }} />
+                ? <PageIcon size={14} style={{ color: "#38bdf8" }} />
+                : <Users size={14} style={{ color: "#38bdf8" }} />
               }
             </div>
             <div>
@@ -128,7 +128,7 @@ export const CrmShell: React.FC<CrmShellProps> = ({
                 {title}
               </h1>
               {subtitle && (
-                <p className="text-[11px] text-muted-foreground mt-0.5">
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                   {subtitle}
                 </p>
               )}
@@ -159,7 +159,7 @@ export const CrmGlassCard: React.FC<{
   value,
   sub,
   icon: Icon,
-  accentColor = "#f59e0b",
+  accentColor = "#0ea5e9",
   onClick,
   trend,
   children,
@@ -208,7 +208,7 @@ export const CrmGlassCard: React.FC<{
       <div className="relative z-10 p-3">
         <div className="flex items-start justify-between gap-2 mb-1.5">
           <p
-            className="text-[10px] font-heading font-semibold uppercase tracking-widest"
+            className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest"
             style={{ color: accentColor, opacity: 0.85 }}
           >
             {label}
@@ -232,7 +232,7 @@ export const CrmGlassCard: React.FC<{
         </div>
 
         {sub && (
-          <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1">
+          <p className="text-[0.6875rem] text-muted-foreground mt-1 flex items-center gap-1">
             {trend === "up" && (
               <span style={{ color: "#10b981" }}>↑</span>
             )}
@@ -255,7 +255,7 @@ export const CrmSection: React.FC<{
   action?: React.ReactNode;
   children: React.ReactNode;
   accentColor?: string;
-}> = ({ title, icon: Icon, action, children, accentColor = "#f59e0b" }) => {
+}> = ({ title, icon: Icon, action, children, accentColor = "#0ea5e9" }) => {
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
 

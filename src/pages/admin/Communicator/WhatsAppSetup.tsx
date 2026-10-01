@@ -117,7 +117,7 @@ export default function WhatsAppSetup() {
 
                   {rights.canEdit && (
                     <div className="flex justify-end">
-                      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
+                      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} className="btn-module shadow-sm hover:opacity-90 gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto">
                         {saveMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                         Save Configuration
                       </Button>
@@ -142,7 +142,7 @@ export default function WhatsAppSetup() {
                 {form.isActive && isConfigured ? "WhatsApp Active" : form.isActive ? "Incomplete Config" : "WhatsApp Inactive"}
               </p>
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
+            <p className="text-[0.6875rem] text-muted-foreground leading-relaxed">
               {form.isActive && isConfigured
                 ? `Via ${form.provider || "configured provider"} · Phone ID: ${form.phoneNumberId || "—"}`
                 : form.isActive
@@ -168,7 +168,7 @@ export default function WhatsAppSetup() {
                 <div className={cn("w-4 h-4 rounded-full border flex items-center justify-center shrink-0", done ? "border-emerald-500 bg-emerald-500/10" : "border-border bg-muted/30")}>
                   {done && <CheckCircle2 size={9} className="text-emerald-600" />}
                 </div>
-                <p className={cn("text-[11px]", done ? "text-foreground" : "text-muted-foreground")}>{label}</p>
+                <p className={cn("text-[0.6875rem]", done ? "text-foreground" : "text-muted-foreground")}>{label}</p>
               </div>
             ))}
           </div>
@@ -186,7 +186,7 @@ export default function WhatsAppSetup() {
                 "Test numbers are limited to 5 in sandbox mode",
                 "Wati / 360dialog abstract the Meta API with simpler tokens",
               ].map((tip) => (
-                <li key={tip} className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+                <li key={tip} className="flex items-start gap-1.5 text-[0.6875rem] text-muted-foreground">
                   <span className="text-primary mt-0.5">·</span> {tip}
                 </li>
               ))}

@@ -45,7 +45,7 @@ const pct = (paid: number, due: number) =>
 
 const sumCount = (rows: any[] = []) => rows.reduce((s, r) => s + (r.Count || 0), 0);
 
-const PROJECT_COLORS = ["#f59e0b","#d97706","#b45309","#eab308","#fbbf24","#fb923c","#f97316","#ea580c"];
+const PROJECT_COLORS = ["#0ea5e9","#0284c7","#b45309","#eab308","#38bdf8","#fb923c","#f97316","#ea580c"];
 const STATUS_PIE_COLORS: Record<string, string> = {
   Approved:  "#22c55e",
   Pending:   "#f59e0b",
@@ -69,18 +69,18 @@ const GlassPanel: React.FC<{ title: string; children: React.ReactNode }> = ({ ti
       className="rounded-xl overflow-hidden"
       style={{
         background: isDark ? "rgba(15,12,3,0.45)" : "rgba(255,255,255,0.72)",
-        border: "1px solid rgba(245,158,11,0.18)",
+        border: "1px solid rgba(14,165,233,0.18)",
         backdropFilter: "blur(16px) saturate(150%)",
         WebkitBackdropFilter: "blur(16px) saturate(150%)",
         boxShadow: isDark
           ? "0 4px 20px rgba(0,0,0,0.25)"
-          : "0 4px 20px rgba(245,158,11,0.06)",
+          : "0 4px 20px rgba(14,165,233,0.06)",
       }}
     >
       {/* Top amber shimmer line */}
       <div
         className="h-px w-full"
-        style={{ background: "linear-gradient(90deg, transparent, rgba(245,158,11,0.4), transparent)" }}
+        style={{ background: "linear-gradient(90deg, transparent, rgba(14,165,233,0.4), transparent)" }}
       />
       <div className="p-4">
         <p className="text-xs font-semibold text-muted-foreground mb-3">{title}</p>
@@ -92,7 +92,7 @@ const GlassPanel: React.FC<{ title: string; children: React.ReactNode }> = ({ ti
 
 // --- Horizontal bar row -------------------------------------------------------
 const HBar: React.FC<{ label: string; value: number; total: number; color?: string }> = ({
-  label, value, total, color = "#f59e0b",
+  label, value, total, color = "#0ea5e9",
 }) => (
   <div className="mb-2.5">
     <div className="flex justify-between text-xs mb-1">
@@ -135,12 +135,12 @@ const SEVERITY_STYLES = {
     pulse: true,
   },
   warning: {
-    border: "border-amber-500/30",
-    bg: "bg-amber-500/10",
-    iconBg: "bg-amber-500/15",
-    iconColor: "text-amber-500",
-    countColor: "text-amber-500",
-    labelColor: "text-amber-500",
+    border: "border-sky-500/30",
+    bg: "bg-sky-500/10",
+    iconBg: "bg-sky-500/15",
+    iconColor: "text-sky-500",
+    countColor: "text-sky-500",
+    labelColor: "text-sky-500",
     pulse: false,
   },
   info: {
@@ -187,7 +187,7 @@ const AlertCard: React.FC<AlertCardProps> = ({ count, label, sublabel, icon: Ico
       <div className="min-w-0 flex-1">
         <div className={`text-2xl font-bold font-heading leading-none ${s.countColor}`}>{count}</div>
         <div className={`text-xs font-medium mt-0.5 leading-tight ${s.labelColor}`}>{label}</div>
-        {sublabel && <div className="text-[10px] text-muted-foreground mt-0.5">{sublabel}</div>}
+        {sublabel && <div className="text-[0.625rem] text-muted-foreground mt-0.5">{sublabel}</div>}
       </div>
       <ChevronRight size={14} className="text-muted-foreground/50 group-hover:text-muted-foreground transition-colors flex-shrink-0" />
     </button>
@@ -208,39 +208,39 @@ const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
             key={day.DayDate}
             className={`rounded-xl border p-2.5 text-center transition-all ${
               hasEvents
-                ? "border-amber-500/30 bg-amber-500/10"
+                ? "border-sky-500/30 bg-sky-500/10"
                 : "border-border bg-card/60"
             }`}
           >
-            <div className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+            <div className="text-[0.625rem] font-semibold text-muted-foreground uppercase tracking-wide">
               {String(day.DayLabel).split(" ")[0]}
             </div>
             <div className="text-lg font-bold font-heading mt-0.5 leading-none">
               {String(day.DayLabel).split(" ")[1]}
             </div>
-            <div className="text-[9px] text-muted-foreground">
+            <div className="text-[0.5625rem] text-muted-foreground">
               {String(day.DayLabel).split(" ")[2]}
             </div>
             <div className="mt-2 space-y-1">
               {day.Handovers > 0 && (
                 <button onClick={() => navigate("/crm/handover")}
-                  className="w-full flex items-center gap-1 text-[10px] text-green-500 bg-green-500/10 rounded px-1 py-0.5 hover:opacity-80">
+                  className="w-full flex items-center gap-1 text-[0.625rem] text-green-500 bg-green-500/10 rounded px-1 py-0.5 hover:opacity-80">
                   <Key size={9} /> {day.Handovers}
                 </button>
               )}
               {day.Registries > 0 && (
                 <button onClick={() => navigate("/crm/sales-deed?tab=Registry")}
-                  className="w-full flex items-center gap-1 text-[10px] text-blue-500 bg-blue-500/10 rounded px-1 py-0.5 hover:opacity-80">
+                  className="w-full flex items-center gap-1 text-[0.625rem] text-blue-500 bg-blue-500/10 rounded px-1 py-0.5 hover:opacity-80">
                   <FileText size={9} /> {day.Registries}
                 </button>
               )}
               {day.MilestonesDue > 0 && (
                 <button onClick={() => navigate("/crm/payments")}
-                  className="w-full flex items-center gap-1 text-[10px] text-amber-500 bg-amber-500/10 rounded px-1 py-0.5 hover:opacity-80">
+                  className="w-full flex items-center gap-1 text-[0.625rem] text-sky-500 bg-sky-500/10 rounded px-1 py-0.5 hover:opacity-80">
                   <IndianRupee size={9} /> {day.MilestonesDue}
                 </button>
               )}
-              {!hasEvents && <div className="text-[10px] text-muted-foreground/40 pt-1">·</div>}
+              {!hasEvents && <div className="text-[0.625rem] text-muted-foreground/40 pt-1">·</div>}
             </div>
           </div>
         );
@@ -252,7 +252,7 @@ const ThisWeekStrip: React.FC<{ data: any[] }> = ({ data }) => {
 // --- Collection Per Project bar -----------------------------------------------
 const CollectionBar: React.FC<{ row: any }> = ({ row }) => {
   const p = pct(row.TotalPaid, row.TotalDue);
-  const color = p >= 80 ? "#22c55e" : p >= 50 ? "#f59e0b" : "#ef4444";
+  const color = p >= 80 ? "#22c55e" : p >= 50 ? "#0ea5e9" : "#ef4444";
   return (
     <div className="space-y-1">
       <div className="flex items-center justify-between text-xs">
@@ -265,7 +265,7 @@ const CollectionBar: React.FC<{ row: any }> = ({ row }) => {
         </div>
         <span className="text-xs font-semibold w-9 text-right" style={{ color }}>{p}%</span>
         {row.OverdueCount > 0 && (
-          <span className="text-[10px] text-red-500 whitespace-nowrap">{row.OverdueCount} overdue</span>
+          <span className="text-[0.625rem] text-red-500 whitespace-nowrap">{row.OverdueCount} overdue</span>
         )}
       </div>
     </div>
@@ -311,7 +311,7 @@ const MiniGauge: React.FC<{ value: number; color: string; size?: number }> = ({ 
 
 // --- Mini trend sparkline (KPI tiles) ------------------------------------------
 const MiniSparkline: React.FC<{ data: any[]; dataKey: string; color: string }> = ({ data, dataKey, color }) => {
-  if (!data?.length) return <div className="h-9 flex items-center text-[10px] text-muted-foreground">No trend data</div>;
+  if (!data?.length) return <div className="h-9 flex items-center text-[0.625rem] text-muted-foreground">No trend data</div>;
   return (
     <ResponsiveContainer width="100%" height={36}>
       <AreaChart data={data} margin={{ top: 2, right: 0, left: 0, bottom: 0 }}>
@@ -335,7 +335,7 @@ const MiniRatioBar: React.FC<{ part: number; whole: number; color: string; label
       <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
         <div className="h-full rounded-full transition-all" style={{ width: `${p}%`, background: color }} />
       </div>
-      <p className="text-[10px] text-muted-foreground mt-1">{label}</p>
+      <p className="text-[0.625rem] text-muted-foreground mt-1">{label}</p>
     </div>
   );
 };
@@ -352,8 +352,8 @@ const AlertSkeleton = () => (
 );
 
 const GlassCardSkeleton = () => (
-  <div className="rounded-xl border border-amber-200/30 p-4 space-y-3"
-    style={{ background: "rgba(245,158,11,0.04)" }}>
+  <div className="rounded-xl border border-sky-200/30 p-4 space-y-3"
+    style={{ background: "rgba(14,165,233,0.04)" }}>
     <div className="flex items-center gap-2">
       <Skeleton className="w-6 h-6 rounded-md" />
       <Skeleton className="h-3 w-20" />
@@ -417,7 +417,7 @@ const CrmDashboard: React.FC = () => {
   const collPct   = pct(payments.TotalPaid ?? 0, payments.TotalDue ?? 0);
 
   const axisColor = isDark ? "#94a3b8" : "#64748b";
-  const gridColor = isDark ? "rgba(245,158,11,0.10)" : "rgba(245,158,11,0.15)";
+  const gridColor = isDark ? "rgba(14,165,233,0.10)" : "rgba(14,165,233,0.15)";
 
   const bookingPie = bkgsData.map((b: any, i: number) => ({
     name: b.Status,
@@ -450,9 +450,9 @@ const CrmDashboard: React.FC = () => {
   // Accent colours for pipeline glass cards
   const pipelineCards = [
     {
-      icon: ClipboardList, label: "Applications", accent: "#f59e0b",
+      icon: ClipboardList, label: "Applications", accent: "#0ea5e9",
       route: "/crm/applications", total: appsTotal,
-      bars: appsData.map((a: any) => ({ label: a.Status, value: a.Count, color: STATUS_PIE_COLORS[a.Status] ?? "#f59e0b" })),
+      bars: appsData.map((a: any) => ({ label: a.Status, value: a.Count, color: STATUS_PIE_COLORS[a.Status] ?? "#0ea5e9" })),
       footer: appsTotal > 0 ? `${appsTotal} total` : null,
     },
     {
@@ -460,7 +460,7 @@ const CrmDashboard: React.FC = () => {
       route: "/crm/bookings", total: bkgsTotal,
       bars: bkgsData.map((b: any) => ({
         label: b.Status, value: b.Count,
-        color: b.Status === CrmStatus.APPROVED ? "#22c55e" : b.Status === CrmStatus.CANCELLED ? "#ef4444" : "#f59e0b",
+        color: b.Status === CrmStatus.APPROVED ? "#22c55e" : b.Status === CrmStatus.CANCELLED ? "#ef4444" : "#0ea5e9",
       })),
       footer: bkgsTotal > 0
         ? `${bkgsTotal} total · ${fmtCr(bkgsData.reduce((s: number, b: any) => s + (b.TotalValue || 0), 0))} value`
@@ -483,7 +483,7 @@ const CrmDashboard: React.FC = () => {
       route: "/crm/handover", total: hndTotal,
       bars: hndData.map((h: any) => ({
         label: h.Status, value: h.Count,
-        color: h.Status === "Completed" ? "#22c55e" : h.Status === "Scheduled" ? "#6366f1" : "#f59e0b",
+        color: h.Status === "Completed" ? "#22c55e" : h.Status === "Scheduled" ? "#6366f1" : "#0ea5e9",
       })),
       footer: hndTotal > 0 ? `${hndTotal} total` : null,
     },
@@ -512,9 +512,9 @@ const CrmDashboard: React.FC = () => {
       value: `${collPct}%`,
       sub: `${fmtCr(payments.TotalPaid ?? 0)} of ${fmtCr(payments.TotalDue ?? 0)}`,
       icon: IndianRupee,
-      accent: "#f59e0b",
+      accent: "#0ea5e9",
       route: "/crm/payments",
-      chart: <MiniGauge value={collPct} color="#f59e0b" />,
+      chart: <MiniGauge value={collPct} color="#0ea5e9" />,
     },
     {
       label: "Due Next 30 Days",
@@ -563,7 +563,7 @@ const CrmDashboard: React.FC = () => {
         <div className="flex items-center gap-2">
           <Building2 size={14} className="text-muted-foreground shrink-0" />
           <Select value={projectId || "__all__"} onValueChange={handleProjectChange}>
-            <SelectTrigger className="text-sm min-w-[200px] h-8 focus:ring-amber-500/40 focus:ring-1">
+            <SelectTrigger className="text-sm min-w-[200px] h-8 focus:ring-sky-500/40 focus:ring-1">
               <SelectValue placeholder="All Projects" />
             </SelectTrigger>
             <SelectContent>
@@ -606,7 +606,7 @@ const CrmDashboard: React.FC = () => {
       </CrmSection>
 
       {/* -- SECTION 2: Key Numbers -------------------------------------------- */}
-      <CrmSection title="Key Numbers" icon={BarChart3} accentColor="#f59e0b">
+      <CrmSection title="Key Numbers" icon={BarChart3} accentColor="#0ea5e9">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {isLoading
             ? Array.from({ length: 4 }).map((_, i) => <GlassCardSkeleton key={i} />)
@@ -629,7 +629,7 @@ const CrmDashboard: React.FC = () => {
       </CrmSection>
 
       {/* -- SECTION 3: Pipeline Overview (glass cards) ------------------------ */}
-      <CrmSection title="Pipeline Overview" icon={ClipboardList} accentColor="#f59e0b">
+      <CrmSection title="Pipeline Overview" icon={ClipboardList} accentColor="#0ea5e9">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
           {isLoading
             ? Array.from({ length: 5 }).map((_, i) => <GlassCardSkeleton key={i} />)
@@ -664,7 +664,7 @@ const CrmDashboard: React.FC = () => {
               label="Payment Collection"
               value={`${collPct}%`}
               icon={IndianRupee}
-              accentColor={collPct >= 80 ? "#22c55e" : collPct >= 50 ? "#f59e0b" : "#ef4444"}
+              accentColor={collPct >= 80 ? "#22c55e" : collPct >= 50 ? "#0ea5e9" : "#ef4444"}
               onClick={() => navigate("/crm/payments")}
               sub={`${fmtCr(payments.TotalPaid ?? 0)} collected of ${fmtCr(payments.TotalDue ?? 0)} total demand`}
             >
@@ -674,7 +674,7 @@ const CrmDashboard: React.FC = () => {
                     className="h-2 rounded-full transition-all"
                     style={{
                       width: `${collPct}%`,
-                      background: collPct >= 80 ? "#22c55e" : collPct >= 50 ? "#f59e0b" : "#ef4444",
+                      background: collPct >= 80 ? "#22c55e" : collPct >= 50 ? "#0ea5e9" : "#ef4444",
                     }}
                   />
                 </div>
@@ -698,7 +698,7 @@ const CrmDashboard: React.FC = () => {
       </CrmSection>
 
       {/* -- SECTION 4: Conversion Funnel -------------------------------------- */}
-      <CrmSection title="Conversion Funnel" icon={TrendingUp} accentColor="#f59e0b">
+      <CrmSection title="Conversion Funnel" icon={TrendingUp} accentColor="#0ea5e9">
         <p className="text-xs text-muted-foreground -mt-1 mb-4">
           Pipeline conversion from Applications through to Possession
         </p>
@@ -707,7 +707,7 @@ const CrmDashboard: React.FC = () => {
           : (() => {
               const f = data?.funnel ?? { Applications: 0, Bookings: 0, Agreements: 0, Possessions: 0 };
               const stages: { label: string; key: keyof typeof f; color: string; route: string }[] = [
-                { label: "Applications", key: "Applications", color: "#f59e0b", route: "/crm/applications" },
+                { label: "Applications", key: "Applications", color: "#0ea5e9", route: "/crm/applications" },
                 { label: "Bookings",     key: "Bookings",     color: "#22c55e", route: "/crm/bookings" },
                 { label: "Agreements",   key: "Agreements",   color: "#3b82f6", route: "/crm/agreements" },
                 { label: "Possessions",  key: "Possessions",  color: "#8b5cf6", route: "/crm/handover" },
@@ -718,7 +718,7 @@ const CrmDashboard: React.FC = () => {
                   className="rounded-xl p-4 space-y-3"
                   style={{
                     background: isDark ? "rgba(15,12,3,0.45)" : "rgba(255,255,255,0.72)",
-                    border: "1px solid rgba(245,158,11,0.18)",
+                    border: "1px solid rgba(14,165,233,0.18)",
                     backdropFilter: "blur(16px)",
                     WebkitBackdropFilter: "blur(16px)",
                   }}
@@ -762,7 +762,7 @@ const CrmDashboard: React.FC = () => {
       </CrmSection>
 
       {/* -- SECTION 5: Status Distribution – Pie Charts ----------------------- */}
-      <CrmSection title="Status Distribution" icon={PieIcon} accentColor="#f59e0b">
+      <CrmSection title="Status Distribution" icon={PieIcon} accentColor="#0ea5e9">
         <p className="text-xs text-muted-foreground -mt-1 mb-3">
           Booking and application status breakdown as of now
         </p>
@@ -824,7 +824,7 @@ const CrmDashboard: React.FC = () => {
       </CrmSection>
 
       {/* -- SECTION 6: Monthly Trend – line + histogram ----------------------- */}
-      <CrmSection title="Monthly Trend" icon={TrendingUp} accentColor="#f59e0b">
+      <CrmSection title="Monthly Trend" icon={TrendingUp} accentColor="#0ea5e9">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
           <GlassPanel title="Applications & Bookings">
             {isLoading ? <Skeleton className="h-[180px] w-full" />
@@ -838,7 +838,7 @@ const CrmDashboard: React.FC = () => {
                       <YAxis tick={{ fontSize: 10, fill: axisColor }} axisLine={false} tickLine={false} allowDecimals={false} />
                       <Tooltip contentStyle={{ background: isDark ? "#1c1408" : "#fff", border: `1px solid ${gridColor}`, borderRadius: 8, fontSize: 11 }} />
                       <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Line type="monotone" dataKey="Applications" stroke={theme === "bw" ? "#FFA500" : "#f59e0b"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                      <Line type="monotone" dataKey="Applications" stroke={theme === "bw" ? "#FFA500" : "#0ea5e9"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                       <Line type="monotone" dataKey="Bookings" stroke={theme === "bw" ? "#008000" : "#22c55e"} strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
                     </LineChart>
                   </ResponsiveContainer>
@@ -872,7 +872,7 @@ const CrmDashboard: React.FC = () => {
 
       {/* -- SECTION 7: Collection by Project ---------------------------------- */}
       {(metrics.collectionPerProject?.length ?? 0) > 0 && (
-        <CrmSection title="Collection by Project" icon={Building2} accentColor="#f59e0b">
+        <CrmSection title="Collection by Project" icon={Building2} accentColor="#0ea5e9">
           <p className="text-xs text-muted-foreground -mt-1 mb-2">
             Payment collected vs total demand — per project
           </p>
@@ -889,7 +889,7 @@ const CrmDashboard: React.FC = () => {
       )}
 
       {/* -- SECTION 8: This Week's Schedule ----------------------------------- */}
-      <CrmSection title="This Week's Schedule" icon={Calendar} accentColor="#f59e0b">
+      <CrmSection title="This Week's Schedule" icon={Calendar} accentColor="#0ea5e9">
         <p className="text-xs text-muted-foreground -mt-1 mb-2">
           Handovers (green) · Registry appointments (blue) · Payment milestones due (amber)
         </p>

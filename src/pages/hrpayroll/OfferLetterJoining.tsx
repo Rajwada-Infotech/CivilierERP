@@ -24,8 +24,9 @@ import {
   updateOfferLetterTemplate,
   type OfferLetterRow,
 } from "@/api/offerLetterApi";
+import { DateInput } from "@/components/ui/date-input";
 
-const labelCls = "block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
+const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 const inputCls = "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
 
 const TEMPLATE_PLACEHOLDERS = [
@@ -131,13 +132,13 @@ const JoiningRow: React.FC<{
       <td className="px-4 py-2.5 font-mono text-xs">{offer.DocNo}</td>
       <td className="px-4 py-2.5">
         <div className="font-medium">{offer.CandidateName}</div>
-        <div className="text-[11px] text-muted-foreground">{offer.CandidateCode}</div>
+        <div className="text-[0.6875rem] text-muted-foreground">{offer.CandidateCode}</div>
       </td>
       <td className="px-4 py-2.5 hidden sm:table-cell">{offer.CompanyName || "-"}</td>
       <td className="px-4 py-2.5 hidden sm:table-cell">{offer.DateOfJoin ? offer.DateOfJoin.slice(0, 10) : "-"}</td>
       <td className="px-4 py-2.5">
         {canEdit ? (
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="px-2 py-1 rounded-lg text-xs bg-muted border border-border" />
+          <DateInput value={date} onChange={(e) => setDate(e.target.value)} className="px-2 py-1 rounded-lg text-xs bg-muted border border-border" />
         ) : (
           date || "-"
         )}
@@ -150,7 +151,7 @@ const JoiningRow: React.FC<{
         )}
       </td>
       <td className="px-4 py-2.5">
-        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${offer.JoiningConfirmed ? "bg-green-500/10 text-green-600 border-green-500/30" : "bg-muted text-muted-foreground border-border"}`}>
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border ${offer.JoiningConfirmed ? "bg-green-500/10 text-green-600 border-green-500/30" : "bg-muted text-muted-foreground border-border"}`}>
           {offer.JoiningConfirmed ? "Joined" : "Pending"}
         </span>
       </td>
@@ -159,7 +160,7 @@ const JoiningRow: React.FC<{
           <button
             onClick={() => date && mutation.mutate()}
             disabled={!date || mutation.isPending}
-            className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-primary text-primary-foreground disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+            className="text-xs font-semibold px-3 py-1.5 rounded-lg btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
           >
             {offer.JoiningConfirmed ? "Update" : "Confirm"}
           </button>
@@ -196,13 +197,13 @@ const LetterBodyTab: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
     <div className="bg-card border border-border rounded-xl p-5 space-y-4 mt-4">
       <div>
         <h3 className="font-heading font-semibold text-foreground text-sm">Offer Letter Body</h3>
-        <p className="text-[11px] text-muted-foreground mt-0.5">
+        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
           This text is merged with each offer's data (via the placeholders below) when you click "Generate" on a record.
         </p>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {TEMPLATE_PLACEHOLDERS.map((p) => (
-          <span key={p} className="text-[11px] font-mono px-2 py-0.5 rounded-full border" style={{ borderColor: `${HR_PAYROLL_ACCENT}33`, color: HR_PAYROLL_ACCENT, backgroundColor: `${HR_PAYROLL_ACCENT}0D` }}>
+          <span key={p} className="text-[0.6875rem] font-mono px-2 py-0.5 rounded-full border" style={{ borderColor: `${HR_PAYROLL_ACCENT}33`, color: HR_PAYROLL_ACCENT, backgroundColor: `${HR_PAYROLL_ACCENT}0D` }}>
             {`{{${p}}}`}
           </span>
         ))}
@@ -220,7 +221,7 @@ const LetterBodyTab: React.FC<{ canEdit: boolean }> = ({ canEdit }) => {
             type="button"
             onClick={() => mutation.mutate(currentBody)}
             disabled={mutation.isPending || !currentBody.trim()}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg btn-module text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {mutation.isPending ? "Saving…" : "Save Letter Body"}
           </button>
@@ -423,7 +424,7 @@ const OfferLetterJoining: React.FC = () => {
                         ))}
                       </select>
                       {selectedCandidates.length === 0 && (
-                        <p className="text-[11px] text-muted-foreground mt-1">No candidates marked "Selected" in Interview yet.</p>
+                        <p className="text-[0.6875rem] text-muted-foreground mt-1">No candidates marked "Selected" in Interview yet.</p>
                       )}
                     </div>
                     <div>
@@ -434,7 +435,7 @@ const OfferLetterJoining: React.FC = () => {
 
                   {selectedCandidate && (
                     <div className="rounded-lg border p-4" style={{ borderColor: `${HR_PAYROLL_ACCENT}33`, backgroundColor: `${HR_PAYROLL_ACCENT}0D` }}>
-                      <p className="text-[11px] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `${HR_PAYROLL_ACCENT}33` }}>
+                      <p className="text-[0.6875rem] uppercase tracking-widest font-heading font-semibold pb-2 mb-2 border-b" style={{ color: HR_PAYROLL_ACCENT, borderColor: `${HR_PAYROLL_ACCENT}33` }}>
                         Candidate Details
                       </p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 text-xs">
@@ -482,11 +483,11 @@ const OfferLetterJoining: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
                       <label className={labelCls}>Date of Join</label>
-                      <input type="date" className={inputCls} value={form.dateOfJoin} onChange={(e) => setField("dateOfJoin", e.target.value)} />
+                      <DateInput className={inputCls} value={form.dateOfJoin} onChange={(e) => setField("dateOfJoin", e.target.value)} />
                     </div>
                     <div>
                       <label className={labelCls}>Document Date *</label>
-                      <input type="date" className={inputCls} value={form.documentDate} onChange={(e) => setField("documentDate", e.target.value)} />
+                      <DateInput className={inputCls} value={form.documentDate} onChange={(e) => setField("documentDate", e.target.value)} />
                     </div>
                   </div>
 
@@ -501,7 +502,7 @@ const OfferLetterJoining: React.FC = () => {
                   </div>
 
                   <div className="flex justify-end gap-2">
-                    <button type="submit" className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity">
+                    <button type="submit" className="inline-flex items-center gap-1.5 text-xs font-semibold px-4 py-2 rounded-lg btn-module text-white hover:opacity-90 transition-opacity">
                       {editingId ? "Update Offer Letter" : "Save Offer Letter"}
                     </button>
                   </div>
@@ -512,7 +513,7 @@ const OfferLetterJoining: React.FC = () => {
                 <div className="flex items-center justify-between px-5 py-3.5 border-b border-border">
                   <div>
                     <h3 className="font-heading font-semibold text-foreground text-sm">Offer Letter Records</h3>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{rows.length} record{rows.length !== 1 ? "s" : ""}</p>
+                    <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{rows.length} record{rows.length !== 1 ? "s" : ""}</p>
                   </div>
                   <ExportMenu data={offerExportData} columns={offerExportColumns} title="Offer Letter" filename="offer-letter" disabled={rows.length === 0} />
                 </div>
@@ -520,12 +521,12 @@ const OfferLetterJoining: React.FC = () => {
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="border-b border-border bg-muted/30">
-                        <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
-                        <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Candidate</th>
-                        <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Company</th>
-                        <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Fin Year</th>
-                        <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Date of Join</th>
-                        <th className="px-4 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
+                        <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
+                        <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Candidate</th>
+                        <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Company</th>
+                        <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Fin Year</th>
+                        <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Date of Join</th>
+                        <th className="px-4 py-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -539,7 +540,7 @@ const OfferLetterJoining: React.FC = () => {
                           <td className="px-4 py-2.5 font-mono text-xs">{r.DocNo}</td>
                           <td className="px-4 py-2.5">
                             <div className="font-medium">{r.CandidateName}</div>
-                            <div className="text-[11px] text-muted-foreground">{r.CandidateCode}</div>
+                            <div className="text-[0.6875rem] text-muted-foreground">{r.CandidateCode}</div>
                           </td>
                           <td className="px-4 py-2.5 hidden sm:table-cell">{r.CompanyName || "-"}</td>
                           <td className="px-4 py-2.5 hidden sm:table-cell">{r.FinYearName || "-"}</td>
@@ -575,20 +576,20 @@ const OfferLetterJoining: React.FC = () => {
             <div className="bg-card border border-border rounded-xl overflow-hidden mt-4">
               <div className="px-5 py-3.5 border-b border-border">
                 <h3 className="font-heading font-semibold text-foreground text-sm">Joining</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Confirm each candidate's actual date of joining</p>
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">Confirm each candidate's actual date of joining</p>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/30">
-                      <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Candidate</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Company</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Offered Date</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Actual Date of Joining</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell">Remarks</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
-                      {rights.canEdit && <th className="px-4 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Action</th>}
+                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
+                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Candidate</th>
+                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Company</th>
+                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">Offered Date</th>
+                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Actual Date of Joining</th>
+                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell">Remarks</th>
+                      <th className="px-4 py-3 text-left text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
+                      {rights.canEdit && <th className="px-4 py-3 text-right text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Action</th>}
                     </tr>
                   </thead>
                   <tbody>

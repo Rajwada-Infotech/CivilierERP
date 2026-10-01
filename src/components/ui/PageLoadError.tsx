@@ -221,13 +221,13 @@ const PageLoadError = ({ message, onRetry }: PageLoadErrorProps) => {
           transition={{ duration: 0.5 }}
           className="w-full flex items-center justify-between border border-border/50 px-4 py-2 rounded-md bg-card/40 backdrop-blur-sm"
         >
-          <span className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">
+          <span className="font-mono text-[0.625rem] text-muted-foreground tracking-widest uppercase">
             Civilier ERP
           </span>
-          <span className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">
+          <span className="font-mono text-[0.625rem] text-muted-foreground tracking-widest uppercase">
             DWG-ERR · REV 0
           </span>
-          <span className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">
+          <span className="font-mono text-[0.625rem] text-muted-foreground tracking-widest uppercase">
             Fault Sheet
           </span>
         </motion.div>
@@ -248,7 +248,7 @@ const PageLoadError = ({ message, onRetry }: PageLoadErrorProps) => {
             <div className="w-px flex-1 bg-primary/40" />
             <div className="w-3 h-px bg-primary/60" />
             <div
-              className="font-mono text-[9px] text-primary/60 my-1 tracking-widest"
+              className="font-mono text-[0.5625rem] text-primary/60 my-1 tracking-widest"
               style={{ writingMode: "vertical-rl" }}
             >
               STATUS: FAULT
@@ -268,7 +268,7 @@ const PageLoadError = ({ message, onRetry }: PageLoadErrorProps) => {
             <div className="w-px flex-1 bg-primary/40" />
             <div className="w-3 h-px bg-primary/60" />
             <div
-              className="font-mono text-[9px] text-primary/60 my-1 tracking-widest"
+              className="font-mono text-[0.5625rem] text-primary/60 my-1 tracking-widest"
               style={{ writingMode: "vertical-rl" }}
             >
               DATA: NULL
@@ -286,7 +286,7 @@ const PageLoadError = ({ message, onRetry }: PageLoadErrorProps) => {
             transition={{ duration: 0.8, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
           >
             <div className="h-px flex-1 bg-primary/40" />
-            <span className="font-mono text-[9px] text-primary/60 mx-2 tracking-widest whitespace-nowrap">
+            <span className="font-mono text-[0.5625rem] text-primary/60 mx-2 tracking-widest whitespace-nowrap">
               LOAD.ERR
             </span>
             <div className="h-px flex-1 bg-primary/40" />
@@ -388,7 +388,7 @@ const PageLoadError = ({ message, onRetry }: PageLoadErrorProps) => {
             transition={{ duration: 0.8, delay: 0.15, ease: [0.16, 1, 0.3, 1] }}
           >
             <div className="h-px flex-1 bg-primary/40" />
-            <span className="font-mono text-[9px] text-primary/60 mx-2 tracking-widest whitespace-nowrap">
+            <span className="font-mono text-[0.5625rem] text-primary/60 mx-2 tracking-widest whitespace-nowrap">
               FAILED TO LOAD
             </span>
             <div className="h-px flex-1 bg-primary/40" />
@@ -409,7 +409,7 @@ const PageLoadError = ({ message, onRetry }: PageLoadErrorProps) => {
               animate={{ scale: [1, 1.4, 1], opacity: [1, 0.5, 1] }}
               transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
             />
-            <span className="font-mono text-[10px] text-muted-foreground tracking-widest uppercase">
+            <span className="font-mono text-[0.625rem] text-muted-foreground tracking-widest uppercase">
               Data Error · Site Notice
             </span>
           </div>
@@ -482,13 +482,13 @@ const PageLoadError = ({ message, onRetry }: PageLoadErrorProps) => {
           transition={{ duration: 0.6, delay: 0.9 }}
           className="w-full flex items-center justify-between border-t border-border/30 pt-3"
         >
-          <span className="font-mono text-[9px] text-muted-foreground/50 tracking-widest uppercase">
+          <span className="font-mono text-[0.5625rem] text-muted-foreground/50 tracking-widest uppercase">
             Scale: N/A
           </span>
-          <span className="font-mono text-[9px] text-muted-foreground/50 tracking-widest uppercase">
+          <span className="font-mono text-[0.5625rem] text-muted-foreground/50 tracking-widest uppercase">
             Checked: System
           </span>
-          <span className="font-mono text-[9px] text-muted-foreground/50 tracking-widest uppercase">
+          <span className="font-mono text-[0.5625rem] text-muted-foreground/50 tracking-widest uppercase">
             Status: Load Failed
           </span>
         </motion.div>

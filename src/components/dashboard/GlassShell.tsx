@@ -198,7 +198,7 @@ export const GlassCard: React.FC<{
       <div className="relative z-10 p-4">
         <div className="flex items-start justify-between gap-2 mb-3">
           <p
-            className="text-[10px] font-heading font-semibold uppercase tracking-widest"
+            className="text-[0.625rem] font-heading font-semibold uppercase tracking-widest"
             style={{ color: accentColor, opacity: 0.85 }}
           >
             {label}
