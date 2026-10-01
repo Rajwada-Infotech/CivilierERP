@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { escapeHtml, safeHtml } from "@/utils/escapeHtml";
+import { downloadMasterPreviewPdf } from "@/utils/masterPreviewPrint";
 import { printStatusLabel } from "@/utils/printStatus";
 import { DocumentChainPanel } from "@/components/material/DocumentChainPanel";
 import { MaterialShell } from "@/components/material/MaterialShell";
@@ -86,6 +87,7 @@ import {
   Truck,
   Link2,
   Printer,
+  FileDown,
   Receipt,
   ChevronDown,
   CalendarDays,
@@ -2222,6 +2224,109 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
     };
   };
 
+  // Downloads a .pdf for a PO, built from the same fields as
+  // handlePrintFromPreview above (Supplier/Company/Project, Order Items,
+  // tax breakdown, Remarks). `poIn` is whatever triggered this — a grid
+  // row (list query, no LineItems) or the already-fully-loaded preview
+  // panel (viewingPO, has LineItems/POItems) — so it always refetches the
+  // full record when LineItems/POItems isn't already present, the same
+  // way the Eye/view click above does, otherwise Order Items would be
+  // silently missing from a PDF generated straight from the grid.
+  const handleGeneratePdf = async (poIn: any) => {
+    const toastId = toast.loading("Generating PDF...");
+    let po = poIn;
+    const id = poIn._id ?? poIn.PurchaseOrderID ?? poIn.purchaseOrderId;
+    if (!Array.isArray(poIn.LineItems) && !Array.isArray(poIn.POItems) && id) {
+      try {
+        po = await getPurchaseOrderById(id);
+      } catch {
+        // fall back to whatever was passed in — PDF still generates,
+        // just without the Order Items section.
+      }
+    }
+
+    const supplierName = po.SupplierName ?? po.supplierName ?? "—";
+    const companyName = po.CompanyName ?? po.companyName ?? "—";
+    const projectName = po.ProjectName ?? po.projectName ?? "—";
+    const poNumber = po.PurchaseOrderNo ?? po.poNumber ?? "—";
+    const poDate = po.PODate ?? po.poDate ?? "";
+    const expectedDate = po.ExpectedDeliveryDate ?? "";
+    const poStatus = po.Status ?? po.status ?? "Draft";
+    const remarks = po.Remarks ?? po.remarks ?? "";
+    const payTerms = po.PaymentTerms ?? po.paymentTerms ?? "";
+
+    const lineItemsArr: any[] = Array.isArray(po.LineItems)
+      ? po.LineItems
+      : Array.isArray(po.POItems)
+        ? po.POItems
+        : [];
+
+    const itemFields = lineItemsArr.map((li: any, i: number) => {
+      const name = li.ItemName ?? li.itemName ?? li.Description ?? "—";
+      const qty = Number(li.Quantity ?? li.quantity ?? 0);
+      const unit = li.UomName ?? li.UOMSymbol ?? li.unit ?? "—";
+      const rate = Number(li.Rate ?? li.rate ?? 0);
+      const tax = Number(li.TaxPct ?? li.gstRate ?? li.tax ?? 0);
+      const amt = Number(li.LineAmount ?? li.amount ?? qty * rate);
+      return {
+        label: `${i + 1}. ${name}`,
+        value: `${qty.toLocaleString("en-IN")} ${unit} × ${fmt(rate)}${tax > 0 ? ` (+${tax}% GST)` : ""} = ${fmt(amt)}`,
+      };
+    });
+
+    const grandTotal = Number(po.TotalAmount ?? po.totalAmount ?? 0);
+    const subtotalVal = lineItemsArr.reduce(
+      (s: number, li: any) => s + Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0),
+      0,
+    );
+    let totalCgstVal = 0;
+    let totalSgstVal = 0;
+    let totalIgstVal = 0;
+    for (const li of lineItemsArr) {
+      const base = Number(li.Quantity ?? li.quantity ?? 0) * Number(li.Rate ?? li.rate ?? 0);
+      totalCgstVal += (base * Number(li.CgstRate ?? li.cgstRate ?? 0)) / 100;
+      totalSgstVal += (base * Number(li.SgstRate ?? li.sgstRate ?? 0)) / 100;
+      totalIgstVal += (base * Number(li.IgstRate ?? li.igstRate ?? 0)) / 100;
+    }
+
+    const sections = [
+      {
+        title: "Overview",
+        fields: [
+          { label: "Supplier", value: supplierName },
+          { label: "Company", value: companyName },
+          { label: "Project / Site", value: projectName },
+          { label: "PO Date", value: poDate ? fmtDate(poDate) : "—" },
+          { label: "Expected Delivery", value: expectedDate ? fmtDate(expectedDate) : "—" },
+          { label: "Payment Terms", value: payTerms || "—" },
+        ],
+      },
+      ...(itemFields.length > 0 ? [{ title: `Order Items (${itemFields.length})`, fields: itemFields }] : []),
+      {
+        title: "Totals",
+        fields: [
+          { label: "Subtotal (excl. GST)", value: fmt(subtotalVal) },
+          ...(totalCgstVal > 0 ? [{ label: "CGST", value: fmt(totalCgstVal) }] : []),
+          ...(totalSgstVal > 0 ? [{ label: "SGST", value: fmt(totalSgstVal) }] : []),
+          ...(totalIgstVal > 0 ? [{ label: "IGST", value: fmt(totalIgstVal) }] : []),
+          { label: "Grand Total", value: fmt(grandTotal) },
+        ],
+      },
+      ...(remarks ? [{ title: "Remarks", fields: [{ label: "Remarks", value: remarks }] }] : []),
+    ];
+
+    downloadMasterPreviewPdf({
+      title: String(poNumber),
+      subtitle: "Purchase Order",
+      code: String(poNumber),
+      status: String(poStatus),
+      sections,
+      filename: `${String(poNumber).replace(/[^\w-]+/g, "_")}.pdf`,
+    })
+      .then(() => toast.success("PDF downloaded", { id: toastId }))
+      .catch(() => toast.error("Could not generate PDF", { id: toastId }));
+  };
+
   // ── Auto-fetch details for preview pop-out ────────────────────────────────
   useEffect(() => {
     if (!viewingPO) {
@@ -2760,6 +2865,13 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                           >
                             <Eye size={15} />
                           </button>
+                          <button
+                            onClick={() => handleGeneratePdf(item)}
+                            className="p-1 rounded text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+                            title="Generate PDF"
+                          >
+                            <FileDown size={15} />
+                          </button>
                           {rights.canDelete && (
                             <button
                               onClick={() => handleDelete(item._id)}
@@ -3039,6 +3151,12 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
                   >
                     <Printer size={13} /><span className="hidden sm:inline">Print</span>
+                  </button>
+                  <button
+                    onClick={() => handleGeneratePdf(viewingPO)}
+                    className="inline-flex items-center gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg border border-border text-xs font-semibold text-foreground hover:bg-muted transition-colors"
+                  >
+                    <FileDown size={13} /><span className="hidden sm:inline">Generate PDF</span>
                   </button>
                   {rights.canEdit && viewingPO.Status !== "Short Closed" && (
                     <button
