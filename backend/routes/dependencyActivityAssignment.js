@@ -94,6 +94,34 @@ async function forkAssignmentForRework(tx, oldAssignmentId, rungId, reason, sour
 // which passes ?dependencyMasterId= to show just the saved flow for the
 // chain currently picked there — so the gate accepts either page's view
 // right rather than only Reporting's.
+//
+// This used to have no cap at all — every IsCurrent = 1 row, unconditionally,
+// each one also running 4 correlated subqueries (engineer/QC names, QC
+// status, materials). Fine at a few hundred rows; a full scan + per-row
+// subquery fan-out over everything the system has ever logged gets
+// materially slower every day as more activities accumulate, independent
+// of any one page load's filters. Added:
+//   - projectId / fromDate / toDate — optional, additive filters so a
+//     caller that DOES know its scope (Reporting's own project picker, a
+//     future "today's log" view) can narrow the DB-side work, not just
+//     filter client-side after the fact.
+//   - page/limit — real OFFSET/FETCH pagination. Defaults to the most
+//     recently touched rows (see DEFAULT_LIMIT below) when the caller
+//     doesn't ask for a specific page, so even an unscoped call is bounded
+//     instead of unconditionally returning the entire table — this is the
+//     actual fix for the unbounded-growth problem; the filters above are
+//     for callers that can do better than "most recent N".
+// Response shape is unchanged (a plain array) for every existing caller —
+// MAX_LIMIT just keeps a malicious/misconfigured limit from asking for the
+// whole table in one page.
+// Current dev data is ~214 rows total, so 2000 keeps today's unscoped
+// callers (Reporting's full list) behaving exactly as before — this is a
+// ceiling against unbounded future growth, not a page size tuned for
+// today's volume. Revisit downward once Reporting gets its own
+// project/date picker wired to the filters above and can ask for a
+// properly scoped page instead of "everything, capped".
+const DEFAULT_LIMIT = 2000;
+const MAX_LIMIT = 5000;
 router.get(
   "/",
   authMiddleware,
@@ -101,6 +129,12 @@ router.get(
   async (req, res) => {
   const dependencyMasterId = req.query.dependencyMasterId ? parseInt(req.query.dependencyMasterId, 10) : null;
   const statusFilter = req.query.status ? String(req.query.status).toUpperCase() : null;
+  const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
+  const fromDate = req.query.fromDate ? String(req.query.fromDate) : null;
+  const toDate = req.query.toDate ? String(req.query.toDate) : null;
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = Math.min(MAX_LIMIT, Math.max(1, parseInt(req.query.limit, 10) || DEFAULT_LIMIT));
+  const offset = (page - 1) * limit;
   try {
     const pool = await getPool();
     const request = pool.request();
@@ -116,6 +150,20 @@ router.get(
       request.input("statusFilter", sql.NVarChar(20), statusFilter);
       conds.push("daa.Status = @statusFilter");
     }
+    if (Number.isFinite(projectId)) {
+      request.input("projectId", sql.Int, projectId);
+      conds.push("dm.ProjectId = @projectId");
+    }
+    if (fromDate && !Number.isNaN(Date.parse(fromDate))) {
+      request.input("fromDate", sql.Date, fromDate);
+      conds.push("daa.UpdatedAt >= @fromDate");
+    }
+    if (toDate && !Number.isNaN(Date.parse(toDate))) {
+      request.input("toDate", sql.Date, toDate);
+      conds.push("daa.UpdatedAt < DATEADD(DAY, 1, @toDate)");
+    }
+    request.input("limit", sql.Int, limit);
+    request.input("offset", sql.Int, offset);
     const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
     const r = await request.query(`
       SELECT
@@ -185,6 +233,7 @@ router.get(
       LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
       ${where}
       ORDER BY daa.UpdatedAt DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
     const rows = r.recordset.map(({ materialsJson, ...row }) => ({
       ...row,
