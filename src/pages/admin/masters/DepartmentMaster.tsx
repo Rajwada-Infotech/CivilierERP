@@ -237,10 +237,10 @@ const DepartmentMaster: React.FC = () => {
             win.document.write(safeHtml`
               <html><head><title>Department — ${row.departmentName}</title>
               <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-              </head><body><h2>Department</h2><table>
+              </head><body><h2>Department</h2><div className="overflow-x-auto thin-scroll"><table>
                 <tr><td>Department Name</td><td>${row.departmentName || "—"}</td></tr>
                 <tr><td>Status</td><td>${row.isActive ? "Active" : "Inactive"}</td></tr>
-              </table></body></html>
+              </table></div></body></html>
             `);
             win.document.close();
             win.print();

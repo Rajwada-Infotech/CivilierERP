@@ -1096,9 +1096,9 @@ const InboxRow: React.FC<{
         />
         {/* Wide screens: one table row. Narrower: a card — module on top,
             labelled details in a grid, actions on their own line. */}
-        <div className={`flex-1 min-w-0 ai-row grid grid-cols-2 sm:grid-cols-3 items-center gap-x-3 gap-y-2.5 pl-3 pr-3 sm:pr-4 py-3.5`}>
+        <div className="flex-1 min-w-0 ai-row">
         {/* Col 1 — Module */}
-        <div className="ai-span col-span-2 sm:col-span-3 flex items-center gap-3 min-w-0">
+        <div className="ai-c-mod flex items-center gap-3 min-w-0">
           <div className={`p-2.5 rounded-xl shrink-0 shadow-sm ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
             <Icon size={15} />
           </div>
@@ -1112,14 +1112,17 @@ const InboxRow: React.FC<{
           </div>
         </div>
 
+        {/* Details group — separate table columns on wide screens
+            (display: contents), one compact dotted line otherwise. */}
+        <div className="ai-meta">
         {/* Col 2 — Date */}
-        <div>
+        <div className="ai-c-date">
           <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Date</span>
           <p className="text-xs font-medium text-foreground">{fmtDate(item.RecordDate)}</p>
         </div>
 
         {/* Col 3 — Party / Transfer route */}
-        <div className="min-w-0">
+        <div className="ai-c-party min-w-0">
         <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Party / Transfer</span>
         {item.Module === "goods-receipt" && item.SourceTransferDocNo ? (
           <div className="flex flex-col gap-0.5 min-w-0">
@@ -1189,7 +1192,7 @@ const InboxRow: React.FC<{
         </div>
 
         {/* Col 4 — Project */}
-        <div className="min-w-0">
+        <div className="ai-c-project min-w-0">
           <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Project</span>
           {item.ProjectName ? (
             <span className="inline-flex items-center gap-1 text-[0.6875rem] font-medium text-foreground truncate max-w-full" title={item.ProjectName}>
@@ -1202,7 +1205,7 @@ const InboxRow: React.FC<{
         </div>
 
         {/* Col 5 — Amount */}
-        <div className="min-w-0">
+        <div className="ai-c-amount min-w-0">
         <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Amount</span>
         <div className="inline-flex items-center px-2 py-1 rounded-lg bg-foreground/5 border border-border/60">
           <p className="text-[0.8125rem] font-mono font-bold text-foreground tabular-nums">
@@ -1212,7 +1215,7 @@ const InboxRow: React.FC<{
         </div>
 
         {/* Col 6 — Approved/Rejected By */}
-        <div className="min-w-0">
+        <div className="ai-c-by min-w-0">
         <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Approved / Rejected by</span>
         <div className="flex items-center gap-1.5 min-w-0">
           {approvedBy && (
@@ -1231,8 +1234,10 @@ const InboxRow: React.FC<{
         </div>
         </div>
 
+        </div>
+
         {/* Col 7 — Status */}
-        <div>
+        <div className="ai-c-status">
           <span className="ai-label block text-[0.625rem] uppercase tracking-widest text-muted-foreground mb-0.5">Status</span>
           <div className="flex items-center">
             <StatusBadge status={item.Status} />
@@ -1240,7 +1245,7 @@ const InboxRow: React.FC<{
         </div>
 
         {/* Col 8 — Actions */}
-        <div className="ai-span ai-actions col-span-2 sm:col-span-3 flex flex-wrap items-center justify-end gap-2 pt-2.5 border-t border-border/60 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
+        <div className="ai-c-actions flex items-center gap-1.5 [&_button]:!filter-none [&_button]:!backdrop-filter-none">
           {actions}
         </div>
         </div>
@@ -1516,7 +1521,7 @@ const ApprovalInbox: React.FC = () => {
                   "Party / Transfer",
                   "Project",
                   "Amount",
-                  "Approved/Rejected By",
+                  "Approved / Rejected By",
                   "Status",
                   "Actions",
                 ].map((h) => (

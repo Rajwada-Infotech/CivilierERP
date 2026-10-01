@@ -430,7 +430,7 @@ export default function PostApprovalRights() {
                 No pages currently support post-approval editing.
               </p>
             ) : (
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto thin-scroll"><table className="w-full text-sm">
                 <thead>
                   <tr className="bg-muted/30 border-b border-border text-xs uppercase tracking-wide">
                     <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground">Page</th>
@@ -465,7 +465,7 @@ export default function PostApprovalRights() {
                     );
                   })}
                 </tbody>
-              </table>
+              </table></div>
             )}
           </div>
         )}

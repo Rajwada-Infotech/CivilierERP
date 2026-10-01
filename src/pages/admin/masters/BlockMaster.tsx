@@ -516,11 +516,11 @@ const BlockMaster: React.FC = () => {
           win.document.write(safeHtml`
             <html><head><title>Block — ${row.blockName}</title>
             <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-            </head><body><h2>Block Card</h2><table>
+            </head><body><h2>Block Card</h2><div className="overflow-x-auto thin-scroll"><table>
               <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
               <tr><td>Block Name</td><td>${row.blockName || "—"}</td></tr>
               <tr><td>Status</td><td>${row.status ? "Active" : "Inactive"}</td></tr>
-            </table></body></html>
+            </table></div></body></html>
           `);
           win.document.close();
           win.print();

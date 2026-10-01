@@ -139,26 +139,26 @@ function YearCard({
         style={{ background: `linear-gradient(90deg, ${accentColor}, transparent)` }}
       />
 
-      <div className="p-5 space-y-4">
+      <div className="p-4 space-y-3.5">
         {/* Title row */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
               style={{ background: `${accentColor}15`, border: `1px solid ${accentColor}25` }}
             >
               <CalendarRange size={16} style={{ color: accentColor }} />
             </div>
-            <div>
-              <p className="text-base font-bold text-foreground font-heading leading-tight">
+            <div className="min-w-0">
+              <p className="text-base font-bold text-foreground font-heading leading-tight whitespace-nowrap">
                 {fy.year}
               </p>
-              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">Financial Year</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5 whitespace-nowrap">Financial Year</p>
             </div>
           </div>
 
           {/* Badges */}
-          <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <div className="flex flex-wrap items-center justify-end gap-1 shrink-0 max-w-[50%]">
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${statusCls}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-emerald-500" : "bg-slate-400"}`} />
               {fy.status}
@@ -171,7 +171,7 @@ function YearCard({
         </div>
 
         {/* Date range */}
-        <div className="rounded-xl bg-muted/40 border border-border/60 px-3.5 py-2.5 flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="rounded-xl bg-muted/40 border border-border/60 px-3 py-2 flex items-center gap-2 text-xs text-muted-foreground whitespace-nowrap">
           <CalendarDays size={12} className="shrink-0 text-blue-500/70" />
           <span className="font-medium text-foreground">{fmtDate(fy.startDate)}</span>
           <span className="text-muted-foreground/40 mx-0.5">→</span>
@@ -596,7 +596,7 @@ export default function FinYearRights() {
             )}
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))]">
             {filtered.map((fy) => (
               <YearCard
                 key={fy.id}

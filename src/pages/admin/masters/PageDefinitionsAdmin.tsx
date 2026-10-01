@@ -439,7 +439,7 @@ export default function PageDefinitionsAdmin() {
               No page definitions found
             </div>
           ) : (
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto thin-scroll"><table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
                   <th className="px-4 py-2.5 text-left font-heading font-semibold text-muted-foreground uppercase tracking-wide text-[0.625rem]">
@@ -550,7 +550,7 @@ export default function PageDefinitionsAdmin() {
                   );
                 })}
               </tbody>
-            </table>
+            </table></div>
           )}
         </div>
       </AdminShell>

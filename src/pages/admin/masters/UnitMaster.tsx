@@ -583,7 +583,7 @@ const UnitMaster: React.FC = () => {
           win.document.write(safeHtml`
             <html><head><title>Unit — ${row.unitName}</title>
             <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
-            </head><body><h2>Unit Card</h2><table>
+            </head><body><h2>Unit Card</h2><div className="overflow-x-auto thin-scroll"><table>
               <tr><td>Project</td><td>${row.projectName || "—"}</td></tr>
               <tr><td>Block</td><td>${row.blockName || "—"}</td></tr>
               <tr><td>Unit Name</td><td>${row.unitName || "—"}</td></tr>
@@ -597,7 +597,7 @@ const UnitMaster: React.FC = () => {
               <tr><td>Base Price</td><td>${(() => { const r = parseFloat(row.ratePerSqFt as string); const s = parseFloat(row.superBuiltUpAreaSqFt as string); return !isNaN(r) && !isNaN(s) && r > 0 && s > 0 ? "₹ " + Math.round(r * s).toLocaleString("en-IN") : "—"; })()}</td></tr>
               <tr><td>Payment Plans</td><td>${row.paymentPlanNames || "—"}</td></tr>
               <tr><td>Status</td><td>${row.status || "—"}</td></tr>
-            </table></body></html>
+            </table></div></body></html>
           `);
           win.document.close();
           win.print();
