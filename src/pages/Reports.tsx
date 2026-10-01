@@ -1373,7 +1373,7 @@ const ALL_REPORTS: ReportDef[] = [
   {
     id: "tds-report",
     label: "TDS Report",
-    description: "TDS actually deducted on payments — invoice-linked & direct",
+    description: "TDS deducted on payments, plus every broker/commission payment regardless of TDS",
     icon: Percent,
     color: "#eab308",
     apiPath: "/api/reports/tds",

@@ -1,5 +1,5 @@
 import React from "react";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown, Search, Layers, X as XIcon } from "lucide-react";
 import type { ExpenseOption } from "../types";
 import type { PayableJVLine } from "@/api/journalVoucherApi";
 
@@ -18,6 +18,9 @@ export function ExpenseBookingPicker({
   selectedJVLine = null,
   onJVLineSelect,
   onJVLineClear,
+  onMergeConfirm,
+  mergedSummary = null,
+  onMergeClear,
 }: {
   options: ExpenseOption[];
   value: string;
@@ -33,12 +36,31 @@ export function ExpenseBookingPicker({
   selectedJVLine?: PayableJVLine | null;
   onJVLineSelect?: (line: PayableJVLine) => void;
   onJVLineClear?: () => void;
+  /** "Merge invoices into one payment" — called with the full, validated
+   *  selection once the user confirms. Only offered for plain Bookings
+   *  (not EMI installments), since those pay via their own schedule. */
+  onMergeConfirm?: (selected: ExpenseOption[]) => void;
+  /** The parent's currently-confirmed merge, if any — `value` alone can't
+   *  represent "3 invoices", so the trigger/footer read this instead once
+   *  a merge has actually been confirmed and the picker's own in-progress
+   *  checkbox state has reset. */
+  mergedSummary?: { count: number; totalAmount: number; label: string } | null;
+  onMergeClear?: () => void;
 }) {
   const [open, setOpen] = React.useState(false);
   const [search, setSearch] = React.useState("");
   const [source, setSource] = React.useState<"invoice" | "contract" | "jv">("invoice");
   const [typeFilter, setTypeFilter] = React.useState<"all" | "booking" | "emi" | "partial">("all");
+  const [mergeMode, setMergeMode] = React.useState(false);
+  const [mergeSelected, setMergeSelected] = React.useState<Set<string>>(new Set());
   const ref = React.useRef<HTMLDivElement>(null);
+
+  // Leaving merge mode (or closing the panel) drops whatever was half-picked
+  // — reopening always starts fresh rather than surfacing a stale selection.
+  const exitMergeMode = () => {
+    setMergeMode(false);
+    setMergeSelected(new Set());
+  };
 
   React.useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -49,7 +71,7 @@ export function ExpenseBookingPicker({
   }, []);
 
   const selected = options.find((o) => o.id === value);
-  const hasSelection = !!selected || !!selectedContract || !!selectedJVLine;
+  const hasSelection = !!selected || !!selectedContract || !!selectedJVLine || !!mergedSummary;
 
   const filteredJVLines = jvLines.filter((l) => {
     if (!search) return true;
@@ -87,6 +109,34 @@ export function ExpenseBookingPicker({
       return aP - bP;
     });
 
+  // Merge mode: only plain bookings (not EMI — those pay via their own
+  // installment schedule) are mergeable. The first invoice checked becomes
+  // the "anchor" that every other candidate must match on company, project
+  // and supplier — see the handler's description for why ("given they have
+  // to be of the same company the same project and the same supplier").
+  const mergeCandidates = options.filter((o) => o.type !== "emi");
+  const mergeAnchor = mergeCandidates.find((o) => mergeSelected.has(o.id)) ?? null;
+  const isMergeCompatible = (o: ExpenseOption) =>
+    !mergeAnchor ||
+    (o.companyId === mergeAnchor.companyId &&
+      o.projectId === mergeAnchor.projectId &&
+      !!o.supplierId &&
+      o.supplierId === mergeAnchor.supplierId);
+  const toggleMergeSelect = (o: ExpenseOption) => {
+    setMergeSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(o.id)) next.delete(o.id);
+      else if (isMergeCompatible(o)) next.add(o.id);
+      return next;
+    });
+  };
+  const mergeSelectedOptions = mergeCandidates.filter((o) => mergeSelected.has(o.id));
+  const mergeTotal = mergeSelectedOptions.reduce((sum, o) => {
+    const payable = o.amount != null ? Math.max(0, o.amount - (o.tdsAmount ?? 0)) : 0;
+    const due = o.remainingAmount != null && o.remainingAmount > 0 && o.remainingAmount < payable ? o.remainingAmount : payable;
+    return sum + due;
+  }, 0);
+
   const filteredContracts = contracts.filter((c) => {
     if (!search) return true;
     const q = search.toLowerCase();
@@ -121,6 +171,15 @@ export function ExpenseBookingPicker({
             <span className="flex items-center gap-2 text-muted-foreground">
               <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               Loading…
+            </span>
+          ) : mergedSummary ? (
+            <span className="flex items-center gap-2 min-w-0">
+              <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-primary/10 text-primary border border-primary/20">
+                <Layers size={9} /> {mergedSummary.count}
+              </span>
+              <span className="font-mono text-xs text-primary font-semibold truncate">
+                {mergedSummary.label} · ₹{mergedSummary.totalAmount.toLocaleString("en-IN")}
+              </span>
             </span>
           ) : selectedJVLine ? (
             <span className="flex items-center gap-2 min-w-0">
@@ -209,7 +268,7 @@ export function ExpenseBookingPicker({
               </div>
               {/* Type filter pills — only for invoices */}
               {source === "invoice" && (
-                <div className="flex gap-1.5 flex-wrap">
+                <div className="flex gap-1.5 flex-wrap items-center">
                   {(["all", "booking", "emi", "partial"] as const).map((t) => {
                     const count = t === "all" ? options.length : t === "booking" ? bookingCount : t === "emi" ? emiCount : partialCount;
                     if (t === "partial" && count === 0) return null;
@@ -229,6 +288,21 @@ export function ExpenseBookingPicker({
                       </button>
                     );
                   })}
+                  {onMergeConfirm && (
+                    <button
+                      type="button"
+                      onClick={() => (mergeMode ? exitMergeMode() : setMergeMode(true))}
+                      title="Pay off several invoices from the same company, project &amp; supplier in one payment"
+                      className={`ml-auto flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[0.6875rem] font-heading font-semibold transition-all border ${
+                        mergeMode
+                          ? "bg-primary/10 text-primary border-primary/30"
+                          : "bg-muted text-muted-foreground border-border hover:border-primary/20"
+                      }`}
+                    >
+                      <Layers size={11} />
+                      {mergeMode ? "Cancel merge" : "Merge invoices"}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -238,9 +312,14 @@ export function ExpenseBookingPicker({
               {source === "invoice" ? (
                 filteredInvoices.length === 0 ? (
                   <div className="px-4 py-6 text-center text-xs text-muted-foreground">No matches found</div>
-                ) : filteredInvoices.map((o) => (
+                ) : filteredInvoices.map((o) => {
+                  const mergeDisabled = mergeMode && (o.type === "emi" || !isMergeCompatible(o));
+                  const mergeChecked = mergeMode && mergeSelected.has(o.id);
+                  return (
                   <button key={o.id} type="button"
+                    disabled={mergeDisabled}
                     onClick={() => {
+                      if (mergeMode) { toggleMergeSelect(o); return; }
                       const remaining = isPartiallyPaid(o) && (o.remainingAmount ?? 0) > 0
                         ? Number(o.remainingAmount)
                         : undefined;
@@ -250,16 +329,32 @@ export function ExpenseBookingPicker({
                       setOpen(false);
                       setSearch("");
                     }}
-                    className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${o.id === value ? "bg-primary/5" : ""}`}
+                    className={`w-full flex items-start gap-3 px-3 py-2.5 text-left transition-colors ${
+                      mergeDisabled ? "opacity-40 cursor-not-allowed" : "hover:bg-muted/50"
+                    } ${o.id === value || mergeChecked ? "bg-primary/5" : ""}`}
                   >
-                    <span className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${o.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
-                      {o.type === "emi" ? "EMI" : "EXB"}
-                    </span>
+                    {mergeMode ? (
+                      <span
+                        className={`shrink-0 mt-0.5 w-4 h-4 rounded border flex items-center justify-center ${
+                          mergeChecked ? "bg-primary border-primary" : "border-border"
+                        }`}
+                      >
+                        {mergeChecked && <span className="w-2 h-2 rounded-sm bg-white" />}
+                      </span>
+                    ) : (
+                      <span className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${o.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
+                        {o.type === "emi" ? "EMI" : "EXB"}
+                      </span>
+                    )}
                     <div className="min-w-0 flex-1">
                       <p className="font-mono text-xs font-semibold text-foreground truncate">{o.label}</p>
                       {o.projectName && <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{o.projectName}</p>}
                       {o.supplierName && o.supplierName !== o.projectName && <p className="text-[0.625rem] text-primary/60 mt-0.5 truncate">{o.supplierName}</p>}
                       {o.type === "emi" && o.installmentNo && <p className="text-[0.625rem] text-violet-500 mt-0.5">Installment #{o.installmentNo}</p>}
+                      {mergeMode && o.type === "emi" && <p className="text-[0.625rem] text-muted-foreground mt-0.5 italic">Not mergeable — paid via its own installments</p>}
+                      {mergeMode && o.type !== "emi" && mergeAnchor && !mergeChecked && !isMergeCompatible(o) && (
+                        <p className="text-[0.625rem] text-muted-foreground mt-0.5 italic">Different company/project/supplier</p>
+                      )}
                       {isPartiallyPaid(o) && (
                         <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-[#ffe2021a] text-amber-600 border border-amber-500/25">
                           <span className="w-1 h-1 rounded-full bg-amber-500 inline-block" />
@@ -293,7 +388,8 @@ export function ExpenseBookingPicker({
                       );
                     })()}
                   </button>
-                ))
+                  );
+                })
               ) : source === "contract" ? (
                 contractsLoading ? (
                 <div className="px-4 py-6 text-center text-xs text-muted-foreground flex items-center justify-center gap-2">
@@ -367,16 +463,48 @@ export function ExpenseBookingPicker({
               )}
             </div>
 
-            {/* Footer clear */}
-            {hasSelection && (
-              <div className="border-t border-border p-2">
-                <button type="button"
-                  onClick={() => { onChange(""); if (onContractClear) onContractClear(); if (onJVLineClear) onJVLineClear(); setOpen(false); setSearch(""); }}
-                  className="w-full text-xs text-muted-foreground hover:text-destructive transition-colors py-1"
-                >
-                  Clear selection
-                </button>
+            {/* Merge confirm bar — replaces the plain "Clear selection"
+                footer while merge mode is active. */}
+            {mergeMode ? (
+              <div className="border-t border-border p-2.5 flex items-center justify-between gap-2.5 bg-muted/20">
+                <span className="text-[0.6875rem] text-muted-foreground">
+                  {mergeSelectedOptions.length === 0
+                    ? "Check invoices to merge"
+                    : <>{mergeSelectedOptions.length} selected · <span className="font-mono font-semibold text-foreground">₹{mergeTotal.toLocaleString("en-IN")}</span></>}
+                </span>
+                <div className="flex items-center gap-1.5">
+                  <button type="button" onClick={exitMergeMode}
+                    className="px-2.5 py-1 rounded-lg text-xs text-muted-foreground hover:text-foreground transition-colors flex items-center gap-1"
+                  >
+                    <XIcon size={11} /> Cancel
+                  </button>
+                  <button type="button"
+                    disabled={mergeSelectedOptions.length < 2}
+                    onClick={() => {
+                      onMergeConfirm?.(mergeSelectedOptions);
+                      if (onContractClear) onContractClear();
+                      if (onJVLineClear) onJVLineClear();
+                      exitMergeMode();
+                      setOpen(false);
+                      setSearch("");
+                    }}
+                    className="px-3 py-1 rounded-lg text-xs font-heading font-semibold bg-primary text-primary-foreground disabled:opacity-40 disabled:cursor-not-allowed transition-opacity"
+                  >
+                    Merge {mergeSelectedOptions.length > 0 ? `(${mergeSelectedOptions.length})` : ""}
+                  </button>
+                </div>
               </div>
+            ) : (
+              hasSelection && (
+                <div className="border-t border-border p-2">
+                  <button type="button"
+                    onClick={() => { onChange(""); if (onContractClear) onContractClear(); if (onJVLineClear) onJVLineClear(); if (onMergeClear) onMergeClear(); setOpen(false); setSearch(""); }}
+                    className="w-full text-xs text-muted-foreground hover:text-destructive transition-colors py-1"
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              )
             )}
           </div>
         )}

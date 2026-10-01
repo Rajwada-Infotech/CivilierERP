@@ -267,6 +267,10 @@ const paymentBodySchema = z
       PImpsReference: optStr(100),
       PCardReference: optStr(100),
       PCardId: optInt,
+      // "Merge invoices" (migration 501) — this payment settles several
+      // ExpenseBooking invoices at once instead of the single PExpenseRef
+      // above. See services/paymentExpenseBookingLink.js.
+      ExpenseBookingIds: z.array(z.coerce.number().int().positive()).optional(),
     })
     .passthrough(),
   );
