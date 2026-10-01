@@ -50,6 +50,21 @@ const {
   getVehicleInOutItemsEnriched,
 } = require("../services/poVehicleGrnChain");
 
+// The entry/exit time pickers send a naive "YYYY-MM-DDTHH:MM" string — the
+// user's local (IST) wall-clock reading, with no timezone info attached.
+// `new Date(...)` on a string like that parses it against the SERVER
+// process's own timezone, which on this EC2 host is UTC — so "07:02" was
+// being read as 07:02 UTC (12:32 PM IST), well after the real IST "now",
+// and the future-time guard below rejected an exit time that was actually
+// hours in the past. Pin the offset explicitly instead of trusting
+// whatever TZ the Node process happens to be running under.
+const IST_OFFSET = "+05:30";
+function parseIstDateTime(value) {
+  if (!value) return null;
+  const hasOffset = /(Z|[+-]\d{2}:?\d{2})$/.test(value);
+  return new Date(hasOffset ? value : `${value}${IST_OFFSET}`);
+}
+
 const router = express.Router();
 
 // ── Rate-limit ────────────────────────────────────────────────────────────────
@@ -709,8 +724,11 @@ router.post("/", requirePageRight("vehicle-in-out", "create"), async (req, res) 
     return res.status(400).json({ error: "challanNo is required" });
   // Exit time is a backfill of when the vehicle actually left — never a
   // future appointment. The UI already caps the picker at "now", this is
-  // just the server-side backstop.
-  if (exitTime && new Date(exitTime).getTime() > Date.now())
+  // just the server-side backstop. Parsed via parseIstDateTime — the picker
+  // sends a naive "wall clock" string with no timezone, and comparing it
+  // raw against Date.now() reads it in the server process's own TZ (UTC on
+  // this host), not the IST it actually represents.
+  if (exitTime && parseIstDateTime(exitTime).getTime() > Date.now())
     return res.status(400).json({ error: "exitTime cannot be in the future" });
 
   const pool = getPool();
@@ -859,7 +877,7 @@ router.put("/:id", requirePageRight("vehicle-in-out", "edit"), async (req, res) 
     return res.status(400).json({ error: "vehicleNo is required" });
   if (!challanNo)
     return res.status(400).json({ error: "challanNo is required" });
-  if (exitTime && new Date(exitTime).getTime() > Date.now())
+  if (exitTime && parseIstDateTime(exitTime).getTime() > Date.now())
     return res.status(400).json({ error: "exitTime cannot be in the future" });
 
   try {
