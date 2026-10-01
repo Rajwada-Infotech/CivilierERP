@@ -91,20 +91,53 @@ async function getHsnRate(pool, hcode) {
 // resolves false rather than being misclassified as a works contract.
 async function resolveLandOwnedByBookingCustomer(pool, bookingId) {
   const result = await pool.request().input("bid", sql.Int, bookingId).query(`
+    -- Every constructed unit on this booking, not just its primary one.
+    --
+    -- This used to read b.UnitId alone. Migration 485 made a booking a header
+    -- with CrmBookingUnit lines, so a booking carrying several villas would
+    -- have had only its primary unit examined — the rest silently escaping the
+    -- works-contract test, and once a CONSTRUCTION_ON_CUSTOMER_LAND rule
+    -- exists, silently taking the wrong rate.
+    --
+    -- The UNION's second arm is the pre-485 fallback and is guarded on the
+    -- absence of lines, so a booking with lines cannot also pull in its
+    -- primary UnitId and double-count. UNION (not UNION ALL) de-duplicates the
+    -- same unit appearing twice.
+    WITH BookingUnits AS (
+      SELECT l.UnitId
+      FROM dbo.CrmBookingUnit l
+      WHERE l.BookingId = @bid AND l.Status = N'Active' AND l.UnitId IS NOT NULL
+      UNION
+      SELECT b.UnitId
+      FROM dbo.CrmBooking b
+      WHERE b.Id = @bid AND b.UnitId IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.CrmBookingUnit l2
+          WHERE l2.BookingId = @bid AND l2.Status = N'Active'
+        )
+    ),
+    BuyingCustomer AS (
+      SELECT a.CustomerId
+      FROM dbo.CrmBooking b
+      JOIN dbo.CrmApplication a ON a.Id = b.ApplicationId
+      WHERE b.Id = @bid
+    )
     SELECT
-      (SELECT COUNT(*) FROM dbo.PlotMaster p WHERE p.ConvertedUnitId = b.UnitId AND p.IsActive = 1) AS SourcePlotCount,
       (SELECT COUNT(DISTINCT p.Id)
-       FROM dbo.PlotMaster p
-       JOIN dbo.CrmBookingPlot bp ON bp.PlotId = p.Id AND bp.Status = N'Active'
-       JOIN dbo.CrmBooking landBooking ON landBooking.Id = bp.BookingId
-       JOIN dbo.CrmApplication landApplication ON landApplication.Id = landBooking.ApplicationId
-       WHERE p.ConvertedUnitId = b.UnitId AND p.IsActive = 1
-         AND landBooking.IsActive = 1 AND landBooking.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
-         AND landApplication.CustomerId = currentApplication.CustomerId
+         FROM dbo.PlotMaster p
+         JOIN BookingUnits bu ON bu.UnitId = p.ConvertedUnitId
+         WHERE p.IsActive = 1) AS SourcePlotCount,
+      (SELECT COUNT(DISTINCT p.Id)
+         FROM dbo.PlotMaster p
+         JOIN BookingUnits bu ON bu.UnitId = p.ConvertedUnitId
+         JOIN dbo.CrmBookingPlot bp ON bp.PlotId = p.Id AND bp.Status = N'Active'
+         JOIN dbo.CrmBooking landBooking ON landBooking.Id = bp.BookingId
+         JOIN dbo.CrmApplication landApplication ON landApplication.Id = landBooking.ApplicationId
+         WHERE p.IsActive = 1
+           AND landBooking.IsActive = 1
+           AND landBooking.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
+           AND landApplication.CustomerId = (SELECT CustomerId FROM BuyingCustomer)
       ) AS CustomerOwnedPlotCount
-    FROM dbo.CrmBooking b
-    JOIN dbo.CrmApplication currentApplication ON currentApplication.Id = b.ApplicationId
-    WHERE b.Id = @bid AND b.UnitId IS NOT NULL
   `);
   const row = result.recordset[0];
   const sourceCount = Number(row?.SourcePlotCount || 0);
