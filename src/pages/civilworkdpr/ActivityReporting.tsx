@@ -193,94 +193,170 @@ function ChainGroupList({
             </button>
 
             {!collapsed && (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
-                      <th className="px-5 py-2">Activity</th>
-                      <th className="px-3 py-2">Engineer</th>
-                      <th className="px-3 py-2">Start Date</th>
-                      <th className="px-3 py-2">Material</th>
-                      <th className="px-3 py-2">Photos</th>
-                      <th className="px-5 py-2">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.rows.map((row) => (
-                      <tr
+              <>
+                {/* Mobile: one stacked card per rung — the 6-column table below
+                    is unreadable below ~640px (every cell squeezed to the
+                    point of wrapping single words), so phones get their own
+                    layout instead of a horizontally-scrolling table. */}
+                <div className="sm:hidden divide-y divide-border">
+                  {group.rows.map((row) => {
+                    const delay = startDelayInfo(row.startDate, row.firstReportedAt);
+                    return (
+                      <div
                         key={row.assignmentId}
                         onClick={() => openDetail(row, "overview")}
-                        className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer"
+                        className="p-3.5 active:bg-muted/30 cursor-pointer space-y-2.5"
                       >
-                        <td className="px-5 py-3">
-                          <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="text-sm font-medium text-foreground leading-snug min-w-0">
                             {row.sequenceNo}. {row.activityName}
-                            <QcBadge qcStatus={row.qcStatus} />
-                            <AttemptBadge attemptNo={row.attemptNo} />
                           </span>
-                        </td>
-                        <td className="px-3 py-3">
-                          <span className="flex items-center gap-1.5 text-xs text-foreground">
-                            <UserRound size={11} className="text-muted-foreground shrink-0" />
-                            {row.engineerNames || <span className="text-muted-foreground italic">Unassigned</span>}
+                          <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+                            <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <QcBadge qcStatus={row.qcStatus} />
+                          <AttemptBadge attemptNo={row.attemptNo} />
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                          <span className="flex items-center gap-1.5">
+                            <UserRound size={12} className="shrink-0" />
+                            {row.engineerNames || <span className="italic">Unassigned</span>}
                           </span>
-                        </td>
-                        <td className="px-3 py-3">
-                          <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
-                            <CalendarDays size={11} className="text-muted-foreground shrink-0" />
+                          <span className="flex items-center gap-1.5">
+                            <CalendarDays size={12} className="shrink-0" />
                             {row.startDate ? new Date(row.startDate).toLocaleDateString() : "—"}
                           </span>
-                          {(() => {
-                            const delay = startDelayInfo(row.startDate, row.firstReportedAt);
-                            if (!delay) return null;
-                            return (
-                              <span
-                                className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
-                                  delay.tone === "on-time"
-                                    ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                                    : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-                                }`}
-                              >
-                                {delay.label}
-                              </span>
-                            );
-                          })()}
-                        </td>
-                        <td className="px-3 py-3">
-                          {row.materials.length === 0 ? (
-                            <span className="text-xs text-muted-foreground italic">—</span>
-                          ) : (
-                            <div className="flex flex-col gap-0.5">
-                              {row.materials.map((m, i) => (
-                                <span key={i} className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
-                                  <Package size={11} className="text-muted-foreground shrink-0" />
-                                  {m.name}
-                                  <span className="text-muted-foreground">
-                                    · {m.quantity}
-                                    {m.uom ? ` ${m.uom}` : ""}
-                                  </span>
+                        </div>
+
+                        {delay && (
+                          <span
+                            className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                              delay.tone === "on-time"
+                                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                            }`}
+                          >
+                            {delay.label}
+                          </span>
+                        )}
+
+                        {row.materials.length > 0 && (
+                          <div className="flex flex-wrap gap-x-3 gap-y-1">
+                            {row.materials.map((m, i) => (
+                              <span key={i} className="flex items-center gap-1.5 text-xs text-foreground">
+                                <Package size={12} className="text-muted-foreground shrink-0" />
+                                {m.name}
+                                <span className="text-muted-foreground">
+                                  · {m.quantity}
+                                  {m.uom ? ` ${m.uom}` : ""}
                                 </span>
-                              ))}
-                            </div>
-                          )}
-                        </td>
-                        <td
-                          className="px-3 py-3"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openDetail(row, "photos");
-                          }}
-                        >
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div onClick={(e) => { e.stopPropagation(); openDetail(row, "photos"); }}>
                           <ActivityPhotosBadge rungId={row.rungId} />
-                        </td>
-                        <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
-                          <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
-                        </td>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Tablet/desktop: the original dense table. */}
+                <div className="hidden sm:block overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-[11px] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
+                        <th className="px-5 py-2">Activity</th>
+                        <th className="px-3 py-2">Engineer</th>
+                        <th className="px-3 py-2">Start Date</th>
+                        <th className="px-3 py-2">Material</th>
+                        <th className="px-3 py-2">Photos</th>
+                        <th className="px-5 py-2">Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {group.rows.map((row) => (
+                        <tr
+                          key={row.assignmentId}
+                          onClick={() => openDetail(row, "overview")}
+                          className="border-b border-border last:border-0 hover:bg-muted/20 cursor-pointer"
+                        >
+                          <td className="px-5 py-3">
+                            <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                              {row.sequenceNo}. {row.activityName}
+                              <QcBadge qcStatus={row.qcStatus} />
+                              <AttemptBadge attemptNo={row.attemptNo} />
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className="flex items-center gap-1.5 text-xs text-foreground">
+                              <UserRound size={11} className="text-muted-foreground shrink-0" />
+                              {row.engineerNames || <span className="text-muted-foreground italic">Unassigned</span>}
+                            </span>
+                          </td>
+                          <td className="px-3 py-3">
+                            <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
+                              <CalendarDays size={11} className="text-muted-foreground shrink-0" />
+                              {row.startDate ? new Date(row.startDate).toLocaleDateString() : "—"}
+                            </span>
+                            {(() => {
+                              const delay = startDelayInfo(row.startDate, row.firstReportedAt);
+                              if (!delay) return null;
+                              return (
+                                <span
+                                  className={`mt-1 inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
+                                    delay.tone === "on-time"
+                                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                                      : "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                                  }`}
+                                >
+                                  {delay.label}
+                                </span>
+                              );
+                            })()}
+                          </td>
+                          <td className="px-3 py-3">
+                            {row.materials.length === 0 ? (
+                              <span className="text-xs text-muted-foreground italic">—</span>
+                            ) : (
+                              <div className="flex flex-col gap-0.5">
+                                {row.materials.map((m, i) => (
+                                  <span key={i} className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
+                                    <Package size={11} className="text-muted-foreground shrink-0" />
+                                    {m.name}
+                                    <span className="text-muted-foreground">
+                                      · {m.quantity}
+                                      {m.uom ? ` ${m.uom}` : ""}
+                                    </span>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td
+                            className="px-3 py-3"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openDetail(row, "photos");
+                            }}
+                          >
+                            <ActivityPhotosBadge rungId={row.rungId} />
+                          </td>
+                          <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
+                            <AssignmentStatusSelect rungId={row.rungId} status={row.status} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
             )}
           </div>
         );
@@ -304,7 +380,13 @@ function RoomActivities({
   openDetail: (row: ReportedAssignment, tab?: "overview" | "blueprint" | "photos") => void;
 }) {
   const { data: items = [], isLoading } = useQuery({
-    queryKey: ["civilworkdpr-activity-reporting-room", room.roomId, statusFilter],
+    // Shares the "civilworkdpr-activity-reporting" key prefix with the
+    // summary query below so AssignmentStatusSelect/ActivityDetailModal/
+    // QualityCheck's existing invalidateQueries({queryKey:
+    // ["civilworkdpr-activity-reporting"]}) calls (a prefix match, not a
+    // string-prefix match — the old single-array-element key wouldn't
+    // match a differently-named key) still refresh this room's rows too.
+    queryKey: ["civilworkdpr-activity-reporting", "room", room.roomId, statusFilter],
     queryFn: () =>
       getReportedAssignments({
         roomId: room.roomId,
@@ -346,7 +428,7 @@ export default function ActivityReporting() {
   // room are only ever fetched on demand, by RoomActivities, once that
   // room's node is expanded (see its own comment above).
   const { data: summary, isLoading } = useQuery({
-    queryKey: ["civilworkdpr-activity-reporting-summary", statusFilter, debouncedSearch],
+    queryKey: ["civilworkdpr-activity-reporting", "summary", statusFilter, debouncedSearch],
     queryFn: () =>
       getActivityScopeSummary({
         status: statusFilter !== "ALL" ? statusFilter : undefined,
