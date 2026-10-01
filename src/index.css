@@ -938,3 +938,39 @@ main table td :is(.font-mono, .tabular-nums, .rounded-full, [class*="badge"], ti
 main table td :is(.font-mono, .tabular-nums, .rounded-full, [class*="badge"]) * {
   white-space: nowrap;
 }
+
+/* ── Approval Inbox: layout follows the space the inbox actually has ─────
+   A container query (not a viewport breakpoint), so the full table only
+   appears when the inbox itself is wide enough for every column plus the
+   Approve / Reject buttons — regardless of screen size, OS display scaling
+   or whether the sidebars are open. Narrower: each row is a card (module on
+   top, labelled details, actions on their own line). */
+.ai-wrap {
+  container-type: inline-size;
+}
+.ai-head {
+  display: none;
+}
+@container (min-width: 76rem) {
+  .ai-head {
+    display: flex;
+  }
+  .ai-row {
+    grid-template-columns:
+      minmax(10rem, 1.3fr) 6.5rem minmax(7rem, 1.2fr) minmax(6rem, 1fr)
+      8rem minmax(7rem, 1fr) 6.5rem auto;
+    column-gap: 0.5rem;
+    row-gap: 0.5rem;
+  }
+  .ai-span {
+    grid-column: auto;
+  }
+  .ai-label {
+    display: none;
+  }
+  .ai-actions {
+    justify-content: flex-start;
+    padding-top: 0;
+    border-top-width: 0;
+  }
+}
