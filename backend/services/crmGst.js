@@ -338,6 +338,7 @@ async function recalculateBookingGst(pool, bookingId) {
 
 module.exports = {
   resolveUnitParkingHsn,
+  resolveLandOwnedByBookingCustomer,
   resolveExtraWorkHsn,
   recalculateBookingGst,
   checkGstExemption,
