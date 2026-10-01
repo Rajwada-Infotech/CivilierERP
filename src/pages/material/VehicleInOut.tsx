@@ -36,6 +36,7 @@ const VIO_EXPORT_COLUMNS: ExportColumn[] = [
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
 import {
   Truck,
   Plus,
@@ -319,6 +320,7 @@ function VehicleCard({
           <ApprovalStatusChain
             table="VehicleInOut"
             recordId={rec.VehicleInOutID}
+            fallback={<StatusBadge status={rec.Status} />}
           />
         </div>
       </div>
@@ -552,6 +554,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
         <ApprovalStatusChain
           table="VehicleInOut"
           recordId={row.original.VehicleInOutID}
+          fallback={<StatusBadge status={row.original.Status} />}
         />
       </div>
     ),

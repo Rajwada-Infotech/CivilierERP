@@ -50,6 +50,7 @@ import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getApprovedMRList, getICTMRPrefill, type ApprovedMRSummary } from "@/api/materialRequestApi";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
 import { usePageRights } from "@/hooks/usePageRights";
 
 const fmtNum = (n: number) =>
@@ -682,7 +683,7 @@ function TransferPreviewModal({
             <Warehouse size={10} /> {transfer.ToGodownName}
           </span>
           <div className="ml-auto">
-            <ApprovalStatusChain table="StockTransfers" recordId={transfer.TransferID} />
+            <ApprovalStatusChain table="StockTransfers" recordId={transfer.TransferID} fallback={<StatusBadge status={transfer.Status} />} />
           </div>
         </div>
 
@@ -1364,6 +1365,7 @@ function TransferHistory() {
                         <ApprovalStatusChain
                           table="StockTransfers"
                           recordId={t.TransferID}
+                          fallback={<StatusBadge status={t.Status} />}
                         />
                       </td>
                       <td className="px-3 py-2.5">

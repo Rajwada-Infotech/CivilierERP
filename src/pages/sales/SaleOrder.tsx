@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
 import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
@@ -692,6 +693,7 @@ function SaleOrderHistory() {
                       table="SaleOrders"
                       recordId={o.SaleOrderID}
                       compact
+                      fallback={<StatusBadge status={o.Status} />}
                     />
                   </td>
                   <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">
@@ -825,6 +827,7 @@ function SaleOrderHistory() {
                     table="SaleOrders"
                     recordId={viewingOrder.SaleOrderID}
                     compact
+                    fallback={<StatusBadge status={viewingOrder.Status} />}
                   />
                 </div>
               </div>

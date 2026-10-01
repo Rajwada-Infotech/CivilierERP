@@ -1831,7 +1831,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
             >
               {record.BoqNo || record.DocNo}
             </span>
-            <ApprovalStatusChain table="BOQ" recordId={record.BoqID} />
+            <ApprovalStatusChain table="BOQ" recordId={record.BoqID} fallback={<StatusBadge status={record.Status} />} />
           </div>
 
           {/* Right-side actions */}

@@ -942,6 +942,7 @@ export default function MaterialRequest() {
                 searchable={false}
                 paginated={false}
                 emptyMessage="No material requests found. Click 'New Request' to create one."
+                getRowId={(r: any) => String(r.MRId)}
               />
               {totalPages > 1 && (
                 <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">

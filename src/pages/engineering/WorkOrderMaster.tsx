@@ -2602,6 +2602,7 @@ const WorkOrdersList: React.FC<{
                       <ApprovalStatusChain
                         table="WorkOrderHeader"
                         recordId={wo.Id}
+                        fallback={<StatusBadge status={wo.Status || "Draft"} />}
                       />
                     </div>
                     <div className="text-xs space-y-1">

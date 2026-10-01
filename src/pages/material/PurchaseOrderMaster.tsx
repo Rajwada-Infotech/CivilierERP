@@ -2726,7 +2726,7 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                     meta: { className: "hidden sm:table-cell" },
                     cell: ({ row }: any) => (
                       <div className="flex flex-col items-start gap-1">
-                        <ApprovalStatusChain table="PurchaseOrders" recordId={row.original._id} />
+                        <ApprovalStatusChain table="PurchaseOrders" recordId={row.original._id} fallback={<StatusChip status={row.original.status} />} />
                       </div>
                     ),
                   },

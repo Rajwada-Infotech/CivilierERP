@@ -101,6 +101,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
 import type {
   GRNFormDataPayload,
   GRNItemLine as GRNItemLineBase,
@@ -706,6 +707,7 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
         table="GoodsReceiptNotes"
         recordId={row.original.GRNID}
         compact
+        fallback={<StatusBadge status={row.original.Status} />}
       />
     ),
   },
