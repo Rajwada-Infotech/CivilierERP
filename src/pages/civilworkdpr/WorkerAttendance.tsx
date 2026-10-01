@@ -166,7 +166,12 @@ export function AddWorkerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      {/* elevated: this dialog can be opened from inside ActivityDetailModal's
+          own z-[70] backdrop, which otherwise paints over this Dialog's
+          default z-[60] overlay+content — the dialog was still there and
+          still worked, it was just invisible under the darker overlay
+          ("blacks out the screen"). Harmless when opened standalone. */}
+      <DialogContent className="max-w-md" elevated>
         <DialogHeader>
           <DialogTitle className="font-heading text-base">Select Worker</DialogTitle>
         </DialogHeader>
