@@ -15,6 +15,7 @@ import {
   CheckCircle2, AlertCircle, Ban, ChevronLeft, LayoutGrid, Rows3, Wallet,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
+import { DateInput } from "@/components/ui/date-input";
 
 // Same approver set the backend's INVOICE_VOID_ROLES enforces
 // (crmBookings.js PUT /:id/invoices/:invoiceId/void) — this only controls
@@ -208,7 +209,7 @@ function InvoicePreviewDialog({ invoice, onClose }: { invoice: InvoiceRow; onClo
         </div>
         <div className="text-xs text-muted-foreground pt-1">{invoice.InvoiceType} · {fmtMoney(invoice.Amount)} · {invoice.BookingNo}</div>
         {invoice.Status === "Void" && (
-          <p className="text-[11px] text-red-600 dark:text-red-400">Voided{invoice.VoidReason ? ` — ${invoice.VoidReason}` : ""}</p>
+          <p className="text-[0.6875rem] text-red-600 dark:text-red-400">Voided{invoice.VoidReason ? ` — ${invoice.VoidReason}` : ""}</p>
         )}
       </DialogContent>
     </Dialog>
@@ -505,10 +506,10 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
   // Account Adjustment) while still Billing: Ready to invoice never having
   // happened, or vice versa, and both are simultaneously true statements.
   function milestoneStatusPill(m: any) {
-    if (m.Status === CrmStatus.PAID) return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-emerald-700 bg-emerald-50 border-emerald-200">Payment: Paid</span>;
-    if (m.Status === "Waived") return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Payment: Waived</span>;
-    if (Number(m.AmountPaid) > 0) return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">Payment: Partial</span>;
-    return <span className="text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Payment: Pending</span>;
+    if (m.Status === CrmStatus.PAID) return <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-emerald-700 bg-emerald-50 border-emerald-200">Payment: Paid</span>;
+    if (m.Status === "Waived") return <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Payment: Waived</span>;
+    if (Number(m.AmountPaid) > 0) return <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-amber-700 bg-amber-50 border-amber-200">Payment: Partial</span>;
+    return <span className="text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-muted-foreground bg-muted/40 border-border">Payment: Pending</span>;
   }
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -557,10 +558,10 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="font-mono text-xs font-semibold text-primary">{b.BookingNo}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${
+                        <span className={`text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium shrink-0 ${
                           b.Status === CrmStatus.APPROVED ? "text-emerald-700 bg-emerald-50 border-emerald-200"
                             : b.Status === CrmStatus.REJECTED || b.Status === CrmStatus.CANCELLED ? "text-red-700 bg-red-50 border-red-200"
-                            : "text-amber-700 bg-amber-50 border-amber-200"
+                            : "text-sky-700 bg-sky-50 border-sky-200"
                         }`}>{b.Status}</span>
                       </div>
                       <div className="text-sm font-medium truncate">{b.ApplicantName}</div>
@@ -570,7 +571,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                     </div>
                     <div className="text-right shrink-0">
                       <div className="text-sm font-semibold">{fmtMoney(b.GrandTotal ?? b.TotalValue)}</div>
-                      <div className="text-[10px] text-muted-foreground">{fmtDate(b.BookingDate)}</div>
+                      <div className="text-[0.625rem] text-muted-foreground">{fmtDate(b.BookingDate)}</div>
                     </div>
                     <ChevronRight size={14} className="text-muted-foreground shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
                   </button>
@@ -661,16 +662,16 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                         </div>
                         {(insight.tone === "partial" || insight.tone === "unpaid") && (
                           <div className="h-1 rounded-full bg-muted overflow-hidden mt-1.5 max-w-[160px]">
-                            <div className="h-full rounded-full bg-amber-500" style={{ width: `${pct}%` }} />
+                            <div className="h-full rounded-full bg-sky-500" style={{ width: `${pct}%` }} />
                           </div>
                         )}
                       </button>
                       <div className="text-right shrink-0">
                         <div className="font-semibold">{fmtMoney(m.AmountDue)}</div>
-                        <div className="text-[10px] text-muted-foreground">Paid {fmtMoney(m.AmountPaid)}</div>
+                        <div className="text-[0.625rem] text-muted-foreground">Paid {fmtMoney(m.AmountPaid)}</div>
                         {isBookingAmountPointer && (
                           <a href={`/crm/bookings?view=${bookingId}`}
-                            className="text-[10px] text-violet-600 dark:text-violet-400 hover:underline mt-0.5 block"
+                            className="text-[0.625rem] text-violet-600 dark:text-violet-400 hover:underline mt-0.5 block"
                             onClick={(e) => e.stopPropagation()}>
                             Open Booking ↗
                           </a>
@@ -682,7 +683,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
               </div>
 
               <div className="border-t border-border bg-muted/10 px-3 py-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-[10px] text-muted-foreground uppercase tracking-wide mr-0.5">or</span>
+                <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide mr-0.5">or</span>
                 {eligibleOnAccount.length > 0 && (
                   <button onClick={() => { setForm((f) => ({ ...f, InvoiceType: "OnAccount", MilestoneId: "" })); setAutoSelected(false); setAckUnlinked(false); }}
                     className={`text-xs px-2.5 py-1.5 rounded-lg border font-medium flex items-center gap-1 ${form.InvoiceType === "OnAccount" ? "border-primary bg-primary/10 text-primary" : "border-border hover:bg-muted"}`}>
@@ -700,7 +701,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
               </div>
 
               {autoSelected && (
-                <div className="border-t border-border bg-blue-50 dark:bg-blue-950/30 px-3 py-2 text-[11px] text-blue-700 dark:text-blue-400 flex items-center gap-1.5">
+                <div className="border-t border-border bg-blue-50 dark:bg-blue-950/30 px-3 py-2 text-[0.6875rem] text-blue-700 dark:text-blue-400 flex items-center gap-1.5">
                   <Info className="w-3.5 h-3.5 shrink-0" />
                   No milestones are currently eligible for this booking, so <strong className="mx-0.5">{form.InvoiceType}</strong> was selected automatically — pick a different type above if that's not what you want.
                 </div>
@@ -717,7 +718,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                 <div className="flex items-center gap-2">
                   <button onClick={() => setBulkSelected(new Set())} className="text-xs text-muted-foreground hover:text-foreground">Clear</button>
                   <button onClick={handleBulkGenerate} disabled={bulkBusy}
-                    className="px-3 py-1.5 text-xs bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-50">
+                    className="px-3 py-1.5 text-xs btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-50">
                     {bulkBusy ? "Generating…" : `Generate ${bulkSelected.size} Invoice${bulkSelected.size !== 1 ? "s" : ""}`}
                   </button>
                 </div>
@@ -748,7 +749,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                 <input type="number" placeholder="Amount" value={form.Amount}
                   onChange={(e) => setForm((f) => ({ ...f, Amount: e.target.value }))}
                   className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
-                <input type="date" value={form.InvoiceDate}
+                <DateInput value={form.InvoiceDate}
                   onChange={(e) => setForm((f) => ({ ...f, InvoiceDate: e.target.value }))}
                   className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
               </div>
@@ -761,8 +762,8 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                 unlocks, since a silent warning is exactly what got missed
                 the last time this produced an unlinked invoice. */}
             {showUnlinkedWarning && (
-              <div className="rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-800 px-3 py-2.5 space-y-2">
-                <div className="flex items-start gap-1.5 text-[11px] text-amber-800 dark:text-amber-400">
+              <div className="rounded-lg border border-sky-300 bg-sky-50 dark:bg-sky-950/30 dark:border-sky-800 px-3 py-2.5 space-y-2">
+                <div className="flex items-start gap-1.5 text-[0.6875rem] text-sky-800 dark:text-sky-400">
                   <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                   <span>
                     This booking still has <strong>{fmtMoney(outstandingTotal)}</strong> outstanding on{" "}
@@ -773,8 +774,8 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                     if you're trying to settle that balance, use the payment/receipt flow instead, then generate a Milestone invoice once a Demand has been raised for it.
                   </span>
                 </div>
-                <label className="flex items-center gap-1.5 text-[11px] text-amber-800 dark:text-amber-400 cursor-pointer">
-                  <input type="checkbox" checked={ackUnlinked} onChange={(e) => setAckUnlinked(e.target.checked)} className="accent-amber-600" />
+                <label className="flex items-center gap-1.5 text-[0.6875rem] text-sky-800 dark:text-sky-400 cursor-pointer">
+                  <input type="checkbox" checked={ackUnlinked} onChange={(e) => setAckUnlinked(e.target.checked)} className="accent-sky-600" />
                   This invoice is unrelated to that outstanding balance — go ahead
                 </label>
               </div>
@@ -804,14 +805,14 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                 ))}
               </div>
               {form.NumberMode === "auto" && (
-                <p className="text-[11px] text-muted-foreground">Standard series — the next INV-{new Date().getFullYear()}-NNNNN number.</p>
+                <p className="text-[0.6875rem] text-muted-foreground">Standard series — the next INV-{new Date().getFullYear()}-NNNNN number.</p>
               )}
               {form.NumberMode === "prefix" && (
                 <div>
                   <input placeholder="e.g. TSTRSD" value={form.InvoicePrefix}
                     onChange={(e) => setForm((f) => ({ ...f, InvoicePrefix: e.target.value.toUpperCase() }))}
                     className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background font-mono uppercase" maxLength={10} />
-                  <p className="text-[11px] text-muted-foreground mt-1">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1">
                     Generates as {form.InvoicePrefix.trim() ? form.InvoicePrefix.trim().toUpperCase() : "PREFIX"}-{new Date().getFullYear()}-NNNNN — its own auto-incrementing series.
                   </p>
                 </div>
@@ -821,7 +822,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
                   <input placeholder="Exact invoice number" value={form.CustomInvoiceNo}
                     onChange={(e) => setForm((f) => ({ ...f, CustomInvoiceNo: e.target.value }))}
                     className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background font-mono" maxLength={30} />
-                  <p className="text-[11px] text-muted-foreground mt-1">Used exactly as typed — must be unique across every invoice.</p>
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1">Used exactly as typed — must be unique across every invoice.</p>
                 </div>
               )}
             </div>
@@ -833,7 +834,7 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
           {bookingId != null && booking && (
             <button onClick={handleGenerate}
               disabled={saving || (form.InvoiceType === "Milestone" && !form.MilestoneId) || (form.InvoiceType === "OnAccount" && !form.OnAccountPaymentId) || (showUnlinkedWarning && !ackUnlinked)}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Generating…" : "Generate"}
             </button>
           )}
@@ -848,14 +849,14 @@ function GenerateInvoiceDialog({ initialBookingId, onClose, onGenerated }: { ini
 // matches CrmOnAccount.tsx's own per-row utilization bar, for consistency
 // across the two money-tracking pages rather than inventing new styling.
 function MilestoneProgressBar({ total, invoiced }: { total: number; invoiced: number }) {
-  if (!total) return <span className="text-[11px] text-muted-foreground">No milestone schedule</span>;
+  if (!total) return <span className="text-[0.6875rem] text-muted-foreground">No milestone schedule</span>;
   const pct = Math.min(100, Math.round((invoiced / total) * 100));
   return (
     <div className="flex items-center gap-1.5 min-w-[110px]">
       <div className="h-1.5 w-16 rounded-full bg-muted overflow-hidden shrink-0">
         <div className="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600" style={{ width: `${pct}%` }} />
       </div>
-      <span className="text-[11px] text-muted-foreground shrink-0">{invoiced} of {total} invoiced</span>
+      <span className="text-[0.6875rem] text-muted-foreground shrink-0">{invoiced} of {total} invoiced</span>
     </div>
   );
 }
@@ -1068,9 +1069,9 @@ const CrmInvoices: React.FC = () => {
             {INVOICED_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         )}
-        <input type="date" value={dateFrom} onChange={(e) => resetToFirstPage(setDateFrom)(e.target.value)}
+        <DateInput value={dateFrom} onChange={(e) => resetToFirstPage(setDateFrom)(e.target.value)}
           title="From date" className="px-2.5 py-2 text-sm border border-border rounded-lg bg-background" />
-        <input type="date" value={dateTo} onChange={(e) => resetToFirstPage(setDateTo)(e.target.value)}
+        <DateInput value={dateTo} onChange={(e) => resetToFirstPage(setDateTo)(e.target.value)}
           title="To date" className="px-2.5 py-2 text-sm border border-border rounded-lg bg-background" />
         <button onClick={() => { setSearch(searchInput.trim()); setPage(1); }} className="px-3 py-2 text-sm border border-border rounded-lg hover:bg-muted">Search</button>
         {hasActiveFilters && (
@@ -1083,19 +1084,19 @@ const CrmInvoices: React.FC = () => {
         <div className="flex items-center border border-border rounded-lg overflow-hidden ml-auto sm:ml-0">
           <button onClick={() => { setView("grouped"); setPage(1); }}
             title="Grouped by booking"
-            className={`px-2.5 py-2 flex items-center gap-1.5 text-xs font-medium ${view === "grouped" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+            className={`px-2.5 py-2 flex items-center gap-1.5 text-xs font-medium ${view === "grouped" ? "btn-module text-white" : "hover:bg-muted"}`}>
             <LayoutGrid size={13} /> Grouped
           </button>
           <button onClick={() => { setView("flat"); setPage(1); }}
             title="Flat, sortable table across all bookings"
-            className={`px-2.5 py-2 flex items-center gap-1.5 text-xs font-medium border-l border-border ${view === "flat" ? "bg-primary text-primary-foreground" : "hover:bg-muted"}`}>
+            className={`px-2.5 py-2 flex items-center gap-1.5 text-xs font-medium border-l border-border ${view === "flat" ? "btn-module text-white" : "hover:bg-muted"}`}>
             <Rows3 size={13} /> Flat
           </button>
         </div>
 
         {rights.canCreate && (
           <button onClick={() => setGenBookingId(null)}
-            className="flex items-center gap-1.5 px-3 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+            className="flex items-center gap-1.5 px-3 py-2 text-sm btn-module text-white rounded-lg font-medium ">
             <Plus className="w-4 h-4" /> Generate Invoice
           </button>
         )}
@@ -1168,7 +1169,7 @@ const CrmInvoices: React.FC = () => {
                                 <td className="px-3 py-1.5 font-mono text-xs font-semibold text-primary">
                                   <span className={isVoid ? "line-through" : ""}>{inv.InvoiceNo}</span>
                                   {isVoid && (
-                                    <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-red-700 bg-red-50 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800 no-underline inline-block">Void</span>
+                                    <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-red-700 bg-red-50 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800 no-underline inline-block">Void</span>
                                   )}
                                 </td>
                                 <td className="px-3 py-1.5"><span className="text-xs px-2 py-0.5 rounded-md bg-muted font-medium">{inv.InvoiceType}</span></td>
@@ -1240,7 +1241,7 @@ const CrmInvoices: React.FC = () => {
                       <tr key={inv.Id} className={`border-b border-border last:border-0 hover:bg-muted/20 ${isVoid ? "opacity-60" : ""}`}>
                         <td className="px-3 py-1.5 font-mono text-xs font-semibold text-primary">
                           <span className={isVoid ? "line-through" : ""}>{inv.InvoiceNo}</span>
-                          {isVoid && <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full border font-medium text-red-700 bg-red-50 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800 no-underline inline-block">Void</span>}
+                          {isVoid && <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 rounded-full border font-medium text-red-700 bg-red-50 border-red-200 dark:bg-red-950/30 dark:text-red-400 dark:border-red-800 no-underline inline-block">Void</span>}
                         </td>
                         <td className="px-3 py-1.5 font-mono text-xs">{inv.BookingNo}</td>
                         <td className="px-3 py-1.5 text-xs truncate max-w-[160px]">{inv.ApplicantName}</td>

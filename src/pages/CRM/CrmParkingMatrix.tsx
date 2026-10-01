@@ -98,13 +98,13 @@ function ActionChoiceDialog({
       <DialogContent accent="crm" className="max-w-sm">
         <DialogHeader><DialogTitle className="font-heading">Parking Slot {slot.SlotNo}</DialogTitle></DialogHeader>
         <div className="grid grid-cols-1 gap-2 pt-1">
-          <button onClick={onSell} className="px-4 py-2.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 text-left">
+          <button onClick={onSell} className="px-4 py-2.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg text-left">
             Sell Now
-            <span className="block text-[11px] font-normal opacity-80">Allot this slot to a customer immediately</span>
+            <span className="block text-[0.6875rem] font-normal opacity-80">Allot this slot to a customer immediately</span>
           </button>
           <button onClick={onHold} className="px-4 py-2.5 text-sm border border-border rounded-lg font-medium hover:bg-muted text-left">
             Place On Hold
-            <span className="block text-[11px] font-normal text-muted-foreground">Reserve for N days while the customer decides</span>
+            <span className="block text-[0.6875rem] font-normal text-muted-foreground">Reserve for N days while the customer decides</span>
           </button>
         </div>
       </DialogContent>
@@ -198,7 +198,7 @@ function BookParkingDialog({
                 <option key={a.Id} value={String(a.Id)}>{a.ApplicationNo} — {a.ApplicantName} ({a.Mobile})</option>
               ))}
             </select>
-            <p className="text-[11px] text-muted-foreground mt-1">This customer does not need an existing unit booking — parking can be sold on its own. Only Applications for this same Project are shown.</p>
+            <p className="text-[0.6875rem] text-muted-foreground mt-1">This customer does not need an existing unit booking — parking can be sold on its own. Only Applications for this same Project are shown.</p>
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Quantity</label>
@@ -215,7 +215,7 @@ function BookParkingDialog({
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
           {rights.canCreate && (
             <button onClick={handleBook} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Booking..." : "Book Slot"}
             </button>
           )}
@@ -280,14 +280,14 @@ function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; proje
               ))}
             </select>
             {apps.length === 0 && (
-              <p className="text-[11px] text-amber-600 mt-1">No open Applications for this Project yet — only Applications for the same Project as this slot can hold it.</p>
+              <p className="text-[0.6875rem] text-amber-600 mt-1">No open Applications for this Project yet — only Applications for the same Project as this slot can hold it.</p>
             )}
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Hold for how many days? *</label>
             <input type="number" min={1} max={90} value={holdDays} onChange={(e) => setHoldDays(e.target.value)}
               className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
-            <p className="text-[11px] text-muted-foreground mt-1">Auto-reverts to Available once this expires — a daily reminder goes to both sides until then.</p>
+            <p className="text-[0.6875rem] text-muted-foreground mt-1">Auto-reverts to Available once this expires — a daily reminder goes to both sides until then.</p>
           </div>
           <div>
             <label className="text-xs text-muted-foreground block mb-1">Reason (optional)</label>
@@ -299,7 +299,7 @@ function PlaceHoldDialog({ slot, projectId, onClose }: { slot: MatrixSlot; proje
           <button onClick={onClose} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
           {rights.canCreate && (
             <button onClick={handlePlace} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Placing..." : "Place Hold"}
             </button>
           )}
@@ -400,14 +400,14 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
             <div>
               <span className="text-muted-foreground flex items-center gap-1"><User size={11} /> Salesperson</span>
               <span className="font-medium">{assignedName || "—"}</span>
-              {assignedEmail && <span className="block text-[11px] text-muted-foreground">{assignedEmail}</span>}
+              {assignedEmail && <span className="block text-[0.6875rem] text-muted-foreground">{assignedEmail}</span>}
             </div>
           </div>
         </div>
 
         {isHold ? (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
-            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-amber-800">
+          <div className="rounded-xl border border-sky-200 bg-sky-50 p-4 space-y-2">
+            <h3 className="text-sm font-semibold flex items-center gap-1.5 text-sky-800">
               <Clock size={14} /> Hold Status
             </h3>
             {hasUnpaidAllotment && (
@@ -417,7 +417,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
               </div>
             )}
             {hasUnpaidAllotment && (
-              <p className="text-[11px] text-amber-700 bg-amber-100/60 border border-amber-200 rounded px-2 py-1.5 flex items-center gap-1.5">
+              <p className="text-[0.6875rem] text-sky-700 bg-sky-100/60 border border-sky-200 rounded px-2 py-1.5 flex items-center gap-1.5">
                 <CheckCircle2 size={12} className="shrink-0" /> Parking charge not yet paid — this tile flips to Booked automatically once it's received.
               </p>
             )}
@@ -429,7 +429,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
               <div><span className="text-muted-foreground block">Booking</span><span className="font-semibold text-sm">{slot.BookingNo || "Standalone parking sale"}</span></div>
               <div>
                 <span className="text-muted-foreground block">Payment Status</span>
-                <span className={`inline-block text-[11px] px-1.5 py-0.5 rounded-full border font-medium ${PAYMENT_STATUS_STYLE[slot.AllotmentPaymentStatus || ""] || ""}`}>
+                <span className={`inline-block text-[0.6875rem] px-1.5 py-0.5 rounded-full border font-medium ${PAYMENT_STATUS_STYLE[slot.AllotmentPaymentStatus || ""] || ""}`}>
                   {slot.AllotmentPaymentStatus || "—"}
                 </span>
               </div>
@@ -455,7 +455,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
             </div>
             {rights.canEdit && (
               <button onClick={handleExtend} disabled={extending}
-                className="px-3 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                className="px-3 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                 {extending ? "Extending..." : "Confirm"}
               </button>
             )}
@@ -473,7 +473,7 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
                 </button>
               )}
               <button onClick={() => navigate(slot.BookingId != null ? `/crm/bookings?applicationId=${slot.ApplicationId}` : `/crm/applications`)}
-                className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+                className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium ">
                 {slot.BookingId != null ? "Open Booking" : "Open Application"}
               </button>
             </>
@@ -486,12 +486,12 @@ function TileInfoDialog({ slot, onClose }: { slot: MatrixSlot; onClose: () => vo
             )
           ) : slot.BookingId != null ? (
             <button onClick={() => navigate(`/crm/bookings?applicationId=${slot.ApplicationId}`)}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium ">
               Open Booking
             </button>
           ) : (
             <button onClick={() => navigate(`/crm/applications`)}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium ">
               Open Application
             </button>
           )}
@@ -631,7 +631,7 @@ export function ParkingMatrixPage() {
                 <div key={label} className="rounded-xl border border-border bg-card p-4">
                   <div className={`w-2 h-2 rounded-full ${dot} mb-3`} />
                   <p className="text-2xl font-bold font-heading text-foreground leading-none">{value}</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">{label}</p>
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1">{label}</p>
                 </div>
               ))}
             </div>
@@ -657,7 +657,7 @@ export function ParkingMatrixPage() {
                   >
                     <div className="flex items-center justify-between gap-2 mb-1.5">
                       <span className="font-bold text-sm text-foreground truncate">#{s.SlotNo}</span>
-                      <span className={`shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_STYLE[s.Status]}`}>
+                      <span className={`shrink-0 text-[0.625rem] font-bold px-2 py-0.5 rounded-full uppercase tracking-wide ${STATUS_STYLE[s.Status]}`}>
                         {s.Status === "OnHold" ? "Hold" : s.Status}
                       </span>
                     </div>

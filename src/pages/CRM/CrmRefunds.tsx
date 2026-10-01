@@ -90,7 +90,7 @@ function TabButton({ active, onClick, icon: Icon, children }: { active: boolean;
   return (
     <button type="button" onClick={onClick}
       className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-        active ? "bg-primary text-primary-foreground border-primary shadow-sm" : "border-border bg-background text-muted-foreground hover:bg-muted"
+        active ? "btn-module text-white border-primary shadow-sm" : "border-border bg-background text-muted-foreground hover:bg-muted"
       }`}>
       <Icon size={14} />{children}
     </button>
@@ -204,7 +204,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                 ))}
               </select>
               {!sources.length ? (
-                <p className="text-[11px] text-muted-foreground mt-1.5">No held credits or unapplied overpayments right now — a refund can only be raised against one.</p>
+                <p className="text-[0.6875rem] text-muted-foreground mt-1.5">No held credits or unapplied overpayments right now — a refund can only be raised against one.</p>
               ) : picked && (
                 <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground rounded-lg border border-border bg-muted/20 px-3 py-2">
                   <span className="flex items-center gap-1.5 font-medium text-foreground"><Building2 size={12} />{picked.CustomerName}</span>
@@ -232,25 +232,25 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                 className="w-full text-sm border border-border rounded-lg pl-7 pr-24 py-2.5 bg-background" />
               {picked && (
                 <button type="button" onClick={() => setAmount(String(remaining))}
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[11px] font-medium px-2 py-1 rounded-md border border-border text-muted-foreground hover:bg-muted">
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[0.6875rem] font-medium px-2 py-1 rounded-md border border-border text-muted-foreground hover:bg-muted">
                   Use max
                 </button>
               )}
             </div>
-            {picked && <p className="text-[11px] text-muted-foreground mt-1">Up to {fmt(remaining)} available from this source.</p>}
+            {picked && <p className="text-[0.6875rem] text-muted-foreground mt-1">Up to {fmt(remaining)} available from this source.</p>}
 
             {mode === "refund" && (
               <div className="grid grid-cols-3 gap-2 pt-1">
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide block">Gross</span>
+                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide block">Gross</span>
                   <span className="text-sm font-semibold tabular-nums">{fmt(amt)}</span>
                 </div>
                 <div className="rounded-lg border border-border bg-muted/20 px-3 py-2">
-                  <span className="text-[10px] text-muted-foreground uppercase tracking-wide block">Deduction{pct ? ` (${pct}%)` : ""}</span>
-                  <span className="text-sm font-semibold tabular-nums text-amber-600 dark:text-amber-400">{fmt(deduction)}</span>
+                  <span className="text-[0.625rem] text-muted-foreground uppercase tracking-wide block">Deduction{pct ? ` (${pct}%)` : ""}</span>
+                  <span className="text-sm font-semibold tabular-nums text-sky-600 dark:text-sky-400">{fmt(deduction)}</span>
                 </div>
                 <div className="rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/20 px-3 py-2">
-                  <span className="text-[10px] text-emerald-700 dark:text-emerald-400 uppercase tracking-wide block">Net to Customer</span>
+                  <span className="text-[0.625rem] text-emerald-700 dark:text-emerald-400 uppercase tracking-wide block">Net to Customer</span>
                   <span className="text-sm font-bold tabular-nums text-emerald-700 dark:text-emerald-400">{fmt(net)}</span>
                 </div>
               </div>
@@ -266,7 +266,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} · {b.ProjectName || b.UnitNo || ""} · {b.CompanyId === picked?.CompanyId ? "same company" : "cross-company"}</option>
                 ))}
               </select>
-              <p className="text-[11px] text-muted-foreground">A cross-company target raises an Inter-Company Fund Transfer for Finance to approve; the credit lands afterwards.</p>
+              <p className="text-[0.6875rem] text-muted-foreground">A cross-company target raises an Inter-Company Fund Transfer for Finance to approve; the credit lands afterwards.</p>
             </Section>
           ) : (
             <Section icon={Landmark} title="Payout details">
@@ -295,9 +295,9 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
               </div>
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="text-[11px] text-muted-foreground">Customer payout account</label>
+                  <label className="text-[0.6875rem] text-muted-foreground">Customer payout account</label>
                   {customerBank && (cbName || cbAcc || cbIfsc) && (
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400">Pre-filled from KYC — edit if it's changed</span>
+                    <span className="text-[0.625rem] text-emerald-600 dark:text-emerald-400">Pre-filled from KYC — edit if it's changed</span>
                   )}
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -306,7 +306,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
                   <input value={cbIfsc} onChange={(e) => setCbIfsc(e.target.value)} placeholder="IFSC" className="w-full text-sm border border-border rounded-lg px-2.5 py-2 bg-background" />
                 </div>
                 {picked?.BookingId != null && !customerBank?.BankName && !customerBank?.AccountNo && (
-                  <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">No bank details on file for this customer — enter them manually before raising the refund.</p>
+                  <p className="text-[0.6875rem] text-sky-600 dark:text-sky-400 mt-1">No bank details on file for this customer — enter them manually before raising the refund.</p>
                 )}
               </div>
               <div>
@@ -319,7 +319,7 @@ function NewRefundDialog({ onClose, onDone }: { onClose: () => void; onDone: () 
 
           <div className="flex justify-end gap-2 pt-1">
             <button onClick={onClose} className="px-3.5 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
-            <button onClick={submit} disabled={saving} className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40 flex items-center gap-1.5">
+            <button onClick={submit} disabled={saving} className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40 flex items-center gap-1.5">
               {saving ? "Saving…" : mode === "rebook" ? <><ArrowRightLeft size={14} />Apply Credit</> : <><Banknote size={14} />Raise Refund</>}
             </button>
           </div>
@@ -378,20 +378,20 @@ const CrmRefunds: React.FC = () => {
     { accessorKey: "RefundNo", header: "Refund No", size: 130, cell: (i) => <span className="font-mono text-xs font-semibold">{i.getValue() as string}</span> },
     { accessorKey: "CustomerName", header: "Customer", size: 160, cell: (i) => (
       <div><div className="text-sm font-medium">{i.row.original.CustomerName}</div>
-        <div className="text-[11px] text-muted-foreground">{SOURCE_LABEL[i.row.original.SourceType]}{i.row.original.CancellationNo ? ` · ${i.row.original.CancellationNo}` : i.row.original.BookingNo ? ` · ${i.row.original.BookingNo}` : ""}</div></div>
+        <div className="text-[0.6875rem] text-muted-foreground">{SOURCE_LABEL[i.row.original.SourceType]}{i.row.original.CancellationNo ? ` · ${i.row.original.CancellationNo}` : i.row.original.BookingNo ? ` · ${i.row.original.BookingNo}` : ""}</div></div>
     ) },
     { accessorKey: "GrossAmount", header: "Gross", size: 100, cell: (i) => <span className="text-xs font-mono">{fmt(i.getValue() as number)}</span> },
     { accessorKey: "DeductionAmount", header: "Deduction", size: 100, cell: (i) => {
       const d = Number(i.getValue()) || 0;
-      return d > 0 ? <span className="text-xs font-mono text-amber-700">{fmt(d)} ({i.row.original.DeductionPercent}%)</span> : <span className="text-xs text-muted-foreground">—</span>;
+      return d > 0 ? <span className="text-xs font-mono text-sky-700">{fmt(d)} ({i.row.original.DeductionPercent}%)</span> : <span className="text-xs text-muted-foreground">—</span>;
     } },
     { accessorKey: "NetAmount", header: "Net", size: 100, cell: (i) => <span className="text-xs font-mono font-semibold text-green-700">{fmt(i.getValue() as number)}</span> },
     { accessorKey: "Status", header: "Status", size: 120, cell: (i) => {
       const s = i.getValue() as string;
       return (
         <div className="flex flex-col gap-1">
-          <span className={`text-[11px] px-2 py-0.5 rounded-full border font-medium w-fit ${statusColor[s] || "text-muted-foreground bg-muted/50 border-border"}`}>{s}</span>
-          {i.row.original.IsOverdue ? <span className="flex items-center gap-1 text-[10px] text-red-600"><AlertTriangle size={10} /> RERA overdue</span> : null}
+          <span className={`text-[0.6875rem] px-2 py-0.5 rounded-full border font-medium w-fit ${statusColor[s] || "text-muted-foreground bg-muted/50 border-border"}`}>{s}</span>
+          {i.row.original.IsOverdue ? <span className="flex items-center gap-1 text-[0.625rem] text-red-600"><AlertTriangle size={10} /> RERA overdue</span> : null}
         </div>
       );
     } },
@@ -431,7 +431,7 @@ const CrmRefunds: React.FC = () => {
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
             {rights.canCreate && (
               <button onClick={() => setShowNew(true)}
-                className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-4 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 via-orange-400 to-amber-600 hover:shadow-lg transition-all">
+                className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-4 py-1.5 rounded-lg btn-module hover:shadow-lg transition-all">
                 <Plus size={14} /> New Refund
               </button>
             )}
@@ -444,13 +444,13 @@ const CrmRefunds: React.FC = () => {
             <input value={searchInput} onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") { setSearch(searchInput); setPage(1); } }}
               placeholder="Search customer, refund no, booking, cancellation… (Enter)"
-              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-amber-500/40" />
+              className="w-full pl-8 pr-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:ring-1 focus:ring-sky-500/40" />
           </div>
           <CrmCompanyProjectBlockFilter value={cpb} onChange={(v) => { setCpb(v); setPage(1); }} />
           <div className="flex flex-wrap gap-1.5">
             {STATUS_TABS.map((s) => (
               <button key={s} onClick={() => { setStatus(s); setPage(1); }}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${status === s ? "bg-primary text-primary-foreground border-transparent" : "bg-background border-border text-muted-foreground hover:bg-muted"}`}>
+                className={`px-2.5 py-1 rounded-lg text-xs font-medium border ${status === s ? "btn-module text-white border-transparent" : "bg-background border-border text-muted-foreground hover:bg-muted"}`}>
                 {s}
               </button>
             ))}
@@ -496,12 +496,12 @@ const CrmRefunds: React.FC = () => {
                   <option value="Cheque">Cheque</option>
                 </select>
               </div>
-              <p className="text-[11px] text-muted-foreground">Approving raises a Finance payment voucher. The refund is marked Paid when that voucher is approved.</p>
+              <p className="text-[0.6875rem] text-muted-foreground">Approving raises a Finance payment voucher. The refund is marked Paid when that voucher is approved.</p>
               <div className="flex justify-end gap-2">
                 <button onClick={() => { setFinanceDialog(null); setFinanceBank(""); setFinanceMode(""); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
                 <button onClick={() => financeAction(financeDialog.Id, "finance-approve", { RefundBankLHeadId: financeBank || undefined, PaymentMode: financeMode || undefined })}
                   disabled={!financeBank}
-                  className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">Raise Payout</button>
+                  className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium disabled:opacity-40">Raise Payout</button>
               </div>
             </div>
           </DialogContent>

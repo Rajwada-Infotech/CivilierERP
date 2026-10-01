@@ -4,10 +4,11 @@ import { Calculator } from "iconsax-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
 import { getEmployees, getEmployeeSalaryBreakup, type SalaryBreakupResult } from "@/api/employeeMasterApi";
+import { DateInput } from "@/components/ui/date-input";
 
 const inputBase =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
-const labelBase = "block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
+const labelBase = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 
 // Standalone version of the "Employee Salary Details" calculation --
 // same endpoint Employee Master's modal uses, but as its own page so it
@@ -68,14 +69,14 @@ const SalaryCalculation: React.FC = () => {
               </div>
               <div>
                 <label className={labelBase}>As Of Date</label>
-                <input type="date" value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} className={inputBase} style={{ width: 170 }} />
+                <DateInput value={asOfDate} onChange={(e) => setAsOfDate(e.target.value)} className={inputBase} style={{ width: 170 }} />
               </div>
               <button onClick={handleCalculate} disabled={!employeeId || loading} className="px-4 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white shadow-sm disabled:opacity-40">
                 {loading ? "Calculating..." : "Calculate"}
               </button>
             </div>
             {selectedEmployee && (
-              <div className="px-5 pb-4 -mt-2 text-[11px] text-muted-foreground">
+              <div className="px-5 pb-4 -mt-2 text-[0.6875rem] text-muted-foreground">
                 CTC: {selectedEmployee.CTCAmount != null ? `₹${Number(selectedEmployee.CTCAmount).toLocaleString("en-IN")} (${selectedEmployee.CTCFrequency})` : "Not set"}
                 {"  ·  "}
                 Salary Structure: {selectedEmployee.SalaryStructureCode || "Not assigned"}
@@ -102,7 +103,7 @@ const SalaryCalculation: React.FC = () => {
             <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
               <div className="px-5 py-4 border-b border-border bg-muted/20">
                 <h3 className="font-heading font-semibold text-foreground text-sm">{result.EmployeeName}</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                   Structure: {result.SalaryStructureName} (v{result.SalaryStructureVersion})
                 </p>
               </div>
@@ -110,7 +111,7 @@ const SalaryCalculation: React.FC = () => {
                 <div className="rounded-lg border border-border overflow-hidden">
                   <table className="w-full text-sm">
                     <thead>
-                      <tr className="bg-muted/30 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                      <tr className="bg-muted/30 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">
                         <th className="text-left px-3 py-2">Salary Head</th>
                         <th className="text-left px-3 py-2">Type</th>
                         <th className="text-left px-3 py-2">Calculation</th>

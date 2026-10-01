@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { DateInput } from "@/components/ui/date-input";
 
 const inputCls = "w-full h-9 px-3 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 transition-shadow";
 const labelCls = "flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1";
@@ -107,19 +108,19 @@ function StickerPreview({ row }: { row: TaggedFAItemCode }) {
   return (
     <div className="flex w-[300px] h-[118px] rounded-md overflow-hidden border border-border bg-white text-black shrink-0">
       <div className="w-11 bg-[#f4c400] flex items-center justify-center">
-        <span className="[writing-mode:vertical-rl] rotate-180 font-extrabold text-[10px] tracking-widest text-neutral-800">
+        <span className="[writing-mode:vertical-rl] rotate-180 font-extrabold text-[0.625rem] tracking-widest text-neutral-800">
           FIXED ASSET
         </span>
       </div>
       <div className="flex-1 flex flex-col items-center justify-center px-2 py-1.5 text-center min-w-0">
-        <span className="text-[7px] tracking-widest text-neutral-500">PROPERTY OF</span>
-        {row.CompanyName && <span className="text-[12px] font-extrabold leading-tight my-0.5 truncate max-w-full">{row.CompanyName}</span>}
+        <span className="text-[0.4375rem] tracking-widest text-neutral-500">PROPERTY OF</span>
+        {row.CompanyName && <span className="text-[0.75rem] font-extrabold leading-tight my-0.5 truncate max-w-full">{row.CompanyName}</span>}
         <span
           className="w-full h-8"
           dangerouslySetInnerHTML={{ __html: code128SVG(row.FAItemCode, { moduleWidth: 1.4, height: 40, quietZone: 6 }).replace("<svg ", '<svg style="width:100%;height:100%" ') }}
         />
-        <span className="text-[10px] font-bold tracking-wide mt-0.5">{row.FAItemCode}</span>
-        <span className="text-[8px] text-neutral-600 truncate max-w-full">{row.ItemName}</span>
+        <span className="text-[0.625rem] font-bold tracking-wide mt-0.5">{row.FAItemCode}</span>
+        <span className="text-[0.5rem] text-neutral-600 truncate max-w-full">{row.ItemName}</span>
       </div>
     </div>
   );
@@ -185,7 +186,7 @@ export default function FixedAssetDepreciationTagStickers() {
         action={
           <button
             onClick={() => (selectedRows.length ? setPrintOpen(true) : toast.error("Select at least one FA Item Code"))}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all"
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
           >
             <Printer size={13} /> Print FA Code Stickers{selectedRows.length ? ` (${selectedRows.length})` : ""}
           </button>
@@ -254,11 +255,11 @@ export default function FixedAssetDepreciationTagStickers() {
               </div>
               <div>
                 <label className={labelCls}><Calendar size={11} /> From Date</label>
-                <input type="date" value={draft.fromDate} onChange={(e) => setDraft((p) => ({ ...p, fromDate: e.target.value }))} className={inputCls} />
+                <DateInput value={draft.fromDate} onChange={(e) => setDraft((p) => ({ ...p, fromDate: e.target.value }))} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}><Calendar size={11} /> To Date</label>
-                <input type="date" value={draft.toDate} onChange={(e) => setDraft((p) => ({ ...p, toDate: e.target.value }))} className={inputCls} />
+                <DateInput value={draft.toDate} onChange={(e) => setDraft((p) => ({ ...p, toDate: e.target.value }))} className={inputCls} />
               </div>
             </div>
 
@@ -273,7 +274,7 @@ export default function FixedAssetDepreciationTagStickers() {
                   <RotateCcw size={12} /> Reset Filter
                 </button>
                 <button onClick={apply}
-                  className="inline-flex items-center gap-1.5 text-xs font-heading font-semibold text-white px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+                  className="inline-flex items-center gap-1.5 text-xs font-heading font-semibold text-white px-3.5 py-1.5 rounded-lg btn-module transition-all">
                   <Filter size={12} /> Apply Filter
                 </button>
               </div>
@@ -325,7 +326,7 @@ No FA Item Codes with a completed Asset Register{hasFilters ? " match these filt
                           <td className="px-4 py-2.5 font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400">{r.FAItemCode}</td>
                           <td className="px-4 py-2.5">{r.ItemName || "—"}</td>
                           <td className="px-4 py-2.5">
-                            <span className="inline-flex px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                            <span className="inline-flex px-2 py-0.5 rounded-full text-[0.6875rem] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
                               Tagged
                             </span>
                           </td>
@@ -345,7 +346,7 @@ No FA Item Codes with a completed Asset Register{hasFilters ? " match these filt
                       <div className="min-w-0 flex-1">
                         <p className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 break-all">{r.FAItemCode}</p>
                         <p className="text-sm mt-0.5">{r.ItemName || "—"}</p>
-                        <span className="inline-flex mt-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                        <span className="inline-flex mt-1 px-2 py-0.5 rounded-full text-[0.625rem] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
                           Tagged
                         </span>
                       </div>
@@ -374,7 +375,7 @@ No FA Item Codes with a completed Asset Register{hasFilters ? " match these filt
             </button>
             <button
               onClick={() => { printStickers(selectedRows); setPrintOpen(false); }}
-              className="inline-flex items-center gap-1.5 text-xs font-heading font-semibold text-white px-4 py-2 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all"
+              className="inline-flex items-center gap-1.5 text-xs font-heading font-semibold text-white px-4 py-2 rounded-lg btn-module transition-all"
             >
               <Printer size={13} /> Print {selectedRows.length} Sticker{selectedRows.length === 1 ? "" : "s"}
             </button>

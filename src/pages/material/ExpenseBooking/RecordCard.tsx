@@ -54,7 +54,7 @@ export function RecordCard({
       {/* Header row */}
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="text-[10px] text-muted-foreground font-medium truncate">
+          <p className="text-[0.625rem] text-muted-foreground font-medium truncate">
             {rec.docTypeName || rec.materialCategory || "Invoice"}
           </p>
           <p className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400 truncate max-w-[200px]">
@@ -72,7 +72,7 @@ export function RecordCard({
       </div>
 
       {adjustedAmount > 0 && (
-        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 w-fit">
+        <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[0.625rem] font-semibold bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20 w-fit">
           Adjusted {isFullyAdjusted ? "(Full)" : "(Partial)"} · ₹{fmt(adjustedAmount)}
         </div>
       )}
@@ -100,7 +100,7 @@ export function RecordCard({
         {rec.emi?.enabled ? (
           <div className="flex items-center gap-1">
             <CreditCard size={10} className="text-violet-500 shrink-0" />
-            <span className="text-violet-600 dark:text-violet-400 font-medium text-[11px]">
+            <span className="text-violet-600 dark:text-violet-400 font-medium text-[0.6875rem]">
               {rec.emi.installmentCount}x EMI
             </span>
           </div>
@@ -117,7 +117,7 @@ export function RecordCard({
       {/* Footer */}
       <div className="flex items-center justify-between pt-2 border-t border-border gap-2">
         <div>
-          <p className="text-[10px] text-muted-foreground">Net Payable</p>
+          <p className="text-[0.625rem] text-muted-foreground">Net Payable</p>
           <p className="text-sm font-mono font-semibold text-foreground">
             ₹{fmt(effectiveNet)}
           </p>
@@ -127,7 +127,7 @@ export function RecordCard({
             table="ExpenseBooking"
             recordId={rec.id}
             compact
-            fallback={<StatusBadge status={rec.status} className="text-[10px] px-2 py-0.5" />}
+            fallback={<StatusBadge status={rec.status} className="text-[0.625rem] px-2 py-0.5" />}
           />
           <div className="flex items-center gap-1">
             <ApprovalActions

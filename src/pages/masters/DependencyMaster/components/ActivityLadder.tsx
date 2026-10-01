@@ -92,7 +92,7 @@ export function ActivityLadder({ active, rungs, onAdd, onRemove, onMove, readOnl
         <h3 className="text-xs font-heading font-semibold uppercase tracking-widest text-foreground">
           Activity Chain
         </h3>
-        <span className="text-[10px] text-muted-foreground/60 ml-1">
+        <span className="text-[0.625rem] text-muted-foreground/60 ml-1">
           strictly linear — each activity must finish before the next starts
         </span>
       </div>

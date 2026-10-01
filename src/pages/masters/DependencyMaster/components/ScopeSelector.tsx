@@ -27,7 +27,7 @@ function Field({
 }) {
   return (
     <div className="flex flex-col gap-0.5 flex-1 min-w-[130px]">
-      <span className="text-[9px] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
+      <span className="text-[0.5625rem] font-heading uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1">
         <Icon size={9} /> {label}
       </span>
       <select

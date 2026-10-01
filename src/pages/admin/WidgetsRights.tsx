@@ -251,8 +251,8 @@ export default function WidgetsRights() {
             <button
               onClick={handleSave}
               disabled={saveStatus === "saving"}
-              className={`bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-60 transition-all
-                ${saveStatus === "saved"
+              className={`btn-module shadow-sm gap-1.5 shrink-0 font-heading font-semibold text-white text-sm px-5 py-2 h-auto inline-flex items-center rounded-lg disabled:opacity-60 transition-all
+ ${saveStatus === "saved"
                   ? "!bg-none !bg-emerald-500 border border-emerald-500/30"
                   : saveStatus === "error"
                   ? "!bg-none !bg-destructive border border-destructive/30"
@@ -447,14 +447,14 @@ export default function WidgetsRights() {
                   <button
                     key={cat}
                     onClick={() => setCategoryFilter(cat)}
-                    className={`px-2.5 py-1 rounded-lg border text-[11px] font-medium transition-all whitespace-nowrap
+                    className={`px-2.5 py-1 rounded-lg border text-[0.6875rem] font-medium transition-all whitespace-nowrap
                       ${categoryFilter === cat
                         ? cat === "All"
-                          ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent font-semibold shadow-sm"
+                          ? "btn-module text-white border-transparent font-semibold shadow-sm"
                           : cat === "Charts"
                             ? "bg-blue-500 text-white border-blue-500 font-semibold"
                             : cat === "KPIs"
-                              ? "bg-violet-500 text-white border-violet-500 font-semibold"
+                              ? "btn-module text-white border-violet-500 font-semibold"
                               : cat === "Data"
                                 ? "bg-cyan-500 text-white border-cyan-500 font-semibold"
                                 : cat === "Planning"
@@ -467,7 +467,7 @@ export default function WidgetsRights() {
                                         ? "bg-teal-500 text-white border-teal-500 font-semibold"
                                         : cat === "Tools"
                                           ? "bg-orange-500 text-white border-orange-500 font-semibold"
-                                          : "bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent font-semibold shadow-sm"
+                                          : "btn-module text-white border-transparent font-semibold shadow-sm"
                         : cat === "All"
                           ? "border-border bg-muted/30 text-muted-foreground hover:bg-muted/60"
                           : cat === "Charts"
@@ -481,7 +481,7 @@ export default function WidgetsRights() {
                                   : cat === "Alerts"
                                     ? "border-rose-500/30 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20"
                                     : cat === "Activity"
-                                      ? "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
+                                      ? "border-amber-500/30 bg-[#ffe2021a] text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"
                                       : cat === "Geo"
                                         ? "border-teal-500/30 bg-teal-500/10 text-teal-600 dark:text-teal-400 hover:bg-teal-500/20"
                                         : cat === "Tools"
@@ -551,7 +551,7 @@ export default function WidgetsRights() {
                         <p className={`text-xs font-semibold font-heading leading-tight ${enabled ? "text-foreground" : "text-muted-foreground"}`}>
                           {widget.label}
                         </p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5 leading-tight hidden sm:block">
+                        <p className="text-[0.625rem] text-muted-foreground mt-0.5 leading-tight hidden sm:block">
                           {widget.category}
                         </p>
                       </div>

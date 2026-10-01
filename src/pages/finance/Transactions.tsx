@@ -227,7 +227,7 @@ export default function Transactions() {
           sub: "awaiting action",
           icon: CreditCard,
           ring: "ring-amber-500/20",
-          bg: "bg-amber-500/10",
+          bg: "bg-[#ffe2021a]",
           blob: "bg-amber-500",
           borderL: "border-l-amber-500",
           color: "text-amber-500",
@@ -283,10 +283,10 @@ export default function Transactions() {
                     <p className="text-lg font-bold font-heading text-foreground leading-none">
                       {value}
                     </p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                    <p className="text-[0.625rem] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
                       {label}
                     </p>
-                    <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
+                    <p className="text-[0.6875rem] text-muted-foreground font-mono mt-0.5 truncate">
                       {sub}
                     </p>
                   </div>
@@ -334,7 +334,7 @@ export default function Transactions() {
                     onClick={() => setPage(pg)}
                     className={`px-3 py-1.5 rounded-md text-xs border transition-colors ${
                       pg === page
-                        ? "border-primary bg-primary text-primary-foreground"
+                        ? "border-primary btn-module text-white"
                         : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
                     }`}
                   >

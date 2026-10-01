@@ -98,7 +98,7 @@ export function LedgerHeadPicker({
               <CommandGroup
                 key={g.key}
                 heading={g.label}
-                className="[&_[cmdk-group-heading]]:text-[10px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-widest"
+                className="[&_[cmdk-group-heading]]:text-[0.625rem] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-widest"
               >
                 {g.options.map((o) => (
                   <CommandItem
@@ -112,13 +112,13 @@ export function LedgerHeadPicker({
                   >
                     <Check size={12} className={cn("mr-2 shrink-0", o.id === value ? "opacity-100" : "opacity-0")} />
                     <span className="truncate text-foreground">{o.label}</span>
-                    {suffix(o) && <span className="ml-auto pl-2 text-[10px] text-muted-foreground">{suffix(o)}</span>}
+                    {suffix(o) && <span className="ml-auto pl-2 text-[0.625rem] text-muted-foreground">{suffix(o)}</span>}
                   </CommandItem>
                 ))}
               </CommandGroup>
             ))}
             {total > shown && (
-              <div className="border-t border-border px-3 py-2 text-[10px] text-muted-foreground">
+              <div className="border-t border-border px-3 py-2 text-[0.625rem] text-muted-foreground">
                 Showing {shown} of {total} — keep typing to narrow it down.
               </div>
             )}

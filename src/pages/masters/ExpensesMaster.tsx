@@ -25,6 +25,7 @@ import {
   Eye,
   XCircle,
 } from "lucide-react";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -121,7 +122,7 @@ function buildExpenseColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[11px] text-muted-foreground mr-1">
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                 Delete?
               </span>
               <button
@@ -141,7 +142,7 @@ function buildExpenseColumns(
         }
         return (
           <div className="flex items-center justify-end gap-1">
-            <button
+            <button data-row-view
               onClick={() => onView(row.original)}
               className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10"
               title="View details"
@@ -496,7 +497,7 @@ const ExpensesMaster: React.FC = () => {
             <button
               onClick={handleSave}
               disabled={saving}
-              className="px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity flex items-center gap-2"
+              className="px-5 py-2.5 rounded-lg btn-module text-white text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity flex items-center gap-2"
               aria-label="Save Account"
             >
               {saving ? (
@@ -610,7 +611,7 @@ const ExpensesMaster: React.FC = () => {
       </div>
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -632,7 +633,7 @@ const ExpensesMaster: React.FC = () => {
             </div>
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Account Name
                 </p>
                 <p className="text-sm font-medium text-foreground">
@@ -640,7 +641,7 @@ const ExpensesMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Type
                 </p>
                 <p className="text-sm text-foreground">
@@ -652,7 +653,7 @@ const ExpensesMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Account Group
                 </p>
                 <p className="text-sm text-foreground">
@@ -664,7 +665,7 @@ const ExpensesMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <span
@@ -680,13 +681,13 @@ const ExpensesMaster: React.FC = () => {
                   startEdit(viewRecord);
                   setViewRecord(null);
                 }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white "
               >
                 <Pencil size={13} /> Edit Account
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

@@ -173,7 +173,7 @@ export function DataTable<TData extends RowData>({
           isn't silently dropped. */}
       {(searchable || exportConfig) && (
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60">
-          <p className="text-[11px] font-body text-muted-foreground">
+          <p className="text-[0.6875rem] font-body text-muted-foreground">
             {loading
               ? "Loading..."
               : `${totalFiltered} record${totalFiltered !== 1 ? "s" : ""}`}
@@ -237,7 +237,7 @@ export function DataTable<TData extends RowData>({
                       key={header.id}
                       colSpan={header.colSpan}
                       style={{ width: widthOf(header.column.columnDef.size) }}
-                      className={`px-5 py-3.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none text-left ${
+                      className={`px-5 py-3.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none text-left ${
                         canSort
                           ? "cursor-pointer hover:text-foreground transition-colors"
                           : ""
@@ -365,7 +365,7 @@ export function DataTable<TData extends RowData>({
                         className="flex items-start justify-between gap-4"
                       >
                         {label && (
-                          <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground shrink-0 pt-0.5">
+                          <span className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground shrink-0 pt-0.5">
                             {label}
                           </span>
                         )}

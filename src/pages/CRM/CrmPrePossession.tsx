@@ -17,6 +17,7 @@ import { RefreshButton } from "@/components/ui/RefreshButton";
 import { usePageRights } from "@/hooks/usePageRights";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
+import { DateInput } from "@/components/ui/date-input";
 
 const API = "/api/crm/pre-possession";
 
@@ -141,15 +142,15 @@ function CheckCard({ c, checkLoading, onToggle, onSaved, navigate }: CheckCardPr
         {/* Inline dates */}
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <label className="text-[10px] text-muted-foreground uppercase tracking-wide block mb-0.5">Inspection Scheduled</label>
-            <input type="date" value={sdt}
+            <label className="text-[0.625rem] text-muted-foreground uppercase tracking-wide block mb-0.5">Inspection Scheduled</label>
+            <DateInput value={sdt}
               onChange={(e) => setSdt(e.target.value)}
               onBlur={(e) => patch({ ScheduledInspectionDate: e.target.value || null })}
               className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
           </div>
           <div>
-            <label className="text-[10px] text-muted-foreground uppercase tracking-wide block mb-0.5">Inspection Completed</label>
-            <input type="date" value={icd}
+            <label className="text-[0.625rem] text-muted-foreground uppercase tracking-wide block mb-0.5">Inspection Completed</label>
+            <DateInput value={icd}
               onChange={(e) => setIcd(e.target.value)}
               onBlur={(e) => patch({ InspectionCompletedDate: e.target.value || null })}
               className="w-full text-xs border border-border rounded px-2 py-1.5 bg-background focus:outline-none focus:ring-1 focus:ring-primary" />
@@ -202,7 +203,7 @@ function CheckCard({ c, checkLoading, onToggle, onSaved, navigate }: CheckCardPr
 
         {/* Inline notes */}
         <div>
-          <label className="text-[10px] text-muted-foreground uppercase tracking-wide block mb-0.5">Notes</label>
+          <label className="text-[0.625rem] text-muted-foreground uppercase tracking-wide block mb-0.5">Notes</label>
           <textarea value={notes}
             onChange={(e) => setNotes(e.target.value)}
             onBlur={(e) => { if (e.target.value !== (c.Notes ?? "")) patch({ Notes: e.target.value || null }); }}
@@ -218,7 +219,7 @@ function CheckCard({ c, checkLoading, onToggle, onSaved, navigate }: CheckCardPr
           </button>
         )}
         {doneCount === 3 && c.Status !== "Ready" && (
-          <div className="text-xs text-center text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 font-medium">
+          <div className="text-xs text-center text-sky-600 bg-sky-50 border border-sky-200 rounded-lg px-3 py-1.5 font-medium">
             1 check remaining — almost ready!
           </div>
         )}
@@ -278,18 +279,18 @@ function CreateDialog({ onClose, onCreated, onViewGateway, prefillBookingId }: C
                 <Loader2 size={12} className="animate-spin" /> Loading eligible bookings…
               </p>
             ) : (eligible as any[]).length === 0 ? (
-              <div className="text-xs bg-amber-50 border border-amber-200 rounded px-3 py-2.5 space-y-2">
-                <p className="font-semibold text-amber-800 flex items-center gap-1.5">
+              <div className="text-xs bg-sky-50 border border-sky-200 rounded px-3 py-2.5 space-y-2">
+                <p className="font-semibold text-sky-800 flex items-center gap-1.5">
                   <ShieldAlert size={13} /> No eligible bookings
                 </p>
-                <p className="text-amber-700">Both gates must pass before a check can be started:</p>
-                <ul className="space-y-1 text-amber-700">
+                <p className="text-sky-700">Both gates must pass before a check can be started:</p>
+                <ul className="space-y-1 text-sky-700">
                   <li className="flex items-start gap-1.5">
-                    <Circle size={5} className="mt-1.5 shrink-0 fill-amber-500 text-amber-500" />
+                    <Circle size={5} className="mt-1.5 shrink-0 fill-sky-500 text-sky-500" />
                     <span><strong>Gate 1 — AFS Registered:</strong> AFS Query Payment confirmed → AFS Registry visit completed → Agreement marked Registered</span>
                   </li>
                   <li className="flex items-start gap-1.5">
-                    <Circle size={5} className="mt-1.5 shrink-0 fill-amber-500 text-amber-500" />
+                    <Circle size={5} className="mt-1.5 shrink-0 fill-sky-500 text-sky-500" />
                     <span><strong>Gate 2 — OC/CC Received:</strong> project must have a received occupancy certificate</span>
                   </li>
                 </ul>
@@ -313,7 +314,7 @@ function CreateDialog({ onClose, onCreated, onViewGateway, prefillBookingId }: C
           {(eligible as any[]).length > 0 && (
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Scheduled Inspection Date</label>
-              <input type="date" value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)}
+              <DateInput value={scheduledDate} onChange={(e) => setScheduledDate(e.target.value)}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
           )}
@@ -325,7 +326,7 @@ function CreateDialog({ onClose, onCreated, onViewGateway, prefillBookingId }: C
           </button>
           <button onClick={handleCreate}
             disabled={saving || !bookingId || (eligible as any[]).length === 0}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+            className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
             {saving ? "Starting…" : "Start Check"}
           </button>
         </div>
@@ -359,7 +360,7 @@ function GatewayRow({ g, onStartCheck, navigate }: { g: any; onStartCheck: (book
   return (
     <div className={`px-4 py-3 ${allPass ? "bg-green-50/40" : "bg-card"}`}>
       <div className="flex items-start gap-3">
-        <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${allPass ? "bg-green-500" : "bg-amber-400"}`} />
+        <div className={`w-2 h-2 rounded-full mt-1.5 shrink-0 ${allPass ? "bg-green-500" : "bg-sky-400"}`} />
         <div className="min-w-0 flex-1">
           {/* Booking identity */}
           <div className="flex items-center gap-2 flex-wrap">
@@ -404,7 +405,7 @@ function GatewayRow({ g, onStartCheck, navigate }: { g: any; onStartCheck: (book
         {allPass && (
           <button
             onClick={() => onStartCheck(String(g.BookingId))}
-            className="shrink-0 flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90">
+            className="shrink-0 flex items-center gap-1 px-2.5 py-1 text-xs font-medium btn-module text-white rounded-lg ">
             <Plus size={11} /> Start
           </button>
         )}
@@ -486,7 +487,7 @@ const CrmPrePossession: React.FC = () => {
           <div className="flex items-center gap-3">
             <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={handleRefresh} />
             <button onClick={() => openCreate()}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+              className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
               <Plus size={14} /> Start Check
             </button>
           </div>

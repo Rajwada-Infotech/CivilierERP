@@ -8,6 +8,7 @@ import {
   FileText, Globe, Hash, CheckCircle2, RefreshCw,
   Landmark, Tag,
 } from "lucide-react";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 const fade = (delay = 0) => ({
   initial: { opacity: 0, y: 14 },
@@ -28,7 +29,7 @@ function InfoRow({
         <Icon size={13} className="text-emerald-500" />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 mb-0.5">{label}</p>
+        <p className="text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground/60 mb-0.5">{label}</p>
         <p className={`text-sm ${mono ? "font-mono font-semibold" : "font-medium"} ${highlight ? "text-emerald-600 dark:text-emerald-400" : "text-foreground"} break-words`}>
           {value}
         </p>
@@ -71,13 +72,13 @@ export default function SupplierCompanyProfile() {
   return (
     <div className="min-h-[calc(100vh-3.5rem)] bg-background">
       {/* Subtle bg glow */}
-      <div className="fixed inset-0 pointer-events-none z-0">
+      <BodyPortal><div className="fixed inset-0 pointer-events-none z-0">
         <div style={{
           position: "absolute", top: "-5%", left: "50%", transform: "translateX(-50%)",
           width: "60vw", height: "35vh",
           background: `radial-gradient(ellipse at 50% 0%, rgba(16,185,129,${isDark ? "0.07" : "0.04"}) 0%, transparent 70%)`,
         }} />
-      </div>
+      </div></BodyPortal>
 
       <div className="relative z-10 max-w-3xl mx-auto px-4 py-10 space-y-6">
 
@@ -110,7 +111,7 @@ export default function SupplierCompanyProfile() {
             </div>
 
             <div className="min-w-0 flex-1">
-              <div className="text-[9px] font-bold uppercase tracking-widest text-emerald-300/60 mb-1">Supplier Company</div>
+              <div className="text-[0.5625rem] font-bold uppercase tracking-widest text-emerald-300/60 mb-1">Supplier Company</div>
               <h1 className="font-heading text-xl font-extrabold text-white leading-tight truncate">
                 {profile.Name}
               </h1>
@@ -125,11 +126,11 @@ export default function SupplierCompanyProfile() {
             {/* Status badge */}
             <div className="shrink-0">
               {isActive ? (
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-emerald-300 bg-emerald-400/15 border border-emerald-400/25 px-3 py-1 rounded-full">
+                <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-bold text-emerald-300 bg-emerald-400/15 border border-emerald-400/25 px-3 py-1 rounded-full">
                   <CheckCircle2 size={11} /> Active
                 </span>
               ) : (
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold text-slate-300 bg-white/10 border border-white/20 px-3 py-1 rounded-full">
+                <span className="inline-flex items-center gap-1.5 text-[0.6875rem] font-bold text-slate-300 bg-white/10 border border-white/20 px-3 py-1 rounded-full">
                   {profile.LHeadStatus}
                 </span>
               )}

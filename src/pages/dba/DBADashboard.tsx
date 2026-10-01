@@ -51,6 +51,7 @@ import {
 } from "lucide-react";
 import { getSocket, connectSocket } from "@/lib/socket";
 import { toast } from "sonner";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -97,7 +98,7 @@ const MAX_CELL_LEN = 80;
 function QueryCellValue({ value }: { value: unknown }) {
   if (value === null || value === undefined) {
     return (
-      <span className="text-muted-foreground italic text-[10px]">null</span>
+      <span className="text-muted-foreground italic text-[0.625rem]">null</span>
     );
   }
 
@@ -121,7 +122,7 @@ function QueryCellValue({ value }: { value: unknown }) {
     return (
       <span
         title={str}
-        className="font-mono text-[10px] cursor-default"
+        className="font-mono text-[0.625rem] cursor-default"
         style={{ wordBreak: "break-all" }}
       >
         {str.slice(0, MAX_CELL_LEN)}
@@ -130,7 +131,7 @@ function QueryCellValue({ value }: { value: unknown }) {
     );
   }
 
-  return <span className="font-mono text-[10px]">{str}</span>;
+  return <span className="font-mono text-[0.625rem]">{str}</span>;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -359,11 +360,11 @@ export default function DBADashboard() {
         action={
           <div className="flex items-center gap-2">
             {dbaSessions.length > 0 && (
-              <span className="flex items-center gap-1.5 text-[11px] font-medium text-blue-600 bg-blue-500/10 border border-blue-500/20 rounded-full px-2.5 py-1">
+              <span className="flex items-center gap-1.5 text-[0.6875rem] font-medium text-blue-600 bg-blue-500/10 border border-blue-500/20 rounded-full px-2.5 py-1">
                 <Users size={10} /> {dbaSessions.length} active
               </span>
             )}
-            <span className={`flex items-center gap-1.5 text-[11px] font-medium rounded-full px-2.5 py-1 border ${socketConnected ? "text-green-600 bg-green-500/10 border-green-500/20" : "text-muted-foreground bg-muted border-border"}`}>
+            <span className={`flex items-center gap-1.5 text-[0.6875rem] font-medium rounded-full px-2.5 py-1 border ${socketConnected ? "text-green-600 bg-green-500/10 border-green-500/20" : "text-muted-foreground bg-muted border-border"}`}>
               {socketConnected ? <Wifi size={10} /> : <WifiOff size={10} />}
               {socketConnected ? "Live" : "Offline"}
             </span>
@@ -431,7 +432,7 @@ export default function DBADashboard() {
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xl font-bold truncate leading-tight">{s.value}</p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">{s.label}</p>
+                    <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{s.label}</p>
                   </div>
                   <ChevronDown
                     size={13}
@@ -443,7 +444,7 @@ export default function DBADashboard() {
               {/* DB Switcher Dropdown */}
               {dbPopoverOpen && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setDbPopoverOpen(false)} />
+                  <BodyPortal><div className="fixed inset-0 z-40" onClick={() => setDbPopoverOpen(false)} /></BodyPortal>
                   <div className="absolute top-full mt-2 left-0 z-50 w-64 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
                     <div className="flex items-center gap-2 px-3 py-2.5 border-b border-border bg-muted/30">
                       <Database size={12} className="text-emerald-500" />
@@ -485,7 +486,7 @@ export default function DBADashboard() {
                             setDbPopoverOpen(false);
                             toast.info(`Reverted to default: ${health?.database_name}`);
                           }}
-                          className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+                          className="text-[0.6875rem] text-muted-foreground hover:text-foreground transition-colors"
                         >
                           ↩ Reset to default ({health?.database_name})
                         </button>
@@ -503,7 +504,7 @@ export default function DBADashboard() {
                 </div>
                 <div>
                   <p className="text-xl font-bold leading-tight">{s.value}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{s.label}</p>
+                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{s.label}</p>
                 </div>
               </CardContent>
             </Card>
@@ -571,7 +572,7 @@ export default function DBADashboard() {
                           <r.icon size={13} className={r.color} />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{r.label}</p>
+                          <p className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">{r.label}</p>
                           <p className="text-sm font-heading font-semibold truncate mt-0.5">{String(r.value)}</p>
                         </div>
                       </div>
@@ -588,7 +589,7 @@ export default function DBADashboard() {
                           <r.icon size={13} className={r.color} />
                         </div>
                         <div className="min-w-0">
-                          <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{r.label}</p>
+                          <p className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">{r.label}</p>
                           <p className="text-sm font-heading font-semibold truncate mt-0.5">{String(r.value)}</p>
                         </div>
                       </div>
@@ -600,7 +601,7 @@ export default function DBADashboard() {
                       <Terminal size={13} className="text-slate-500" />
                     </div>
                     <div className="min-w-0">
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">SQL Version</p>
+                      <p className="text-[0.625rem] uppercase tracking-wider text-muted-foreground">SQL Version</p>
                       <p className="text-xs font-mono font-semibold truncate mt-0.5">
                         {health.sql_version?.split("\n")[0] ?? health.sql_version}
                       </p>
@@ -656,27 +657,27 @@ export default function DBADashboard() {
                 <Table>
                   <TableHeader>
                     <TableRow className="bg-muted/30 hover:bg-muted/30">
-                      <TableHead className="text-[11px] font-semibold pl-4">Table</TableHead>
-                      <TableHead className="text-[11px] font-semibold">Schema</TableHead>
+                      <TableHead className="text-[0.6875rem] font-semibold pl-4">Table</TableHead>
+                      <TableHead className="text-[0.6875rem] font-semibold">Schema</TableHead>
                       <TableHead
-                        className="text-[11px] font-semibold cursor-pointer select-none"
+                        className="text-[0.6875rem] font-semibold cursor-pointer select-none"
                         onClick={() => toggleSort("row_count")}
                       >
                         <span className="flex items-center gap-1">Rows <SortIcon col="row_count" /></span>
                       </TableHead>
                       <TableHead
-                        className="text-[11px] font-semibold cursor-pointer select-none"
+                        className="text-[0.6875rem] font-semibold cursor-pointer select-none"
                         onClick={() => toggleSort("size_mb")}
                       >
                         <span className="flex items-center gap-1">Size <SortIcon col="size_mb" /></span>
                       </TableHead>
                       <TableHead
-                        className="text-[11px] font-semibold cursor-pointer select-none"
+                        className="text-[0.6875rem] font-semibold cursor-pointer select-none"
                         onClick={() => toggleSort("last_write")}
                       >
                         <span className="flex items-center gap-1">Last Write <SortIcon col="last_write" /></span>
                       </TableHead>
-                      <TableHead className="text-right text-[11px] font-semibold pr-4" />
+                      <TableHead className="text-right text-[0.6875rem] font-semibold pr-4" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -697,13 +698,13 @@ export default function DBADashboard() {
                             <TableCell className="pl-4 py-3">
                               <div className="flex items-center gap-2">
                                 <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${recentWrite ? "bg-green-500" : "bg-muted-foreground/30"}`} />
-                                <span className="font-mono font-semibold text-[11px] text-primary">{t.table_name}</span>
+                                <span className="font-mono font-semibold text-[0.6875rem] text-primary">{t.table_name}</span>
                               </div>
                             </TableCell>
-                            <TableCell className="text-muted-foreground text-[11px]">{t.schema_name}</TableCell>
+                            <TableCell className="text-muted-foreground text-[0.6875rem]">{t.schema_name}</TableCell>
                             <TableCell>
                               <div className="space-y-1">
-                                <span className="text-[11px] font-medium">{(t.row_count ?? 0).toLocaleString()}</span>
+                                <span className="text-[0.6875rem] font-medium">{(t.row_count ?? 0).toLocaleString()}</span>
                                 <div className="w-20 h-0.5 bg-muted rounded-full">
                                   <div className="h-0.5 bg-blue-400 rounded-full" style={{ width: `${rowBar}%` }} />
                                 </div>
@@ -711,18 +712,18 @@ export default function DBADashboard() {
                             </TableCell>
                             <TableCell>
                               <div className="space-y-1">
-                                <span className="text-[11px] text-muted-foreground">{t.size_mb?.toFixed(2) ?? "—"} MB</span>
+                                <span className="text-[0.6875rem] text-muted-foreground">{t.size_mb?.toFixed(2) ?? "—"} MB</span>
                                 <div className="w-20 h-0.5 bg-muted rounded-full">
                                   <div className={`h-0.5 rounded-full ${sizeBar > 70 ? "bg-orange-400" : "bg-emerald-400"}`} style={{ width: `${sizeBar}%` }} />
                                 </div>
                               </div>
                             </TableCell>
-                            <TableCell className="text-muted-foreground text-[11px] font-mono">
+                            <TableCell className="text-muted-foreground text-[0.6875rem] font-mono">
                               {t.last_write ? new Date(t.last_write).toLocaleDateString("en-IN") : "—"}
                             </TableCell>
                             <TableCell className="text-right pr-4">
                               <Button variant="ghost" size="sm"
-                                className="h-6 text-[10px] gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                className="h-6 text-[0.625rem] gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                                 onClick={() => { setQueryText(`SELECT TOP 100 * FROM ${t.schema_name}.[${t.table_name}]`); setActiveTab("query"); }}>
                                 <Terminal size={10} /> Query
                               </Button>
@@ -752,11 +753,11 @@ export default function DBADashboard() {
               </div>
               <div className="flex items-center gap-2">
                 {(selectedDb ?? health?.database_name) && (
-                  <span className="flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                  <span className="flex items-center gap-1 text-[0.625rem] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
                     <Database size={9} /> {selectedDb ?? health?.database_name}
                   </span>
                 )}
-                <span className="text-[10px] text-muted-foreground">Ctrl+Enter to run</span>
+                <span className="text-[0.625rem] text-muted-foreground">Ctrl+Enter to run</span>
               </div>
             </div>
 
@@ -771,7 +772,7 @@ export default function DBADashboard() {
               />
               {/* Danger warning */}
               {/\b(DROP|TRUNCATE|ALTER|DELETE|INSERT|UPDATE|EXEC|EXECUTE)\b/i.test(queryText) && (
-                <div className="absolute bottom-2 right-3 flex items-center gap-1 text-[10px] text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded">
+                <div className="absolute bottom-2 right-3 flex items-center gap-1 text-[0.625rem] text-orange-400 bg-orange-500/10 border border-orange-500/20 px-2 py-0.5 rounded">
                   <AlertTriangle size={9} /> Destructive — will require confirmation
                 </div>
               )}
@@ -779,7 +780,7 @@ export default function DBADashboard() {
 
             {/* Status bar */}
             <div className="flex items-center justify-between px-4 py-2 bg-muted/40 border-t border-border">
-              <div className="flex items-center gap-3 text-[10px] text-muted-foreground">
+              <div className="flex items-center gap-3 text-[0.625rem] text-muted-foreground">
                 <span>{queryText.length} chars</span>
                 {lastRunMs !== null && (
                   <span className="flex items-center gap-1">
@@ -791,11 +792,11 @@ export default function DBADashboard() {
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1 text-muted-foreground"
+                <Button variant="ghost" size="sm" className="h-6 text-[0.625rem] gap-1 text-muted-foreground"
                   onClick={() => navigator.clipboard.writeText(queryText)}>
                   <Copy size={9} /> Copy
                 </Button>
-                <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1 text-muted-foreground"
+                <Button variant="ghost" size="sm" className="h-6 text-[0.625rem] gap-1 text-muted-foreground"
                   onClick={() => { setQueryText(""); setQueryResult(null); setQueryError(null); setLastRunMs(null); }}>
                   <Trash2 size={9} /> Clear
                 </Button>
@@ -830,10 +831,10 @@ export default function DBADashboard() {
                   <CheckCircle2 size={12} className="text-green-500" />
                   <span className="text-xs font-heading font-semibold">{queryResult.rowCount} row(s)</span>
                   {lastRunMs !== null && (
-                    <span className="text-[10px] text-muted-foreground">· {lastRunMs}ms</span>
+                    <span className="text-[0.625rem] text-muted-foreground">· {lastRunMs}ms</span>
                   )}
                 </div>
-                <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1"
+                <Button variant="ghost" size="sm" className="h-6 text-[0.625rem] gap-1"
                   onClick={() => navigator.clipboard.writeText(
                     [Object.keys(queryResult.rows[0]).join("\t"),
                      ...queryResult.rows.map((r) => Object.values(r).join("\t"))].join("\n")
@@ -846,7 +847,7 @@ export default function DBADashboard() {
                   <TableHeader className="sticky top-0 bg-muted/80 backdrop-blur-sm z-10">
                     <TableRow>
                       {Object.keys(queryResult.rows[0]).map((k) => (
-                        <TableHead key={k} className="text-[11px] font-semibold whitespace-nowrap">{k}</TableHead>
+                        <TableHead key={k} className="text-[0.6875rem] font-semibold whitespace-nowrap">{k}</TableHead>
                       ))}
                     </TableRow>
                   </TableHeader>
@@ -870,7 +871,7 @@ export default function DBADashboard() {
             <div className="rounded-lg bg-muted/30 border border-border px-4 py-8 text-center">
               <CheckCircle2 size={18} className="text-green-500 mx-auto mb-2" />
               <p className="text-xs font-medium">Query executed successfully</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">0 rows returned</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">0 rows returned</p>
             </div>
           )}
         </div>
@@ -890,7 +891,7 @@ export default function DBADashboard() {
               </CardHeader>
               <CardContent className="pb-3 space-y-1.5">
                 {liveQueryFeed.slice(0, 5).map((entry, i) => (
-                  <div key={i} className="flex items-center gap-3 text-[11px]">
+                  <div key={i} className="flex items-center gap-3 text-[0.6875rem]">
                     <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${entry.status === "success" ? "bg-green-500" : "bg-red-500"}`} />
                     <span className="text-muted-foreground w-24 shrink-0">{entry.name}</span>
                     <span className="font-mono text-foreground truncate flex-1">{entry.query}</span>
@@ -946,30 +947,30 @@ export default function DBADashboard() {
                       {/* Content */}
                       <div className="flex-1 min-w-0 space-y-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[10px] font-mono text-muted-foreground">
+                          <span className="text-[0.625rem] font-mono text-muted-foreground">
                             {new Date(q.executed_at).toLocaleString("en-IN")}
                           </span>
                           {q.executed_by && (
-                            <span className="text-[10px] text-muted-foreground">· {q.executed_by}</span>
+                            <span className="text-[0.625rem] text-muted-foreground">· {q.executed_by}</span>
                           )}
-                          <Badge className={`text-[9px] px-1.5 py-0 h-4 ${q.status === "success" ? "bg-green-500/10 text-green-600 border-green-500/20" : "bg-red-500/10 text-red-600 border-red-500/20"}`}>
+                          <Badge className={`text-[0.5625rem] px-1.5 py-0 h-4 ${q.status === "success" ? "bg-green-500/10 text-green-600 border-green-500/20" : "bg-red-500/10 text-red-600 border-red-500/20"}`}>
                             {q.status}
                           </Badge>
                           {q.rows_affected != null && (
-                            <span className="text-[10px] text-muted-foreground">{q.rows_affected} rows</span>
+                            <span className="text-[0.625rem] text-muted-foreground">{q.rows_affected} rows</span>
                           )}
                         </div>
-                        <p className="font-mono text-[11px] text-foreground bg-muted/40 rounded px-2 py-1 truncate">
+                        <p className="font-mono text-[0.6875rem] text-foreground bg-muted/40 rounded px-2 py-1 truncate">
                           {q.query_text}
                         </p>
                         {q.error_message && (
-                          <p className="text-[10px] text-red-500 font-mono">{q.error_message}</p>
+                          <p className="text-[0.625rem] text-red-500 font-mono">{q.error_message}</p>
                         )}
                       </div>
 
                       {/* Re-run button */}
                       <Button variant="ghost" size="sm"
-                        className="h-6 text-[10px] gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                        className="h-6 text-[0.625rem] gap-1 opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                         onClick={() => { setQueryText(q.query_text); setActiveTab("query"); }}>
                         <RotateCcw size={9} /> Reuse
                       </Button>

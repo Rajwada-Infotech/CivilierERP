@@ -46,6 +46,7 @@ import { useLookup } from "@/hooks/useLookup";
 import { usePageRights } from "@/hooks/usePageRights";
 import { useAuth } from "@/contexts/AuthContext";
 import { friendlyErrorMessage } from "@/lib/friendlyError";
+import { AutoInput, DateInput } from "@/components/ui/date-input";
 
 interface Project {
   Id?: number;
@@ -175,7 +176,7 @@ function CompanyTagPicker({
                   const name = c.Name ?? c.name ?? "";
                   return (
                     <Avatar key={id} className="h-8 w-8 border-2 border-card ring-1 ring-border/60">
-                      <AvatarFallback className={`text-[11px] font-heading font-bold ${tagAvatarColor(id)}`}>
+                      <AvatarFallback className={`text-[0.6875rem] font-heading font-bold ${tagAvatarColor(id)}`}>
                         {name.charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
@@ -183,7 +184,7 @@ function CompanyTagPicker({
                 })}
                 {extra > 0 && (
                   <Avatar className="h-8 w-8 border-2 border-card ring-1 ring-border/60">
-                    <AvatarFallback className="text-[10px] font-heading font-bold bg-muted text-muted-foreground">
+                    <AvatarFallback className="text-[0.625rem] font-heading font-bold bg-muted text-muted-foreground">
                       +{extra}
                     </AvatarFallback>
                   </Avatar>
@@ -209,7 +210,7 @@ function CompanyTagPicker({
                 return (
                   <CommandItem key={id} value={name} onSelect={() => toggle(id)} className="gap-2">
                     <Avatar className="h-6 w-6">
-                      <AvatarFallback className={`text-[10px] font-heading font-bold ${tagAvatarColor(id)}`}>
+                      <AvatarFallback className={`text-[0.625rem] font-heading font-bold ${tagAvatarColor(id)}`}>
                         {name.charAt(0).toUpperCase()}
                       </AvatarFallback>
                     </Avatar>
@@ -315,14 +316,14 @@ function ProjectViewModal({
   const STATUS_COLORS: Record<string, string> = {
     Active: "bg-emerald-500/10 text-emerald-600",
     Planning: "bg-blue-500/10 text-blue-600",
-    "On Hold": "bg-amber-500/10 text-amber-600",
+    "On Hold": "bg-[#ffe2021a] text-amber-600",
     Completed: "bg-purple-500/10 text-purple-600",
     Cancelled: "bg-muted text-muted-foreground",
   };
 
   const Row = ({ label, value }: { label: string; value?: string | null }) => (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
       <span className="text-sm text-foreground break-words">
@@ -641,7 +642,7 @@ function buildProjectColumns(
       enableSorting: false,
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-1">
-          <button
+          <button data-row-view
             onClick={() => openView(row.original)}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10"
             title="View details"
@@ -1008,8 +1009,7 @@ export default function ProjectMaster() {
             size={14}
             className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
           />
-          <input
-            type="date"
+          <DateInput
             value={(form[key] as string) || ""}
             onChange={(e) =>
               !readOnly && setForm((p) => ({ ...p, [key]: e.target.value }))
@@ -1019,7 +1019,7 @@ export default function ProjectMaster() {
           />
         </div>
       ) : (
-        <input
+        <AutoInput
           type={type}
           value={(form[key] as string) || ""}
           onChange={(e) =>
@@ -1074,7 +1074,7 @@ export default function ProjectMaster() {
           rights.canCreate && (
             <button
               onClick={openNew}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all"
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all"
             >
               <Plus size={13} /> Add Project
             </button>
@@ -1161,7 +1161,7 @@ export default function ProjectMaster() {
                   onClick={() => setActiveTab(tab)}
                   className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold capitalize whitespace-nowrap transition-colors ${
                     activeTab === tab
-                      ? "bg-gradient-to-r from-blue-500 to-indigo-600 text-white shadow-sm"
+                      ? "btn-module text-white shadow-sm"
                       : "text-muted-foreground hover:bg-muted"
                   }`}
                 >
@@ -1333,13 +1333,13 @@ export default function ProjectMaster() {
                       />
                     </div>
                     {complianceLoading && (
-                      <p className="text-[10px] text-primary mt-1 flex items-center gap-1">
+                      <p className="text-[0.625rem] text-primary mt-1 flex items-center gap-1">
                         <Loader2 size={10} className="animate-spin" />
                         Fetching compliance data…
                       </p>
                     )}
                     {form.companyId && !complianceLoading && form.gst && (
-                      <p className="text-[10px] text-emerald-600 mt-1">
+                      <p className="text-[0.625rem] text-emerald-600 mt-1">
                         ✓ Compliance data loaded from Company Master
                       </p>
                     )}
@@ -1596,7 +1596,7 @@ export default function ProjectMaster() {
               <button
                 onClick={() => saveMutation.mutate()}
                 disabled={!form.code || !form.name || saveMutation.isPending}
-                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
+                className="font-heading font-semibold text-white text-sm px-5 py-2 rounded-lg btn-module shadow-sm disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-2"
               >
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />

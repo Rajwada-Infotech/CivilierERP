@@ -51,6 +51,7 @@ import {
   type VendorOption,
 } from "@/api/securityAttendanceApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
+import { DateInput } from "@/components/ui/date-input";
 
 const PAGE_KEY = "maintenance-security-attendance";
 const TABS = ["overview", "checkinout", "personnel", "history", "shifts"] as const;
@@ -89,14 +90,14 @@ const fmtDate = (d: string | null | undefined) => {
 
 const STATUS_STYLE: Record<AttendanceStatus, string> = {
   Present: "bg-emerald-500/10 border-emerald-500/20 text-emerald-600",
-  Late: "bg-amber-500/10 border-amber-500/20 text-amber-600",
+  Late: "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
   Absent: "bg-red-500/10 border-red-500/20 text-red-600",
   HalfDay: "bg-sky-500/10 border-sky-500/20 text-sky-600",
 };
 
 function StatusBadge({ status }: { status: AttendanceStatus }) {
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${STATUS_STYLE[status] || "bg-muted border-border text-muted-foreground"}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${STATUS_STYLE[status] || "bg-muted border-border text-muted-foreground"}`}>
       {status}
     </span>
   );
@@ -106,12 +107,12 @@ function VerificationBadge({ status }: { status: string }) {
   const style =
     status === "Verified" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" :
     status === "Rejected" ? "bg-red-500/10 border-red-500/20 text-red-600" :
-    "bg-amber-500/10 border-amber-500/20 text-amber-600";
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${style}`}>{status}</span>;
+    "bg-[#ffe2021a] border-amber-500/20 text-amber-600";
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${style}`}>{status}</span>;
 }
 
 const inputCls = "px-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
-const labelCls = "block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
+const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 const fieldCls = "w-full px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 text-foreground";
 
 export default function SecurityAttendance() {
@@ -228,7 +229,7 @@ function CheckInOutTab({ rights }: { rights: ReturnType<typeof usePageRights> })
         ) : (
           <div className="rounded-xl border border-border overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
                 <tr>
                   <th className="text-left px-4 py-2.5">Security ID</th>
                   <th className="text-left px-4 py-2.5">Name</th>
@@ -247,7 +248,7 @@ function CheckInOutTab({ rights }: { rights: ReturnType<typeof usePageRights> })
                         {rights.canCreate && (
                           <button
                             onClick={() => setCheckInFor(p)}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-heading font-semibold gradient-maintenance text-white"
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-semibold gradient-maintenance text-white"
                           >
                             <LogIn size={12} /> Check-In
                           </button>
@@ -255,7 +256,7 @@ function CheckInOutTab({ rights }: { rights: ReturnType<typeof usePageRights> })
                         {rights.canEdit && (
                           <button
                             onClick={() => setAbsentFor(p)}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-heading font-medium border border-border text-muted-foreground hover:text-destructive hover:border-destructive/40"
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-medium border border-border text-muted-foreground hover:text-destructive hover:border-destructive/40"
                           >
                             <UserX size={12} /> Mark Absent
                           </button>
@@ -280,7 +281,7 @@ function CheckInOutTab({ rights }: { rights: ReturnType<typeof usePageRights> })
         ) : (
           <div className="rounded-xl border border-border overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
                 <tr>
                   <th className="text-left px-4 py-2.5">Security ID</th>
                   <th className="text-left px-4 py-2.5">Name</th>
@@ -305,7 +306,7 @@ function CheckInOutTab({ rights }: { rights: ReturnType<typeof usePageRights> })
                         {rights.canEdit && r.CheckIn && !r.CheckOut && (
                           <button
                             onClick={() => setCheckOutFor(r)}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-heading font-semibold border border-border text-foreground hover:bg-muted"
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-semibold border border-border text-foreground hover:bg-muted"
                           >
                             <LogOut size={12} /> Check-Out
                           </button>
@@ -535,7 +536,7 @@ function PersonnelTab({ rights }: { rights: ReturnType<typeof usePageRights> }) 
       {rows.length > 0 && (
         <div className="rounded-xl border border-border overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+            <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
               <tr>
                 <th className="text-left px-4 py-2.5">Security ID</th>
                 <th className="text-left px-4 py-2.5">Name</th>
@@ -557,7 +558,7 @@ function PersonnelTab({ rights }: { rights: ReturnType<typeof usePageRights> }) 
                   <td className="px-4 py-2.5 text-muted-foreground">{p.ProjectName || "—"}</td>
                   <td className="px-4 py-2.5 text-muted-foreground">{p.DefaultShiftName || "—"}</td>
                   <td className="px-4 py-2.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${p.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${p.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>
                       {p.Status}
                     </span>
                   </td>
@@ -703,7 +704,7 @@ function PersonnelFormDialog({
                       className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-muted/40 transition-colors"
                     >
                       <span className="text-xs text-foreground truncate">{v.name}</span>
-                      <span className="shrink-0 text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{v.typeLabel}</span>
+                      <span className="shrink-0 text-[0.5625rem] font-medium px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground">{v.typeLabel}</span>
                     </button>
                   ))
                 )}
@@ -786,9 +787,9 @@ function HistoryTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
   return (
     <div className="space-y-4 pt-1">
       <div className="flex flex-wrap items-center gap-2">
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={inputCls} />
+        <DateInput value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={inputCls} />
         <span className="text-xs text-muted-foreground">to</span>
-        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={inputCls} />
+        <DateInput value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={inputCls} />
         <select value={securityId} onChange={(e) => setSecurityId(e.target.value)} className={inputCls}>
           <option value="">All Personnel</option>
           {(personnel || []).map((p) => (<option key={p.Id} value={p.Id}>{p.Name}</option>))}
@@ -819,7 +820,7 @@ function HistoryTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       {rows.length > 0 && (
         <div className="rounded-xl border border-border overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+            <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
               <tr>
                 <th className="text-left px-4 py-2.5">Date</th>
                 <th className="text-left px-4 py-2.5">Security ID</th>
@@ -981,8 +982,8 @@ function AttendanceLogsModal({ row, onClose }: { row: SecurityAttendanceRow; onC
                 {l.Remarks && <div className="text-foreground">{l.Remarks}</div>}
                 {(l.OldValue || l.NewValue) && (
                   <div className="grid grid-cols-2 gap-2 pt-1">
-                    <div><p className="text-[9px] uppercase text-muted-foreground">Old</p><pre className="whitespace-pre-wrap break-all text-[10px] text-muted-foreground">{l.OldValue || "—"}</pre></div>
-                    <div><p className="text-[9px] uppercase text-muted-foreground">New</p><pre className="whitespace-pre-wrap break-all text-[10px] text-foreground">{l.NewValue || "—"}</pre></div>
+                    <div><p className="text-[0.5625rem] uppercase text-muted-foreground">Old</p><pre className="whitespace-pre-wrap break-all text-[0.625rem] text-muted-foreground">{l.OldValue || "—"}</pre></div>
+                    <div><p className="text-[0.5625rem] uppercase text-muted-foreground">New</p><pre className="whitespace-pre-wrap break-all text-[0.625rem] text-foreground">{l.NewValue || "—"}</pre></div>
                   </div>
                 )}
               </div>
@@ -1019,7 +1020,7 @@ function ShiftsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       {rows.length > 0 && (
         <div className="rounded-xl border border-border overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+            <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
               <tr>
                 <th className="text-left px-4 py-2.5">Name</th>
                 <th className="text-left px-4 py-2.5">Start</th>
@@ -1037,7 +1038,7 @@ function ShiftsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                   <td className="px-4 py-2.5 font-mono text-xs">{fmtTimeOfDay(s.EndTime)}</td>
                   <td className="px-4 py-2.5">{s.GraceMinutes}</td>
                   <td className="px-4 py-2.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${s.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${s.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>
                       {s.Status}
                     </span>
                   </td>

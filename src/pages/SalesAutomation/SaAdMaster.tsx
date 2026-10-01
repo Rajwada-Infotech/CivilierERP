@@ -206,10 +206,10 @@ const CreativesDialog: React.FC<{ adId: string; adName: string; onClose: () => v
               {(creatives as any[]).map((c) => (
                 <div key={c.Id} className="flex items-center justify-between gap-2 rounded-lg border border-border px-3 py-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary shrink-0">{c.MediaType}</span>
+                    <span className="text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary shrink-0">{c.MediaType}</span>
                     <div className="min-w-0">
                       <div className="text-sm font-medium truncate">{c.FileName}</div>
-                      <div className="text-[11px] text-muted-foreground">{c.FileSize ? `${(c.FileSize / 1024).toFixed(0)} KB` : ""} · {c.UploadedByName || "—"}</div>
+                      <div className="text-[0.6875rem] text-muted-foreground">{c.FileSize ? `${(c.FileSize / 1024).toFixed(0)} KB` : ""} · {c.UploadedByName || "—"}</div>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 shrink-0">

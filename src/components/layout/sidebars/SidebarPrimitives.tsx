@@ -1,6 +1,60 @@
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { ArrowDown2, ArrowUp2 } from "iconsax-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Portal as TooltipPortal } from "@radix-ui/react-tooltip";
+
+// Only one sidebar tooltip at a time: opening one closes any lingering one.
+let closeActiveTooltip: (() => void) | null = null;
+
+/** Shows the full text in a tooltip on hover, but only when the wrapped
+ *  label is actually cut off ("…" / line-clamp). */
+const OverflowTooltip = ({
+  text,
+  children,
+}: {
+  text: string;
+  children: React.ReactElement;
+}) => {
+  const [open, setOpen] = useState(false);
+  return (
+    <TooltipProvider delayDuration={0}>
+      <Tooltip
+        open={open}
+        // Radix would open on any hover; opening is driven by the overflow
+        // check below instead, so only honour close requests here.
+        onOpenChange={() => {}}
+      >
+        <TooltipTrigger
+          asChild
+          onPointerEnter={(e) => {
+            const t = e.currentTarget as HTMLElement;
+            if (t.scrollWidth > t.clientWidth || t.scrollHeight > t.clientHeight + 1) {
+              const close = () => setOpen(false);
+              if (closeActiveTooltip && closeActiveTooltip !== close) closeActiveTooltip();
+              closeActiveTooltip = close;
+              setOpen(true);
+            }
+          }}
+          onPointerLeave={() => setOpen(false)}
+        >
+          {children}
+        </TooltipTrigger>
+        {/* Portalled so the sidebar's overflow clipping can't cut it off. */}
+        <TooltipPortal>
+          <TooltipContent side="right" sideOffset={10} className="z-[100] max-w-xs text-xs">
+            {text}
+          </TooltipContent>
+        </TooltipPortal>
+      </Tooltip>
+    </TooltipProvider>
+  );
+};
 
 // ─── Shared types ─────────────────────────────────────────────────────────────
 
@@ -91,7 +145,7 @@ const RailTooltip = ({
 );
 
 const Badge = ({ count }: { count: number }) => (
-  <span className="bg-blue-500 text-white text-[10px] font-bold min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full shrink-0">
+  <span className="bg-blue-500 text-white text-[0.625rem] font-bold min-w-[20px] h-5 px-1 flex items-center justify-center rounded-full shrink-0">
     {count}
   </span>
 );
@@ -112,6 +166,7 @@ const NavLabel = ({
   className?: string;
   wrap?: boolean;
 }) => (
+  <OverflowTooltip text={label}>
   <span
     className={`relative inline-block min-w-0 max-w-full ${wrap ? "line-clamp-2 leading-tight" : "truncate"} ${className}`}
   >
@@ -128,6 +183,7 @@ const NavLabel = ({
       }}
     />
   </span>
+  </OverflowTooltip>
 );
 
 // ─── NavButton ────────────────────────────────────────────────────────────────
@@ -259,7 +315,7 @@ export const NavGroup = ({
               <button
                 key={child.path}
                 onClick={() => navigate(child.path, child.state ? { state: child.state } : undefined)}
-                className={`w-full flex justify-between items-center gap-2 text-[11px] px-2 py-1 rounded-md text-sidebar-foreground/70 transition-all duration-200 ${
+                className={`w-full flex justify-between items-center gap-2 text-[0.6875rem] px-2 py-1 rounded-md text-sidebar-foreground/70 transition-all duration-200 ${
                   childActive
                     ? ""
                     : "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -271,7 +327,7 @@ export const NavGroup = ({
                 />
                 <NavLabel label={child.label} active={childActive} accentColor={accentColor} className="flex-1 text-left" />
                 {child.badge && (
-                  <span className="bg-blue-500 text-white text-[9px] font-bold min-w-[16px] h-[16px] flex items-center justify-center rounded-full">
+                  <span className="bg-blue-500 text-white text-[0.5625rem] font-bold min-w-[16px] h-[16px] flex items-center justify-center rounded-full">
                     {child.badge}
                   </span>
                 )}
@@ -283,12 +339,14 @@ export const NavGroup = ({
             <div key={section.label}>
               <button
                 onClick={() => toggleSection(section.label)}
-                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[11px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                className="w-full flex items-center gap-1.5 px-1.5 py-1 rounded-md text-[0.6875rem] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
               >
                 <section.icon size={12} />
-                <span className="flex-1 text-left truncate font-medium">
-                  {section.label}
-                </span>
+                <OverflowTooltip text={section.label}>
+                  <span className="flex-1 text-left truncate font-medium">
+                    {section.label}
+                  </span>
+                </OverflowTooltip>
                 {openSections[section.label] ? (
                   <ArrowUp2 size={10} />
                 ) : (
@@ -307,7 +365,7 @@ export const NavGroup = ({
                       <button
                         key={child.path}
                         onClick={() => navigate(child.path)}
-                        className={`w-full flex items-center gap-2 text-[11px] px-2 py-1 rounded-md text-sidebar-foreground/70 transition-all duration-200 ${
+                        className={`w-full flex items-center gap-2 text-[0.6875rem] px-2 py-1 rounded-md text-sidebar-foreground/70 transition-all duration-200 ${
                           sChildActive
                             ? ""
                             : "hover:bg-sidebar-accent"

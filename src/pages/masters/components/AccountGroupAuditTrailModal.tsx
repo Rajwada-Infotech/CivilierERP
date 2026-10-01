@@ -25,7 +25,7 @@ function fmtDateTime(value: string) {
 
 const ACTION_META: Record<AuditTrailEntry["Action"], { label: string; icon: typeof PlusCircle; className: string }> = {
   CREATE: { label: "Created", icon: PlusCircle, className: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10" },
-  UPDATE: { label: "Updated", icon: Pencil, className: "text-amber-600 dark:text-amber-400 bg-amber-500/10" },
+  UPDATE: { label: "Updated", icon: Pencil, className: "text-amber-600 dark:text-amber-400 bg-[#ffe2021a]" },
   DELETE: { label: "Deleted", icon: Trash2, className: "text-red-600 dark:text-red-400 bg-red-500/10" },
 };
 
@@ -94,7 +94,7 @@ export function AccountGroupAuditTrailModal({ open, onClose }: Props) {
         const meta = ACTION_META[action];
         const Icon = meta.icon;
         return (
-          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium ${meta.className}`}>
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.6875rem] font-medium ${meta.className}`}>
             <Icon size={11} /> {meta.label}
           </span>
         );

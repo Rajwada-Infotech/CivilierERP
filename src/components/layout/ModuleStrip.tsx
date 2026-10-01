@@ -577,10 +577,10 @@ export const ModuleStrip: React.FC = () => {
                       : "0 8px 28px rgba(15,17,26,0.18)",
                   }}
                 >
-                  <p className="text-[12px] font-semibold leading-snug" style={{ color: isDark ? "#f4f5f9" : "#14161f" }}>
+                  <p className="text-[0.75rem] font-semibold leading-snug" style={{ color: isDark ? "#f4f5f9" : "#14161f" }}>
                     {tooltip.label}
                   </p>
-                  <p className="text-[10px] mt-0.5 leading-snug" style={{ color: isDark ? "rgba(244,245,249,0.62)" : "rgba(20,22,31,0.62)" }}>
+                  <p className="text-[0.625rem] mt-0.5 leading-snug" style={{ color: isDark ? "rgba(244,245,249,0.62)" : "rgba(20,22,31,0.62)" }}>
                     {tooltip.desc}
                   </p>
                   <span

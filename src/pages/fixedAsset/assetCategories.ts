@@ -26,7 +26,7 @@ export const CATEGORY_COLORS: Record<string, string> = {
   Laptop:         "bg-blue-500/10 text-blue-600 dark:text-blue-400",
   Desktop:        "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
   "Mobile Phone": "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  Printer:        "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  Printer:        "bg-[#ffe2021a] text-amber-600 dark:text-amber-400",
   Scanner:        "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
   Furniture:      "bg-orange-500/10 text-orange-600 dark:text-orange-400",
   Vehicle:        "bg-rose-500/10 text-rose-600 dark:text-rose-400",

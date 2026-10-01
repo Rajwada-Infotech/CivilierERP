@@ -155,7 +155,7 @@ export function InlineLayoutEditor({
     return <div className="px-4 py-2 text-xs text-muted-foreground bg-muted/20 border-y border-border">No units with a Unit Type here.</div>;
   }
 
-  const btn = "inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors disabled:opacity-40";
+  const btn = "inline-flex items-center gap-1 text-[0.6875rem] font-medium px-2.5 py-1 rounded-md transition-colors disabled:opacity-40";
   const impact = (p: OverridePreview, verb: string) => (
     <span>
       <span className="font-semibold">{p.unitsChanged}</span> of {p.unitsInScope} unit(s) {verb} ·{" "}
@@ -174,7 +174,7 @@ export function InlineLayoutEditor({
       <div className="flex flex-wrap items-center gap-2">
         {types.length > 1 ? (
           <select value={type.layoutTypeId} onChange={(e) => setTypeId(Number(e.target.value))} disabled={busy !== ""}
-            className="h-7 rounded-md border border-border bg-background px-1.5 text-[11px]">
+            className="h-7 rounded-md border border-border bg-background px-1.5 text-[0.6875rem]">
             {types.map((t) => <option key={t.layoutTypeId} value={t.layoutTypeId}>{t.label} ({t.units})</option>)}
           </select>
         ) : (
@@ -199,7 +199,7 @@ export function InlineLayoutEditor({
           <label className="inline-flex items-center gap-1 text-muted-foreground">
             up to floor
             <input value={upTo} onChange={(e) => setUpTo(e.target.value)} type="number" min={position.floorNo ?? 0} placeholder={String(position.floorNo)}
-              disabled={!canEdit || busy !== ""} className="h-6 w-14 rounded border border-border bg-background px-1 text-[11px]" />
+              disabled={!canEdit || busy !== ""} className="h-6 w-14 rounded border border-border bg-background px-1 text-[0.6875rem]" />
           </label>
         )}
       </div>
@@ -254,7 +254,7 @@ export function InlineLayoutEditor({
               </button>
             )}
             <button type="button" onClick={save} disabled={busy !== "" || !dirty || total === 0 || !previewReady || !!preview?.data.overlap}
-              className={`${btn} bg-gradient-to-r from-cyan-500 to-teal-400 text-white hover:opacity-90`}>
+              className={`${btn} btn-module text-white hover:opacity-90`}>
               {busy === "save" ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} Save
             </button>
           </>

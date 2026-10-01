@@ -247,7 +247,7 @@ export default function AdminControlPanel() {
               </CardTitle>
               <Button
                 size="sm"
-                className="h-8 text-xs gap-1 bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90"
+                className="h-8 text-xs gap-1 btn-module shadow-sm text-white hover:opacity-90"
                 onClick={() => setAddOpen(true)}
               >
                 <Plus size={12} /> Add User
@@ -276,7 +276,7 @@ export default function AdminControlPanel() {
                         {user.email}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-[0.625rem]">
                           {user.role}
                         </Badge>
                       </TableCell>
@@ -290,7 +290,7 @@ export default function AdminControlPanel() {
                       </TableCell>
                       <TableCell>
                         <Badge
-                          className={`text-[10px] ${!user.discontinue ? "bg-green-500/15 text-green-600 border-green-500/30" : "bg-red-500/15 text-red-600 border-red-500/30"}`}
+                          className={`text-[0.625rem] ${!user.discontinue ? "bg-green-500/15 text-green-600 border-green-500/30" : "bg-red-500/15 text-red-600 border-red-500/30"}`}
                         >
                           {!user.discontinue ? "Active" : "Inactive"}
                         </Badge>
@@ -385,7 +385,7 @@ export default function AdminControlPanel() {
                 <TableBody>
                   {filteredTables.map((t) => (
                     <TableRow key={t.name} className="text-xs">
-                      <TableCell className="font-mono text-[11px]">
+                      <TableCell className="font-mono text-[0.6875rem]">
                         {t.name}
                       </TableCell>
                       <TableCell>{(t.rows ?? 0).toLocaleString()}</TableCell>
@@ -399,7 +399,7 @@ export default function AdminControlPanel() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="h-6 text-[10px] gap-1"
+                          className="h-6 text-[0.625rem] gap-1"
                           onClick={() => toast.info(`Viewing ${t.name}`)}
                         >
                           <FileText size={10} /> View
@@ -453,7 +453,7 @@ export default function AdminControlPanel() {
                       <TableCell className="font-medium">{log.userName ?? log.user ?? "—"}</TableCell>
                       <TableCell>{log.eventType ?? log.event ?? log.action ?? "—"}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-[0.625rem]">
                           {log.resource ?? log.module ?? "—"}
                         </Badge>
                       </TableCell>
@@ -520,7 +520,7 @@ export default function AdminControlPanel() {
             </Button>
             <Button
               size="sm"
-              className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90"
+              className="btn-module shadow-sm text-white hover:opacity-90"
               onClick={() => addMutation.mutate()}
               disabled={!addForm.name || !addForm.email}
             >
@@ -563,7 +563,7 @@ export default function AdminControlPanel() {
             >
               Cancel
             </Button>
-            <Button size="sm" className="bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white hover:opacity-90" onClick={() => editMutation.mutate()}>
+            <Button size="sm" className="btn-module shadow-sm text-white hover:opacity-90" onClick={() => editMutation.mutate()}>
               Save
             </Button>
           </DialogFooter>

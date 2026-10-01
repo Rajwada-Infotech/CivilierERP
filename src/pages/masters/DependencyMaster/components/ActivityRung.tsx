@@ -36,7 +36,7 @@ export function ActivityRung({
   return (
     <div className="relative pl-9">
       {/* Rail node */}
-      <div className="absolute left-0 top-3 w-7 h-7 rounded-full bg-primary text-white text-[11px] font-heading font-bold flex items-center justify-center shadow-sm z-10">
+      <div className="absolute left-0 top-3 w-7 h-7 rounded-full bg-primary text-white text-[0.6875rem] font-heading font-bold flex items-center justify-center shadow-sm z-10">
         {rung.sequenceNo}
       </div>
       {/* Rail line down to the next node */}
@@ -78,7 +78,7 @@ export function ActivityRung({
           {rung.activityName}
         </span>
         <span
-          className={`text-[9px] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 ${
+          className={`text-[0.5625rem] font-heading uppercase tracking-wide px-1.5 py-0.5 rounded shrink-0 ${
             rung.workType === "INTERNAL"
               ? "bg-orange-500/10 text-orange-500"
               : "bg-sky-500/10 text-sky-500"

@@ -55,6 +55,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SUPPLIER_TYPE = "S";
@@ -357,7 +358,7 @@ function buildSupplierColumns(
         const badgeCls = gstType === "Registered"
           ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
           : gstType === "Unregistered"
-            ? "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20"
+            ? "bg-[#ffe2021a] text-amber-600 dark:text-amber-400 border-amber-500/20"
             : "bg-muted text-muted-foreground border-border";
         const badgeLabel = gstType === "Registered"
           ? "GST"
@@ -369,7 +370,7 @@ function buildSupplierColumns(
             <span className="font-mono text-xs font-semibold text-primary">
               {gst || "—"}
             </span>
-            <span className={`inline-flex w-fit items-center text-[9px] font-semibold px-1.5 py-0.5 rounded-full border ${badgeCls}`}>
+            <span className={`inline-flex w-fit items-center text-[0.5625rem] font-semibold px-1.5 py-0.5 rounded-full border ${badgeCls}`}>
               {badgeLabel}
             </span>
           </div>
@@ -396,7 +397,7 @@ function buildSupplierColumns(
       cell: ({ getValue }) => {
         const tds = getValue() as boolean;
         return tds ? (
-          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-600">
+          <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-[#ffe2021a] text-amber-600">
             TDS
           </span>
         ) : (
@@ -414,7 +415,7 @@ function buildSupplierColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-start">
-              <span className="text-[11px] text-muted-foreground mr-1">
+              <span className="text-[0.6875rem] text-muted-foreground mr-1">
                 Delete?
               </span>
               <button
@@ -435,7 +436,7 @@ function buildSupplierColumns(
         const hasPhone = !!(row.original.LHeadPhone?.replace(/\D/g, ""));
         return (
           <div className="flex items-center justify-start gap-2 w-full min-w-[120px]">
-            <button
+            <button data-row-view
               onClick={() => onView(row.original)}
               className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
@@ -445,7 +446,7 @@ function buildSupplierColumns(
             {canPrint && (
               <button
                 onClick={() => onPrint(row.original)}
-                className="p-1 rounded text-amber-500 hover:bg-amber-500/10 transition-colors"
+                className="p-1 rounded text-amber-500 hover:bg-[#ffe2021a] transition-colors"
                 title="Print"
               >
                 <Printer size={15} />
@@ -1108,7 +1109,7 @@ const SupplierMaster: React.FC = () => {
               onClick={handleImportClick}
               disabled={importing}
               title="Import vendors from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {importing ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -1156,7 +1157,7 @@ const SupplierMaster: React.FC = () => {
               <h2 className="text-sm font-heading font-semibold text-foreground">
                 {editingId ? `Edit ${vendorType || "Vendor"}` : `Add ${vendorType || "Vendor"}`}
               </h2>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 Fields marked <span className="text-destructive">*</span> are
                 required
               </p>
@@ -1170,7 +1171,7 @@ const SupplierMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Building2 size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Basic Information
                 </p>
               </div>
@@ -1302,7 +1303,7 @@ const SupplierMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Phone size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Contact Details
                 </p>
               </div>
@@ -1389,7 +1390,7 @@ const SupplierMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <FileText size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   GST &amp; Tax Details
                 </p>
               </div>
@@ -1423,7 +1424,7 @@ const SupplierMaster: React.FC = () => {
                       }}
                       className="h-3 w-3 rounded accent-primary"
                     />
-                    <span className="text-[11px] text-muted-foreground">PAN not available</span>
+                    <span className="text-[0.6875rem] text-muted-foreground">PAN not available</span>
                   </label>
                   {errors.LHeadPan && (
                     <p className="text-xs text-red-500 mt-1 flex items-center gap-1">
@@ -1511,7 +1512,7 @@ const SupplierMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <Landmark size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Bank Details
                 </p>
               </div>
@@ -1585,7 +1586,7 @@ const SupplierMaster: React.FC = () => {
                 <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
                   <User size={12} className="text-primary" />
                 </div>
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground flex-1">
                   Supplier Portal Login
                 </p>
               </div>
@@ -1643,12 +1644,12 @@ const SupplierMaster: React.FC = () => {
               const loginUrl = `${window.location.origin}/supplier-login`;
               return (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-muted/40">
-                  <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground/60 shrink-0">Portal</span>
+                  <span className="text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground/60 shrink-0">Portal</span>
                   <span className="font-mono text-xs text-muted-foreground truncate flex-1 min-w-0">{loginUrl}</span>
                   <button
                     type="button"
                     onClick={() => { navigator.clipboard.writeText(loginUrl); toast.success("Link copied"); }}
-                    className="flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded border border-border bg-background hover:bg-muted transition-colors shrink-0 text-muted-foreground hover:text-foreground"
+                    className="flex items-center gap-1 px-2 py-1 text-[0.6875rem] font-medium rounded border border-border bg-background hover:bg-muted transition-colors shrink-0 text-muted-foreground hover:text-foreground"
                     title="Copy portal link"
                   >
                     <Copy size={11} />
@@ -1747,7 +1748,7 @@ const SupplierMaster: React.FC = () => {
 
           {/* Card footer — actions */}
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl">
-            <p className="text-[11px] text-muted-foreground hidden sm:block">
+            <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
               {canSave ? (
                 <span className="text-emerald-500 font-medium">
                   Ready to save
@@ -1768,7 +1769,7 @@ const SupplierMaster: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={saving || !canSave}
-                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
                 {saving ? (
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1932,7 +1933,7 @@ const SupplierMaster: React.FC = () => {
           <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
             <button
               onClick={() => setImportResults(null)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
             >
               Close
             </button>
@@ -1942,7 +1943,7 @@ const SupplierMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => setViewRecord(null)}
@@ -2007,7 +2008,7 @@ const SupplierMaster: React.FC = () => {
                 { label: "IFSC Code", value: viewRecord.bankIfscCode || "—", mono: true },
               ].map(({ label, value, mono }) => (
                 <div key={label}>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     {label}
                   </p>
                   <p
@@ -2018,7 +2019,7 @@ const SupplierMaster: React.FC = () => {
                 </div>
               ))}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Status
                 </p>
                 <span
@@ -2046,13 +2047,13 @@ const SupplierMaster: React.FC = () => {
                   startEdit(viewRecord);
                   setViewRecord(null);
                 }}
-                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white shadow-sm flex items-center gap-1.5"
+                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white shadow-sm flex items-center gap-1.5"
               >
                 <Pencil size={13} /> Edit Vendor
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

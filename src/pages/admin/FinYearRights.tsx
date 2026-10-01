@@ -40,6 +40,7 @@ import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
 import { finYearSchema, type FinYearForm } from "@/schemas/finYearSchema";
 import { usePageRights } from "@/hooks/usePageRights";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ function StatCard({
       </div>
       <div>
         <p className="text-xl font-bold text-foreground leading-none">{value}</p>
-        <p className="text-[11px] text-muted-foreground mt-0.5">{label}</p>
+        <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{label}</p>
       </div>
     </div>
   );
@@ -125,7 +126,7 @@ function YearCard({
     : "bg-slate-500/10 text-slate-500 border-slate-400/20";
 
   const lockCls = fy.locked
-    ? "bg-amber-500/10 text-amber-600 border-amber-400/20 dark:text-amber-400"
+    ? "bg-[#ffe2021a] text-amber-600 border-amber-400/20 dark:text-amber-400"
     : "bg-muted text-muted-foreground border-border";
 
   const accentColor = isActive ? "#3b82f6" : "#64748b";
@@ -152,17 +153,17 @@ function YearCard({
               <p className="text-base font-bold text-foreground font-heading leading-tight">
                 {fy.year}
               </p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Financial Year</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">Financial Year</p>
             </div>
           </div>
 
           {/* Badges */}
           <div className="flex flex-col items-end gap-1.5 shrink-0">
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${statusCls}`}>
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${statusCls}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${isActive ? "bg-emerald-500" : "bg-slate-400"}`} />
               {fy.status}
             </span>
-            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${lockCls}`}>
+            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[0.625rem] font-semibold border ${lockCls}`}>
               {fy.locked ? <Lock size={9} /> : <Unlock size={9} />}
               {fy.locked ? "Locked" : "Open"}
             </span>
@@ -180,7 +181,7 @@ function YearCard({
         {/* Progress bar (only for active years) */}
         {isActive && (
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+            <div className="flex items-center justify-between text-[0.625rem] text-muted-foreground">
               <span>Year progress</span>
               <span className="font-semibold text-foreground">{Math.round(progress)}%</span>
             </div>
@@ -308,7 +309,7 @@ function FinYearDialog({
               <p className="text-sm font-semibold text-foreground">
                 {editing ? "Edit Financial Year" : "New Financial Year"}
               </p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                 {editing ? `Editing ${editing.year}` : "Configure dates, status and lock"}
               </p>
             </div>
@@ -321,7 +322,7 @@ function FinYearDialog({
 
             {/* Year name */}
             <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+              <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
                 Year Label <span className="text-red-500">*</span>
               </label>
               <input
@@ -330,7 +331,7 @@ function FinYearDialog({
                 className={inputCls}
               />
               {errors.year && (
-                <p className="text-[11px] text-red-500 flex items-center gap-1">
+                <p className="text-[0.6875rem] text-red-500 flex items-center gap-1">
                   <AlertTriangle size={10} /> {errors.year.message}
                 </p>
               )}
@@ -339,34 +340,34 @@ function FinYearDialog({
             {/* Date range */}
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
                   Start Date <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <Calendar size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <input type="date" {...register("startDate")} className={dateCls} />
+                  <DateInput {...register("startDate")} className={dateCls} />
                 </div>
                 {errors.startDate && (
-                  <p className="text-[11px] text-red-500">{errors.startDate.message}</p>
+                  <p className="text-[0.6875rem] text-red-500">{errors.startDate.message}</p>
                 )}
               </div>
               <div className="space-y-1.5">
-                <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">
                   End Date <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <Calendar size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                  <input type="date" {...register("endDate")} className={dateCls} />
+                  <DateInput {...register("endDate")} className={dateCls} />
                 </div>
                 {errors.endDate && (
-                  <p className="text-[11px] text-red-500">{errors.endDate.message}</p>
+                  <p className="text-[0.6875rem] text-red-500">{errors.endDate.message}</p>
                 )}
               </div>
             </div>
 
             {/* Status toggle buttons */}
             <div className="space-y-1.5">
-              <label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Status</label>
+              <label className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground">Status</label>
               <div className="flex gap-2">
                 {(["Active", "Closed"] as const).map((s) => (
                   <button
@@ -400,7 +401,7 @@ function FinYearDialog({
                   : <Unlock size={14} className="text-muted-foreground" />}
                 <div>
                   <p className="text-xs font-semibold text-foreground">Lock Year</p>
-                  <p className="text-[10px] text-muted-foreground">Prevents new entries when locked</p>
+                  <p className="text-[0.625rem] text-muted-foreground">Prevents new entries when locked</p>
                 </div>
               </div>
               <Switch
@@ -423,7 +424,7 @@ function FinYearDialog({
             <button
               type="submit"
               disabled={isSaving}
-              className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-heading font-semibold rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 shadow-sm text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+              className="flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-heading font-semibold rounded-xl btn-module shadow-sm text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {isSaving ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
               {isSaving ? "Saving…" : editing ? "Save Changes" : "Create Year"}
@@ -533,7 +534,7 @@ export default function FinYearRights() {
             <button
               onClick={openAdd}
               disabled={isLoading}
-              className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 transition-all disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 rounded-lg btn-module transition-all disabled:opacity-50"
             >
               <Plus size={13} />
               New Year

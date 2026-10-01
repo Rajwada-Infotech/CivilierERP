@@ -56,6 +56,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { BodyPortal } from "@/components/ui/body-portal";
+import { MonthInput } from "@/components/ui/date-input";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CardRecord {
@@ -265,7 +267,7 @@ const ReminderBanner: React.FC<{
             className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 flex flex-col sm:flex-row sm:items-center gap-3"
           >
             <div className="flex items-start gap-3 flex-1 min-w-0">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/10 flex items-center justify-center flex-shrink-0">
+              <div className="w-9 h-9 rounded-xl bg-[#ffe2021a] flex items-center justify-center flex-shrink-0">
                 <Bell size={16} className="text-amber-500" />
               </div>
               <div>
@@ -426,7 +428,7 @@ function buildCardColumns(
         const isEditing = editingId === id;
         return (
           <div className="flex items-center justify-end gap-1">
-            <button
+            <button data-row-view
               onClick={() => onView(row.original)}
               className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
               title="View details"
@@ -979,7 +981,7 @@ const CardMaster: React.FC = () => {
             {hasAlerts && (
               <button
                 onClick={() => setShowReminderPanel((p) => !p)}
-                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-heading font-semibold transition-all ${overdueCount > 0 ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-amber-500/40 bg-amber-500/10 text-amber-600"}`}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs font-heading font-semibold transition-all ${overdueCount > 0 ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-amber-500/40 bg-[#ffe2021a] text-amber-600"}`}
               >
                 <BellRing
                   size={13}
@@ -1081,7 +1083,7 @@ const CardMaster: React.FC = () => {
                 <h2 className="text-sm font-heading font-semibold text-foreground">
                   {editingId ? "Edit Card" : "Add Card"}
                 </h2>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                   Fields marked <span className="text-destructive">*</span> are
                   required
                 </p>
@@ -1094,7 +1096,7 @@ const CardMaster: React.FC = () => {
                 <div className="absolute -top-6 -right-6 w-32 h-32 rounded-full bg-white/5" />
                 <div className="absolute -bottom-8 -left-4 w-40 h-40 rounded-full bg-white/5" />
                 <div>
-                  <p className="text-[10px] text-primary-foreground/60 font-heading uppercase tracking-widest mb-1">
+                  <p className="text-[0.625rem] text-primary-foreground/60 font-heading uppercase tracking-widest mb-1">
                     {form.network || "Network"} · {form.cardType || "Type"}
                   </p>
                   <p className="text-lg font-mono font-bold text-primary-foreground tracking-widest">
@@ -1109,7 +1111,7 @@ const CardMaster: React.FC = () => {
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-[10px] text-primary-foreground/60 font-heading uppercase tracking-widest">
+                  <p className="text-[0.625rem] text-primary-foreground/60 font-heading uppercase tracking-widest">
                     Expires
                   </p>
                   <p className="text-sm font-mono text-primary-foreground font-semibold">
@@ -1118,7 +1120,7 @@ const CardMaster: React.FC = () => {
                   {form.reminderEnabled && previewReminderDate && (
                     <div className="flex items-center justify-end gap-1 mt-1.5">
                       <Bell size={9} className="text-primary-foreground/50" />
-                      <p className="text-[10px] text-primary-foreground/50 font-heading">
+                      <p className="text-[0.625rem] text-primary-foreground/50 font-heading">
                         {formatDisplayDate(previewReminderDate)}
                       </p>
                     </div>
@@ -1130,7 +1132,7 @@ const CardMaster: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Bank dropdown — live from BankMaster DB */}
                 <div>
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                     Bank Name <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1157,14 +1159,14 @@ const CardMaster: React.FC = () => {
                     />
                   </div>
                   {errors.bankId && (
-                    <p className="text-[11px] text-destructive mt-1">
+                    <p className="text-[0.6875rem] text-destructive mt-1">
                       Bank is required
                     </p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                     Company Name
                   </label>
                   <div className="relative">
@@ -1189,9 +1191,9 @@ const CardMaster: React.FC = () => {
 
                 {/* Account Number — auto-filled from bank selection */}
                 <div>
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                     Account Number
-                    <span className="ml-2 normal-case text-[10px] text-muted-foreground/60">
+                    <span className="ml-2 normal-case text-[0.625rem] text-muted-foreground/60">
                       (auto-filled)
                     </span>
                   </label>
@@ -1210,7 +1212,7 @@ const CardMaster: React.FC = () => {
                       className={`${inp} pl-8 font-mono tracking-widest`}
                     />
                     {form.accountNumber && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.5625rem] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
                         AUTO
                       </span>
                     )}
@@ -1219,9 +1221,9 @@ const CardMaster: React.FC = () => {
 
                 {/* IFSC — auto-filled, read-only */}
                 <div>
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                     IFSC Code
-                    <span className="ml-2 normal-case text-[10px] text-muted-foreground/60">
+                    <span className="ml-2 normal-case text-[0.625rem] text-muted-foreground/60">
                       (auto-filled)
                     </span>
                   </label>
@@ -1238,7 +1240,7 @@ const CardMaster: React.FC = () => {
                       className={`${inp} pl-8 font-mono tracking-widest bg-muted/50 cursor-default text-muted-foreground`}
                     />
                     {form.ifscCode && (
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[0.5625rem] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
                         AUTO
                       </span>
                     )}
@@ -1246,7 +1248,7 @@ const CardMaster: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                     Card Network
                   </label>
                   <div className="relative">
@@ -1270,7 +1272,7 @@ const CardMaster: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                     Card Type
                   </label>
                   <div className="relative">
@@ -1294,7 +1296,7 @@ const CardMaster: React.FC = () => {
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                     Card Holder Name
                   </label>
                   <input
@@ -1307,7 +1309,7 @@ const CardMaster: React.FC = () => {
                 </div>
 
                 <div className="sm:col-span-2">
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                     Card Number <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1336,14 +1338,14 @@ const CardMaster: React.FC = () => {
                     </button>
                   </div>
                   {errors.cardNumber && (
-                    <p className="text-[11px] text-destructive mt-1">
+                    <p className="text-[0.6875rem] text-destructive mt-1">
                       Valid card number required (min 13 digits)
                     </p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                     CVC / CVV <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1372,14 +1374,14 @@ const CardMaster: React.FC = () => {
                     </button>
                   </div>
                   {errors.cvv && (
-                    <p className="text-[11px] text-destructive mt-1">
+                    <p className="text-[0.6875rem] text-destructive mt-1">
                       CVC required (3–4 digits)
                     </p>
                   )}
                 </div>
 
                 <div>
-                  <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                     Expiry Date <span className="text-destructive">*</span>
                   </label>
                   <div className="relative">
@@ -1387,8 +1389,7 @@ const CardMaster: React.FC = () => {
                       size={14}
                       className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     />
-                    <input
-                      type="month"
+                    <MonthInput
                       value={
                         form.expiryDate && form.expiryDate.length === 5
                           ? `20${form.expiryDate.slice(3)}-${form.expiryDate.slice(0, 2)}`
@@ -1407,7 +1408,7 @@ const CardMaster: React.FC = () => {
                     />
                   </div>
                   {errors.expiryDate && (
-                    <p className="text-[11px] text-destructive mt-1">
+                    <p className="text-[0.6875rem] text-destructive mt-1">
                       Valid expiry required (MM/YY)
                     </p>
                   )}
@@ -1436,7 +1437,7 @@ const CardMaster: React.FC = () => {
                           <p className="text-sm font-heading font-semibold text-foreground">
                             Card Renewal Reminder
                           </p>
-                          <p className="text-[11px] text-muted-foreground hidden sm:block">
+                          <p className="text-[0.6875rem] text-muted-foreground hidden sm:block">
                             {form.reminderEnabled && previewReminderDate
                               ? `Will remind on ${formatDisplayDate(previewReminderDate)}`
                               : "No reminder set"}
@@ -1459,7 +1460,7 @@ const CardMaster: React.FC = () => {
                     {form.reminderEnabled && (
                       <div className="mt-4 pt-4 border-t border-primary/15 grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                          <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                             Remind Before Expiry (Days)
                           </label>
                           <div className="relative">
@@ -1487,7 +1488,7 @@ const CardMaster: React.FC = () => {
                                 key={d}
                                 type="button"
                                 onClick={() => setField("reminderDays", d)}
-                                className={`px-2.5 py-1 rounded-lg text-[11px] font-heading border transition-all ${form.reminderDays === d ? "bg-primary text-primary-foreground border-primary" : "bg-card border-border text-muted-foreground hover:border-primary/40"}`}
+                                className={`px-2.5 py-1 rounded-lg text-[0.6875rem] font-heading border transition-all ${form.reminderDays === d ? "btn-module text-white border-primary" : "bg-card border-border text-muted-foreground hover:border-primary/40"}`}
                               >
                                 {d}d
                               </button>
@@ -1495,7 +1496,7 @@ const CardMaster: React.FC = () => {
                           </div>
                         </div>
                         <div>
-                          <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                          <label className="block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                             Reminder Will Fire On
                           </label>
                           <div className="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-primary/10 border border-primary/20">
@@ -1509,7 +1510,7 @@ const CardMaster: React.FC = () => {
                                   ? formatDisplayDate(previewReminderDate)
                                   : "—"}
                               </p>
-                              <p className="text-[11px] text-muted-foreground">
+                              <p className="text-[0.6875rem] text-muted-foreground">
                                 {form.reminderDays} day
                                 {form.reminderDays !== 1 ? "s" : ""} before
                                 expiry
@@ -1549,7 +1550,7 @@ const CardMaster: React.FC = () => {
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20">
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 {canSave ? (
                   <span className="text-emerald-500 font-medium">
                     Ready to save
@@ -1588,7 +1589,7 @@ const CardMaster: React.FC = () => {
                 <h3 className="font-heading font-semibold text-foreground text-sm">
                   Card Records
                 </h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">
+                <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                   {filtered.length} record{filtered.length !== 1 ? "s" : ""}
                 </p>
               </div>
@@ -1630,7 +1631,7 @@ const CardMaster: React.FC = () => {
 
           {/* Delete Confirm */}
           {deleteId && (
-            <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
+            <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 backdrop-blur-sm">
               <div className="rounded-xl bg-card border border-border shadow-xl p-6 max-w-sm w-full mx-4">
                 <h3 className="font-heading font-semibold text-foreground mb-2">
                   Delete Card?
@@ -1653,7 +1654,7 @@ const CardMaster: React.FC = () => {
                   </button>
                 </div>
               </div>
-            </div>
+            </div></BodyPortal>
           )}
         </div>
       </FinanceShell>
@@ -1718,7 +1719,7 @@ const CardMaster: React.FC = () => {
 
       {/* ── View Detail Drawer ── */}
       {viewRecord && (
-        <div className="fixed inset-0 z-[60] flex justify-end">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex justify-end">
           <div
             className="absolute inset-0 bg-black/30 backdrop-blur-sm"
             onClick={() => {
@@ -1747,7 +1748,7 @@ const CardMaster: React.FC = () => {
             <div className="p-5 space-y-4 overflow-y-auto flex-1">
               {viewRecord.companyName && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     Company
                   </p>
                   <p className="text-sm font-medium text-foreground">
@@ -1756,7 +1757,7 @@ const CardMaster: React.FC = () => {
                 </div>
               )}
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Bank
                 </p>
                 <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
@@ -1765,7 +1766,7 @@ const CardMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Card Holder
                 </p>
                 <p className="text-sm text-foreground">
@@ -1773,7 +1774,7 @@ const CardMaster: React.FC = () => {
                 </p>
               </div>
               <div>
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                   Card Number
                 </p>
                 <div className="flex items-center gap-2">
@@ -1790,13 +1791,13 @@ const CardMaster: React.FC = () => {
                     {drawerRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
                   </button>
                 </div>
-                <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1">
+                <p className="text-[0.625rem] text-muted-foreground mt-0.5 flex items-center gap-1">
                   <ShieldAlert size={9} /> Card number hidden for security
                 </p>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     Network
                   </p>
                   <span className="inline-flex px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary font-medium">
@@ -1804,7 +1805,7 @@ const CardMaster: React.FC = () => {
                   </span>
                 </div>
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     Card Type
                   </p>
                   <p className="text-sm text-foreground">
@@ -1814,7 +1815,7 @@ const CardMaster: React.FC = () => {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     Expiry
                   </p>
                   <p className="font-mono text-sm text-foreground flex items-center gap-1">
@@ -1823,7 +1824,7 @@ const CardMaster: React.FC = () => {
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     Status
                   </p>
                   <span
@@ -1835,7 +1836,7 @@ const CardMaster: React.FC = () => {
               </div>
               {viewRecord.reminderEnabled && viewRecord.expiryDate && (
                 <div>
-                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading mb-1">
                     Reminder
                   </p>
                   <p className="text-sm text-foreground flex items-center gap-1.5">
@@ -1863,13 +1864,13 @@ const CardMaster: React.FC = () => {
                   setViewRecord(null);
                   setDrawerRevealed(false);
                 }}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white "
               >
                 <Edit2 size={13} /> Edit Card
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
     </>
   );

@@ -34,6 +34,7 @@ import {
   Zap,
   Circle,
 } from "lucide-react";
+import { BodyPortal } from "@/components/ui/body-portal";
 
 // ─── Utilities ─────────────────────────────────────────────────────────────
 
@@ -143,13 +144,13 @@ const RoleBadge: React.FC<{ role: string }> = ({ role }) => {
     super_admin:
       "bg-violet-500/10 text-violet-600 border-violet-500/30 dark:text-violet-400",
     admin: "bg-sky-500/10 text-sky-600 border-sky-500/30 dark:text-sky-400",
-    dba: "bg-amber-500/10 text-amber-600 border-amber-500/30 dark:text-amber-400",
+    dba: "bg-[#ffe2021a] text-amber-600 border-amber-500/30 dark:text-amber-400",
     user: "bg-slate-500/10 text-slate-600 border-slate-500/30 dark:text-slate-400",
   };
   const cls = colorMap[role] ?? "bg-muted text-muted-foreground border-border";
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest ${cls}`}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[0.625rem] font-semibold uppercase tracking-widest ${cls}`}
     >
       {roleLabel(role)}
     </span>
@@ -170,7 +171,7 @@ const EventBadge: React.FC<{ event: string; actionType?: string }> = ({
     create:
       "bg-emerald-500/10 text-emerald-600 border-emerald-500/20 dark:text-emerald-400",
     update:
-      "bg-amber-500/10 text-amber-600 border-amber-500/20 dark:text-amber-400",
+      "bg-[#ffe2021a] text-amber-600 border-amber-500/20 dark:text-amber-400",
     delete:
       "bg-rose-500/10 text-rose-600 border-rose-500/20 dark:text-rose-400",
     export:
@@ -181,7 +182,7 @@ const EventBadge: React.FC<{ event: string; actionType?: string }> = ({
   const cls = colorMap[key] ?? "bg-muted text-muted-foreground border-border";
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${cls}`}
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[0.625rem] font-bold uppercase tracking-wider ${cls}`}
     >
       {key === "settings_change" ? "settings" : key}
     </span>
@@ -266,7 +267,7 @@ const SessionCard: React.FC<{ session: GroupedSession }> = ({ session }) => {
               <p className="truncate text-sm font-semibold text-foreground">
                 {session.userName}
               </p>
-              <p className="truncate text-[11px] text-muted-foreground">
+              <p className="truncate text-[0.6875rem] text-muted-foreground">
                 {session.userEmail}
               </p>
               <div className="mt-1">
@@ -279,7 +280,7 @@ const SessionCard: React.FC<{ session: GroupedSession }> = ({ session }) => {
           <div className="hidden space-y-1 md:block">
             <div className="flex items-center gap-1.5 text-xs">
               <Globe size={11} className="text-muted-foreground" />
-              <span className="font-mono text-[11px] font-medium text-foreground/80">
+              <span className="font-mono text-[0.6875rem] font-medium text-foreground/80">
                 {session.ipAddress || "—"}
               </span>
               {multipleIps && (
@@ -294,7 +295,7 @@ const SessionCard: React.FC<{ session: GroupedSession }> = ({ session }) => {
             </div>
             <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Fingerprint size={11} />
-              <span className="font-mono text-[10px]">
+              <span className="font-mono text-[0.625rem]">
                 {session.deviceFingerprint !== "Unknown"
                   ? session.deviceFingerprint.slice(0, 14) + "…"
                   : "—"}
@@ -342,7 +343,7 @@ const SessionCard: React.FC<{ session: GroupedSession }> = ({ session }) => {
               {session.actions.length} actions
             </div>
             {multipleIps && (
-              <span className="flex items-center gap-1 rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+              <span className="flex items-center gap-1 rounded-full bg-[#ffe2021a] px-2 py-0.5 text-[0.625rem] font-medium text-amber-600 dark:text-amber-400">
                 <AlertTriangle size={10} /> Multi-IP
               </span>
             )}
@@ -368,7 +369,7 @@ const SessionCard: React.FC<{ session: GroupedSession }> = ({ session }) => {
             </p>
           ) : (
             <div className="space-y-1.5">
-              <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+              <p className="mb-2 text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground">
                 Actions in this session
               </p>
               {session.actions.map((action, i) => {
@@ -387,19 +388,19 @@ const SessionCard: React.FC<{ session: GroupedSession }> = ({ session }) => {
                         {action.resource || "—"}
                       </p>
                       {action.requestUrl && (
-                        <p className="truncate font-mono text-[10px] text-muted-foreground">
+                        <p className="truncate font-mono text-[0.625rem] text-muted-foreground">
                           {action.requestMethod} {action.requestUrl}
                         </p>
                       )}
                       {action.details && (
-                        <p className="truncate text-[10px] text-muted-foreground">
+                        <p className="truncate text-[0.625rem] text-muted-foreground">
                           {action.details}
                         </p>
                       )}
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="text-[11px] text-foreground">{t.time}</p>
-                      <p className="text-[10px] text-muted-foreground">
+                      <p className="text-[0.6875rem] text-foreground">{t.time}</p>
+                      <p className="text-[0.625rem] text-muted-foreground">
                         {t.relative}
                       </p>
                     </div>
@@ -429,14 +430,14 @@ const ActionRow: React.FC<{ event: SessionEvent; index: number }> = ({
       <EventBadge event={event.event} actionType={event.actionType} />
       <div className="min-w-0 space-y-0.5">
         <div className="flex items-baseline gap-2 flex-wrap">
-          <span className="font-semibold text-foreground text-[11px]">
+          <span className="font-semibold text-foreground text-[0.6875rem]">
             {event.userName}
           </span>
           <span className="text-muted-foreground truncate">
             {event.resource || event.requestUrl || "—"}
           </span>
         </div>
-        <div className="flex gap-3 text-[10px] text-muted-foreground flex-wrap">
+        <div className="flex gap-3 text-[0.625rem] text-muted-foreground flex-wrap">
           <span className="font-mono">{event.ipAddress || "—"}</span>
           <span>
             {browser} · {os}
@@ -447,8 +448,8 @@ const ActionRow: React.FC<{ event: SessionEvent; index: number }> = ({
         </div>
       </div>
       <div className="text-right shrink-0">
-        <p className="text-[11px] text-foreground">{t.time}</p>
-        <p className="text-[10px] text-muted-foreground">{t.relative}</p>
+        <p className="text-[0.6875rem] text-foreground">{t.time}</p>
+        <p className="text-[0.625rem] text-muted-foreground">{t.relative}</p>
       </div>
     </div>
   );
@@ -734,27 +735,27 @@ const ActivityBrowser: React.FC = () => {
           <button
               key="create"
               onClick={() => setQuickFilter((prev) => (prev === "create" ? null : "create"))}
-              className={`h-7 rounded-lg border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${quickFilter === "create" ? "border-emerald-500 bg-emerald-500 text-white" : "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"}`}
+              className={`h-7 rounded-lg border px-2.5 text-[0.625rem] font-bold uppercase tracking-wider transition-colors ${quickFilter === "create" ? "border-emerald-500 bg-emerald-500 text-white" : "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20"}`}
             >create</button>
           <button
               key="update"
               onClick={() => setQuickFilter((prev) => (prev === "update" ? null : "update"))}
-              className={`h-7 rounded-lg border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${quickFilter === "update" ? "border-amber-500 bg-amber-500 text-white" : "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"}`}
+              className={`h-7 rounded-lg border px-2.5 text-[0.625rem] font-bold uppercase tracking-wider transition-colors ${quickFilter === "update" ? "border-amber-500 bg-amber-500 text-white" : "border-amber-500/40 bg-[#ffe2021a] text-amber-600 dark:text-amber-400 hover:bg-amber-500/20"}`}
             >update</button>
           <button
               key="delete"
               onClick={() => setQuickFilter((prev) => (prev === "delete" ? null : "delete"))}
-              className={`h-7 rounded-lg border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${quickFilter === "delete" ? "border-rose-500 bg-rose-500 text-white" : "border-rose-500/40 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20"}`}
+              className={`h-7 rounded-lg border px-2.5 text-[0.625rem] font-bold uppercase tracking-wider transition-colors ${quickFilter === "delete" ? "border-rose-500 bg-rose-500 text-white" : "border-rose-500/40 bg-rose-500/10 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20"}`}
             >delete</button>
           <button
               key="read"
               onClick={() => setQuickFilter((prev) => (prev === "read" ? null : "read"))}
-              className={`h-7 rounded-lg border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${quickFilter === "read" ? "border-sky-500 bg-sky-500 text-white" : "border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400 hover:bg-sky-500/20"}`}
+              className={`h-7 rounded-lg border px-2.5 text-[0.625rem] font-bold uppercase tracking-wider transition-colors ${quickFilter === "read" ? "border-sky-500 bg-sky-500 text-white" : "border-sky-500/40 bg-sky-500/10 text-sky-600 dark:text-sky-400 hover:bg-sky-500/20"}`}
             >read</button>
           <button
               key="export"
               onClick={() => setQuickFilter((prev) => (prev === "export" ? null : "export"))}
-              className={`h-7 rounded-lg border px-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors ${quickFilter === "export" ? "border-cyan-500 bg-cyan-500 text-white" : "border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20"}`}
+              className={`h-7 rounded-lg border px-2.5 text-[0.625rem] font-bold uppercase tracking-wider transition-colors ${quickFilter === "export" ? "border-cyan-500 bg-cyan-500 text-white" : "border-cyan-500/40 bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-500/20"}`}
             >export</button>
         </div>
 
@@ -850,7 +851,7 @@ const ActivityBrowser: React.FC = () => {
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
-          <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 border-b border-border bg-muted/50 px-4 py-2.5 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+          <div className="grid grid-cols-[auto_1fr_auto] gap-x-3 border-b border-border bg-muted/50 px-4 py-2.5 text-[0.625rem] font-bold uppercase tracking-widest text-muted-foreground">
             <span>Event</span>
             <span>User · Resource</span>
             <span className="text-right">Time</span>
@@ -884,7 +885,7 @@ const ActivityBrowser: React.FC = () => {
                 onClick={() => setPage(p)}
                 className={`rounded-lg border px-3 py-1.5 text-xs ${
                   p === activity.page
-                    ? "border-transparent bg-gradient-to-r from-blue-500 to-indigo-600 text-white font-semibold shadow-sm"
+                    ? "border-transparent btn-module text-white font-semibold shadow-sm"
                     : "border-border hover:bg-muted"
                 }`}
               >
@@ -933,7 +934,7 @@ const ActivityBrowser: React.FC = () => {
       )}
       {/* Clear History confirm */}
       {confirmClearOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/60 backdrop-blur-sm">
+        <BodyPortal><div className="fixed inset-0 z-[60] flex items-center justify-center bg-background/60 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-2xl">
             <div className="mb-4 flex items-center gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-destructive/10">
@@ -968,7 +969,7 @@ const ActivityBrowser: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div></BodyPortal>
       )}
       </AdminShell>
     </>

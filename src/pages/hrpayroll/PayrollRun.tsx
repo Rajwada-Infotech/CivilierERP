@@ -25,16 +25,16 @@ const MONTHS = [
 
 const inputBase =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
-const labelBase = "block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
+const labelBase = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 
 const statusBadge = (status: PayrollRunStatus) => {
   const styles: Record<PayrollRunStatus, string> = {
     Draft: "bg-muted text-muted-foreground border-border",
-    Processed: "bg-amber-500/10 text-amber-600 border-amber-500/30",
+    Processed: "bg-[#ffe2021a] text-amber-600 border-amber-500/30",
     Locked: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30",
   };
   return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border ${styles[status]}`}>
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-medium border ${styles[status]}`}>
       {status}
     </span>
   );
@@ -174,17 +174,17 @@ const PayrollRun: React.FC = () => {
           <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
             <div className="px-4 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-card/60">
               <h3 className="font-heading font-semibold text-foreground text-sm">Payroll Runs</h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">{runs.length} run{runs.length !== 1 ? "s" : ""}</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{runs.length} run{runs.length !== 1 ? "s" : ""}</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/10">
-                    <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Period</th>
-                    <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Company</th>
-                    <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Employees</th>
-                    <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
-                    <th className="text-right px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
+                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Period</th>
+                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Company</th>
+                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Employees</th>
+                    <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Status</th>
+                    <th className="text-right px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -199,7 +199,7 @@ const PayrollRun: React.FC = () => {
                         <td className="px-4 py-2.5">{statusBadge(r.Status)}</td>
                         <td className="px-4 py-2.5">
                           <div className="flex items-center justify-end gap-1.5">
-                            <button onClick={(e) => { e.stopPropagation(); setSelectedRunId(r.PayrollRunId); }} title="View Records" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
+                            <button data-row-view="hide" onClick={(e) => { e.stopPropagation(); setSelectedRunId(r.PayrollRunId); }} title="View Records" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
                               <Eye size={14} />
                             </button>
                             {rights.canEdit && r.Status !== "Locked" && (
@@ -215,8 +215,8 @@ const PayrollRun: React.FC = () => {
                             {rights.canDelete && (
                               deleteConfirmId === r.PayrollRunId ? (
                                 <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                  <button onClick={() => handleDelete(r.PayrollRunId)} disabled={busy} className="px-2 py-1 rounded text-[11px] font-medium bg-destructive text-destructive-foreground disabled:opacity-40">Confirm</button>
-                                  <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 rounded text-[11px] font-medium border border-border">Cancel</button>
+                                  <button onClick={() => handleDelete(r.PayrollRunId)} disabled={busy} className="px-2 py-1 rounded text-[0.6875rem] font-medium bg-destructive text-destructive-foreground disabled:opacity-40">Confirm</button>
+                                  <button onClick={() => setDeleteConfirmId(null)} className="px-2 py-1 rounded text-[0.6875rem] font-medium border border-border">Cancel</button>
                                 </div>
                               ) : (
                                 <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(r.PayrollRunId); }} title="Delete" className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-destructive">
@@ -241,7 +241,7 @@ const PayrollRun: React.FC = () => {
                   <h3 className="font-heading font-semibold text-foreground text-sm">
                     {MONTHS[detail.PeriodMonth - 1]} {detail.PeriodYear} — {detail.CompanyName || "All Companies"}
                   </h3>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{detail.Employees.length} employee(s) computed</p>
+                  <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{detail.Employees.length} employee(s) computed</p>
                 </div>
                 {statusBadge(detail.Status)}
               </div>
@@ -249,13 +249,13 @@ const PayrollRun: React.FC = () => {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/10">
-                      <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Employee</th>
-                      <th className="text-left px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Structure</th>
-                      <th className="text-right px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Gross</th>
-                      <th className="text-right px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Deduction</th>
-                      <th className="text-right px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Net</th>
-                      <th className="text-right px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">CTC</th>
-                      <th className="text-right px-4 py-2.5 text-[10px] font-heading uppercase tracking-widest text-muted-foreground">Payslip</th>
+                      <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Employee</th>
+                      <th className="text-left px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Structure</th>
+                      <th className="text-right px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Gross</th>
+                      <th className="text-right px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Deduction</th>
+                      <th className="text-right px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Net</th>
+                      <th className="text-right px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">CTC</th>
+                      <th className="text-right px-4 py-2.5 text-[0.625rem] font-heading uppercase tracking-widest text-muted-foreground">Payslip</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -273,7 +273,7 @@ const PayrollRun: React.FC = () => {
                           <td className="px-4 py-2.5 text-right">
                             <button
                               onClick={() => navigate(`/hr-payroll/payroll-run/${detail.PayrollRunId}/payslip/${e.EmployeeId}`)}
-                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[11px] font-medium text-foreground hover:bg-muted transition-colors"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-border text-[0.6875rem] font-medium text-foreground hover:bg-muted transition-colors"
                             >
                               <Eye size={12} /> View
                             </button>

@@ -146,7 +146,7 @@ const priorityConfig: Record<
   },
   Medium: {
     label: "Medium",
-    cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+    cls: "bg-[#ffe2021a] text-amber-600 border-amber-400/20",
     bar: "bg-amber-500",
   },
   Low: {
@@ -164,7 +164,7 @@ function PriorityBadge({ priority }: { priority: string }) {
   };
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cfg.cls}`}
     >
       {cfg.label}
     </span>
@@ -177,11 +177,11 @@ function StatusBadge({ status }: { status: string }) {
       ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
       : status === "InProgress"
         ? "bg-blue-500/10 text-blue-600 border-blue-400/20"
-        : "bg-amber-500/10 text-amber-600 border-amber-400/20";
+        : "bg-[#ffe2021a] text-amber-600 border-amber-400/20";
   const label = status === "InProgress" ? "Resolving" : status;
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-medium border ${cls}`}
     >
       {label}
     </span>
@@ -437,11 +437,11 @@ export default function TicketDashboard() {
                           size={10}
                           className="text-muted-foreground shrink-0"
                         />
-                        <span className="text-[11px] text-muted-foreground truncate">
+                        <span className="text-[0.6875rem] text-muted-foreground truncate">
                           {t.customer_name || "—"}
                         </span>
                         {t.created_at && (
-                          <span className="text-[11px] text-muted-foreground hidden sm:inline">
+                          <span className="text-[0.6875rem] text-muted-foreground hidden sm:inline">
                             · {fmtDate(t.created_at)}
                           </span>
                         )}
@@ -495,7 +495,7 @@ export default function TicketDashboard() {
                           size={10}
                           className="text-muted-foreground shrink-0"
                         />
-                        <span className="text-[11px] text-muted-foreground truncate">
+                        <span className="text-[0.6875rem] text-muted-foreground truncate">
                           {t.customer_name || "—"}
                         </span>
                       </div>
@@ -655,7 +655,7 @@ export default function TicketDashboard() {
                   icon: Clock,
                   path: "/ticket/pending",
                   color: "text-amber-600",
-                  bg: "bg-amber-500/10",
+                  bg: "bg-[#ffe2021a]",
                 },
                 {
                   label: "Resolved",

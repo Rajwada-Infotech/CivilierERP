@@ -95,13 +95,13 @@ function MasterTermPicker({
                       {term.name}
                     </p>
                     {term.calculationType && (
-                      <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-heading bg-muted text-muted-foreground border-border">
+                      <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[0.625rem] font-heading bg-muted text-muted-foreground border-border">
                         {term.calculationType}
                       </span>
                     )}
                   </div>
                   {term.description && (
-                    <p className="text-[11px] text-muted-foreground mt-1">
+                    <p className="text-[0.6875rem] text-muted-foreground mt-1">
                       {term.description}
                     </p>
                   )}
@@ -163,7 +163,7 @@ function SingleTermRow({
       {/* Row header */}
       <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-muted/30">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/10 text-[10px] font-heading font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
+          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-emerald-500/10 text-[0.625rem] font-heading font-semibold text-emerald-600 dark:text-emerald-400 shrink-0">
             {index + 1}
           </span>
           <div className="min-w-0">
@@ -171,7 +171,7 @@ function SingleTermRow({
               {term.masterTermName ?? `Term ${index + 1}`}
               {term.masterTermName && (
                 <span
-                  className={`inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${
+                  className={`inline-flex items-center text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border ${
                     isAddition
                       ? "bg-green-500/10 text-green-600 dark:text-green-400 border-green-500/20"
                       : "bg-destructive/10 text-destructive border-destructive/20"
@@ -182,7 +182,7 @@ function SingleTermRow({
               )}
             </p>
             {term.applicable && basicAmount > 0 && (
-              <p className="text-[10px] text-muted-foreground">
+              <p className="text-[0.625rem] text-muted-foreground">
                 {isAddition ? "+" : "−"}₹{fmt(discountAmount)}{" "}
                 <span className="opacity-60">
                   ({term.appliedOn === "post-gst" ? "After GST" : "Before GST"})
@@ -197,7 +197,7 @@ function SingleTermRow({
           <button
             type="button"
             onClick={onPickMaster}
-            className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 hover:underline"
+            className="flex items-center gap-1 text-[0.6875rem] text-emerald-600 dark:text-emerald-400 hover:underline"
           >
             <BookOpen size={11} />
             {term.masterTermName ? "Change" : "From Master"}
@@ -206,7 +206,7 @@ function SingleTermRow({
           <button
             type="button"
             onClick={() => onUpdate({ ...term, applicable: !term.applicable })}
-            className="flex items-center gap-1 text-[11px] font-medium transition-colors"
+            className="flex items-center gap-1 text-[0.6875rem] font-medium transition-colors"
           >
             {term.applicable ? (
               <>
@@ -248,7 +248,7 @@ function SingleTermRow({
           {!term.applicable ? (
             <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-4 flex flex-col items-center gap-1.5 text-center">
               <Tag size={15} className="text-muted-foreground/40" />
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 Toggle on to configure this discount term
               </p>
             </div>
@@ -462,13 +462,13 @@ export function BillingAccordion({
               <p className="text-sm font-heading font-semibold text-foreground flex items-center gap-1.5">
                 Billing Terms
                 {isMulti && terms.length > 1 && (
-                  <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[10px] font-heading px-1.5 py-0.5 border border-emerald-500/20">
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-[0.625rem] font-heading px-1.5 py-0.5 border border-emerald-500/20">
                     <Layers size={9} />
                     {terms.length}
                   </span>
                 )}
               </p>
-              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+              <p className="text-[0.6875rem] text-muted-foreground mt-0.5 truncate">
                 {activeCount > 0 && hasBase ? (
                   <span className="text-emerald-600 dark:text-emerald-400 font-medium">
                     {activeCount} term{activeCount > 1 ? "s" : ""} applied · Net
@@ -510,7 +510,7 @@ export function BillingAccordion({
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-border">
               {/* Left: Term list */}
               <div className="p-4 space-y-3">
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground">
                   {isMulti ? "Discount Terms" : "Discount Configuration"}
                 </p>
 
@@ -615,7 +615,7 @@ export function BillingAccordion({
 
               {/* Right: Price Breakdown */}
               <div className="p-4">
-                <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground mb-3">
+                <p className="text-[0.6875rem] font-heading uppercase tracking-wider text-muted-foreground mb-3">
                   Price Breakdown
                 </p>
 
@@ -705,7 +705,7 @@ export function BillingAccordion({
                             >
                               <span className="text-muted-foreground">
                                 {term.masterTermName ?? `Term ${i + 1}`}
-                                <span className="ml-1 text-[10px] opacity-60">
+                                <span className="ml-1 text-[0.625rem] opacity-60">
                                   · {isAdd ? "Addition" : "Deduction"} Before
                                   GST
                                   {term.type === "percentage"
@@ -732,7 +732,7 @@ export function BillingAccordion({
                           <div className="flex justify-between items-center px-3 py-1.5 bg-muted/30">
                             <span className="text-muted-foreground font-medium">
                               Taxable Amount
-                              <span className="ml-1 text-[10px] opacity-60">
+                              <span className="ml-1 text-[0.625rem] opacity-60">
                                 After pre-GST adjustments
                               </span>
                             </span>
@@ -747,7 +747,7 @@ export function BillingAccordion({
                           <span className="text-muted-foreground">
                             CGST
                             {hasPreTerms && effectiveCGSTRate > 0 && (
-                              <span className="ml-1 text-[10px] opacity-60">
+                              <span className="ml-1 text-[0.625rem] opacity-60">
                                 @ {effectiveCGSTRate.toFixed(2)}%
                               </span>
                             )}
@@ -762,7 +762,7 @@ export function BillingAccordion({
                           <span className="text-muted-foreground">
                             SGST
                             {hasPreTerms && effectiveSGSTRate > 0 && (
-                              <span className="ml-1 text-[10px] opacity-60">
+                              <span className="ml-1 text-[0.625rem] opacity-60">
                                 @ {effectiveSGSTRate.toFixed(2)}%
                               </span>
                             )}
@@ -776,7 +776,7 @@ export function BillingAccordion({
                         <div className="flex justify-between items-center px-3 py-2 bg-muted/30">
                           <span className="text-muted-foreground">
                             Gross Amount
-                            <span className="ml-1 text-[10px] opacity-60">
+                            <span className="ml-1 text-[0.625rem] opacity-60">
                               Taxable + CGST + SGST
                             </span>
                           </span>
@@ -796,7 +796,7 @@ export function BillingAccordion({
                             >
                               <span className="text-muted-foreground">
                                 {term.masterTermName ?? `Term ${i + 1}`}
-                                <span className="ml-1 text-[10px] opacity-60">
+                                <span className="ml-1 text-[0.625rem] opacity-60">
                                   · {isAdd ? "Addition" : "Deduction"} After GST
                                   {term.type === "percentage"
                                     ? ` · ${term.value}%`
@@ -821,7 +821,7 @@ export function BillingAccordion({
                         <div className="flex justify-between items-center px-3 py-2.5 bg-emerald-500/[0.06]">
                           <span className="font-heading font-semibold text-foreground">
                             Net Payable
-                            <span className="ml-1 text-[10px] font-normal opacity-60">
+                            <span className="ml-1 text-[0.625rem] font-normal opacity-60">
                               Final amount due
                             </span>
                           </span>

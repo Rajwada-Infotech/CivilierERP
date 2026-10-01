@@ -59,7 +59,7 @@ export const CancelReasonDialog: React.FC<{
         </DialogHeader>
 
         <div>
-          <label className="block text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-1.5">
+          <label className="block text-[0.625rem] font-heading uppercase tracking-wider text-muted-foreground mb-1.5">
             Cancel Reason <span className="text-red-500">*</span>
           </label>
           <select

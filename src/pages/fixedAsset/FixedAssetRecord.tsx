@@ -32,6 +32,7 @@ import {
   Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+import { DateInput } from "@/components/ui/date-input";
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const ASSET_STATUS_OPTIONS = ["Pending", "Active", "Sold", "Scrapped", "Under Maintenance"] as const;
@@ -131,7 +132,7 @@ function FAItemCodeCombobox({
                       <span className="flex flex-col min-w-0">
                         <span className="font-mono text-xs font-semibold text-yellow-600 dark:text-yellow-400 truncate">{c.FAItemCode}</span>
                         <span className="text-xs truncate">{c.ItemName || "—"}</span>
-                        <span className="text-[11px] text-muted-foreground truncate">
+                        <span className="text-[0.6875rem] text-muted-foreground truncate">
                           {[c.CompanyName, c.ProjectName, c.GodownName].filter(Boolean).join(" · ")}
                         </span>
                       </span>
@@ -240,7 +241,7 @@ function SectionHeader({ icon: Icon, children }: { icon: React.ElementType; chil
 function SubGroup({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
-      <p className="text-[10px] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 border-b border-border/60 pb-1.5">
+      <p className="text-[0.625rem] font-heading font-semibold uppercase tracking-wider text-muted-foreground/70 border-b border-border/60 pb-1.5">
         {label}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 xl:gap-5">
@@ -317,7 +318,7 @@ function DepreciationPostingCard({ assetId, glassSection }: { assetId: number; g
         </div>
         {rights.canEdit && plan && !plan.error && !plan.isPosted && (
           <button onClick={() => postMut.mutate()} disabled={postMut.isPending}
-            className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-4 py-2 rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+            className="inline-flex items-center gap-1.5 font-heading font-semibold text-white shadow-sm text-xs px-4 py-2 rounded-lg btn-module transition-all disabled:opacity-50">
             <Check size={13} /> {postMut.isPending ? "Posting…" : `Post ${DEP_MONTHS[month - 1]} ${year}`}
           </button>
         )}
@@ -341,13 +342,13 @@ function DepreciationPostingCard({ assetId, glassSection }: { assetId: number; g
               <div key={k} className="bg-muted/40 rounded-lg p-2">
                 <p className="text-muted-foreground">{k}</p>
                 <p className="font-semibold tabular-nums mt-0.5">{v}</p>
-                <p className="text-[10px] text-muted-foreground/70 mt-0.5">{hint}</p>
+                <p className="text-[0.625rem] text-muted-foreground/70 mt-0.5">{hint}</p>
               </div>
             ))}
           </div>
 
           <div className="overflow-x-auto">
-            <p className="text-[11px] text-muted-foreground mb-1.5">
+            <p className="text-[0.6875rem] text-muted-foreground mb-1.5">
               Journal entry — {DEP_MONTHS[month - 1]} {year} only (current month's depreciation)
             </p>
             <table className="w-full text-sm min-w-[420px]">
@@ -363,7 +364,7 @@ function DepreciationPostingCard({ assetId, glassSection }: { assetId: number; g
                   <tr key={i}>
                     <td className="px-3 py-2">{e.account}</td>
                     <td className="px-3 py-2 text-center">
-                      <span className={`inline-block rounded px-1.5 py-0.5 text-[11px] font-bold ${e.debit ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"}`}>
+                      <span className={`inline-block rounded px-1.5 py-0.5 text-[0.6875rem] font-bold ${e.debit ? "bg-blue-500/15 text-blue-600 dark:text-blue-400" : "bg-amber-500/15 text-amber-600 dark:text-amber-400"}`}>
                         {e.debit ? "Dr" : "Cr"}
                       </span>
                     </td>
@@ -375,7 +376,7 @@ function DepreciationPostingCard({ assetId, glassSection }: { assetId: number; g
           </div>
 
           {plan.isPosted && (
-            <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+            <p className="text-[0.6875rem] text-emerald-600 dark:text-emerald-400">
               Already posted for {DEP_MONTHS[month - 1]} {year}{plan.voucherRef ? ` · voucher ${plan.voucherRef}` : ""}.
             </p>
           )}
@@ -388,7 +389,7 @@ function DepreciationPostingCard({ assetId, glassSection }: { assetId: number; g
           <div className="overflow-x-auto">
             <table className="w-full text-xs min-w-[520px]">
               <thead>
-                <tr className="text-muted-foreground text-[10px] uppercase tracking-wide">
+                <tr className="text-muted-foreground text-[0.625rem] uppercase tracking-wide">
                   <th className="px-3 py-1.5 text-left">Period</th>
                   <th className="px-3 py-1.5 text-left">Voucher</th>
                   <th className="px-3 py-1.5 text-right">Opening</th>
@@ -496,7 +497,7 @@ function ItemPicturePicker({ value, onChange }: { value: string; onChange: (data
           className="flex w-full flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border bg-background py-6 text-muted-foreground hover:border-yellow-500/40 hover:bg-yellow-500/[0.03] transition-colors">
           <Upload size={16} />
           <span className="text-xs font-medium">Upload Picture</span>
-          <span className="text-[10px] text-muted-foreground/70">JPG, JPEG, PNG or WEBP · max 4 MB</span>
+          <span className="text-[0.625rem] text-muted-foreground/70">JPG, JPEG, PNG or WEBP · max 4 MB</span>
         </button>
       )}
     </div>
@@ -519,7 +520,7 @@ function LivePreviewCard({ form, saving, glassStyle }: { form: FormState; saving
   return (
     <div className="relative rounded-2xl overflow-hidden h-fit" style={glassStyle}>
       <div className="bg-gradient-to-br from-yellow-500 via-amber-500 to-yellow-700 p-4 text-white">
-        <p className="text-[10px] uppercase tracking-wide text-white/70 mb-1.5">Draft Document</p>
+        <p className="text-[0.625rem] uppercase tracking-wide text-white/70 mb-1.5">Draft Document</p>
         <div className="flex items-center gap-2.5">
           <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/15 shrink-0">
             <Icon size={16} />
@@ -546,7 +547,7 @@ function LivePreviewCard({ form, saving, glassStyle }: { form: FormState; saving
         <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
           <div className="h-full rounded-full bg-gradient-to-r from-yellow-500 to-amber-500 transition-all duration-500 ease-out" style={{ width: `${pct}%` }} />
         </div>
-        <p className="text-[11px] text-muted-foreground mt-1.5">{pct}% filled</p>
+        <p className="text-[0.6875rem] text-muted-foreground mt-1.5">{pct}% filled</p>
       </div>
 
       {saving && (
@@ -959,7 +960,7 @@ export default function FixedAssetRecord() {
             </button>
             {rights.canEdit && (
               <button onClick={() => goToEdit(d as unknown as FixedAssetListItem)}
-                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+                className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
                 <Pencil size={13} /> Edit
               </button>
             )}
@@ -997,7 +998,7 @@ export default function FixedAssetRecord() {
                 </div>
               </div>
               <div className="text-right shrink-0">
-                <p className="text-[11px] text-white/70">Current Book Value</p>
+                <p className="text-[0.6875rem] text-white/70">Current Book Value</p>
                 <p className="text-2xl font-bold tabular-nums">{dc ? fmtCur(dc.bookValue) : fmtCur(d.PurchaseCost)}</p>
               </div>
             </div>
@@ -1006,7 +1007,7 @@ export default function FixedAssetRecord() {
                 <div className="h-1.5 w-full rounded-full bg-white/20 overflow-hidden">
                   <div className="h-full rounded-full bg-white/80" style={{ width: `${Math.min(100, (dc.bookValue / d.PurchaseCost) * 100)}%` }} />
                 </div>
-                <p className="text-[11px] text-white/70 mt-1.5">
+                <p className="text-[0.6875rem] text-white/70 mt-1.5">
                   {fmt((dc.bookValue / d.PurchaseCost) * 100)}% of original value remaining · {dc.years} yrs in service
                 </p>
               </div>
@@ -1143,7 +1144,7 @@ export default function FixedAssetRecord() {
               <ArrowLeft size={13} /> Cancel
             </button>
             <button onClick={handleSave} disabled={saving}
-              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all disabled:opacity-50">
+              className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all disabled:opacity-50">
               <Check size={13} /> {saving ? "Saving…" : "Save Asset"}
             </button>
           </div>
@@ -1157,7 +1158,7 @@ export default function FixedAssetRecord() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 xl:gap-5">
               <div>
                 <label className={labelCls}><Calendar size={11} /> Document Date</label>
-                <input type="date" value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
+                <DateInput value={form.docDate} onChange={(e) => setField("docDate", e.target.value)} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}><Building2 size={11} /> Company</label>
@@ -1200,9 +1201,9 @@ export default function FixedAssetRecord() {
                   <div className="flex items-center justify-between gap-2 rounded-lg border border-yellow-500/30 bg-yellow-500/[0.04] px-3 py-2">
                     <div className="min-w-0">
                       <p className="text-sm font-medium truncate">{form.assetName}</p>
-                      <p className="text-[11px] font-mono text-yellow-600 dark:text-yellow-400 truncate">{form.faItemCode}</p>
+                      <p className="text-[0.6875rem] font-mono text-yellow-600 dark:text-yellow-400 truncate">{form.faItemCode}</p>
                       {form.godownName && (
-                        <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5 truncate">
+                        <p className="text-[0.6875rem] text-muted-foreground flex items-center gap-1 mt-0.5 truncate">
                           <Warehouse size={10} /> {form.godownName}
                         </p>
                       )}
@@ -1220,7 +1221,7 @@ export default function FixedAssetRecord() {
                   <FAItemCodeCombobox codes={unassignedCodes} value={null} onSelect={handleSelectCode} loading={codesLoading} />
                 )}
                 {editingId == null && !form.sourceTagId && (
-                  <p className="text-[11px] text-muted-foreground mt-1">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1">
                     Select a previously generated, unassigned FA Item Code from FA Inventory — Item Name, Company, Project and Godown auto-fill.
                   </p>
                 )}
@@ -1253,7 +1254,7 @@ export default function FixedAssetRecord() {
                   )}
                 </select>
                 {sacCodes.length === 0 && (
-                  <p className="text-[11px] text-muted-foreground mt-1">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1">
                     No SAC codes yet — add one in Material → Setup → HSN with “Is SAC Code” enabled.
                   </p>
                 )}
@@ -1283,11 +1284,11 @@ export default function FixedAssetRecord() {
               </div>
               <div>
                 <label className={labelCls}><Calendar size={11} /> Purchase Date</label>
-                <input type="date" value={form.purchaseDate} onChange={(e) => setField("purchaseDate", e.target.value)} className={inputCls} />
+                <DateInput value={form.purchaseDate} onChange={(e) => setField("purchaseDate", e.target.value)} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}><PlayCircle size={11} /> Activation Date</label>
-                <input type="date" value={form.activationDate} onChange={(e) => setField("activationDate", e.target.value)} className={inputCls} />
+                <DateInput value={form.activationDate} onChange={(e) => setField("activationDate", e.target.value)} className={inputCls} />
               </div>
               <div>
                 <label className={labelCls}>Purchase Invoice Ref</label>
@@ -1350,7 +1351,7 @@ export default function FixedAssetRecord() {
                 </div>
                 <div>
                   <DepreciationBar bookValue={depCalc.bookValue} cost={parseFloat(form.purchaseCost)} />
-                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                  <p className="text-[0.6875rem] text-muted-foreground mt-1.5">
                     {fmt((depCalc.bookValue / parseFloat(form.purchaseCost)) * 100)}% of value remaining · {depCalc.years} yrs in service
                   </p>
                 </div>
@@ -1374,7 +1375,7 @@ export default function FixedAssetRecord() {
                 </div>
                 <div>
                   <label className={labelCls}><Calendar size={11} /> Sale Date</label>
-                  <input type="date" value={form.saleDate} onChange={(e) => setField("saleDate", e.target.value)} className={inputCls} />
+                  <DateInput value={form.saleDate} onChange={(e) => setField("saleDate", e.target.value)} className={inputCls} />
                 </div>
                 <div>
                   <label className={labelCls}>Buyer Name</label>
@@ -1436,7 +1437,7 @@ export default function FixedAssetRecord() {
       action={
         rights.canCreate && (
           <button onClick={goToCreate}
-            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+            className="inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
             <Plus size={13} /> New Asset
           </button>
         )
@@ -1602,7 +1603,7 @@ export default function FixedAssetRecord() {
           <p className="text-sm">No fixed assets found</p>
           {rights.canCreate && (
             <button onClick={goToCreate}
-              className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg bg-gradient-to-r from-yellow-400 via-amber-400 to-yellow-600 transition-all">
+              className="mt-2 inline-flex items-center gap-1.5 shrink-0 font-heading font-semibold text-white shadow-sm text-xs px-3 sm:px-4 py-1.5 h-auto rounded-lg btn-module transition-all">
               <Plus size={13} /> Add First Asset
             </button>
           )}
@@ -1637,7 +1638,7 @@ export default function FixedAssetRecord() {
                         <CategoryBadge category={a.AssetCategory} />
                         <div className="min-w-0">
                           <p className="font-medium truncate">{a.AssetName}</p>
-                          <p className="text-[11px] text-muted-foreground font-mono truncate">{a.AssetCode || "—"}</p>
+                          <p className="text-[0.6875rem] text-muted-foreground font-mono truncate">{a.AssetCode || "—"}</p>
                         </div>
                       </div>
                     </td>
@@ -1661,7 +1662,7 @@ export default function FixedAssetRecord() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => goToView(a)}
+                        <button data-row-view="hide" onClick={() => goToView(a)}
                           className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground" title="View">
                           <Eye size={13} />
                         </button>

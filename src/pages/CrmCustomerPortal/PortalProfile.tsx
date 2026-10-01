@@ -31,7 +31,7 @@ function MiniStat({ icon: Icon, label, value }: { icon: any; label: string; valu
       <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0" style={{ background: GOLD_SOFT, color: GOLD }}><Icon size={14} /></div>
       <div className="min-w-0">
         <p className="text-sm font-semibold truncate" style={{ color: TEXT }}>{value}</p>
-        <p className="text-[10px]" style={{ color: TEXT_FAINT }}>{label}</p>
+        <p className="text-[0.625rem]" style={{ color: TEXT_FAINT }}>{label}</p>
       </div>
     </div>
   );
@@ -106,7 +106,7 @@ const PortalProfile: React.FC = () => {
           <InfoField label="Email" value={me.Email} />
           <InfoField label="Interested Project" value={selectedApp?.InterestedProject} />
           <div>
-            <p className="text-[10px] uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Application Status</p>
+            <p className="text-[0.625rem] uppercase tracking-wide" style={{ color: TEXT_FAINT }}>Application Status</p>
             <div className="mt-1"><StatusPill status={selectedApp?.ApplicationStatus} /></div>
           </div>
         </div>
@@ -142,7 +142,7 @@ const PortalProfile: React.FC = () => {
             <div key={t.Id} className="flex items-center justify-between gap-3 px-5 py-3 border-b last:border-0" style={{ borderColor: HAIRLINE }}>
               <div className="min-w-0">
                 <p className="text-sm font-medium truncate" style={{ color: TEXT }}>{t.Subject}</p>
-                <p className="text-[11px]" style={{ color: TEXT_FAINT }}>{t.TicketNo} · {fmtDate(t.CreatedAt)}</p>
+                <p className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>{t.TicketNo} · {fmtDate(t.CreatedAt)}</p>
               </div>
               <StatusPill status={t.Status} />
             </div>
@@ -166,7 +166,7 @@ const PortalProfile: React.FC = () => {
                     background: mode === key ? GOLD_SOFT : SURFACE_ALT,
                   }}>
                   <Icon size={16} style={{ color: mode === key ? GOLD : TEXT_MUTED }} />
-                  <span className="text-[11px] font-medium" style={{ color: mode === key ? TEXT : TEXT_MUTED }}>{label}</span>
+                  <span className="text-[0.6875rem] font-medium" style={{ color: mode === key ? TEXT : TEXT_MUTED }}>{label}</span>
                 </button>
               ))}
             </div>
@@ -187,7 +187,7 @@ const PortalProfile: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <span className="text-[11px] font-medium text-center leading-tight" style={{ color: TEXT }}>{a.label}</span>
+                  <span className="text-[0.6875rem] font-medium text-center leading-tight" style={{ color: TEXT }}>{a.label}</span>
                 </button>
               ))}
             </div>

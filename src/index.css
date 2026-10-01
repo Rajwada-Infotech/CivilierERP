@@ -394,11 +394,13 @@
             hsl(var(--accent-3))
         );
     }
+    /* Follows the current module's colour (see --mod-* / .btn-module). */
     .gradient-accent {
         background: linear-gradient(
             135deg,
-            hsl(var(--accent-1)),
-            hsl(var(--accent-2))
+            var(--mod-from),
+            var(--mod-via),
+            var(--mod-to)
         );
     }
     .gradient-engineering {
@@ -418,8 +420,9 @@
     .gradient-accent-hover {
         background: linear-gradient(
             135deg,
-            hsl(var(--accent-2)),
-            hsl(var(--accent-1))
+            var(--mod-to),
+            var(--mod-via),
+            var(--mod-from)
         );
     }
 }
@@ -666,7 +669,7 @@
 /* ── CRM dialog theme ──────────────────────────────────────────────────────
    The shared <DialogContent accent="crm"> gets the `.crm-dialog` class (see
    src/components/ui/dialog.tsx). Everything below is a descendant selector so
-   every CRM dialog picks up the orange accent WITHOUT rewriting each dialog's
+   every CRM dialog picks up the sky accent WITHOUT rewriting each dialog's
    markup.
 
    These rules used to hardcode a near-black surface (#0c0c10) and white text,
@@ -675,15 +678,15 @@
    ships SIX themes (dark, light, midnight, root, glass, bw; see the
    [data-theme] blocks above), so the surface, border and text now come from
    the same tokens every other dialog uses and follow whichever theme is
-   active. Only the #ff920f accent — top rule, focus ring, checkbox tint — is
+   active. Only the #0ea5e9 accent — top rule, focus ring, checkbox tint — is
    a fixed brand colour, because that is what actually identifies a CRM
    dialog. It reads on light and dark grounds alike. ───────────────────────── */
 .crm-dialog {
     background:
-        linear-gradient(135deg, rgba(255, 146, 15, 0.05), transparent 35%),
+        linear-gradient(135deg, rgba(14, 165, 233, 0.05), transparent 35%),
         hsl(var(--card));
     border-color: hsl(var(--border));
-    border-top: 3px solid #ff920f;
+    border-top: 3px solid #0ea5e9;
     box-shadow:
         0 24px 64px -12px rgb(0 0 0 / 0.28),
         0 0 0 1px hsl(var(--border) / 0.4);
@@ -711,8 +714,8 @@
 .crm-dialog select:focus,
 .crm-dialog textarea:focus {
     background: hsl(var(--background));
-    border-color: #ff920f;
-    box-shadow: 0 0 0 3px rgba(255, 146, 15, 0.18);
+    border-color: #0ea5e9;
+    box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.18);
     outline: none;
 }
 .crm-dialog input::placeholder,
@@ -746,13 +749,13 @@
     color-scheme: light;
 }
 
-/* Checkboxes / radios pick up the orange accent */
+/* Checkboxes / radios pick up the sky accent */
 .crm-dialog input[type="checkbox"],
 .crm-dialog input[type="radio"] {
-    accent-color: #ff920f;
+    accent-color: #0ea5e9;
 }
 
-/* Keyboard focus ring — orange, matches the spec */
+/* Keyboard focus ring — sky, matches the spec */
 .crm-dialog button:focus-visible,
 .crm-dialog input:focus-visible,
 .crm-dialog select:focus-visible,
@@ -760,4 +763,127 @@
 .crm-dialog a:focus-visible {
     outline: 2px solid #ffad35;
     outline-offset: 2px;
+}
+
+/* ── Laptop-screen readability ───────────────────────────────────────────
+   The UI is tuned for large monitors; on laptop-width screens (e.g. a
+   MacBook at 1280–1600px) the same sizes read as too small. Text, spacing
+   and controls are rem-based, so raising the root size scales the whole
+   interface up there. Phones/tablets (<768px) keep their own layout, and
+   large monitors (>1600px) are unchanged. */
+@media (min-width: 768px) and (max-width: 1600px) {
+  html {
+    font-size: 110%;
+  }
+}
+
+/* Row-click-to-view (see main.tsx): the whole row opens the details, so the
+   eye button inside table rows is hidden and the row reads as clickable. */
+tr [data-row-view] {
+  display: none !important;
+}
+tr:has([data-row-view]:not([data-row-view="hide"])) {
+  cursor: pointer;
+}
+
+/* ── Mobile / tablet responsiveness safety net (< 768px) ─────────────────
+   Pages are built desktop-first; on narrow screens several patterns pushed
+   the whole page sideways. These rules keep the page itself exactly
+   viewport-wide while letting wide content scroll inside its own box. */
+@media (max-width: 767px) {
+  /* The page never scrolls sideways. `clip` (unlike `hidden`) doesn't create
+     a scroll container, so position: sticky keeps working. */
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: clip;
+  }
+
+  /* Wide tables scroll horizontally inside themselves instead of widening
+     the page. */
+  main table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Fixed pixel/rem widths (w-[600px], w-96, min-w-[…]) outside tables are
+     capped at the available width. Table cells keep their widths — the
+     table scrolls. */
+  main :not(table *):is([class^="w-["], [class*=" w-["], .w-96),
+  .fixed :not(table *):is([class^="w-["], [class*=" w-["], .w-96) {
+    max-width: 100%;
+  }
+  main :not(table *):is([class^="min-w-["], [class*=" min-w-["]) {
+    min-width: 0 !important;
+  }
+
+  /* Fixed 3–6 column grids (forms, stat rows) reflow into as many columns
+     as fit, down to one. */
+  main .grid-cols-3,
+  main .grid-cols-4,
+  main .grid-cols-5,
+  main .grid-cols-6,
+  .fixed .grid-cols-3,
+  .fixed .grid-cols-4 {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+  }
+  /* …and a multi-column span inside them takes a full row rather than
+     forcing extra columns. */
+  :is(main, .fixed) :is(.grid-cols-3, .grid-cols-4, .grid-cols-5, .grid-cols-6)
+    > :is(.col-span-2, .col-span-3, .col-span-4, .col-span-5) {
+    grid-column: 1 / -1;
+  }
+
+  /* Images, media and pre-formatted blocks never exceed their container. */
+  main img,
+  main video,
+  main canvas,
+  main svg:not([width]) {
+    max-width: 100%;
+  }
+  main pre {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+/* ── Module-themed primary buttons ───────────────────────────────────────
+   Every primary action button uses `.btn-module`: a gradient in the colour
+   of the module the user is in (matching its sidebar/module-strip colour).
+   data-module is set on the layout root and synced to <body>, so portalled
+   modals/drawers pick it up too. Outside any module it falls back to the
+   theme's primary colour. */
+:root {
+  --mod-from: hsl(var(--primary));
+  --mod-via: hsl(var(--primary));
+  --mod-to: hsl(var(--primary));
+  --mod-shadow: hsl(var(--primary) / 0.25);
+}
+[data-module="finance"]          { --mod-from: #6366f1; --mod-via: #8b5cf6; --mod-to: #a855f7; --mod-shadow: rgba(99,102,241,.25); }
+[data-module="material"]         { --mod-from: #10b981; --mod-via: #2dd4bf; --mod-to: #06b6d4; --mod-shadow: rgba(16,185,129,.25); }
+[data-module="fixed-asset"]      { --mod-from: #eab308; --mod-via: #f59e0b; --mod-to: #ea580c; --mod-shadow: rgba(234,179,8,.25); }
+[data-module="loan"]             { --mod-from: #22c55e; --mod-via: #10b981; --mod-to: #0d9488; --mod-shadow: rgba(34,197,94,.25); }
+[data-module="engineering"]      { --mod-from: #f97316; --mod-via: #f59e0b; --mod-to: #ea580c; --mod-shadow: rgba(249,115,22,.25); }
+[data-module="civilworkdpr"]     { --mod-from: #0891b2; --mod-via: #0ea5e9; --mod-to: #2563eb; --mod-shadow: rgba(8,145,178,.25); }
+[data-module="followup"]         { --mod-from: #0d9488; --mod-via: #10b981; --mod-to: #0891b2; --mod-shadow: rgba(13,148,136,.25); }
+[data-module="ticket"]           { --mod-from: #ec4899; --mod-via: #fb7185; --mod-to: #d946ef; --mod-shadow: rgba(236,72,153,.25); }
+[data-module="sales"]            { --mod-from: #a855f7; --mod-via: #8b5cf6; --mod-to: #d946ef; --mod-shadow: rgba(168,85,247,.25); }
+[data-module="sales-automation"] { --mod-from: #f59e0b; --mod-via: #fb923c; --mod-to: #ea580c; --mod-shadow: rgba(245,158,11,.25); }
+[data-module="crm"]              { --mod-from: #0ea5e9; --mod-via: #22d3ee; --mod-to: #3b82f6; --mod-shadow: rgba(14,165,233,.25); }
+[data-module="maintenance"]      { --mod-from: #65a30d; --mod-via: #22c55e; --mod-to: #059669; --mod-shadow: rgba(101,163,13,.25); }
+[data-module="hr-payroll"]       { --mod-from: #eab308; --mod-via: #f59e0b; --mod-to: #f97316; --mod-shadow: rgba(234,179,8,.25); }
+[data-module="records"]          { --mod-from: #e11d48; --mod-via: #ec4899; --mod-to: #f43f5e; --mod-shadow: rgba(225,29,72,.25); }
+[data-module="admin"]            { --mod-from: #3b82f6; --mod-via: #6366f1; --mod-to: #0ea5e9; --mod-shadow: rgba(59,130,246,.25); }
+
+.btn-module {
+  background-color: var(--mod-from);
+  background-image: linear-gradient(to right, var(--mod-from), var(--mod-via), var(--mod-to));
+  color: #fff;
+  transition: box-shadow 0.2s, filter 0.2s;
+}
+.btn-module:hover:not(:disabled) {
+  filter: brightness(1.05);
+  box-shadow: 0 8px 18px -6px var(--mod-shadow);
 }

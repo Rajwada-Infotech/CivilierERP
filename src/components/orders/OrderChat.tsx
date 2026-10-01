@@ -279,7 +279,7 @@ export function OrderChat({ poId, apiBase, currentUser, className, onClose }: Or
         {groupedMessages.map((group) => (
           <div key={group.label} className="space-y-2.5">
             <div className="flex items-center gap-3">
-              <span className="mx-auto rounded-full px-2.5 py-0.5 text-[10px] font-medium text-muted-foreground/70">
+              <span className="mx-auto rounded-full px-2.5 py-0.5 text-[0.625rem] font-medium text-muted-foreground/70">
                 {group.label}
               </span>
             </div>
@@ -301,14 +301,14 @@ export function OrderChat({ poId, apiBase, currentUser, className, onClose }: Or
 
                     <div className={cn("flex min-w-0 max-w-[80%] sm:max-w-[75%] flex-col gap-0.5", textAlignment)}>
                       <div className={cn("flex items-baseline gap-1.5", isMine ? "justify-end" : "justify-start")}>
-                        <span className="text-[11px] font-medium text-muted-foreground truncate">{message.author_name}</span>
-                        <span className="text-[10px] text-muted-foreground/50 shrink-0">{formatTime(message.created_at)}</span>
+                        <span className="text-[0.6875rem] font-medium text-muted-foreground truncate">{message.author_name}</span>
+                        <span className="text-[0.625rem] text-muted-foreground/50 shrink-0">{formatTime(message.created_at)}</span>
                       </div>
 
                       <MessageContent pending={message.pending}>
                         <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{message.comment}</p>
                         {message.pending && (
-                          <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium opacity-70">
+                          <span className="mt-1 inline-flex items-center gap-1 text-[0.625rem] font-medium opacity-70">
                             <Loader2 size={10} className="animate-spin" /> Sending
                           </span>
                         )}

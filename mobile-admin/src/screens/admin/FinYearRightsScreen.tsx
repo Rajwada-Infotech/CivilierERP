@@ -65,7 +65,7 @@ function YearCard({
               <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: isActive ? "#10b981" : colors.mutedForeground }} />
               <Text style={{ color: isActive ? "#10b981" : colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.heading.semibold }}>{fy.status}</Text>
             </View>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: fy.locked ? "#f59e0b1a" : colors.muted }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999, backgroundColor: fy.locked ? "#ffe2021a" : colors.muted }}>
               {fy.locked ? <Lock size={8} color="#f59e0b" /> : <Unlock size={8} color={colors.mutedForeground} />}
               <Text style={{ color: fy.locked ? "#f59e0b" : colors.mutedForeground, fontSize: 9.5, fontFamily: fonts.heading.semibold }}>{fy.locked ? "Locked" : "Open"}</Text>
             </View>

@@ -18,6 +18,7 @@ import {
   addBillToCustomerBill, cancelBill, getMonthlyReport, getProviderWiseReport, getCustomerWiseReport, getElectricityAuditLog,
   type MeterRow, type ElectricityBillRow, type BillPreview, type MeterReadingRow, type BillStatus,
 } from "@/api/electricityMaintenanceApi";
+import { DateInput } from "@/components/ui/date-input";
 
 const PAGE_KEY = "maintenance-electricity";
 const TABS = ["overview", "meters", "bills", "reports", "audit"] as const;
@@ -25,27 +26,27 @@ type Tab = (typeof TABS)[number];
 const TAB_LABEL: Record<Tab, string> = { overview: "Overview", meters: "Meters & Readings", bills: "Billing", reports: "Reports", audit: "Audit Log" };
 
 const inputCls = "px-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
-const labelCls = "block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
+const labelCls = "block text-[0.6875rem] uppercase tracking-widest font-heading text-muted-foreground mb-1.5";
 const fieldCls = "w-full px-3.5 py-2.5 rounded-xl text-sm font-body bg-muted border border-border focus:outline-none focus:ring-2 text-foreground";
 const fmt = (n: number | null | undefined) => `₹${(Number(n) || 0).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const fmtDate = (d: string | null | undefined) => (d ? new Date(d).toLocaleDateString("en-IN") : "—");
 const fmtDateTime = (d: string | null | undefined) => (d ? new Date(d).toLocaleString("en-IN") : "—");
 
 const BILL_STATUS_STYLE: Record<BillStatus, string> = {
-  PendingVerification: "bg-amber-500/10 border-amber-500/20 text-amber-600",
+  PendingVerification: "bg-[#ffe2021a] border-amber-500/20 text-amber-600",
   Verified: "bg-sky-500/10 border-sky-500/20 text-sky-600",
   AddedToCustomerBill: "bg-emerald-500/10 border-emerald-500/20 text-emerald-600",
   Cancelled: "bg-red-500/10 border-red-500/20 text-red-600",
   Revised: "bg-violet-500/10 border-violet-500/20 text-violet-600",
 };
 function BillStatusBadge({ status }: { status: BillStatus }) {
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${BILL_STATUS_STYLE[status] || ""}`}>{status}</span>;
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${BILL_STATUS_STYLE[status] || ""}`}>{status}</span>;
 }
 function HandoverBadge({ status }: { status: string }) {
   const style = status === "Handover Completed" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600"
-    : status === "Handover Scheduled" ? "bg-amber-500/10 border-amber-500/20 text-amber-600"
+    : status === "Handover Scheduled" ? "bg-[#ffe2021a] border-amber-500/20 text-amber-600"
     : "bg-muted border-border text-muted-foreground";
-  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${style}`}>{status}</span>;
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${style}`}>{status}</span>;
 }
 
 export default function ElectricityMaintenance() {
@@ -176,7 +177,7 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       {rows.length > 0 && (
         <div className="rounded-xl border border-border overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+            <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
               <tr>
                 <th className="text-left px-4 py-2.5">Customer</th>
                 <th className="text-left px-4 py-2.5">Flat</th>
@@ -206,17 +207,17 @@ function MetersTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                   <td className="px-4 py-2.5"><HandoverBadge status={m.HandoverStatus} /></td>
                   <td className="px-4 py-2.5">{m.LatestBillStatus ? <BillStatusBadge status={m.LatestBillStatus} /> : <span className="text-muted-foreground text-xs">Pending</span>}</td>
                   <td className="px-4 py-2.5">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${m.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>{m.Status}</span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[0.6875rem] font-heading border ${m.Status === "Active" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600" : "bg-muted border-border text-muted-foreground"}`}>{m.Status}</span>
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-end gap-1.5">
                       {rights.canCreate && m.Status === "Active" && (
-                        <button onClick={() => setReadingFor(m)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-heading font-semibold gradient-maintenance text-white">
+                        <button onClick={() => setReadingFor(m)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-semibold gradient-maintenance text-white">
                           <Plus size={12} /> Reading
                         </button>
                       )}
                       {rights.canCreate && m.Status === "Active" && (
-                        <button onClick={() => setBillingFor(m)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-heading font-medium border border-border text-foreground hover:bg-muted">
+                        <button onClick={() => setBillingFor(m)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-medium border border-border text-foreground hover:bg-muted">
                           <FileText size={12} /> Generate Bill
                         </button>
                       )}
@@ -305,7 +306,7 @@ function AddReadingDialog({ meter, onClose }: { meter: MeterRow; onClose: () => 
             </div>
             <div>
               <label className={labelCls}>Reading Date</label>
-              <input type="date" value={readingDate} onChange={(e) => setReadingDate(e.target.value)} className={fieldCls} />
+              <DateInput value={readingDate} onChange={(e) => setReadingDate(e.target.value)} className={fieldCls} />
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-border">
@@ -368,15 +369,15 @@ function GenerateBillDialog({ meter, onClose }: { meter: MeterRow; onClose: () =
         <DialogHeader><DialogTitle className="font-heading text-base">Generate Electricity Bill</DialogTitle></DialogHeader>
         <div className="space-y-3 pt-1">
           <div className="grid grid-cols-2 gap-3">
-            <div><label className={labelCls}>Period From</label><input type="date" value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} className={fieldCls} /></div>
-            <div><label className={labelCls}>Period To</label><input type="date" value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} className={fieldCls} /></div>
+            <div><label className={labelCls}>Period From</label><DateInput value={periodFrom} onChange={(e) => setPeriodFrom(e.target.value)} className={fieldCls} /></div>
+            <div><label className={labelCls}>Period To</label><DateInput value={periodTo} onChange={(e) => setPeriodTo(e.target.value)} className={fieldCls} /></div>
           </div>
           <button onClick={loadPreview} disabled={loadingPreview} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border border-border text-foreground hover:bg-muted disabled:opacity-60">
             {loadingPreview ? <Loader2 size={13} className="animate-spin" /> : null} Preview
           </button>
 
           {previewError && (
-            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 flex items-start gap-2">
+            <div className="rounded-lg border border-amber-500/30 bg-[#ffe2021a] px-3 py-2.5 text-xs text-amber-700 flex items-start gap-2">
               <ShieldAlert size={14} className="shrink-0 mt-0.5" /> {previewError}
             </div>
           )}
@@ -454,13 +455,13 @@ function MeterHistoryDialog({ meter, onClose }: { meter: MeterRow; onClose: () =
             <table className="w-full text-xs">
               <thead className="bg-muted/30">
                 <tr>
-                  <th className="text-left px-2 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">Date</th>
-                  <th className="text-left px-2 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">Type</th>
-                  <th className="text-left px-2 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">Previous</th>
-                  <th className="text-left px-2 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">Current</th>
-                  <th className="text-left px-2 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">Units</th>
-                  <th className="text-left px-2 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">Bill</th>
-                  <th className="text-left px-2 py-1.5 text-[9px] uppercase tracking-widest text-muted-foreground">Status</th>
+                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Date</th>
+                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Type</th>
+                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Previous</th>
+                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Current</th>
+                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Units</th>
+                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Bill</th>
+                  <th className="text-left px-2 py-1.5 text-[0.5625rem] uppercase tracking-widest text-muted-foreground">Status</th>
                   <th className="w-8" />
                 </tr>
               </thead>
@@ -576,9 +577,9 @@ function BillsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
           <option value="">All Status</option>
           {["PendingVerification", "Verified", "AddedToCustomerBill", "Cancelled", "Revised"].map((s) => (<option key={s} value={s}>{s}</option>))}
         </select>
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={inputCls} />
+        <DateInput value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={inputCls} />
         <span className="text-xs text-muted-foreground">to</span>
-        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={inputCls} />
+        <DateInput value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={inputCls} />
         {rights.canExport && (
           <div className="ml-auto">
             <ExportMenu
@@ -610,7 +611,7 @@ function BillsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
       {rows.length > 0 && (
         <div className="rounded-xl border border-border overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+            <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
               <tr>
                 <th className="text-left px-4 py-2.5">Customer</th>
                 <th className="text-left px-4 py-2.5">Flat</th>
@@ -633,12 +634,12 @@ function BillsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
                   <td className="px-4 py-2.5">
                     <div className="flex items-center justify-end gap-1.5">
                       {rights.canEdit && b.BillStatus === "PendingVerification" && (
-                        <button onClick={() => handleVerify(b)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-heading font-semibold border border-border text-foreground hover:bg-muted">
+                        <button onClick={() => handleVerify(b)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-semibold border border-border text-foreground hover:bg-muted">
                           <CheckCircle2 size={12} /> Verify
                         </button>
                       )}
                       {rights.canEdit && b.BillStatus === "Verified" && (
-                        <button onClick={() => setAddingTo(b)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-heading font-semibold gradient-maintenance text-white">
+                        <button onClick={() => setAddingTo(b)} className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.6875rem] font-heading font-semibold gradient-maintenance text-white">
                           Add to Bill
                         </button>
                       )}
@@ -768,9 +769,9 @@ function ReportsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
   return (
     <div className="space-y-5 pt-1">
       <div className="flex items-center gap-2">
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={inputCls} />
+        <DateInput value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={inputCls} />
         <span className="text-xs text-muted-foreground">to</span>
-        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={inputCls} />
+        <DateInput value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={inputCls} />
       </div>
 
       <div>
@@ -813,7 +814,7 @@ function ReportsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
         ) : (
           <div className="rounded-xl border border-border overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
                 <tr>
                   <th className="text-left px-4 py-2.5">Provider</th>
                   <th className="text-left px-4 py-2.5">Meters</th>
@@ -866,7 +867,7 @@ function ReportsTab({ rights }: { rights: ReturnType<typeof usePageRights> }) {
         ) : (
           <div className="rounded-xl border border-border overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-[11px] uppercase tracking-widest text-muted-foreground font-heading">
+              <thead className="bg-muted/40 text-[0.6875rem] uppercase tracking-widest text-muted-foreground font-heading">
                 <tr>
                   <th className="text-left px-4 py-2.5">Customer</th>
                   <th className="text-left px-4 py-2.5">Flat</th>

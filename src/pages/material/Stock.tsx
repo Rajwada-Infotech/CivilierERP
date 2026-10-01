@@ -35,6 +35,7 @@ import {
   type ItemLedgerRow,
 } from "@/api/inventoryMasterApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { DateInput } from "@/components/ui/date-input";
 
 // ─── RefType presentation (Stock drill-down) ──────────────────────────────────
 const REF_TYPE_META: Record<
@@ -128,12 +129,12 @@ function GodownInfoCard({ godown }: { godown: Godown }) {
             {godown.GodownName}
           </p>
           {godown.GodownCode && (
-            <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-mono">
+            <span className="text-[0.625rem] bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-mono">
               {godown.GodownCode}
             </span>
           )}
           {!godown.IsActive && (
-            <span className="text-[9px] bg-red-500/10 text-red-600 px-2 py-0.5 rounded-full font-bold">
+            <span className="text-[0.5625rem] bg-red-500/10 text-red-600 px-2 py-0.5 rounded-full font-bold">
               INACTIVE
             </span>
           )}
@@ -150,22 +151,22 @@ function GodownInfoCard({ godown }: { godown: Godown }) {
         )}
         <div className="flex flex-wrap gap-3 mt-2">
           {godown.EnterpriseName && (
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
               <Building2 size={10} /> {godown.EnterpriseName}
             </span>
           )}
           {godown.ProjectName && (
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
               <FolderKanban size={10} /> {godown.ProjectName}
             </span>
           )}
           {godown.Location && (
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+            <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground">
               <MapPin size={10} /> {godown.Location}
             </span>
           )}
           {godown.Remarks && (
-            <span className="flex items-center gap-1 text-[11px] text-muted-foreground italic">
+            <span className="flex items-center gap-1 text-[0.6875rem] text-muted-foreground italic">
               <Info size={10} /> {godown.Remarks}
             </span>
           )}
@@ -229,7 +230,7 @@ function SummaryRow({
             <Icon size={16} className={color} />
           </div>
           <div>
-            <p className="text-[11px] text-muted-foreground">{label}</p>
+            <p className="text-[0.6875rem] text-muted-foreground">{label}</p>
             <p className="text-sm font-heading font-bold text-foreground">
               {fmtNum(value)}
             </p>
@@ -329,11 +330,11 @@ function ItemLedgerModal({
                       <span className="text-sm font-medium text-foreground">
                         {row.DocNo || `#${row.RefID}`}
                       </span>
-                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
+                      <span className="text-[0.625rem] uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full">
                         {meta.label}
                       </span>
                     </div>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                    <p className="text-[0.6875rem] text-muted-foreground mt-0.5">
                       {row.MovementDate
                         ? new Date(row.MovementDate).toLocaleDateString("en-IN", {
                             day: "2-digit",
@@ -353,7 +354,7 @@ function ItemLedgerModal({
                       {fmtNum(row.Qty)}
                     </span>
                     {row.UOM && (
-                      <p className="text-[10px] text-muted-foreground">{row.UOM}</p>
+                      <p className="text-[0.625rem] text-muted-foreground">{row.UOM}</p>
                     )}
                   </div>
                   {clickable && (
@@ -546,7 +547,7 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                           <span className="font-medium text-foreground hover:text-emerald-600 hover:underline">
                             {row.ItemName || "—"}
                           </span>
-                          <div className="text-[10px] text-muted-foreground sm:hidden">
+                          <div className="text-[0.625rem] text-muted-foreground sm:hidden">
                             {row.UOMSymbol || row.UOMName || ""}
                             {row.ItemGroupName ? ` · ${row.ItemGroupName}` : ""}
                           </div>
@@ -560,7 +561,7 @@ function StockDetailsTable({ godownId, dateFrom, dateTo, projectName }: {
                       {row.UOMSymbol || row.UOMName ? (
                         <span
                           title={row.UOMName ?? undefined}
-                          className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-400/20"
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-400/20"
                         >
                           {row.UOMSymbol || row.UOMName}
                         </span>
@@ -816,8 +817,7 @@ export default function Stock() {
           <div className="grid grid-cols-2 gap-3 mt-3">
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground block">From Date</label>
-              <input
-                type="date"
+              <DateInput
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-emerald-500/30 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"
@@ -825,8 +825,7 @@ export default function Stock() {
             </div>
             <div className="space-y-1.5">
               <label className="text-xs font-medium text-muted-foreground block">To Date</label>
-              <input
-                type="date"
+              <DateInput
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground outline-none focus:ring-2 focus:ring-emerald-500/30 [&::-webkit-calendar-picker-indicator]:opacity-60 [&::-webkit-calendar-picker-indicator]:invert"

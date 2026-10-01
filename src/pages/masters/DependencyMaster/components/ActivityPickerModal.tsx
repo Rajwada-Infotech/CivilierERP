@@ -111,7 +111,7 @@ export function ActivityPickerModal({ open, onClose, onPick, excludeIds }: Props
                   <Tag size={12} className="text-teal-400 shrink-0" />
                   <span className="flex-1 truncate">{a.activity_name}</span>
                   {already && (
-                    <span className="text-[9px] uppercase tracking-wide text-muted-foreground shrink-0">
+                    <span className="text-[0.5625rem] uppercase tracking-wide text-muted-foreground shrink-0">
                       Already added
                     </span>
                   )}
@@ -129,7 +129,7 @@ export function ActivityPickerModal({ open, onClose, onPick, excludeIds }: Props
             type="button"
             onClick={confirm}
             disabled={selected.length === 0}
-            className="px-3 py-1.5 rounded-md text-xs font-medium bg-primary text-primary-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 rounded-md text-xs font-medium btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {selected.length > 0
               ? `Add ${selected.length} Activit${selected.length === 1 ? "y" : "ies"}`

@@ -25,12 +25,12 @@ const STATUSES   = ["Open", "Assigned", "InProgress", "Resolved", "Closed", "Reo
 
 const priorityColor: Record<string, string> = {
   Urgent: "text-red-600 bg-red-50 border-red-200",
-  High:   "text-orange-600 bg-orange-50 border-orange-200",
+  High:   "text-sky-600 bg-sky-50 border-sky-200",
   Normal: "text-blue-600 bg-blue-50 border-blue-200",
   Low:    "text-muted-foreground bg-muted/50 border-border",
 };
 const statusColor: Record<string, string> = {
-  Open:       "text-orange-600 bg-orange-50 border-orange-200",
+  Open:       "text-sky-600 bg-sky-50 border-sky-200",
   Assigned:   "text-blue-600 bg-blue-50 border-blue-200",
   InProgress: "text-purple-600 bg-purple-50 border-purple-200",
   Resolved:   "text-green-600 bg-green-50 border-green-200",
@@ -227,7 +227,7 @@ const CrmServiceTickets: React.FC = () => {
         <div className="max-w-xs truncate">
           {i.row.original.Subject}
           {i.row.original.RaisedByCustomer && (
-            <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-600 font-medium">Customer</span>
+            <span className="ml-1.5 text-[0.625rem] px-1.5 py-0.5 rounded-full border border-blue-200 bg-blue-50 text-blue-600 font-medium">Customer</span>
           )}
         </div>
       ) },
@@ -337,7 +337,7 @@ const CrmServiceTickets: React.FC = () => {
           <div className="flex items-center gap-3">
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           <button onClick={() => setDialogOpen(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+          className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
           <Plus size={14} /> Raise Ticket
         </button>
         </div>
@@ -424,7 +424,7 @@ const CrmServiceTickets: React.FC = () => {
             <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); }}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleCreate} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Raising..." : "Raise Ticket"}
             </button>
           </DialogFooter>
@@ -447,7 +447,7 @@ const CrmServiceTickets: React.FC = () => {
             <button onClick={() => setResolveDialog(false)}
               className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleResolveConfirm} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Resolving..." : "Mark Resolved"}
             </button>
           </DialogFooter>

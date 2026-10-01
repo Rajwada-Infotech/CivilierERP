@@ -52,7 +52,7 @@ export const MessageAvatar: React.FC<MessageAvatarProps> = ({
   className,
 }) => (
   <Avatar className={cn("h-6 w-6 shrink-0", className)}>
-    <AvatarFallback className={cn("text-[9px] font-bold", tone)}>
+    <AvatarFallback className={cn("text-[0.5625rem] font-bold", tone)}>
       {getInitials(name || "U")}
     </AvatarFallback>
   </Avatar>

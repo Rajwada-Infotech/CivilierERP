@@ -14,6 +14,7 @@ import { Plus, Key, AlertTriangle, CheckCircle2, User } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { DateInput } from "@/components/ui/date-input";
 
 const API        = "/api/crm/handover";
 const SA_LEADS_API = "/api/sa/leads";
@@ -338,7 +339,7 @@ const CrmHandover: React.FC = () => {
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           {rights.canCreate && (
             <button onClick={() => setNewDialog(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg ">
             <Key size={14} /> Schedule Handover
           </button>
           )}
@@ -377,11 +378,11 @@ const CrmHandover: React.FC = () => {
               className={`w-full text-left p-3 rounded-lg border transition-colors ${selectedId === h.Id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/20"}`}>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium truncate">{h.ApplicantName}</span>
-                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${statusColor[h.Status] || ""}`}>{h.Status}</span>
+                <span className={`text-[0.625rem] font-semibold px-1.5 py-0.5 rounded-full border ${statusColor[h.Status] || ""}`}>{h.Status}</span>
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">{h.BookingNo} · {h.UnitNo}</div>
               {h.OpenSnagCount > 0 && (
-                <div className="text-xs text-orange-600 flex items-center gap-1 mt-1">
+                <div className="text-xs text-sky-600 flex items-center gap-1 mt-1">
                   <AlertTriangle size={10} /> {h.OpenSnagCount} open snag(s)
                 </div>
               )}
@@ -498,7 +499,7 @@ const CrmHandover: React.FC = () => {
             <div>
               <label className="text-xs text-muted-foreground block mb-1">
                 Booking *{" "}
-                <span className="text-[10px] text-primary">(only eligible bookings shown — AFS Registered, Possession Notice Acknowledged, no NOC left Pending/Approved, no overdue dues)</span>
+                <span className="text-[0.625rem] text-primary">(only eligible bookings shown — AFS Registered, Possession Notice Acknowledged, no NOC left Pending/Approved, no overdue dues)</span>
               </label>
               <select value={newForm.BookingId} onChange={(e) => setNewForm((f) => ({ ...f, BookingId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
@@ -513,7 +514,7 @@ const CrmHandover: React.FC = () => {
             </div>
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Scheduled Date</label>
-              <input type="date" value={newForm.ScheduledDate}
+              <DateInput value={newForm.ScheduledDate}
                 onChange={(e) => setNewForm((f) => ({ ...f, ScheduledDate: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>
@@ -526,7 +527,7 @@ const CrmHandover: React.FC = () => {
           <DialogFooter>
             <button onClick={() => setNewDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSchedule} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Scheduling..." : "Schedule"}
             </button>
           </DialogFooter>
@@ -554,7 +555,7 @@ const CrmHandover: React.FC = () => {
           <DialogFooter>
             <button onClick={() => setSnagDialog(false)} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleAddSnag} disabled={saving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Adding..." : "Raise Snag"}
             </button>
           </DialogFooter>
@@ -575,7 +576,7 @@ const CrmHandover: React.FC = () => {
           <div className="space-y-3 pt-1">
             <div>
               <label className="text-xs font-medium block mb-1">Actual Handover Date *</label>
-              <input type="date" value={completeForm.ActualHandoverDate}
+              <DateInput value={completeForm.ActualHandoverDate}
                 onChange={(e) => setCompleteForm((f) => ({ ...f, ActualHandoverDate: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background" />
             </div>

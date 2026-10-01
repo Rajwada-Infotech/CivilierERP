@@ -15,6 +15,7 @@ import { CancelReasonDialog } from "@/components/followup/CancelReasonDialog";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getSocket } from "@/lib/socket";
 import { useAuth } from "@/contexts/AuthContext";
+import { DateTimeInput } from "@/components/ui/date-input";
 
 const API = "/api/task-master";
 const TEAL = "#0d9488";
@@ -249,14 +250,14 @@ const TagPicker: React.FC<{ taskId: string }> = ({ taskId }) => {
 
   return (
     <div>
-      <p className="text-[9px] font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center gap-1">
+      <p className="text-[0.5625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-1.5 flex items-center gap-1">
         <TagIcon size={10} /> Tags
       </p>
       <div className="flex flex-wrap items-center gap-1.5">
         {assigned.map((t) => (
           <span
             key={t.Id}
-            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full text-[11px] font-medium"
+            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-full text-[0.6875rem] font-medium"
             style={{ background: "rgba(13,148,136,0.12)", border: "1px solid rgba(13,148,136,0.3)", color: TEAL }}
           >
             {t.Name}
@@ -292,7 +293,7 @@ const TagPicker: React.FC<{ taskId: string }> = ({ taskId }) => {
             }}
             placeholder="Add tag…"
             disabled={saving}
-            className="w-28 px-2 py-1 rounded-full text-[11px] bg-muted border border-border focus:outline-none focus:ring-1 disabled:opacity-50"
+            className="w-28 px-2 py-1 rounded-full text-[0.6875rem] bg-muted border border-border focus:outline-none focus:ring-1 disabled:opacity-50"
             style={{ ["--tw-ring-color" as any]: TEAL }}
           />
           {open && (input.trim() || suggestions.length > 0) && (
@@ -626,7 +627,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
         {/* ── Header ── */}
         <SheetHeader className="px-5 py-4 pr-12 border-b border-border text-left space-y-2 shrink-0">
           <div className="min-w-0">
-            <p className="text-[11px] font-mono text-muted-foreground uppercase tracking-widest">
+            <p className="text-[0.6875rem] font-mono text-muted-foreground uppercase tracking-widest">
               {task?.TaskNo || "…"}
             </p>
             <SheetTitle className="truncate font-body">{task?.Subject || "Task"}</SheetTitle>
@@ -678,7 +679,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
               </div>
 
               <div>
-                <p className="text-[9px] font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
+                <p className="text-[0.5625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">
                   Progress{task?.HasChildren ? " (from sub-tasks)" : ""}
                 </p>
                 <ProgressBar
@@ -696,7 +697,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                     <button
                       type="button"
                       onClick={() => onStatusChange(taskId, "Hold")}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/25 hover:bg-amber-500/20 transition-colors"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#ffe2021a] text-amber-600 border border-amber-500/25 hover:bg-amber-500/20 transition-colors"
                     >
                       <Pause size={12} /> Put on Hold
                     </button>
@@ -731,7 +732,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                   className="rounded-xl p-3.5 text-sm space-y-1.5"
                   style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.18)" }}
                 >
-                  <p className="text-[9px] font-heading font-semibold uppercase tracking-wide text-red-500">Cancelled</p>
+                  <p className="text-[0.5625rem] font-heading font-semibold uppercase tracking-wide text-red-500">Cancelled</p>
                   <p className="text-xs text-foreground">
                     <span className="text-muted-foreground">Reason:</span> {task.CancelReasonLabel || "—"}
                   </p>
@@ -789,7 +790,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                               <Paperclip size={13} />
                               {(doneFiles[f.Id]?.length ?? 0) > 0 && (
                                 <span
-                                  className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full text-[8px] font-bold text-white flex items-center justify-center"
+                                  className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full text-[0.5rem] font-bold text-white flex items-center justify-center"
                                   style={{ background: TEAL }}
                                 >
                                   {doneFiles[f.Id]!.length}
@@ -800,7 +801,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                               type="button"
                               onClick={() => handleMarkFollowUpDone(f.Id)}
                               disabled={markingDoneId === f.Id}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/25 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[0.6875rem] font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/25 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
                               title="Mark this follow-up as done"
                             >
                               <Check size={11} /> Done
@@ -818,28 +819,28 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                       </div>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 mt-2">
-                      <span className="text-[11px] text-muted-foreground">
+                      <span className="text-[0.6875rem] text-muted-foreground">
                         {f.CreatedByName || "—"} · {formatDateTime(f.CreatedAt)}
                       </span>
                       {f.NextReminderAt && (
                         <span
-                          className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded border ${
+                          className={`inline-flex items-center gap-1 text-[0.6875rem] px-1.5 py-0.5 rounded border ${
                             f.IsDone
                               ? "bg-muted text-muted-foreground border-border/60 line-through"
-                              : "bg-amber-500/10 text-amber-600 border-amber-500/25"
+                              : "bg-[#ffe2021a] text-amber-600 border-amber-500/25"
                           }`}
                         >
                           <CalendarClock size={10} /> {formatDateTime(f.NextReminderAt)}
                         </span>
                       )}
                       {f.IsDone && (
-                        <span className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/25">
+                        <span className="inline-flex items-center gap-1 text-[0.6875rem] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 border border-emerald-500/25">
                           <Check size={10} /> Done{f.DoneByName ? ` · ${f.DoneByName}` : ""}
                         </span>
                       )}
                     </div>
                     {isCurrent && (doneFiles[f.Id]?.length ?? 0) > 0 && (
-                      <p className="text-[11px] text-muted-foreground mt-1.5">
+                      <p className="text-[0.6875rem] text-muted-foreground mt-1.5">
                         {doneFiles[f.Id]!.length} file(s) ready to attach when marked Done
                       </p>
                     )}
@@ -848,7 +849,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                         {f.Attachments.map((a) => (
                           <span
                             key={a.Id}
-                            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md text-[11px] font-medium"
+                            className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md text-[0.6875rem] font-medium"
                             style={{ background: "rgba(13,148,136,0.10)", border: "1px solid rgba(13,148,136,0.25)" }}
                           >
                             <button
@@ -898,7 +899,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
             {/* A plain sibling of the scroll area above, not `sticky` inside
                 it — sticky-inside-scroll was overlapping the last entry. */}
             <div className="shrink-0 border-t border-border p-4 space-y-2">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">New Follow Up</p>
+              <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold">New Follow Up</p>
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
@@ -908,8 +909,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                 style={{ ["--tw-ring-color" as any]: TEAL }}
               />
               <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="datetime-local"
+                <DateTimeInput
                   value={nextReminder}
                   onChange={(e) => setNextReminder(e.target.value)}
                   className="px-2.5 py-1.5 rounded-lg text-xs bg-muted border border-border focus:outline-none focus:ring-1"
@@ -931,7 +931,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                   onChange={(e) => setPendingFiles((prev) => [...prev, ...Array.from(e.target.files || [])])}
                 />
                 {pendingFiles.length > 0 && (
-                  <span className="text-[11px] text-muted-foreground">{pendingFiles.length} file(s) selected</span>
+                  <span className="text-[0.6875rem] text-muted-foreground">{pendingFiles.length} file(s) selected</span>
                 )}
                 <button
                   type="button"
@@ -973,7 +973,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                     </div>
                     <div className={`min-w-0 max-w-[75%] flex flex-col ${isOwn ? "items-end" : "items-start"}`}>
                       {!isOwn && showSender && (
-                        <span className="text-[11px] font-semibold px-1 mb-0.5" style={{ color: TEAL }}>
+                        <span className="text-[0.6875rem] font-semibold px-1 mb-0.5" style={{ color: TEAL }}>
                           {m.SenderName || "Unknown"}
                         </span>
                       )}
@@ -986,7 +986,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                         style={isOwn ? { background: TEAL } : { background: "var(--card)" }}
                       >
                         {m.Message}
-                        <span className={`block text-[10px] mt-0.5 text-right ${isOwn ? "text-white/70" : "text-muted-foreground"}`}>
+                        <span className={`block text-[0.625rem] mt-0.5 text-right ${isOwn ? "text-white/70" : "text-muted-foreground"}`}>
                           {formatDateTime(m.CreatedAt)}
                         </span>
                       </div>
@@ -1026,7 +1026,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
           <TabsContent value="files" className="flex-1 min-h-0 overflow-y-auto scrollbar-none mt-3" style={{ height: 0 }}>
             <div className="px-5 pb-5">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+                <p className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-semibold">
                   {files.length} file{files.length === 1 ? "" : "s"}
                 </p>
                 <button
@@ -1073,7 +1073,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium text-foreground">{f.FileName}</p>
-                          <p className="text-[11px] text-muted-foreground">
+                          <p className="text-[0.6875rem] text-muted-foreground">
                             {f.UploadedByName || "Unknown"} · {formatDateTime(f.UploadedAt)}
                             {f.FileSize != null && ` · ${formatFileSize(f.FileSize)}`}
                           </p>
@@ -1120,7 +1120,7 @@ export const TaskDrawer: React.FC<TaskDrawerProps> = ({ taskId, onClose, onStatu
 const DetailRow: React.FC<{ label: string; value?: string | null; mono?: boolean }> = ({ label, value, mono }) =>
   value ? (
     <div>
-      <p className="text-[9px] font-heading font-semibold uppercase tracking-wide text-muted-foreground">
+      <p className="text-[0.5625rem] font-heading font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
       </p>
       <p className={`text-xs font-semibold text-foreground mt-0.5 ${mono ? "font-mono" : ""}`}>{value}</p>

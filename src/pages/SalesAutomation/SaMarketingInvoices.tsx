@@ -188,13 +188,13 @@ const SaMarketingInvoices: React.FC = () => {
           rowActions={(row) => {
             const status = String(row.ApprovalStatus ?? "Pending");
             if (status === "Approved") {
-              return <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600">Approved</span>;
+              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-emerald-500/10 text-emerald-600">Approved</span>;
             }
             if (status === "Rejected") {
-              return <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-red-500/10 text-red-500">Rejected</span>;
+              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-red-500/10 text-red-500">Rejected</span>;
             }
             if (!canDoAction("sa-marketing-invoices", "edit")) {
-              return <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-yellow-500/10 text-yellow-600">Pending</span>;
+              return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-semibold bg-yellow-500/10 text-yellow-600">Pending</span>;
             }
             return (
               <>

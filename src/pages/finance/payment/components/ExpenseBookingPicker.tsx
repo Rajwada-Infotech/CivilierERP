@@ -106,7 +106,7 @@ export function ExpenseBookingPicker({
       <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
         Select Invoice / Contract
       </label>
-      <p className="text-[11px] text-muted-foreground -mt-1">
+      <p className="text-[0.6875rem] text-muted-foreground -mt-1">
         Choose an invoice or contract — auto-fills project, company &amp; amount.
       </p>
       <div className="relative" ref={ref}>
@@ -124,21 +124,21 @@ export function ExpenseBookingPicker({
             </span>
           ) : selectedJVLine ? (
             <span className="flex items-center gap-2 min-w-0">
-              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold bg-teal-500/10 text-teal-600 border border-teal-500/20">JV</span>
+              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-teal-500/10 text-teal-600 border border-teal-500/20">JV</span>
               <span className="font-mono text-xs text-teal-600 dark:text-teal-400 font-semibold truncate">
                 {selectedJVLine.JVNo || `JV-${selectedJVLine.JVID}`} · {selectedJVLine.LHeadName}
               </span>
             </span>
           ) : selectedContract ? (
             <span className="flex items-center gap-2 min-w-0">
-              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20">CON</span>
+              <span className="shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20">CON</span>
               <span className="font-mono text-xs text-violet-600 dark:text-violet-400 font-semibold truncate">
                 {selectedContract.DocNo} · {selectedContract.ContactPerson}
               </span>
             </span>
           ) : selected ? (
             <span className="flex items-center gap-2 min-w-0">
-              <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${selected.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
+              <span className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${selected.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
                 {selected.type === "emi" ? "EMI" : "EXB"}
               </span>
               <span className="font-mono text-xs text-primary font-semibold truncate">{selected.label}</span>
@@ -150,7 +150,7 @@ export function ExpenseBookingPicker({
         </button>
 
         {selectedJVLine && (
-          <p className="mt-1.5 px-0.5 text-[11px] flex items-center gap-3">
+          <p className="mt-1.5 px-0.5 text-[0.6875rem] flex items-center gap-3">
             <span className="text-muted-foreground">
               Liability <span className="font-mono font-semibold text-foreground/80">₹{Number(selectedJVLine.CreditAmount || 0).toLocaleString("en-IN")}</span>
             </span>
@@ -164,7 +164,7 @@ export function ExpenseBookingPicker({
         )}
 
         {selectedContract && (selectedContract.TotalPaid > 0 || selectedContract.PendingAmount != null) && (
-          <p className="mt-1.5 px-0.5 text-[11px] flex items-center gap-3">
+          <p className="mt-1.5 px-0.5 text-[0.6875rem] flex items-center gap-3">
             <span className="text-muted-foreground">
               Contract value <span className="font-mono font-semibold text-foreground/80">₹{Number(selectedContract.ContractAmount || 0).toLocaleString("en-IN")}</span>
             </span>
@@ -221,7 +221,7 @@ export function ExpenseBookingPicker({
                         : isActive ? "bg-primary/10 text-primary border-primary/30" : "bg-muted text-muted-foreground border-border hover:border-primary/20";
                     return (
                       <button key={t} type="button" onClick={() => setTypeFilter(t)}
-                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-heading font-semibold transition-all border ${cls}`}
+                        className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[0.6875rem] font-heading font-semibold transition-all border ${cls}`}
                       >
                         {t === "partial" && <span className="w-1.5 h-1.5 rounded-full bg-amber-500 inline-block" />}
                         {t === "all" ? "All" : t === "booking" ? "Bookings" : t === "emi" ? "EMI" : "Partial"}
@@ -252,16 +252,16 @@ export function ExpenseBookingPicker({
                     }}
                     className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${o.id === value ? "bg-primary/5" : ""}`}
                   >
-                    <span className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${o.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
+                    <span className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold ${o.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}>
                       {o.type === "emi" ? "EMI" : "EXB"}
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="font-mono text-xs font-semibold text-foreground truncate">{o.label}</p>
-                      {o.projectName && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{o.projectName}</p>}
-                      {o.supplierName && o.supplierName !== o.projectName && <p className="text-[10px] text-primary/60 mt-0.5 truncate">{o.supplierName}</p>}
-                      {o.type === "emi" && o.installmentNo && <p className="text-[10px] text-violet-500 mt-0.5">Installment #{o.installmentNo}</p>}
+                      {o.projectName && <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{o.projectName}</p>}
+                      {o.supplierName && o.supplierName !== o.projectName && <p className="text-[0.625rem] text-primary/60 mt-0.5 truncate">{o.supplierName}</p>}
+                      {o.type === "emi" && o.installmentNo && <p className="text-[0.625rem] text-violet-500 mt-0.5">Installment #{o.installmentNo}</p>}
                       {isPartiallyPaid(o) && (
-                        <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/25">
+                        <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-[#ffe2021a] text-amber-600 border border-amber-500/25">
                           <span className="w-1 h-1 rounded-full bg-amber-500 inline-block" />
                           Partial
                           {(o.remainingAmount ?? 0) > 0 && (
@@ -288,7 +288,7 @@ export function ExpenseBookingPicker({
                           : payable;
                       return (
                         displayAmt != null && (
-                          <span className="shrink-0 text-[11px] font-mono font-semibold text-foreground/70 mt-0.5">₹{displayAmt.toLocaleString("en-IN")}</span>
+                          <span className="shrink-0 text-[0.6875rem] font-mono font-semibold text-foreground/70 mt-0.5">₹{displayAmt.toLocaleString("en-IN")}</span>
                         )
                       );
                     })()}
@@ -317,19 +317,19 @@ export function ExpenseBookingPicker({
                   }}
                   className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${selectedContract?.ContractId === c.ContractId ? "bg-violet-500/5" : ""}`}
                 >
-                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20">CON</span>
+                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20">CON</span>
                   <div className="min-w-0 flex-1">
                     <p className="font-mono text-xs font-semibold text-foreground truncate">{c.DocNo || `CON-${c.ContractId}`}</p>
-                    {c.ContactPerson && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{c.ContactPerson}</p>}
-                    {(c.Reason || c.NatureOfContract) && <p className="text-[10px] text-muted-foreground/70 mt-0.5 truncate">{c.Reason || c.NatureOfContract}</p>}
+                    {c.ContactPerson && <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{c.ContactPerson}</p>}
+                    {(c.Reason || c.NatureOfContract) && <p className="text-[0.625rem] text-muted-foreground/70 mt-0.5 truncate">{c.Reason || c.NatureOfContract}</p>}
                     {(c.TotalPaid > 0 || c.PendingAmount != null) && (
-                      <p className="text-[10px] mt-1 flex items-center gap-2">
+                      <p className="text-[0.625rem] mt-1 flex items-center gap-2">
                         <span className="text-emerald-600 dark:text-emerald-400">Paid ₹{Number(c.TotalPaid || 0).toLocaleString("en-IN")}</span>
                         <span className="text-amber-600 dark:text-amber-400">Pending ₹{Number(Math.max(c.PendingAmount || 0, 0)).toLocaleString("en-IN")}</span>
                       </p>
                     )}
                   </div>
-                  {c.ContractAmount != null && <span className="shrink-0 text-[11px] font-mono font-semibold text-violet-600/80 mt-0.5">₹{Number(c.ContractAmount).toLocaleString("en-IN")}</span>}
+                  {c.ContractAmount != null && <span className="shrink-0 text-[0.6875rem] font-mono font-semibold text-violet-600/80 mt-0.5">₹{Number(c.ContractAmount).toLocaleString("en-IN")}</span>}
                 </button>
               ))
               ) : (
@@ -349,19 +349,19 @@ export function ExpenseBookingPicker({
                   }}
                   className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${selectedJVLine?.LineID === l.LineID ? "bg-teal-500/5" : ""}`}
                 >
-                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold bg-teal-500/10 text-teal-600 border border-teal-500/20">JV</span>
+                  <span className="shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-heading font-semibold bg-teal-500/10 text-teal-600 border border-teal-500/20">JV</span>
                   <div className="min-w-0 flex-1">
                     <p className="font-mono text-xs font-semibold text-foreground truncate">{l.JVNo || `JV-${l.JVID}`} · {l.LHeadName}</p>
-                    {(l.ProjectName || l.CompanyName) && <p className="text-[10px] text-muted-foreground mt-0.5 truncate">{l.ProjectName || l.CompanyName}</p>}
-                    {l.Narration && <p className="text-[10px] text-teal-600/60 mt-0.5 truncate">{l.Narration}</p>}
+                    {(l.ProjectName || l.CompanyName) && <p className="text-[0.625rem] text-muted-foreground mt-0.5 truncate">{l.ProjectName || l.CompanyName}</p>}
+                    {l.Narration && <p className="text-[0.625rem] text-teal-600/60 mt-0.5 truncate">{l.Narration}</p>}
                     {l.PaidAmount > 0 && (
-                      <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/25">
+                      <span className="inline-flex items-center gap-1 mt-1 px-1.5 py-0.5 rounded-full text-[0.625rem] font-heading font-semibold bg-[#ffe2021a] text-amber-600 border border-amber-500/25">
                         <span className="w-1 h-1 rounded-full bg-amber-500 inline-block" />
                         Partly paid · ₹{Number(l.RemainingAmount).toLocaleString("en-IN")} left
                       </span>
                     )}
                   </div>
-                  <span className="shrink-0 text-[11px] font-mono font-semibold text-teal-600/80 mt-0.5">₹{Number(l.RemainingAmount).toLocaleString("en-IN")}</span>
+                  <span className="shrink-0 text-[0.6875rem] font-mono font-semibold text-teal-600/80 mt-0.5">₹{Number(l.RemainingAmount).toLocaleString("en-IN")}</span>
                 </button>
               ))
               )}

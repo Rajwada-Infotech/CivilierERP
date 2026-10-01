@@ -26,9 +26,9 @@ async function fetchItems(requestId: number): Promise<any[]> {
 }
 
 const statusBadge = (status: string) => {
-  if (status === "Approved") return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-600">Approved</span>;
-  if (status === "Rejected") return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/10 text-red-500">Rejected</span>;
-  return <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-600">Pending</span>;
+  if (status === "Approved") return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-bold bg-emerald-500/10 text-emerald-600">Approved</span>;
+  if (status === "Rejected") return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-bold bg-red-500/10 text-red-500">Rejected</span>;
+  return <span className="px-2 py-0.5 rounded-full text-[0.625rem] font-bold bg-[#ffe2021a] text-amber-600">Pending</span>;
 };
 
 const SaLeadTransfers: React.FC = () => {
@@ -111,7 +111,7 @@ const SaLeadTransfers: React.FC = () => {
     { accessorKey: "Classification", header: "Classification", size: 110,
       cell: (i) => (
         i.row.original.Classification ? (
-          <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-semibold ${
+          <span className={`px-1.5 py-0.5 rounded-full text-[0.625rem] font-semibold ${
             i.row.original.Classification === "Hot" ? "bg-red-500/10 text-red-500" :
             i.row.original.Classification === "Warm" ? "bg-orange-500/10 text-orange-500" :
             "bg-blue-500/10 text-blue-500"

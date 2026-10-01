@@ -91,7 +91,7 @@ function StatusTile({
       <Icon size={12} />
       {label}
       <span
-        className="px-1.5 rounded-full text-[10px] font-heading font-semibold leading-4"
+        className="px-1.5 rounded-full text-[0.625rem] font-heading font-semibold leading-4"
         style={
           active
             ? { background: `${accentColor}2e`, color: accentColor }
@@ -116,7 +116,7 @@ function ActivityPhotosBadge({ rungId }: { rungId: number }) {
 
   return (
     <span
-      className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[11px] font-medium ${
+      className={`flex items-center gap-1.5 px-2 py-1 rounded-md text-[0.6875rem] font-medium ${
         count > 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"
       }`}
     >
@@ -179,7 +179,7 @@ function ChainGroupList({
               <GitBranch size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
               <span className="text-sm font-heading font-semibold text-foreground">{group.alias}</span>
               <span
-                className={`text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                className={`text-[0.625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
                   group.workType === "INTERNAL"
                     ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
                     : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
@@ -187,7 +187,7 @@ function ChainGroupList({
               >
                 {group.workType}
               </span>
-              <span className="ml-auto text-[10px] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
+              <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
                 {group.rows.length} activit{group.rows.length !== 1 ? "ies" : "y"}
               </span>
             </button>

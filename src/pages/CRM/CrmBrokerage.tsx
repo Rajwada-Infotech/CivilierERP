@@ -256,7 +256,7 @@ const CrmBrokerage: React.FC = () => {
           <div className="text-xs space-y-0.5">
             <div className="font-semibold text-foreground">₹{gross.toLocaleString("en-IN")}</div>
             {tds > 0 && (
-              <div className="text-orange-600">− TDS {r.TDSPercentage}%: ₹{tds.toLocaleString("en-IN")}</div>
+              <div className="text-sky-600">− TDS {r.TDSPercentage}%: ₹{tds.toLocaleString("en-IN")}</div>
             )}
             <div className={`font-bold ${tds > 0 ? "text-green-600" : "text-foreground"}`}>
               Net: ₹{net.toLocaleString("en-IN")}
@@ -311,7 +311,7 @@ const CrmBrokerage: React.FC = () => {
           <RefreshButton dataUpdatedAt={dataUpdatedAt} isFetching={isFetching} onRefresh={refetch} />
           {rights.canCreate && (
             <button onClick={openCreate}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90">
+            className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg hover:shadow-lg ">
             <Plus size={14} /> Add Broker
           </button>
           )}
@@ -319,7 +319,7 @@ const CrmBrokerage: React.FC = () => {
       }
     >
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2 text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded-lg px-3 py-2">
+        <div className="flex items-center gap-2 text-xs text-sky-600 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2">
           <ShieldAlert size={14} /> This data is internal-only and is excluded from the customer portal by design.
         </div>
         <button onClick={() => navigate("/crm/broker-payments")}
@@ -391,7 +391,7 @@ const CrmBrokerage: React.FC = () => {
                 {selectedBroker.LHeadPan && <div><span className="text-muted-foreground">PAN: </span><span className="font-mono font-medium">{selectedBroker.LHeadPan}</span></div>}
                 {selectedBroker.LHeadRera && <div><span className="text-muted-foreground">RERA: </span><span className="font-mono font-medium">{selectedBroker.LHeadRera}</span></div>}
                 {selectedBroker.LHeadPaymentTerms && <div><span className="text-muted-foreground">Terms: </span><span className="font-medium">{selectedBroker.LHeadPaymentTerms}</span></div>}
-                <div><span className="text-muted-foreground">TDS: </span><span className={`font-medium ${selectedBroker.IsTdsApplicable !== false ? "text-amber-600" : "text-muted-foreground"}`}>{selectedBroker.IsTdsApplicable !== false ? "Applicable (Sec. 194H)" : "Not Applicable"}</span></div>
+                <div><span className="text-muted-foreground">TDS: </span><span className={`font-medium ${selectedBroker.IsTdsApplicable !== false ? "text-sky-600" : "text-muted-foreground"}`}>{selectedBroker.IsTdsApplicable !== false ? "Applicable (Sec. 194H)" : "Not Applicable"}</span></div>
               </div>
             )}
 
@@ -420,7 +420,7 @@ const CrmBrokerage: React.FC = () => {
                 <label className="text-xs text-muted-foreground block mb-1">
                   TDS (Sec. 194H)
                   {selectedBroker && selectedBroker.IsTdsApplicable === false && (
-                    <span className="ml-1.5 text-[10px] text-muted-foreground">· Not applicable per Broker Master</span>
+                    <span className="ml-1.5 text-[0.625rem] text-muted-foreground">· Not applicable per Broker Master</span>
                   )}
                 </label>
                 <select value={form.TDSId} onChange={(e) => setForm((f) => ({ ...f, TDSId: e.target.value }))}
@@ -449,7 +449,7 @@ const CrmBrokerage: React.FC = () => {
           <div className="flex justify-end gap-2 pt-3 border-t border-border">
             <button onClick={() => { setDialogOpen(false); setForm({ ...EMPTY_FORM }); setEditingId(null); setEditingStatus(null); }} className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
             <button onClick={handleSave} disabled={saving || approving}
-              className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+              className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
               {saving ? "Saving..." : editingId != null ? "Save Changes" : "Add"}
             </button>
             {editingId != null && editingStatus === CrmStatus.PENDING && isApprover && (

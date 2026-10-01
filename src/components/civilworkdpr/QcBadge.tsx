@@ -10,7 +10,7 @@ export function QcBadge({ qcStatus }: { qcStatus: "APPROVED" | "REWORK" | null |
   const passed = qcStatus === "APPROVED";
   return (
     <span
-      className={`inline-flex items-center gap-1 text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 ${
+      className={`inline-flex items-center gap-1 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 ${
         passed
           ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
           : "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
@@ -32,7 +32,7 @@ export function AttemptBadge({ attemptNo }: { attemptNo: number | null | undefin
   if (!attemptNo || attemptNo <= 1) return null;
   return (
     <span
-      className="inline-flex items-center gap-1 text-[10px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+      className="inline-flex items-center gap-1 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 bg-[#ffe2021a] text-amber-600 dark:text-amber-400"
       title={`Attempt ${attemptNo} — reworked from an earlier attempt`}
     >
       <History size={10} /> Attempt {attemptNo}

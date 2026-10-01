@@ -106,8 +106,8 @@ export function Mono({ children, className = "" }: { children: React.ReactNode; 
 export function PageHeader({ eyebrow, title, subtitle }: { eyebrow: string; title: string; subtitle?: string }) {
   return (
     <div className="mb-6">
-      <p className="text-[11px] font-semibold tracking-[0.18em] uppercase" style={{ color: GOLD }}>{eyebrow}</p>
-      <h1 className="text-[26px] sm:text-[28px] font-semibold mt-1" style={{ ...serif, color: TEXT }}>{title}</h1>
+      <p className="text-[0.6875rem] font-semibold tracking-[0.18em] uppercase" style={{ color: GOLD }}>{eyebrow}</p>
+      <h1 className="text-[1.625rem] sm:text-[1.75rem] font-semibold mt-1" style={{ ...serif, color: TEXT }}>{title}</h1>
       {subtitle && <p className="text-sm mt-1.5 max-w-xl" style={{ color: TEXT_MUTED }}>{subtitle}</p>}
     </div>
   );
@@ -139,7 +139,7 @@ export function CardHeader({ icon: Icon, title, action }: { icon: any; title: st
 export function InfoField({ label, value, mono: isMono }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
     <div>
-      <p className="text-[10px] uppercase tracking-wide" style={{ color: TEXT_FAINT }}>{label}</p>
+      <p className="text-[0.625rem] uppercase tracking-wide" style={{ color: TEXT_FAINT }}>{label}</p>
       <p className="text-sm font-medium mt-1" style={{ color: TEXT, ...(isMono ? mono : {}) }}>{value ?? "—"}</p>
     </div>
   );
@@ -168,7 +168,7 @@ const STATUS_TONES: Record<string, { bg: string; fg: string }> = {
 export function StatusPill({ status, label }: { status: string; label?: string }) {
   const tone = STATUS_TONES[status] || { bg: SURFACE_ALT, fg: TEXT_MUTED };
   return (
-    <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full" style={{ background: tone.bg, color: tone.fg }}>
+    <span className="text-[0.6875rem] font-semibold px-2.5 py-1 rounded-full" style={{ background: tone.bg, color: tone.fg }}>
       {label || status}
     </span>
   );
@@ -210,7 +210,7 @@ export function Stepper({ steps }: { steps: { label: string; state: StepState; n
         <div key={s.label} className="flex items-start" style={{ minWidth: 0 }}>
           <div className="flex flex-col items-center text-center" style={{ width: 92 }}>
             <div
-              className="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-semibold shrink-0"
+              className="w-7 h-7 rounded-full flex items-center justify-center text-[0.6875rem] font-semibold shrink-0"
               style={
                 s.state === "done" ? { background: INK, color: "#fff" }
                 : s.state === "current" ? { background: GOLD_SOFT, color: GOLD, border: `2px solid ${GOLD}` }
@@ -220,8 +220,8 @@ export function Stepper({ steps }: { steps: { label: string; state: StepState; n
             >
               {s.state === "done" ? "✓" : i + 1}
             </div>
-            <p className="text-[10.5px] font-medium mt-1.5 leading-tight" style={{ color: s.state === "upcoming" ? TEXT_FAINT : TEXT }}>{s.label}</p>
-            {s.note && <p className="text-[9.5px] leading-tight mt-0.5" style={{ color: TEXT_FAINT }}>{s.note}</p>}
+            <p className="text-[0.6562rem] font-medium mt-1.5 leading-tight" style={{ color: s.state === "upcoming" ? TEXT_FAINT : TEXT }}>{s.label}</p>
+            {s.note && <p className="text-[0.5938rem] leading-tight mt-0.5" style={{ color: TEXT_FAINT }}>{s.note}</p>}
           </div>
           {i < steps.length - 1 && (
             <div className="h-[2px] mt-3.5 shrink-0" style={{ width: 28, background: s.state === "done" ? INK : HAIRLINE }} />

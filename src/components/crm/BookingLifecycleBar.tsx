@@ -43,7 +43,7 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
     return (
       <div className="rounded-lg border border-border bg-card px-3 py-2 flex items-center gap-2 text-muted-foreground/60">
         <div className="h-3 w-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
-        <span className="text-[11px]">Loading lifecycle…</span>
+        <span className="text-[0.6875rem]">Loading lifecycle…</span>
       </div>
     );
   }
@@ -58,7 +58,7 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
     <div className="rounded-lg border border-border bg-card px-3 py-2.5">
       {/* header + inline progress bar share one row */}
       <div className="flex items-center gap-3 mb-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
+        <span className="text-[0.625rem] font-semibold uppercase tracking-wide text-muted-foreground shrink-0">
           Lifecycle
         </span>
         <div className="h-1 flex-1 rounded-full bg-muted overflow-hidden">
@@ -67,7 +67,7 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
             style={{ width: `${pct}%` }}
           />
         </div>
-        <span className="text-[10px] font-medium text-muted-foreground shrink-0">
+        <span className="text-[0.625rem] font-medium text-muted-foreground shrink-0">
           {doneCount}/{data.steps.length} · {pct}%
         </span>
       </div>
@@ -83,7 +83,7 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
                 onClick={clickable ? () => navigate(step.link!) : undefined}
                 disabled={!clickable}
                 title={step.blockedBy ?? (step.date ? `${step.label} — ${step.date}` : step.label)}
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] leading-none transition-colors
+                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[0.6875rem] leading-none transition-colors
                   ${step.status === "done" ? "border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950/30 dark:text-green-400" : ""}
                   ${step.status === "active" ? "border-primary/40 bg-primary/10 text-foreground font-semibold" : ""}
                   ${step.status === "locked" ? "border-transparent bg-muted/30 text-muted-foreground/40" : ""}
@@ -95,7 +95,7 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
                 {step.status === "locked" && <Lock size={8} className="shrink-0" />}
                 {step.label}
               </button>
-              {!isLast && <span className="text-muted-foreground/20 text-[10px] select-none mx-0.5">›</span>}
+              {!isLast && <span className="text-muted-foreground/20 text-[0.625rem] select-none mx-0.5">›</span>}
             </React.Fragment>
           );
         })}
@@ -103,7 +103,7 @@ export const BookingLifecycleBar: React.FC<BookingLifecycleBarProps> = ({ bookin
 
       {/* single-line "what's next" hint, only when something is actually blocked */}
       {nextLocked && (
-        <div className="mt-2 text-[10px] text-muted-foreground truncate">
+        <div className="mt-2 text-[0.625rem] text-muted-foreground truncate">
           <span className="font-medium text-foreground">Next:</span> {nextLocked.label} — {nextLocked.blockedBy}
         </div>
       )}

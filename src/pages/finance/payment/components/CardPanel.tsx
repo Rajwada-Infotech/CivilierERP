@@ -55,7 +55,7 @@ export function CardPanel({ bankId, form, set }: CardPanelProps) {
 
   if (cards.length === 0) {
     return (
-      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600">
+      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[#ffe2021a] border border-amber-500/20 text-xs text-amber-600">
         <AlertTriangle size={12} />
         No cards on file for this bank. You can still enter the transaction ID
         below, or add a card in Card Master.
@@ -101,7 +101,7 @@ export function CardPanel({ bankId, form, set }: CardPanelProps) {
         />
       </div>
       {selected && (
-        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
+        <p className="text-[0.6875rem] text-muted-foreground/70 mt-1 pl-1">
           {[selected.card_type, selected.card_holder_name]
             .filter(Boolean)
             .join(" · ")}

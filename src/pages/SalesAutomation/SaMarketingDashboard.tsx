@@ -21,7 +21,7 @@ const StatCard: React.FC<{ icon: React.ElementType; label: string; value: string
     <div>
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="text-xl font-bold text-foreground mt-0.5">{value}</p>
-      {sub && <p className="text-[11px] text-muted-foreground mt-0.5">{sub}</p>}
+      {sub && <p className="text-[0.6875rem] text-muted-foreground mt-0.5">{sub}</p>}
     </div>
   </div>
 );

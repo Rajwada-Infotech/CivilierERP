@@ -47,7 +47,7 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
         </DialogHeader>
         <div className="space-y-4">
           <div>
-            <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">APK file</p>
+            <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">APK file</p>
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
@@ -63,13 +63,13 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
               className="hidden"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             />
-            <p className="text-[11px] text-muted-foreground mt-1.5">
+            <p className="text-[0.6875rem] text-muted-foreground mt-1.5">
               The version is read from the APK itself and must be newer than the current build
               {app.current ? ` (currently build ${app.current.versionCode})` : ""}.
             </p>
           </div>
           <div>
-            <p className="text-[10px] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">What's new</p>
+            <p className="text-[0.625rem] uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">What's new</p>
             <textarea
               rows={4}
               className={inp}
@@ -83,7 +83,7 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
             <input type="checkbox" checked={mandatory} onChange={(e) => setMandatory(e.target.checked)} className="mt-0.5" />
             <span className="text-sm">
               <span className="font-medium">Mandatory update</span>
-              <span className="block text-[11px] text-muted-foreground">
+              <span className="block text-[0.6875rem] text-muted-foreground">
                 Blocks the app until it is updated. Use for changes older versions can't work with.
               </span>
             </span>
@@ -101,7 +101,7 @@ function PublishDialog({ app, onClose }: { app: AppCatalogEntry; onClose: () => 
               type="button"
               disabled={!file || publish.isPending}
               onClick={() => publish.mutate()}
-              className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white bg-primary hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className="inline-flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-semibold text-white btn-module hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
               {publish.isPending && <Loader2 size={14} className="animate-spin" />}
               {publish.isPending ? "Uploading…" : "Publish"}
@@ -143,7 +143,7 @@ function EditDialog({ release, onClose }: { release: AppRelease; onClose: () => 
             <button
               onClick={() => save.mutate()}
               disabled={save.isPending}
-              className="px-5 py-2 rounded-lg text-sm font-semibold text-white bg-primary hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className="px-5 py-2 rounded-lg text-sm font-semibold text-white btn-module hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
               Save
             </button>
@@ -178,10 +178,10 @@ export default function ApkManager() {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <p className="font-heading font-semibold text-foreground truncate">{a.label}</p>
-                    <p className="text-[11px] font-mono text-muted-foreground truncate">{a.packageName}</p>
+                    <p className="text-[0.6875rem] font-mono text-muted-foreground truncate">{a.packageName}</p>
                   </div>
                   {a.current?.mandatory && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 shrink-0">
+                    <span className="inline-flex items-center gap-1 text-[0.625rem] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400 shrink-0">
                       <ShieldAlert size={11} /> Mandatory
                     </span>
                   )}
@@ -208,7 +208,7 @@ export default function ApkManager() {
                 <div className="flex items-center gap-2 mt-auto pt-1">
                   <button
                     onClick={() => setPublishing(a)}
-                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-white bg-primary hover:opacity-90 transition-opacity"
+                    className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-white btn-module hover:opacity-90 transition-opacity"
                   >
                     <Upload size={13} /> Publish new build
                   </button>
@@ -228,7 +228,7 @@ export default function ApkManager() {
 
         <div className="mt-6 rounded-2xl border border-border bg-card/70 backdrop-blur-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-border/60 flex items-center gap-3">
-            <h3 className="text-[10px] font-heading font-bold uppercase tracking-widest text-muted-foreground">Release history</h3>
+            <h3 className="text-[0.625rem] font-heading font-bold uppercase tracking-widest text-muted-foreground">Release history</h3>
             <select className="ml-auto px-2.5 py-1.5 rounded-lg border border-border bg-background text-xs" value={filter} onChange={(e) => setFilter(e.target.value)}>
               <option value="">All apps</option>
               {catalog.map((a) => (
@@ -238,7 +238,7 @@ export default function ApkManager() {
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-muted/30 text-[10px] uppercase tracking-widest font-heading text-muted-foreground">
+              <thead className="bg-muted/30 text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground">
                 <tr>
                   <th className="px-4 py-2 text-left">App</th>
                   <th className="px-4 py-2 text-left">Version</th>
@@ -257,8 +257,8 @@ export default function ApkManager() {
                     <tr key={r.id} className="hover:bg-muted/20">
                       <td className="px-4 py-2.5 font-medium">
                         {catalog.find((a) => a.appKey === r.appKey)?.label ?? r.appKey}
-                        {r.isCurrent && <span className="ml-2 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">Current</span>}
-                        {r.mandatory && <span className="ml-1.5 text-[9px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400">Mandatory</span>}
+                        {r.isCurrent && <span className="ml-2 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">Current</span>}
+                        {r.mandatory && <span className="ml-1.5 text-[0.5625rem] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-full bg-red-500/10 text-red-600 dark:text-red-400">Mandatory</span>}
                       </td>
                       <td className="px-4 py-2.5">{r.versionName ?? "—"}</td>
                       <td className="px-4 py-2.5 tabular-nums">{r.versionCode}</td>

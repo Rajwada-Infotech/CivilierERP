@@ -351,7 +351,7 @@ export default function SuperAdminDashboard() {
       value: metrics?.activeUsers ?? "—",
       icon: Activity,
       color: "text-amber-500",
-      bg: "bg-amber-500/10",
+      bg: "bg-[#ffe2021a]",
     },
   ];
 
@@ -623,7 +623,7 @@ export default function SuperAdminDashboard() {
                         <TableCell>
                           <Badge
                             variant="outline"
-                            className={`text-[10px] ${
+                            className={`text-[0.625rem] ${
                               tenant.plan === "Enterprise"
                                 ? "border-yellow-500/40 text-yellow-600"
                                 : tenant.plan === "Professional"
@@ -634,7 +634,7 @@ export default function SuperAdminDashboard() {
                             {tenant.plan}
                           </Badge>
                         </TableCell>
-                        <TableCell className="font-mono text-[11px] text-muted-foreground">
+                        <TableCell className="font-mono text-[0.6875rem] text-muted-foreground">
                           {tenant.dbName}
                         </TableCell>
                         <TableCell>
@@ -651,7 +651,7 @@ export default function SuperAdminDashboard() {
                         </TableCell>
                         <TableCell>
                           <Badge
-                            className={`text-[10px] ${
+                            className={`text-[0.625rem] ${
                               tenant.status === "active"
                                 ? "border-green-500/30 bg-green-500/15 text-green-600"
                                 : "border-red-500/30 bg-red-500/15 text-red-600"
@@ -765,18 +765,18 @@ export default function SuperAdminDashboard() {
                           {user.email}
                         </TableCell>
                         <TableCell>
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" className="text-[0.625rem]">
                             {user.roleName || user.role}
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[11px] text-primary">
+                          <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.6875rem] text-primary">
                             {getUserTenantId(user) || "GLOBAL"}
                           </span>
                         </TableCell>
                         <TableCell>
                           <Badge
-                            className={`text-[10px] ${
+                            className={`text-[0.625rem] ${
                               user.discontinue
                                 ? "border-red-500/30 bg-red-500/15 text-red-600"
                                 : "border-green-500/30 bg-green-500/15 text-green-600"
@@ -851,7 +851,7 @@ export default function SuperAdminDashboard() {
                         : "—",
                     icon: BarChart3,
                     color: "text-amber-500",
-                    bg: "bg-amber-500/10",
+                    bg: "bg-[#ffe2021a]",
                   },
                 ].map((item) => (
                   <Card key={item.label}>

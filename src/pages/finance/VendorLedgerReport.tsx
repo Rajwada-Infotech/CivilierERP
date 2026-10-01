@@ -53,6 +53,7 @@ import {
   Briefcase,
   FolderKanban,
 } from "lucide-react";
+import { DateInput } from "@/components/ui/date-input";
 
 interface EntityOption {
   id: number;
@@ -131,7 +132,7 @@ const SOURCE_META: Record<string, { label: string; icon: React.ElementType; colo
   CrmOnAccountPayment: { label: "CRM On A/C Payment", icon: TrendingUp, color: "text-teal-500", bg: "bg-teal-500/10" },
   CrmSalesDeed: { label: "CRM Sales Deed", icon: FileText, color: "text-sky-500", bg: "bg-sky-500/10" },
   FundTransfer: { label: "Fund Transfer", icon: ArrowLeftRight, color: "text-indigo-500", bg: "bg-indigo-500/10" },
-  JournalVoucher: { label: "Journal Voucher", icon: FileText, color: "text-amber-500", bg: "bg-amber-500/10" },
+  JournalVoucher: { label: "Journal Voucher", icon: FileText, color: "text-amber-500", bg: "bg-[#ffe2021a]" },
   LoanPosting: { label: "Loan", icon: CircleDollarSign, color: "text-violet-500", bg: "bg-violet-500/10" },
   LoanRepayment: { label: "Loan Repayment", icon: CircleDollarSign, color: "text-violet-500", bg: "bg-violet-500/10" },
   DebitNoteAdjustment: { label: "Debit Note", icon: FileText, color: "text-red-500", bg: "bg-red-500/10" },
@@ -163,7 +164,7 @@ function FilterSelect({
 }) {
   return (
     <div className="flex flex-col gap-0.5 flex-1 min-w-[140px]">
-      <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading flex items-center gap-1">
+      <span className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading flex items-center gap-1">
         <Icon size={9} /> {label}
       </span>
       <select
@@ -374,13 +375,13 @@ export function VendorLedgerReportBody() {
           own z-20. */}
       <div className="relative z-30 glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60">
         <div className="flex items-center justify-between gap-2">
-          <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">
+          <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">
             Search Party / General Ledger
           </label>
           <button
             onClick={refreshAll}
             disabled={loading}
-            className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border text-[10px] text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
+            className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-border text-[0.625rem] text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
           >
             <RefreshCw size={10} className={loading ? "animate-spin" : ""} /> Refresh
           </button>
@@ -430,9 +431,9 @@ export function VendorLedgerReportBody() {
                       <Icon size={14} className={`shrink-0 ${m.color}`} />
                       <span className="min-w-0 flex-1">
                         <span className="block text-sm text-foreground truncate">{h.Name}</span>
-                        {h.CompanyName && <span className="block text-[10px] text-muted-foreground truncate">{h.CompanyName}</span>}
+                        {h.CompanyName && <span className="block text-[0.625rem] text-muted-foreground truncate">{h.CompanyName}</span>}
                       </span>
-                      <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-muted ${m.color}`}>
+                      <span className={`shrink-0 text-[0.625rem] font-medium px-1.5 py-0.5 rounded-full bg-muted ${m.color}`}>
                         {m.label}
                       </span>
                     </button>
@@ -453,7 +454,7 @@ export function VendorLedgerReportBody() {
             </div>
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground truncate">{selectedHead.Name}</p>
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-[0.6875rem] text-muted-foreground">
                 {meta.label}{selectedHead.CompanyName ? ` · ${selectedHead.CompanyName}` : ""}{selectedHead.Code ? ` · ${selectedHead.Code}` : ""}
               </p>
             </div>
@@ -495,7 +496,7 @@ export function VendorLedgerReportBody() {
       <div className="glass rounded-xl px-4 sm:px-5 py-4 ring-1 ring-border/60">
         <div className="flex flex-col lg:flex-row lg:items-end gap-3">
           <div className="flex-1 min-w-0">
-            <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">Range</label>
+            <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">Range</label>
             <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
               {([
                 ["today", "Today"],
@@ -507,9 +508,9 @@ export function VendorLedgerReportBody() {
                 <button
                   key={key}
                   onClick={() => applyPreset(key)}
-                  className={`shrink-0 px-3 py-1.5 rounded-full text-[11px] font-medium border transition-all whitespace-nowrap ${
+                  className={`shrink-0 px-3 py-1.5 rounded-full text-[0.6875rem] font-medium border transition-all whitespace-nowrap ${
                     activePreset === key
-                      ? "bg-primary text-primary-foreground border-primary"
+                      ? "btn-module text-white border-primary"
                       : "bg-background text-muted-foreground border-border hover:border-primary/50"
                   }`}
                 >
@@ -520,9 +521,8 @@ export function VendorLedgerReportBody() {
           </div>
           <div className="flex flex-wrap items-end gap-2">
             <div className="flex-1 min-w-[140px] lg:flex-none">
-              <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">From</label>
-              <input
-                type="date"
+              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">From</label>
+              <DateInput
                 value={fromDate}
                 onChange={(e) => { setFromDate(e.target.value); setActivePreset("custom"); }}
                 max={toDate || undefined}
@@ -530,9 +530,8 @@ export function VendorLedgerReportBody() {
               />
             </div>
             <div className="flex-1 min-w-[140px] lg:flex-none">
-              <label className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading">To</label>
-              <input
-                type="date"
+              <label className="text-[0.625rem] uppercase tracking-widest text-muted-foreground font-heading">To</label>
+              <DateInput
                 value={toDate}
                 onChange={(e) => { setToDate(e.target.value); setActivePreset("custom"); }}
                 min={fromDate || undefined}
@@ -558,7 +557,7 @@ export function VendorLedgerReportBody() {
             { label: "Opening Balance", value: fmtBalance(summaryQuery.data?.windowOpeningBalance ?? 0), icon: Wallet, color: "text-primary", bg: "bg-primary/10", ring: "ring-primary/15", borderL: "border-l-primary" },
             { label: "Total Debit", value: formatINR(summaryQuery.data?.periodDebit ?? 0), icon: TrendingUp, color: "text-emerald-500", bg: "bg-emerald-500/10", ring: "ring-emerald-500/15", borderL: "border-l-emerald-500" },
             { label: "Total Credit", value: formatINR(summaryQuery.data?.periodCredit ?? 0), icon: TrendingDown, color: "text-rose-500", bg: "bg-rose-500/10", ring: "ring-rose-500/15", borderL: "border-l-rose-500" },
-            { label: "Closing Balance", value: fmtBalance(summaryQuery.data?.currentBalance ?? 0), icon: CircleDollarSign, color: "text-amber-500", bg: "bg-amber-500/10", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
+            { label: "Closing Balance", value: fmtBalance(summaryQuery.data?.currentBalance ?? 0), icon: CircleDollarSign, color: "text-amber-500", bg: "bg-[#ffe2021a]", ring: "ring-amber-500/15", borderL: "border-l-amber-500" },
           ].map(({ label, value, icon: Icon, color, bg, ring, borderL }) => (
             <div key={label} className={`relative glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 overflow-hidden border-l-2 ${ring} ${borderL}`}>
               <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
@@ -568,7 +567,7 @@ export function VendorLedgerReportBody() {
                 <p className="text-lg font-bold font-heading text-foreground leading-none truncate">
                   {summaryQuery.isFetching && !summaryQuery.data ? <Loader2 size={14} className="animate-spin" /> : value}
                 </p>
-                <p className="text-[10px] text-muted-foreground mt-1 font-heading uppercase tracking-wide">{label}</p>
+                <p className="text-[0.625rem] text-muted-foreground mt-1 font-heading uppercase tracking-wide">{label}</p>
               </div>
             </div>
           ))}
@@ -580,7 +579,7 @@ export function VendorLedgerReportBody() {
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-4 border-b border-border/60">
           <p className="text-xs font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
             <Receipt size={12} /> {selectedHead ? "Transactions" : "All Transactions"}
-            <span className="ml-1 text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full normal-case tracking-normal font-normal">
+            <span className="ml-1 text-[0.625rem] bg-muted text-muted-foreground px-2 py-0.5 rounded-full normal-case tracking-normal font-normal">
               {transactions.length}
             </span>
           </p>
@@ -604,14 +603,14 @@ export function VendorLedgerReportBody() {
         ) : (
           <>
             {transactions.length >= (showParty ? 1000 : 2000) && (
-              <div className="px-5 py-2 text-xs text-amber-700 dark:text-amber-400 bg-amber-500/10 border-b border-amber-500/20">
+              <div className="px-5 py-2 text-xs text-amber-700 dark:text-amber-400 bg-[#ffe2021a] border-b border-amber-500/20">
                 Showing the most recent {transactions.length.toLocaleString("en-IN")} transactions — apply a date filter to narrow results.
               </div>
             )}
             <div className="overflow-x-auto">
               <table className="w-full text-xs min-w-[760px]">
                 <thead>
-                  <tr className="border-b border-border/60 text-muted-foreground uppercase tracking-wide text-[10px] font-heading">
+                  <tr className="border-b border-border/60 text-muted-foreground uppercase tracking-wide text-[0.625rem] font-heading">
                     <th className="text-left px-4 sm:px-5 py-2.5">Date</th>
                     {showParty && <th className="text-left px-3 py-2.5">Party</th>}
                     <th className="text-left px-3 py-2.5">Doc Number</th>

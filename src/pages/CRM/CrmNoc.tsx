@@ -39,7 +39,7 @@ function StatusBadge({ status }: { status: string }) {
   const c = STATUS_CFG[status] ?? STATUS_CFG.Pending;
   return (
     <span className={cn(
-      "inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 rounded-sm border border-border bg-card font-mono text-[10px] font-semibold uppercase tracking-wider",
+      "inline-flex items-center gap-1.5 pl-1.5 pr-2 py-0.5 rounded-sm border border-border bg-card font-mono text-[0.625rem] font-semibold uppercase tracking-wider",
       c.text,
     )}>
       <span className={cn("w-[3px] h-3 rounded-[1px]", c.bar)} />
@@ -53,7 +53,7 @@ function StatusBadge({ status }: { status: string }) {
 function DetailRow({ label, value, mono = false }: { label: string; value: React.ReactNode; mono?: boolean }) {
   return (
     <div className="flex items-start justify-between gap-4 py-2 border-b border-border/60 last:border-0">
-      <span className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground font-heading shrink-0">{label}</span>
+      <span className="text-[0.6875rem] font-semibold uppercase tracking-widest text-muted-foreground font-heading shrink-0">{label}</span>
       <span className={cn("text-sm text-foreground text-right", mono && "font-mono")}>{value}</span>
     </div>
   );
@@ -170,7 +170,7 @@ function EditNocDialog({ noc, onClose, onSaved }: { noc: any; onClose: () => voi
           <button onClick={onClose}
             className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
           <button onClick={save} disabled={saving}
-            className="px-4 py-1.5 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+            className="px-4 py-1.5 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
             {saving ? "Saving…" : "Save"}
           </button>
         </div>
@@ -415,7 +415,7 @@ const CrmNoc: React.FC = () => {
             {rights.canCreate && (
               <button
                 onClick={() => setDialogOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90"
+                className="flex items-center gap-1.5 px-3 py-1.5 btn-module text-white text-sm font-medium rounded-lg "
               >
                 <Plus size={14} /> Request NOC
               </button>
@@ -428,7 +428,7 @@ const CrmNoc: React.FC = () => {
           <div className="flex rounded-lg border border-border overflow-hidden text-sm">
             {(["All", "Organisation", "Bank"] as const).map((t) => (
               <button key={t} onClick={() => updateFilter(setTypeFilter)(t)}
-                className={cn("px-3 py-1.5 transition-colors", typeFilter === t ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground")}>
+                className={cn("px-3 py-1.5 transition-colors", typeFilter === t ? "btn-module text-white" : "hover:bg-muted text-muted-foreground")}>
                 {t}
               </button>
             ))}
@@ -436,7 +436,7 @@ const CrmNoc: React.FC = () => {
           <div className="flex rounded-lg border border-border overflow-hidden text-sm">
             {(["All", "Pending", "Approved", "Issued", "Rejected"] as const).map((s) => (
               <button key={s} onClick={() => updateFilter(setStatusFilter)(s)}
-                className={cn("px-3 py-1.5 transition-colors", statusFilter === s ? "bg-primary text-primary-foreground" : "hover:bg-muted text-muted-foreground")}>
+                className={cn("px-3 py-1.5 transition-colors", statusFilter === s ? "btn-module text-white" : "hover:bg-muted text-muted-foreground")}>
                 {s}
               </button>
             ))}
@@ -476,7 +476,7 @@ const CrmNoc: React.FC = () => {
                 {bkgFetching ? (
                   <p className="text-xs text-muted-foreground px-1 py-2">Loading eligible bookings…</p>
                 ) : (eligibleBookings as any[]).length === 0 ? (
-                  <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5">
+                  <div className="flex items-start gap-2 text-xs text-sky-700 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2.5">
                     <AlertTriangle size={13} className="shrink-0 mt-0.5" />
                     <span>No eligible bookings. Requires: AFS Registered at Sub-Registrar + no NOC already on file for the booking.</span>
                   </div>
@@ -502,7 +502,7 @@ const CrmNoc: React.FC = () => {
                   <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg border border-primary bg-primary/10 text-primary text-sm font-medium">
                     {form.NocType === "Bank" ? <Landmark size={14} /> : <Building2 size={14} />}
                     <span>{form.NocType === "Bank" ? "Bank (Lender)" : "Organisation (Developer)"}</span>
-                    <span className="ml-auto text-[11px] font-normal text-primary/70">
+                    <span className="ml-auto text-[0.6875rem] font-normal text-primary/70">
                       {form.NocType === "Bank" ? "loan-financed booking" : "self-funded booking"}
                     </span>
                   </div>
@@ -511,13 +511,13 @@ const CrmNoc: React.FC = () => {
 
               {/* Booking context strip */}
               {form.BookingId && !contextLoading && context && (
-                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-[11px] space-y-1">
+                <div className="rounded-lg border border-border bg-muted/30 px-3 py-2.5 text-[0.6875rem] space-y-1">
                   <div className="font-semibold text-foreground text-xs">
                     {context.booking.ApplicantName}
                     <span className="text-muted-foreground font-normal"> · {context.booking.UnitNo}</span>
                   </div>
                   {context.agreement ? (
-                    <div className={cn("flex items-center gap-1.5", agreementRegistered ? "text-green-700" : "text-amber-700")}>
+                    <div className={cn("flex items-center gap-1.5", agreementRegistered ? "text-green-700" : "text-sky-700")}>
                       {agreementRegistered ? <CheckCircle2 size={11} /> : <AlertTriangle size={11} />}
                       {context.agreement.AgreementNo} — {context.agreement.Status}
                       {!agreementRegistered && <span className="font-medium ml-1">(Registered required)</span>}
@@ -568,7 +568,7 @@ const CrmNoc: React.FC = () => {
                 className="px-4 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:bg-muted">Cancel</button>
               <button onClick={handleCreate} disabled={!canRequest || !rights.canCreate}
                 title={!agreementRegistered && form.BookingId ? "AFS must be Registered first" : undefined}
-                className="px-5 py-2 text-sm bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 disabled:opacity-40">
+                className="px-5 py-2 text-sm btn-module text-white rounded-lg font-medium hover:shadow-lg disabled:opacity-40">
                 {saving ? "Requesting…" : "Request NOC"}
               </button>
             </div>
@@ -587,7 +587,7 @@ const CrmNoc: React.FC = () => {
                     </div>
                     <div className="min-w-0">
                       <DialogTitle className="text-sm font-semibold font-heading font-mono">{detail.NocNo}</DialogTitle>
-                      <DialogDescription className="text-[11px] mt-0.5">{detail.NocType} NOC</DialogDescription>
+                      <DialogDescription className="text-[0.6875rem] mt-0.5">{detail.NocType} NOC</DialogDescription>
                     </div>
                     <div className="ml-auto flex items-center gap-2">
                       <StatusBadge status={detail.Status} />
@@ -634,7 +634,7 @@ const CrmNoc: React.FC = () => {
                       </div>
                     ) : detail.Status === CrmStatus.APPROVED && rights.canEdit ? (
                       <button onClick={handleMarkIssued} disabled={markingIssued}
-                        className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-40 transition-colors">
+                        className="flex items-center gap-1.5 px-4 py-2 text-sm font-medium btn-module text-white rounded-lg hover:shadow-lg disabled:opacity-40 transition-colors">
                         <ArrowRight size={14} />
                         {markingIssued ? "Marking…" : "Mark as Issued"}
                       </button>

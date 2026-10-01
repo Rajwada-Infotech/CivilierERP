@@ -17,6 +17,7 @@ import {
   PortalDialogContent as DialogContent, PortalDialogTitle as DialogTitle, PortalDialogDescription as DialogDescription,
   GOLD, GOLD_SOFT, INK, VIOLET, HAIRLINE, SURFACE, SURFACE_ALT, TEXT, TEXT_MUTED, TEXT_FAINT, serif, mono,
 } from "./portalTheme";
+import { DateInput } from "@/components/ui/date-input";
 
 type Ctx = { me: any; timeline: any; applicationId: number; applications: any[] };
 
@@ -37,7 +38,7 @@ function DateStatusBadge({ label, date, color, active }: { label: string; date?:
   if (!active) return null;
   const tone = DATE_BADGE_TONES[color];
   return (
-    <span className="text-[11px] px-2 py-0.5 rounded-full font-medium" style={{ background: tone.bg, color: tone.fg }}>
+    <span className="text-[0.6875rem] px-2 py-0.5 rounded-full font-medium" style={{ background: tone.bg, color: tone.fg }}>
       {label}{date ? `: ${fmtDate(date)}` : ""}
     </span>
   );
@@ -189,7 +190,7 @@ function UploadDocDialog({ doc, applicationId, onClose, onUploaded }: { doc: any
           style={{ borderColor: file ? INK : HAIRLINE, background: file ? GOLD_SOFT : SURFACE_ALT }}>
           <UploadCloud size={22} style={{ color: file ? INK : GOLD }} />
           <span className="text-sm font-medium" style={{ color: TEXT }}>{file ? file.name : "Click to choose a file"}</span>
-          <span className="text-[11px]" style={{ color: TEXT_FAINT }}>{file ? fmtBytes(file.size) : "PDF, Word, or image · up to 25 MB"}</span>
+          <span className="text-[0.6875rem]" style={{ color: TEXT_FAINT }}>{file ? fmtBytes(file.size) : "PDF, Word, or image · up to 25 MB"}</span>
           <input type="file" className="hidden" accept=".pdf,.doc,.docx,image/*"
             onChange={(e) => setFile(e.target.files?.[0] || null)} />
         </label>
@@ -237,7 +238,7 @@ function ProposeDateDialog({
               : "Suggest a date that works for you — we'll review it and either accept it or propose another."}
           </DialogDescription>
         </DialogHeader>
-        <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
+        <DateInput value={date} onChange={(e) => setDate(e.target.value)}
           className="w-full text-sm rounded-lg px-3 py-2 outline-none" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT, background: SURFACE_ALT }} />
         <div className="flex justify-end gap-2 pt-2">
           <button onClick={onClose} className="px-3 py-1.5 text-sm rounded-lg hover:opacity-80" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT_MUTED }}>Cancel</button>
@@ -315,12 +316,12 @@ function RespondDialog({
             style={{ background: INK }}
           >
             Approve
-            <span className="block text-[11px] font-normal opacity-80">Everything looks correct</span>
+            <span className="block text-[0.6875rem] font-normal opacity-80">Everything looks correct</span>
           </button>
           <button onClick={() => setMode("recheck")}
             className="px-4 py-2.5 text-sm rounded-lg font-medium text-left" style={{ border: `1px solid ${HAIRLINE}`, color: TEXT }}>
             Request a Recheck
-            <span className="block text-[11px] font-normal" style={{ color: TEXT_MUTED }}>Something needs to be corrected</span>
+            <span className="block text-[0.6875rem] font-normal" style={{ color: TEXT_MUTED }}>Something needs to be corrected</span>
           </button>
         </div>
         <div className="flex justify-end pt-1">
@@ -434,9 +435,9 @@ const PortalAgreement: React.FC = () => {
           <div className="px-5 sm:px-6 py-5" style={{ background: `linear-gradient(135deg, ${INK} 0%, ${VIOLET} 100%)` }}>
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="text-[10px] uppercase tracking-[0.16em] text-white/60">Agreement For Sale</p>
+                <p className="text-[0.625rem] uppercase tracking-[0.16em] text-white/60">Agreement For Sale</p>
                 <h2 className="text-lg sm:text-xl font-semibold text-white mt-0.5" style={serif}>{agreement.AgreementNo}</h2>
-                <p className="text-[11px] text-white/60 mt-1 flex items-center gap-1.5" style={mono}>
+                <p className="text-[0.6875rem] text-white/60 mt-1 flex items-center gap-1.5" style={mono}>
                   <Hash size={10} /> v{agreement.VersionNo || 1} · {agreement.BookingNo}
                 </p>
               </div>
@@ -562,7 +563,7 @@ const PortalAgreement: React.FC = () => {
                       {d.Label || d.DocumentType.replace(/([A-Z])/g, " $1").trim()}
                       {d.IsMandatory ? <span className="text-rose-500"> *</span> : null}
                     </p>
-                    <p className="text-[11px] truncate" style={{ color: rejected ? "#A32C36" : "#8A6D14" }}>
+                    <p className="text-[0.6875rem] truncate" style={{ color: rejected ? "#A32C36" : "#8A6D14" }}>
                       {rejected ? "Returned — please re-upload" : "Requested — upload when ready"}
                     </p>
                   </div>
@@ -590,7 +591,7 @@ const PortalAgreement: React.FC = () => {
                     {d.Label || d.DocumentType.replace(/([A-Z])/g, " $1").trim()}{d.VersionNo > 1 ? ` (v${d.VersionNo})` : ""}
                     {d.UploadedByType === "Customer" && <StatusPill status={d.Status} />}
                   </p>
-                  <p className="text-[11px] truncate" style={{ color: TEXT_FAINT }}>{d.FileName}{d.FileSize ? ` · ${fmtBytes(d.FileSize)}` : ""}</p>
+                  <p className="text-[0.6875rem] truncate" style={{ color: TEXT_FAINT }}>{d.FileName}{d.FileSize ? ` · ${fmtBytes(d.FileSize)}` : ""}</p>
                 </div>
                 <Eye size={14} className="shrink-0" style={{ color: TEXT_FAINT }} />
               </button>
@@ -638,7 +639,7 @@ const PortalAgreement: React.FC = () => {
 
             {qpInfoDocs.length > 0 && (
               <div>
-                <p className="text-[10px] uppercase tracking-wide mb-1.5" style={{ color: TEXT_FAINT }}>Paperwork From Us</p>
+                <p className="text-[0.625rem] uppercase tracking-wide mb-1.5" style={{ color: TEXT_FAINT }}>Paperwork From Us</p>
                 <div className="space-y-1.5">
                   {qpInfoDocs.map((a: any) => (
                     <button key={a.AttachmentId} onClick={() => setQpPreviewAttachment(a)}
@@ -655,7 +656,7 @@ const PortalAgreement: React.FC = () => {
 
             {qpProofDocs.length > 0 && (
               <div>
-                <p className="text-[10px] uppercase tracking-wide mb-1.5" style={{ color: TEXT_FAINT }}>Your Proof of Payment</p>
+                <p className="text-[0.625rem] uppercase tracking-wide mb-1.5" style={{ color: TEXT_FAINT }}>Your Proof of Payment</p>
                 <div className="space-y-1.5">
                   {qpProofDocs.map((a: any) => (
                     <button key={a.AttachmentId} onClick={() => setQpPreviewAttachment(a)}

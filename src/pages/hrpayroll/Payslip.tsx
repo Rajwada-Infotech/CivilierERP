@@ -78,8 +78,8 @@ const Payslip: React.FC = () => {
             <div className="text-right">
               <p className="text-xs text-muted-foreground">Pay Period</p>
               <p className="font-heading font-semibold text-foreground text-sm">{MONTHS[data.Run.PeriodMonth - 1]} {data.Run.PeriodYear}</p>
-              <p className="text-[11px] text-muted-foreground mt-1">Structure: {data.SalaryStructureName || "-"}</p>
-              <p className={`text-[11px] mt-1 font-medium ${data.Run.Status === "Locked" ? "text-emerald-600" : "text-amber-600"}`}>{data.Run.Status}</p>
+              <p className="text-[0.6875rem] text-muted-foreground mt-1">Structure: {data.SalaryStructureName || "-"}</p>
+              <p className={`text-[0.6875rem] mt-1 font-medium ${data.Run.Status === "Locked" ? "text-emerald-600" : "text-amber-600"}`}>{data.Run.Status}</p>
             </div>
           </div>
 

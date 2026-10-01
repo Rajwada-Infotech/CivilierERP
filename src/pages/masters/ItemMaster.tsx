@@ -1163,7 +1163,7 @@ const ItemMaster: React.FC = () => {
               </>
             ) : (
               <>
-                <button
+                <button data-row-view
                   title="View details"
                   onClick={() => setViewRow(row.original)}
                   className="p-1 rounded hover:bg-sky-500/10 text-sky-500 transition-colors"
@@ -1174,7 +1174,7 @@ const ItemMaster: React.FC = () => {
                   <button
                     title="Print"
                     onClick={() => handleItemPrint(row.original)}
-                    className="p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors"
+                    className="p-1 rounded hover:bg-[#ffe2021a] text-amber-500 transition-colors"
                   >
                     <Printer size={15} />
                   </button>
@@ -1247,7 +1247,7 @@ const ItemMaster: React.FC = () => {
               onClick={handleImportClick}
               disabled={importing}
               title="Import items from a filled-in CSV"
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-primary-foreground hover:shadow-lg hover:shadow-primary/20 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold btn-module text-white hover:shadow-lg transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {importing ? (
                 <Loader2 size={13} className="animate-spin" />
@@ -1335,12 +1335,12 @@ const ItemMaster: React.FC = () => {
                   }
                   className={`shrink-0 w-9 h-9 flex items-center justify-center rounded-lg border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
                     showAlternateUoms
-                      ? "bg-primary text-primary-foreground border-primary"
+                      ? "btn-module text-white border-primary"
                       : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
                   }`}
                 >
                   {alternateUoms.length > 0 && !showAlternateUoms ? (
-                    <span className="text-[10px] font-bold">
+                    <span className="text-[0.625rem] font-bold">
                       {alternateUoms.length}
                     </span>
                   ) : (
@@ -1359,7 +1359,7 @@ const ItemMaster: React.FC = () => {
                   <Ruler size={13} className="text-primary" />
                   Alternate UOMs
                 </p>
-                <p className="text-[11px] text-muted-foreground mb-3">
+                <p className="text-[0.6875rem] text-muted-foreground mb-3">
                   Tag other units this item can also be requested/ordered in,
                   with how many{" "}
                   <span className="font-mono">
@@ -1540,7 +1540,7 @@ const ItemMaster: React.FC = () => {
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-4 sm:px-6 py-3 sm:py-4 border-t border-border bg-muted/20 rounded-b-xl overflow-hidden mt-2">
-            <p className="hidden sm:block text-[11px] text-muted-foreground">
+            <p className="hidden sm:block text-[0.6875rem] text-muted-foreground">
               Ready to save
             </p>
             <div className="flex items-center gap-2 sm:ml-auto">
@@ -1553,7 +1553,7 @@ const ItemMaster: React.FC = () => {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
+                className="flex-1 sm:flex-none px-5 py-2 rounded-lg text-sm font-heading font-semibold btn-module text-white disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2 transition-opacity whitespace-nowrap"
               >
                 {saving ? (
                   <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1704,7 +1704,7 @@ const ItemMaster: React.FC = () => {
                       { label: "Description", value: viewRow.description },
                     ].map(({ label, value, mono }) => (
                       <div key={label}>
-                        <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                        <p className="text-[0.625rem] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
                           {label}
                         </p>
                         <p
@@ -1728,7 +1728,7 @@ const ItemMaster: React.FC = () => {
               )}
               <button
                 onClick={() => setViewRow(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
               >
                 Close
               </button>
@@ -1804,7 +1804,7 @@ const ItemMaster: React.FC = () => {
             <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
               <button
                 onClick={() => setImportResults(null)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading btn-module text-white transition-all"
               >
                 Close
               </button>

@@ -64,14 +64,14 @@ function Row({ entry, value, onSelect, showModule }: {
       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
       <span className="flex min-w-0 flex-col">
         <span className="truncate text-sm text-foreground">{entry.label}</span>
-        {sub && <span className="truncate text-[11px] text-muted-foreground">{sub}</span>}
+        {sub && <span className="truncate text-[0.6875rem] text-muted-foreground">{sub}</span>}
       </span>
     </CommandItem>
   );
 }
 
 const Kbd = ({ children }: { children: React.ReactNode }) => (
-  <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+  <kbd className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.625rem] text-muted-foreground">
     {children}
   </kbd>
 );
@@ -159,7 +159,7 @@ export function CompassDialog() {
           </CommandList>
         </Command>
 
-        <div className="flex items-center justify-between border-t border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+        <div className="flex items-center justify-between border-t border-border bg-muted/30 px-3 py-2 text-[0.6875rem] text-muted-foreground">
           <span className="flex items-center gap-3">
             <span className="flex items-center gap-1"><Kbd>↑</Kbd><Kbd>↓</Kbd> navigate</span>
             <span className="flex items-center gap-1"><Kbd>↵</Kbd> open</span>
