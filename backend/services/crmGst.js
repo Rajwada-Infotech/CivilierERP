@@ -142,6 +142,26 @@ async function resolveUnitParkingHsn(pool, bracketBase, opts = {}) {
   };
 }
 
+
+/**
+ * The Extra Work (extra charges) HSN, from the master.
+ *
+ * Migration 487 seeded an EXTRA_WORK rule, but every caller kept using the
+ * EXTRA_WORK_HSN_CODE constant directly — so the rule existed and did nothing.
+ * The same contradiction as the Unit+Parking bracket: change the rule and the
+ * charge keeps its old rate, while the application form keeps PRINTING the old
+ * HSN to the customer.
+ *
+ * Unbanded, so no value is passed. Same fallback contract as
+ * resolveUnitParkingHsn: the constant stands in when nothing matches, and
+ * fromRule says which answer this is.
+ */
+async function resolveExtraWorkHsn(pool) {
+  const resolved = await resolveHsnCode(pool, APPLIES_TO.EXTRA_WORK, { value: 0 });
+  if (resolved.hsnCode) return { hsnCode: resolved.hsnCode, fromRule: true, ruleName: resolved.ruleName };
+  return { hsnCode: EXTRA_WORK_HSN_CODE, fromRule: false, ruleName: null };
+}
+
 // The single source of truth for ParkingTotal/ExtraChargesTotal/GrandTotal
 // AND the fixed HSN-driven GST — merged into one function (rather than two
 // separate rollups) so milestones are always redistributed
@@ -318,6 +338,7 @@ async function recalculateBookingGst(pool, bookingId) {
 
 module.exports = {
   resolveUnitParkingHsn,
+  resolveExtraWorkHsn,
   recalculateBookingGst,
   checkGstExemption,
   getHsnRate,
