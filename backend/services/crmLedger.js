@@ -15,6 +15,7 @@
 
 const { sql } = require("../db");
 const { getGLHeadId, postVoucher, hasPosting, GL_ACCOUNTS } = require("./generalLedger");
+const { getGLHeadIdByCode } = require("./generalLedger");
 const { getBookingLandSplit } = require("./projectType");
 
 const CRM_COLLECTIONS_ACCOUNT = "CRM Collections A/c";
@@ -28,6 +29,12 @@ const CRM_SALE_INCOME_ACCOUNT = "Sale of Flat/Parking";
 // Seeded by migration 484. Kept strictly separate from the construction head
 // above — see postCrmInvoiceToGL for why they must never be pooled.
 const CRM_SALE_LAND_ACCOUNT = "Sale of Land";
+// Stable keys for the two heads above. Names are editable from Account Head
+// Master and a rename would make these postings throw at posting time, after
+// the invoice is already approved — so resolution goes code-first, with the
+// name kept only as a fallback for databases predating migrations 472/484.
+const CRM_SALE_INCOME_CODE = "CRM-SALE-INCOME";
+const CRM_SALE_LAND_CODE = "CRM-SALE-LAND";
 // Income head the company keeps when a cancelled booking is refunded (not
 // re-booked). Seeded by migration 416.
 const CRM_FORFEITURE_ACCOUNT = "Booking Cancellation Forfeiture";
@@ -921,7 +928,7 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
 
   let legs;
   if (split.isPureLand) {
-    const landHeadId = await getGLHeadId(pool, CRM_SALE_LAND_ACCOUNT);
+    const landHeadId = await getGLHeadIdByCode(pool, CRM_SALE_LAND_CODE, CRM_SALE_LAND_ACCOUNT);
     legs = [
       { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
       { lHeadId: landHeadId, credit: amount, narration: `${row.InvoiceNo} — land sale income recognised` },
@@ -934,8 +941,8 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
     const base = split.landValue + split.constructionValue;
     const landPart = base > 0 ? Math.round(((amount * split.landValue) / base) * 100) / 100 : 0;
     const constructionPart = Math.round((amount - landPart) * 100) / 100;
-    const landHeadId = await getGLHeadId(pool, CRM_SALE_LAND_ACCOUNT);
-    const incomeHeadId = await getGLHeadId(pool, CRM_SALE_INCOME_ACCOUNT);
+    const landHeadId = await getGLHeadIdByCode(pool, CRM_SALE_LAND_CODE, CRM_SALE_LAND_ACCOUNT);
+    const incomeHeadId = await getGLHeadIdByCode(pool, CRM_SALE_INCOME_CODE, CRM_SALE_INCOME_ACCOUNT);
     legs = [
       { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
     ];
@@ -944,7 +951,7 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
     if (constructionPart > 0)
       legs.push({ lHeadId: incomeHeadId, credit: constructionPart, narration: `${row.InvoiceNo} — flat/villa sale income recognised` });
   } else {
-    const incomeHeadId = await getGLHeadId(pool, CRM_SALE_INCOME_ACCOUNT);
+    const incomeHeadId = await getGLHeadIdByCode(pool, CRM_SALE_INCOME_CODE, CRM_SALE_INCOME_ACCOUNT);
     legs = [
       { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
       { lHeadId: incomeHeadId, credit: amount, narration: `${row.InvoiceNo} — flat/parking sale income recognised` },

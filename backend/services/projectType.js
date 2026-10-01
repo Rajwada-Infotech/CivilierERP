@@ -210,13 +210,18 @@ async function getBookingLandSplit(pool, bookingId, totalValue) {
     -- plot booking has NO CrmBookingUnit row at all. Reading only the unit
     -- lines (as this did before) classified a pure-land booking as construction
     -- and taxed the land, which is exactly backwards.
-    SELECT N'PLOT' AS UnitKind, bp.AllocatedValue
+    -- Flagged land STRUCTURALLY, not by kind. A CrmBookingPlot row references
+    -- dbo.PlotMaster, which is land inventory by definition — so this must not
+    -- depend on the kind register. Tagging these rows 'PLOT' and looking the
+    -- code up would mean that clearing IsLand on that one master row, or
+    -- deactivating it, silently made every plot booking taxable.
+    SELECT CAST(1 AS BIT) AS IsLandLine, CAST(NULL AS NVARCHAR(20)) AS UnitKind, bp.AllocatedValue
     FROM dbo.CrmBookingPlot bp
     WHERE bp.BookingId = @bid AND bp.Status = N'Active'
     UNION ALL
     -- Constructed assets (flat / villa), plus any early UnitMaster PLOT rows
     -- that predate 491 and are kept for historical foreign keys.
-    SELECT u.UnitKind, l.AllocatedValue
+    SELECT CAST(0 AS BIT) AS IsLandLine, u.UnitKind, l.AllocatedValue
     FROM dbo.CrmBookingUnit l
     JOIN dbo.UnitMaster u ON u.Id = l.UnitId
     WHERE l.BookingId = @bid AND l.Status = N'Active'
@@ -224,7 +229,7 @@ async function getBookingLandSplit(pool, bookingId, totalValue) {
     -- Pre-485 fallback: no lines of EITHER kind, so use the booking's own
     -- primary unit. Guarded on both tables, or a plot booking would also pick
     -- up its UnitId here and be double-counted.
-    SELECT u2.UnitKind, b.TotalValue
+    SELECT CAST(0 AS BIT) AS IsLandLine, u2.UnitKind, b.TotalValue
     FROM dbo.CrmBooking b
     JOIN dbo.UnitMaster u2 ON u2.Id = b.UnitId
     WHERE b.Id = @bid
@@ -243,17 +248,22 @@ async function getBookingLandSplit(pool, bookingId, totalValue) {
   // a comparison against the literal 'PLOT'. A kind added as COMMERCIAL_PLOT or
   // FARM_LAND is land the moment it is flagged, with no code change.
   const landKinds = await loadLandKinds(pool);
-  const isLandKind = (k) => landKinds.has(String(k || "").toUpperCase());
+  // A line is land if its SOURCE says so (PlotMaster-backed), or if its kind
+  // is registered as land. The structural test comes first so plot bookings
+  // cannot be affected by a master edit.
+  const isLandLine = (r) =>
+    r.IsLandLine === true || r.IsLandLine === 1 ||
+    landKinds.has(String(r.UnitKind || "").toUpperCase());
 
   let landValue = 0;
   let constructionValue = 0;
   for (const l of lines) {
     const v = Number(l.AllocatedValue || 0);
-    if (isLandKind(l.UnitKind)) landValue += v;
+    if (isLandLine(l)) landValue += v;
     else constructionValue += v;
   }
 
-  const hasLand = lines.some((l) => isLandKind(l.UnitKind));
+  const hasLand = lines.some((l) => isLandLine(l));
   const isPureLand = hasLand && constructionValue === 0;
 
   // AllocatedValue can lag a booking edit (it is written when lines are priced).
