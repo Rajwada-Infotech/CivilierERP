@@ -91,3 +91,47 @@ describe("LEGACY_DEFAULT", () => {
     expect(LEGACY_DEFAULT.AllowsMultiUnitSale).toBe(false);
   });
 });
+
+describe("land kinds come from the master, not a literal", () => {
+  // Migration 492 dropped the CHECK constraint on UnitMaster.UnitKind and made
+  // kinds an editable master, which turned the old `kind === "PLOT"` test into
+  // a trap: a kind added from the UI as COMMERCIAL_PLOT or FARM_LAND would be
+  // taxed as construction even though it is land. Migration 497 moved the
+  // decision onto an IsLand flag; these pin that it stays there.
+  const register = new Set(["PLOT", "COMMERCIAL_PLOT", "FARM_LAND"]);
+
+  test("a land kind that is not literally PLOT is still land", () => {
+    const t = unitSaleTreatment("COMMERCIAL_PLOT", register);
+    expect(t.isLand).toBe(true);
+    expect(t.gstApplicable).toBe(false);
+    expect(t.countsTowardGstBracket).toBe(false);
+    expect(t.incomeAccount).toBe(INCOME_ACCOUNT.LAND);
+  });
+
+  test("a kind absent from the register is taxable construction", () => {
+    const t = unitSaleTreatment("SHOP", register);
+    expect(t.isLand).toBe(false);
+    expect(t.gstApplicable).toBe(true);
+  });
+
+  test("with no register supplied it falls back to PLOT alone", () => {
+    // The fallback may only ever UNDER-claim land. Over-claiming would
+    // zero-rate a taxable supply, which is the worse of the two errors.
+    expect(unitSaleTreatment("PLOT").isLand).toBe(true);
+    expect(unitSaleTreatment("COMMERCIAL_PLOT").isLand).toBe(false);
+  });
+
+  test("bookingSaleTreatment threads the register through to every line", () => {
+    // Guards a real hazard: passing unitSaleTreatment straight to .map() would
+    // hand it the array INDEX in the register slot.
+    const t = bookingSaleTreatment(["COMMERCIAL_PLOT", "FARM_LAND"], register);
+    expect(t.hasLand).toBe(true);
+    expect(t.hasConstruction).toBe(false);
+    expect(t.gstApplicable).toBe(false);
+  });
+
+  test("a mixed booking is still detected when the land kind is a custom one", () => {
+    const t = bookingSaleTreatment(["COMMERCIAL_PLOT", "VILLA"], register);
+    expect(t.isMixed).toBe(true);
+  });
+});

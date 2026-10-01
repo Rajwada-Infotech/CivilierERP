@@ -108,9 +108,44 @@ async function getEffectiveType(pool, { projectId = null, blockId = null } = {})
  * crmGst.js is an affordable-HOUSING threshold applied to construction value;
  * letting plot value into it would misprice every villa in a plotted project.
  */
-function unitSaleTreatment(unitKind) {
+/**
+ * The land register: which unit kinds are land, read from
+ * dbo.CrmConstructedAssetKind.IsLand (migration 497).
+ *
+ * This replaces a `kind === 'PLOT'` comparison that became unsafe the moment
+ * migration 492 dropped the CHECK constraint on UnitMaster.UnitKind and made
+ * kinds an editable master. A kind added from the UI as COMMERCIAL_PLOT or
+ * FARM_LAND would otherwise have been taxed as construction, silently.
+ *
+ * Returned as a Set of codes so the pure functions below stay synchronous and
+ * testable: callers that touch the database load it once and pass it down.
+ */
+async function loadLandKinds(pool) {
+  const r = await pool.request().query(
+    "SELECT Code FROM dbo.CrmConstructedAssetKind WHERE IsLand = 1",
+  );
+  return new Set(r.recordset.map((x) => String(x.Code || "").toUpperCase()));
+}
+
+/**
+ * How a unit's sale is treated for tax and accounting. THIS is the function
+ * money decisions go through — never the project type.
+ *
+ * Land is outside GST altogether (Schedule III, CGST Act: neither a supply of
+ * goods nor of services), so a land kind carries no output tax and must also
+ * stay out of any GST rate-bracket computation. The Rs 45 lakh bracket in
+ * crmGst.js is an affordable-HOUSING threshold applied to construction value;
+ * letting land value into it would misprice every villa in a plotted project.
+ *
+ * @param {Set<string>} [landKinds] from loadLandKinds(). Omitted, it falls back
+ *   to PLOT alone — the pre-497 behaviour, which keeps this function pure for
+ *   tests and keeps a caller that forgot to load the register SAFE rather than
+ *   wrong: the fallback can only ever under-claim land, never over-claim it,
+ *   and over-claiming is what would zero-rate a taxable sale.
+ */
+function unitSaleTreatment(unitKind, landKinds = null) {
   const kind = String(unitKind || UNIT_KIND.FLAT).toUpperCase();
-  const isLand = kind === UNIT_KIND.PLOT;
+  const isLand = landKinds ? landKinds.has(kind) : kind === UNIT_KIND.PLOT;
   return {
     kind,
     isLand,
@@ -130,8 +165,11 @@ function unitSaleTreatment(unitKind) {
  * `hasLand && hasConstruction` to detect the case that needs apportioning
  * instead of one blended rate.
  */
-function bookingSaleTreatment(unitKinds = []) {
-  const treatments = unitKinds.map(unitSaleTreatment);
+function bookingSaleTreatment(unitKinds = [], landKinds = null) {
+  // Note the explicit arrow: passing unitSaleTreatment straight to .map()
+  // would hand it the ARRAY INDEX as its second argument, which is the
+  // landKinds slot — a truthy index would then be used as a Set.
+  const treatments = unitKinds.map((k) => unitSaleTreatment(k, landKinds));
   const hasLand = treatments.some((t) => t.isLand);
   const hasConstruction = treatments.some((t) => !t.isLand);
   return {
@@ -201,15 +239,21 @@ async function getBookingLandSplit(pool, bookingId, totalValue) {
     return { landValue: 0, constructionValue: round2(totalValue), isPureLand: false, hasLand: false };
   }
 
+  // Which kinds count as land comes from the master (migration 497), not from
+  // a comparison against the literal 'PLOT'. A kind added as COMMERCIAL_PLOT or
+  // FARM_LAND is land the moment it is flagged, with no code change.
+  const landKinds = await loadLandKinds(pool);
+  const isLandKind = (k) => landKinds.has(String(k || "").toUpperCase());
+
   let landValue = 0;
   let constructionValue = 0;
   for (const l of lines) {
     const v = Number(l.AllocatedValue || 0);
-    if (String(l.UnitKind || "").toUpperCase() === "PLOT") landValue += v;
+    if (isLandKind(l.UnitKind)) landValue += v;
     else constructionValue += v;
   }
 
-  const hasLand = lines.some((l) => String(l.UnitKind || "").toUpperCase() === "PLOT");
+  const hasLand = lines.some((l) => isLandKind(l.UnitKind));
   const isPureLand = hasLand && constructionValue === 0;
 
   // AllocatedValue can lag a booking edit (it is written when lines are priced).
@@ -230,6 +274,7 @@ module.exports = {
   UNIT_KIND,
   INCOME_ACCOUNT,
   getEffectiveType,
+  loadLandKinds,
   getBookingLandSplit,
   unitSaleTreatment,
   bookingSaleTreatment,
