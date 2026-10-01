@@ -494,7 +494,22 @@ router.get("/tds", async (req, res) => {
       }
     }
 
-    const whereParts = ["ISNULL(np.TDSAmount, 0) > 0"];
+    // A payment shows here if TDS was actually deducted on it (the
+    // original scope), OR it's a broker/commission payment (194H) at all —
+    // those belong in a TDS report even when no TDS applied (below
+    // threshold, or the broker was flagged TDS-exempt), since "why wasn't
+    // TDS deducted on this brokerage" is exactly the kind of thing this
+    // report needs to make reviewable, not just a log of amounts withheld.
+    // Excludes Rejected/Deleted payments — those never actually moved
+    // money, so they don't belong in a report of real transactions
+    // (previously no status filter existed at all, which only stayed
+    // harmless because a rejected payment with TDS > 0 was rare; now that
+    // every broker payment qualifies regardless of TDS, a rejected one
+    // would otherwise show up looking like a real payout).
+    const whereParts = [
+      "(ISNULL(np.TDSAmount, 0) > 0 OR np.SourceCrmBrokerageId IS NOT NULL)",
+      "np.Status NOT IN ('Rejected', 'Deleted')",
+    ];
     const request = pool.request().input("offset", sql.Int, offset).input("limit", sql.Int, limit);
 
     if (companyId) {
@@ -534,17 +549,39 @@ router.get("/tds", async (req, res) => {
           END,
           party_head.LHeadName
         )                                                    AS PartyName,
-        CASE WHEN np.PExpenseRef IS NOT NULL AND np.PExpenseRef <> '' AND np.ContractId IS NULL
+        CASE
+          WHEN np.SourceCrmBrokerageId IS NOT NULL THEN 'Brokerage'
+          WHEN np.PExpenseRef IS NOT NULL AND np.PExpenseRef <> '' AND np.ContractId IS NULL
              THEN 'Invoice' ELSE 'Direct' END                AS PaymentType,
         np.PExpenseRef                                       AS InvoiceRef,
         np.TDSNature,
         np.TDSName,
         ISNULL(np.TDSPercentage, 0)                          AS TDSPercentage,
-        ISNULL(np.PAmount, 0)                                AS GrossAmount,
+        -- PAmount means two different things depending on how this payment
+        -- was created: for a Direct payment it's the GROSS bill amount (TDS
+        -- gets split out of THIS payment's own GL posting — see
+        -- newPayment.js's bankAndTdsLegs); for an Invoice or Brokerage
+        -- payment, PAmount is already NET of TDS (TDS was withheld
+        -- separately, at invoice-posting or brokerage-approval time — see
+        -- resolveInvoiceLinkedTds / createFinancePaymentForBrokerage), so
+        -- TDSAmount here is only an inherited display figure, not something
+        -- still to be subtracted. A single PAmount-minus-TDSAmount formula
+        -- for every row double-subtracted TDS on exactly the rows this
+        -- report cares most about.
+        CASE WHEN net.IsAlreadyNet = 1
+          THEN ISNULL(np.PAmount, 0) + ISNULL(np.TDSAmount, 0)
+          ELSE ISNULL(np.PAmount, 0) END                     AS GrossAmount,
         ISNULL(np.TDSAmount, 0)                              AS TDSAmount,
-        ISNULL(np.PAmount, 0) - ISNULL(np.TDSAmount, 0)      AS NetPaid,
+        CASE WHEN net.IsAlreadyNet = 1
+          THEN ISNULL(np.PAmount, 0)
+          ELSE ISNULL(np.PAmount, 0) - ISNULL(np.TDSAmount, 0) END AS NetPaid,
         COUNT(*) OVER()                                      AS _total
       FROM dbo.NewPayment np
+      CROSS APPLY (SELECT CASE
+          WHEN np.SourceCrmBrokerageId IS NOT NULL THEN 1
+          WHEN np.PExpenseRef IS NOT NULL AND np.PExpenseRef <> '' AND np.ContractId IS NULL THEN 1
+          ELSE 0
+        END AS IsAlreadyNet) net
       LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
       LEFT JOIN dbo.enterprise ec ON ec.id = TRY_CAST(np.PCompany AS INT) AND ec.business_type = 'C'
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
@@ -589,9 +626,19 @@ router.get("/tds", async (req, res) => {
     else if (fyStart) totalsRequest.input("FYStart", sql.Date, fyStart);
     if (dateTo) totalsRequest.input("DateTo", sql.Date, dateTo);
     else if (fyEnd) totalsRequest.input("FYEnd", sql.Date, fyEnd);
-    const totalsRes = await totalsRequest.query(
-      `SELECT ISNULL(SUM(np.TDSAmount), 0) AS TotalTDS, ISNULL(SUM(np.PAmount), 0) AS TotalGross FROM dbo.NewPayment np ${whereSQL}`,
-    );
+    const totalsRes = await totalsRequest.query(`
+      SELECT
+        ISNULL(SUM(np.TDSAmount), 0) AS TotalTDS,
+        -- Same Invoice/Brokerage-is-already-net adjustment as the main
+        -- query's GrossAmount column — see its comment above.
+        ISNULL(SUM(
+          CASE WHEN np.SourceCrmBrokerageId IS NOT NULL
+                 OR (np.PExpenseRef IS NOT NULL AND np.PExpenseRef <> '' AND np.ContractId IS NULL)
+            THEN ISNULL(np.PAmount, 0) + ISNULL(np.TDSAmount, 0)
+            ELSE ISNULL(np.PAmount, 0) END
+        ), 0) AS TotalGross
+      FROM dbo.NewPayment np ${whereSQL}
+    `);
 
     return res.json({
       data,
