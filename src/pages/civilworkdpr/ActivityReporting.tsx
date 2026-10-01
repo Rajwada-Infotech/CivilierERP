@@ -81,7 +81,7 @@ function StatusTile({
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-colors border"
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-heading font-medium transition-colors border shrink-0"
       style={
         active
           ? { background: `${accentColor}18`, borderColor: `${accentColor}59`, color: accentColor }
@@ -259,7 +259,17 @@ function ChainGroupList({
                           </div>
                         )}
 
-                        <div onClick={(e) => { e.stopPropagation(); openDetail(row, "photos"); }}>
+                        {/* inline-flex so this click target hugs the small
+                            pill's own footprint — a plain block
+                            <div> here stretched full card width (divs are
+                            block-level by default), so tapping ANYWHERE in
+                            the blank space to the right of the pill, not
+                            just the pill itself, opened Photos instead of
+                            bubbling up to the card's own "open Overview"
+                            handler. That dead zone is exactly what made
+                            "opening an activity" look like it always landed
+                            on Photos. */}
+                        <div onClick={(e) => { e.stopPropagation(); openDetail(row, "photos"); }} className="inline-flex">
                           <ActivityPhotosBadge rungId={row.rungId} />
                         </div>
                       </div>
@@ -460,31 +470,34 @@ export default function ActivityReporting() {
           </div>
         ) : (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 border-b border-border bg-muted/30">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 sm:gap-3 px-3.5 sm:px-5 py-3 sm:py-3.5 border-b border-border bg-muted/30">
               <span className="text-sm font-heading font-semibold text-foreground">Assigned Activities</span>
-              <div className="flex items-center gap-2">
-                <div className="relative">
-                  <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search flat or activity…"
-                    className="pl-7 pr-7 py-1.5 w-56 text-xs rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-cyan-500/30"
-                  />
-                  {search && (
-                    <button
-                      type="button"
-                      onClick={() => setSearch("")}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
+              <div className="relative w-full sm:w-auto">
+                <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search flat or activity…"
+                  className="pl-7 pr-7 py-1.5 w-full sm:w-56 text-xs rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-cyan-500/30"
+                />
+                {search && (
+                  <button
+                    type="button"
+                    onClick={() => setSearch("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-1.5 px-5 py-3 border-b border-border bg-muted/10">
+            {/* Mobile: one horizontally-scrolling row (swipe to see the rest,
+                same pattern as a native app's filter chips) instead of
+                letting 9 pills wrap into 3-4 full-width rows a user has to
+                scroll past before reaching any actual content. Desktop keeps
+                the original wrapping layout — there's room for it there. */}
+            <div className="flex sm:flex-wrap items-center gap-1.5 px-3.5 sm:px-5 py-2.5 sm:py-3 border-b border-border bg-muted/10 overflow-x-auto sm:overflow-visible thin-scroll">
               {FILTER_OPTIONS.map((opt) => {
                 const meta = STATUS_TILE_META[opt.value];
                 const count = opt.value === "ALL" ? total : (statusCounts[opt.value] ?? 0);
@@ -515,7 +528,7 @@ export default function ActivityReporting() {
                     : "No activities match this status."}
               </div>
             ) : (
-              <div className="p-4">
+              <div className="p-2 sm:p-4">
                 <ScopeLocationTree
                   rows={rooms}
                   countLabel="activity"

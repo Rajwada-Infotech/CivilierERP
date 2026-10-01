@@ -157,7 +157,13 @@ function DependencyChainCards({
                 {chain.workType}
               </span>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            {/* Mobile: one full-width block per rung, name on its own line
+                above the badges — the old single-line rounded-full pill
+                (name + status + QC + attempt all inline) just overflowed or
+                squished on a narrow screen once the activity name was more
+                than a couple words. Desktop keeps the original compact
+                wrapping pill row. */}
+            <div className="flex flex-col sm:flex-row sm:flex-wrap gap-1.5">
               {rungs.length === 0 ? (
                 <span className="text-xs text-muted-foreground italic">Loading activities…</span>
               ) : (
@@ -175,18 +181,18 @@ function DependencyChainCards({
                       key={rung.rungId ?? rung.activityId}
                       type="button"
                       onClick={() => onAssign(rung, chain)}
-                      className={`flex items-center gap-1.5 rounded-full border pl-2 pr-2.5 py-1 text-xs transition-colors ${
+                      className={`w-full sm:w-auto flex flex-wrap items-center gap-1.5 rounded-xl sm:rounded-full border px-2.5 sm:pl-2 sm:pr-2.5 py-1.5 sm:py-1 text-xs text-left transition-colors ${
                         done
                           ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
                           : "border-border bg-muted/40 text-foreground hover:bg-muted"
                       }`}
                       title="Assign engineer & material"
                     >
-                      <span className="font-medium">
+                      <span className="font-medium flex-1 min-w-0 basis-full sm:basis-auto">
                         {rung.sequenceNo}. {rung.activityName}
                       </span>
                       <span
-                        className={`text-[9px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${meta.className}`}
+                        className={`text-[9px] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full shrink-0 ${meta.className}`}
                       >
                         {meta.label}
                       </span>
@@ -401,7 +407,7 @@ export default function WorkDone() {
               </span>
             </div>
 
-            <div className="p-5">
+            <div className="p-3.5 sm:p-5">
               {/* Each level collapses into a chip once picked (see
                   LocationChip) and only the next level's dropdown is ever
                   rendered — nothing downstream shows until its parent is
@@ -552,7 +558,7 @@ export default function WorkDone() {
                 <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
                 <span className="text-sm font-heading font-semibold text-foreground">Dependency Chains</span>
               </div>
-              <div className="p-4">
+              <div className="p-2 sm:p-4">
                 <ScopeLocationTree
                   rows={allChains as DependencyMasterListRow[]}
                   countLabel="chain"
@@ -582,7 +588,7 @@ export default function WorkDone() {
               </span>
             </div>
 
-            <div className="p-5 space-y-4">
+            <div className="p-3.5 sm:p-5 space-y-4">
               {loadingDependencies ? (
                 <div className="w-full h-10 rounded-lg border border-border bg-muted/30 animate-pulse" />
               ) : matchingDependencies.length === 0 ? (
@@ -654,80 +660,141 @@ export default function WorkDone() {
                       <label className={labelCls}>
                         <ListChecks size={11} /> Saved Flow
                       </label>
-                      <div className="rounded-lg border border-border overflow-hidden overflow-x-auto">
-                        <table className="w-full text-sm">
-                          <thead>
-                            <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
-                              <th className="px-3.5 py-2.5">Activity</th>
-                              <th className="px-3 py-2.5">Engineer</th>
-                              <th className="px-3 py-2.5">Start Date</th>
-                              <th className="px-3 py-2.5">Material</th>
-                              <th className="px-3.5 py-2.5">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {(linkedDependencyDetail?.activities ?? []).map((rung) => {
-                              const assignment = rung.rungId != null ? roomAssignmentByRungId.get(rung.rungId) : undefined;
-                              return (
-                                <tr
-                                  key={`${rung.rungId ?? rung.activityId}-${rung.sequenceNo}`}
-                                  className="border-b border-border last:border-0 hover:bg-muted/20"
-                                >
-                                  <td className="px-3.5 py-3">
-                                    <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                                      {rung.sequenceNo}. {rung.activityName}
-                                      <QcBadge qcStatus={assignment?.qcStatus} />
-                                      <AttemptBadge attemptNo={assignment?.attemptNo} />
-                                    </span>
-                                  </td>
-                                  {assignment ? (
-                                    <>
-                                      <td className="px-3 py-3">
-                                        <span className="flex items-center gap-1.5 text-xs text-foreground">
-                                          <UserRound size={11} className="text-muted-foreground shrink-0" />
-                                          {assignment.engineerNames || (
-                                            <span className="text-muted-foreground italic">Unassigned</span>
-                                          )}
-                                        </span>
-                                      </td>
-                                      <td className="px-3 py-3">
-                                        <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
-                                          <CalendarDays size={11} className="text-muted-foreground shrink-0" />
-                                          {assignment.startDate ? new Date(assignment.startDate).toLocaleDateString() : "—"}
-                                        </span>
-                                      </td>
-                                      <td className="px-3 py-3">
-                                        {assignment.materials.length === 0 ? (
-                                          <span className="text-xs text-muted-foreground italic">—</span>
-                                        ) : (
-                                          <div className="flex flex-col gap-0.5">
-                                            {assignment.materials.map((m, i) => (
-                                              <span key={i} className="text-xs text-foreground whitespace-nowrap">
-                                                {m.name}
-                                                <span className="text-muted-foreground">
-                                                  {" "}
-                                                  · {m.quantity}
-                                                  {m.uom ? ` ${m.uom}` : ""}
-                                                </span>
-                                              </span>
-                                            ))}
-                                          </div>
-                                        )}
-                                      </td>
-                                      <td className="px-3.5 py-3">
-                                        <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} />
-                                      </td>
-                                    </>
-                                  ) : (
-                                    <td colSpan={4} className="px-3 py-3">
-                                      <span className="text-xs text-muted-foreground italic">Not assigned yet</span>
-                                    </td>
+                      <div className="rounded-lg border border-border overflow-hidden">
+                        {/* Mobile: one stacked card per rung — the 5-column
+                            table below is the same cramped-on-a-phone shape
+                            Reporting's own activity table had before its own
+                            mobile rework; this mirrors that fix. */}
+                        <div className="sm:hidden divide-y divide-border">
+                          {(linkedDependencyDetail?.activities ?? []).map((rung) => {
+                            const assignment = rung.rungId != null ? roomAssignmentByRungId.get(rung.rungId) : undefined;
+                            return (
+                              <div key={`${rung.rungId ?? rung.activityId}-${rung.sequenceNo}`} className="p-3 space-y-2">
+                                <div className="flex items-start justify-between gap-2">
+                                  <span className="text-xs font-medium text-foreground leading-snug min-w-0">
+                                    {rung.sequenceNo}. {rung.activityName}
+                                  </span>
+                                  {assignment && (
+                                    <div className="shrink-0">
+                                      <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} />
+                                    </div>
                                   )}
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <QcBadge qcStatus={assignment?.qcStatus} />
+                                  <AttemptBadge attemptNo={assignment?.attemptNo} />
+                                </div>
+                                {assignment ? (
+                                  <>
+                                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                                      <span className="flex items-center gap-1.5">
+                                        <UserRound size={11} className="shrink-0" />
+                                        {assignment.engineerNames || <span className="italic">Unassigned</span>}
+                                      </span>
+                                      <span className="flex items-center gap-1.5">
+                                        <CalendarDays size={11} className="shrink-0" />
+                                        {assignment.startDate ? new Date(assignment.startDate).toLocaleDateString() : "—"}
+                                      </span>
+                                    </div>
+                                    {assignment.materials.length > 0 && (
+                                      <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                        {assignment.materials.map((m, i) => (
+                                          <span key={i} className="text-xs text-foreground">
+                                            {m.name}
+                                            <span className="text-muted-foreground">
+                                              {" "}
+                                              · {m.quantity}
+                                              {m.uom ? ` ${m.uom}` : ""}
+                                            </span>
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span className="text-xs text-muted-foreground italic">Not assigned yet</span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Tablet/desktop: the original dense table. */}
+                        <div className="hidden sm:block overflow-x-auto">
+                          <table className="w-full text-sm">
+                            <thead>
+                              <tr className="border-b border-border text-left text-[0.6875rem] font-heading font-semibold text-muted-foreground uppercase tracking-wide">
+                                <th className="px-3.5 py-2.5">Activity</th>
+                                <th className="px-3 py-2.5">Engineer</th>
+                                <th className="px-3 py-2.5">Start Date</th>
+                                <th className="px-3 py-2.5">Material</th>
+                                <th className="px-3.5 py-2.5">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(linkedDependencyDetail?.activities ?? []).map((rung) => {
+                                const assignment = rung.rungId != null ? roomAssignmentByRungId.get(rung.rungId) : undefined;
+                                return (
+                                  <tr
+                                    key={`${rung.rungId ?? rung.activityId}-${rung.sequenceNo}`}
+                                    className="border-b border-border last:border-0 hover:bg-muted/20"
+                                  >
+                                    <td className="px-3.5 py-3">
+                                      <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                                        {rung.sequenceNo}. {rung.activityName}
+                                        <QcBadge qcStatus={assignment?.qcStatus} />
+                                        <AttemptBadge attemptNo={assignment?.attemptNo} />
+                                      </span>
+                                    </td>
+                                    {assignment ? (
+                                      <>
+                                        <td className="px-3 py-3">
+                                          <span className="flex items-center gap-1.5 text-xs text-foreground">
+                                            <UserRound size={11} className="text-muted-foreground shrink-0" />
+                                            {assignment.engineerNames || (
+                                              <span className="text-muted-foreground italic">Unassigned</span>
+                                            )}
+                                          </span>
+                                        </td>
+                                        <td className="px-3 py-3">
+                                          <span className="flex items-center gap-1.5 text-xs text-foreground whitespace-nowrap">
+                                            <CalendarDays size={11} className="text-muted-foreground shrink-0" />
+                                            {assignment.startDate ? new Date(assignment.startDate).toLocaleDateString() : "—"}
+                                          </span>
+                                        </td>
+                                        <td className="px-3 py-3">
+                                          {assignment.materials.length === 0 ? (
+                                            <span className="text-xs text-muted-foreground italic">—</span>
+                                          ) : (
+                                            <div className="flex flex-col gap-0.5">
+                                              {assignment.materials.map((m, i) => (
+                                                <span key={i} className="text-xs text-foreground whitespace-nowrap">
+                                                  {m.name}
+                                                  <span className="text-muted-foreground">
+                                                    {" "}
+                                                    · {m.quantity}
+                                                    {m.uom ? ` ${m.uom}` : ""}
+                                                  </span>
+                                                </span>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </td>
+                                        <td className="px-3.5 py-3">
+                                          <AssignmentStatusSelect rungId={assignment.rungId} status={assignment.status} />
+                                        </td>
+                                      </>
+                                    ) : (
+                                      <td colSpan={4} className="px-3 py-3">
+                                        <span className="text-xs text-muted-foreground italic">Not assigned yet</span>
+                                      </td>
+                                    )}
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
                     </div>
                   )}
