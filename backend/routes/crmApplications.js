@@ -80,7 +80,7 @@ const APP_SELECT = `
     plat.Name AS PlatformName, camp.Name AS CampaignName, ad.Name AS AdName,
     cp.Name AS ChannelPartnerName,
     ref.ApplicationNo AS ReferredByApplicationNo, ref.ApplicantName AS ReferredByName,
-    proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName, um.BlockId AS BlockId,
+    proj.name AS ProjectMasterName, comp.name AS CompanyName, um.UnitName AS PreferredUnitName, COALESCE(um.BlockId, (SELECT TOP 1 pm.BlockId FROM dbo.CrmApplicationPlot ap JOIN dbo.PlotMaster pm ON pm.Id = ap.PlotId WHERE ap.ApplicationId = a.Id AND ap.Status = N'Active' ORDER BY ap.IsPrimary DESC, ap.Id)) AS BlockId,
     -- The Application's own PropertyType/BhkPreference are free-text intake
     -- fields nothing in the current wizard actually populates (no step asks
     -- for them), so they're blank on every application created here. The

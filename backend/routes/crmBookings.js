@@ -120,7 +120,9 @@ const BOOKING_SELECT = `
     b.CompanyId,
     COALESCE(um.UnitName,   b.UnitNo)    AS UnitNo,
     COALESCE(blk.BlockName, b.BlockName) AS BlockName,
-    um.BlockId,
+    -- A plot booking has no UnitId, so um is NULL; fall back to the block
+    -- the booking itself carries (migration 499).
+    COALESCE(um.BlockId, b.BlockId) AS BlockId,
     b.FloorName,
     COALESCE(um.UnitType,   b.UnitType)  AS UnitType,
     b.AreaSqFt,
@@ -201,7 +203,7 @@ const BOOKING_SELECT = `
   FROM dbo.CrmBooking b
   JOIN  dbo.CrmApplication a ON a.Id = b.ApplicationId
   LEFT JOIN dbo.UnitMaster um   ON um.Id   = b.UnitId
-  LEFT JOIN dbo.BlockMaster blk ON blk.Id  = um.BlockId
+  LEFT JOIN dbo.BlockMaster blk ON blk.Id  = COALESCE(um.BlockId, b.BlockId)
   LEFT JOIN dbo.enterprise  proj ON proj.id = b.ProjectId AND proj.business_type = 'P'
   LEFT JOIN dbo.Users u  ON u.id  = b.AssignedTo
   LEFT JOIN dbo.Users cu ON cu.id = b.CreatedBy
