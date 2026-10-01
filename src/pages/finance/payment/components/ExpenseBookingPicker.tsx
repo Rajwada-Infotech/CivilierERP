@@ -116,10 +116,19 @@ export function ExpenseBookingPicker({
   // to be of the same company the same project and the same supplier").
   const mergeCandidates = options.filter((o) => o.type !== "emi");
   const mergeAnchor = mergeCandidates.find((o) => mergeSelected.has(o.id)) ?? null;
+  // Project match uses the resolved DISPLAY name, not projectId — the
+  // backing EProjectName column is stored inconsistently (a numeric
+  // enterprise id as text for most bookings, a literal project name for
+  // others), so two invoices that plainly show the same project here could
+  // carry a mismatched raw id/name shape and be wrongly flagged
+  // "different project". projectName is the same resolved value the
+  // picker's own company/project/supplier filter above already matched
+  // both rows on, so this can never disagree with what the user just saw
+  // filtered together.
   const isMergeCompatible = (o: ExpenseOption) =>
     !mergeAnchor ||
     (o.companyId === mergeAnchor.companyId &&
-      o.projectId === mergeAnchor.projectId &&
+      o.projectName === mergeAnchor.projectName &&
       !!o.supplierId &&
       o.supplierId === mergeAnchor.supplierId);
   const toggleMergeSelect = (o: ExpenseOption) => {
