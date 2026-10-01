@@ -35,6 +35,7 @@ const authMiddleware = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { parseId } = require("../middleware/validateRequest");
 const { actorId } = require("../services/saAccess");
+const { LineStatus, ResaleStatus } = require("../constants/crmStatuses");
 
 router.use(authMiddleware);
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
@@ -104,7 +105,7 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
         FROM dbo.CrmBookingPlot bp
         JOIN dbo.CrmBooking bk ON bk.Id = bp.BookingId
         JOIN dbo.CrmApplication a ON a.Id = bk.ApplicationId
-        WHERE bp.PlotId = @p AND bp.Status = N'Active'
+        WHERE bp.PlotId = @p AND bp.Status = N'${LineStatus.ACTIVE}'
           AND bk.IsActive = 1 AND bk.Status NOT IN (N'Cancelled', N'Rejected', N'Expired')
         ORDER BY bp.Id DESC
       `);
@@ -138,7 +139,7 @@ router.post("/", requirePageRight("crm-resales", "create"), async (req, res) => 
         OUTPUT INSERTED.Id
         VALUES (@plot, @unit, @fb, @fc, @tc, @date,
                 @agreed, @orig, @fee, @feeGst,
-                N'Pending', @notes, @by)
+                N'${ResaleStatus.PENDING}', @notes, @by)
       `);
     res.status(201).json({ success: true, id: result.recordset[0].Id });
   } catch (e) {
@@ -168,8 +169,8 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
       .query("SELECT Id, PlotId, UnitId, FromBookingId, Status FROM dbo.CrmUnitResale WHERE Id = @id AND IsActive = 1");
     const resale = cur.recordset[0];
     if (!resale) return res.status(404).json({ error: "Resale not found" });
-    if (resale.Status === "Completed") return res.status(400).json({ error: "This resale is already completed" });
-    if (resale.Status === "Cancelled") return res.status(400).json({ error: "This resale was cancelled" });
+    if (resale.Status === ResaleStatus.COMPLETED) return res.status(400).json({ error: "This resale is already completed" });
+    if (resale.Status === ResaleStatus.CANCELLED) return res.status(400).json({ error: "This resale was cancelled" });
 
     await tx.begin();
 
@@ -180,8 +181,8 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
       // failure half-way leaves the plot with its original owner rather than
       // with none.
       await tx.request().input("p", sql.Int, resale.PlotId).input("b", sql.Int, resale.FromBookingId)
-        .query(`UPDATE dbo.CrmBookingPlot SET Status = N'Transferred'
-                WHERE PlotId = @p AND Status = N'Active' AND (@b IS NULL OR BookingId = @b)`);
+        .query(`UPDATE dbo.CrmBookingPlot SET Status = N'${LineStatus.TRANSFERRED}'
+                WHERE PlotId = @p AND Status = N'${LineStatus.ACTIVE}' AND (@b IS NULL OR BookingId = @b)`);
 
       const prior = await tx.request().input("p", sql.Int, resale.PlotId)
         .query("SELECT TOP 1 AreaSqFt, RatePerSqFt, AllocatedValue FROM dbo.CrmBookingPlot WHERE PlotId = @p ORDER BY Id DESC");
@@ -194,12 +195,12 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
         .input("r", sql.Decimal(18, 2), pr.RatePerSqFt ?? null)
         .input("v", sql.Decimal(18, 2), pr.AllocatedValue ?? null)
         .query(`INSERT INTO dbo.CrmBookingPlot (BookingId, PlotId, AreaSqFt, RatePerSqFt, AllocatedValue, Status, IsPrimary)
-                VALUES (@b, @p, @a, @r, @v, N'Active', 0)`);
+                VALUES (@b, @p, @a, @r, @v, N'${LineStatus.ACTIVE}', 0)`);
     }
 
     await tx.request().input("id", sql.Int, id).input("tb", sql.Int, toBookingId).input("by", sql.Int, actorId(req))
       .query(`UPDATE dbo.CrmUnitResale
-              SET Status = N'Completed', ToBookingId = @tb, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+              SET Status = N'${ResaleStatus.COMPLETED}', ToBookingId = @tb, UpdatedBy = @by, UpdatedAt = SYSDATETIME()
               WHERE Id = @id`);
 
     await tx.commit();
@@ -217,8 +218,8 @@ router.put("/:id/cancel", requirePageRight("crm-resales", "edit"), async (req, r
   try {
     const pool = getPool();
     const r = await pool.request().input("id", sql.Int, id).input("by", sql.Int, actorId(req))
-      .query(`UPDATE dbo.CrmUnitResale SET Status = N'Cancelled', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
-              WHERE Id = @id AND IsActive = 1 AND Status <> N'Completed'`);
+      .query(`UPDATE dbo.CrmUnitResale SET Status = N'${ResaleStatus.CANCELLED}', UpdatedBy = @by, UpdatedAt = SYSDATETIME()
+              WHERE Id = @id AND IsActive = 1 AND Status <> N'${ResaleStatus.COMPLETED}'`);
     if (!r.rowsAffected[0])
       return res.status(400).json({ error: "Not found, or already completed — a completed resale has already moved the plot and cannot be cancelled here." });
     res.json({ success: true });
