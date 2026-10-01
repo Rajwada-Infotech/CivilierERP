@@ -16,7 +16,7 @@
   "dependencies": {
     "@tanstack/react-query": "^5.101.0",
     "adbkit-apkreader": "^3.2.0",
-    "axios": "^1.18.1",
+    "axios": "^1.20.0",
     "bcrypt": "^6.0.0",
     "compression": "^1.8.1",
     "cors": "^2.8.6",
