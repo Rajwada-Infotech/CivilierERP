@@ -273,7 +273,7 @@ export default function IntegrationChannelsAdmin() {
               {search ? "No channels match your search." : "No channels found."}
             </div>
           ) : (
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto thin-scroll"><table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/40">
                   <th className="text-left py-3 px-4 font-medium text-muted-foreground">Key</th>
@@ -325,7 +325,7 @@ export default function IntegrationChannelsAdmin() {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </table></div>
           )}
         </CardContent>
       </Card>

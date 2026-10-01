@@ -498,7 +498,7 @@ export default function PasswordReset() {
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            <div className="grid gap-4 [grid-template-columns:repeat(auto-fill,minmax(min(100%,17rem),1fr))]">
               {filtered.map((user) => (
                 <UserCard
                   key={user.id}
