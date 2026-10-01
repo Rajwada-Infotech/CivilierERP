@@ -402,11 +402,16 @@ function PhotosTab({ rungId }: { rungId: number }) {
             </button>
           </div>
         )}
+        {/* No `capture` attribute here — on mobile browsers that forces the
+            OS straight into the camera app, skipping the gallery/file
+            picker entirely, which is exactly backwards for a button whose
+            whole point is "let me pick an existing photo instead." Desktop
+            ignores `capture` either way, which is why this only ever broke
+            on phones. */}
         <input
           ref={fileInputRef}
           type="file"
           accept="image/*"
-          capture="environment"
           multiple
           className="hidden"
           onChange={(e) => {
@@ -1443,7 +1448,13 @@ export default function ActivityDetailModal({
           }
         >
           <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden flex flex-col flex-1 min-h-0">
-            <div className="flex items-center gap-1 px-4 pt-3 border-b border-border shrink-0">
+            {/* Six tabs' worth of icon+label never fit a phone's width — this
+                used to just overflow the flex row silently (no scrollbar, no
+                affordance), clipping "Daily Log"/"History" off-screen with
+                no way to reach them. overflow-x-auto + shrink-0 makes it a
+                swipeable strip instead; thin-scroll keeps the scrollbar from
+                looking like a stray horizontal rule when it does show. */}
+            <div className="flex items-center gap-1 px-4 pt-3 border-b border-border shrink-0 overflow-x-auto thin-scroll">
               {visibleTabs.map((t) => {
                 const Icon = t.icon;
                 const active = tab === t.id;
@@ -1452,7 +1463,7 @@ export default function ActivityDetailModal({
                     key={t.id}
                     type="button"
                     onClick={() => setTab(t.id)}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors ${
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-heading font-semibold border-b-2 transition-colors shrink-0 whitespace-nowrap ${
                       active ? "border-cyan-500 text-cyan-600 dark:text-cyan-400" : "border-transparent text-muted-foreground hover:text-foreground"
                     }`}
                   >

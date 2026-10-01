@@ -630,12 +630,14 @@ const civilWorkDprSetupItems: SetupItem[] = [
     label: "Activity Master",
     path: "/masters/activity",
     color: "text-cyan-500",
+    pageKey: "activity-master",
   },
   {
     icon: DoorOpen,
     label: "Flat Master",
     path: "/civilworkdpr/room-master",
     color: "text-cyan-500",
+    pageKey: "civilworkdpr-room-master",
   },
 ];
 
@@ -1355,7 +1357,9 @@ export const MobileNav: React.FC = () => {
                         </p>
                       </div>
                       <div className="grid grid-cols-3 gap-1.5">
-                        {setupConfig.items.map(
+                        {setupConfig.items
+                          .filter((it) => !it.pageKey || canAccessPage(it.pageKey))
+                          .map(
                           ({ icon: Icon, label, path, color }, i) => {
                             const active = location.pathname === path;
                             return (

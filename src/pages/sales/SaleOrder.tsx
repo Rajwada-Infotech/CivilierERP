@@ -27,6 +27,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { GLAccountSelect } from "@/components/finance/GLAccountSelect";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
@@ -573,6 +575,13 @@ function SaleOrderHistory() {
   const orders: SaleOrderDoc[] = data?.data ?? [];
   const [viewingOrder, setViewingOrder] = useState<SaleOrderDoc | null>(null);
 
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: soApprovalTrails, isLoading: soApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "SaleOrders",
+    orders.map((o) => o.SaleOrderID),
+  );
+
   const deleteMutation = useMutation({
     mutationFn: deleteSaleOrder,
     onSuccess: () => {
@@ -692,6 +701,9 @@ function SaleOrderHistory() {
                       table="SaleOrders"
                       recordId={o.SaleOrderID}
                       compact
+                      fallback={<StatusBadge status={o.Status} />}
+                      preloaded={soApprovalTrails.get(String(o.SaleOrderID)) ?? null}
+                      preloadedLoading={soApprovalTrailsLoading}
                     />
                   </td>
                   <td className="px-4 py-3 text-muted-foreground truncate max-w-[120px]">
@@ -825,6 +837,7 @@ function SaleOrderHistory() {
                     table="SaleOrders"
                     recordId={viewingOrder.SaleOrderID}
                     compact
+                    fallback={<StatusBadge status={viewingOrder.Status} />}
                   />
                 </div>
               </div>

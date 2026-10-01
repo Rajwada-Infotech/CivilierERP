@@ -25,6 +25,7 @@ import {
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { FinanceShell } from "@/components/finance/FinanceShell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -235,6 +236,13 @@ export default function Contract() {
           .some((f) => f?.toLowerCase().includes(searchQ.toLowerCase())))
     ),
     [rawContracts, searchQ]
+  );
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: approvalTrails, isLoading: approvalTrailsLoading } = useApprovalTrailsBulk(
+    "Contract",
+    contracts.map((c) => c.ContractId),
   );
 
   const projects = useMemo(() => {
@@ -497,6 +505,8 @@ export default function Contract() {
             table="Contract"
             recordId={(row.original as ContractListItem).ContractId}
             fallback={<StatusBadge status={getValue() as string} />}
+            preloaded={approvalTrails.get(String((row.original as ContractListItem).ContractId)) ?? null}
+            preloadedLoading={approvalTrailsLoading}
           />
         </div>
       ),
@@ -582,6 +592,7 @@ export default function Contract() {
                 paginated={false}
                 emptyMessage="No contracts yet. Click 'New Contract' to create one."
                 columns={columns}
+                getRowId={(r: any) => String(r.ContractId)}
               />
             </CardContent>
           </Card>

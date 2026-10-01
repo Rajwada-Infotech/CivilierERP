@@ -50,6 +50,8 @@ import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { getApprovedMRList, getICTMRPrefill, type ApprovedMRSummary } from "@/api/materialRequestApi";
 import { MaterialShell } from "@/components/material/MaterialShell";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
 
 const fmtNum = (n: number) =>
@@ -682,7 +684,7 @@ function TransferPreviewModal({
             <Warehouse size={10} /> {transfer.ToGodownName}
           </span>
           <div className="ml-auto">
-            <ApprovalStatusChain table="StockTransfers" recordId={transfer.TransferID} />
+            <ApprovalStatusChain table="StockTransfers" recordId={transfer.TransferID} fallback={<StatusBadge status={transfer.Status} />} />
           </div>
         </div>
 
@@ -1014,6 +1016,13 @@ function TransferHistory() {
     staleTime: 60_000,
   });
   const transfers: StockTransfer[] = data?.data ?? [];
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: transferApprovalTrails, isLoading: transferApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "StockTransfers",
+    transfers.map((t) => t.TransferID),
+  );
 
   // Inter-company transfers (direct GL voucher between the two companies'
   // Inter-Company A/c heads, no bank/cash involved) live in a separate
@@ -1364,6 +1373,9 @@ function TransferHistory() {
                         <ApprovalStatusChain
                           table="StockTransfers"
                           recordId={t.TransferID}
+                          fallback={<StatusBadge status={t.Status} />}
+                          preloaded={transferApprovalTrails.get(String(t.TransferID)) ?? null}
+                          preloadedLoading={transferApprovalTrailsLoading}
                         />
                       </td>
                       <td className="px-3 py-2.5">

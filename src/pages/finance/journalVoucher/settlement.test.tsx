@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
+import { format } from "date-fns";
 import type { BankRecord } from "@/api/bankMasterApi";
 import {
   emptySettlement,
@@ -126,8 +127,20 @@ describe("SettlementModeSection", () => {
     expect(num).not.toHaveTextContent("100003"); // bounced
 
     fireEvent.change(num, { target: { value: "100002" } });
-    fireEvent.change(screen.getByLabelText("Cheque date"), { target: { value: "2026-09-21" } });
-    expect(state()).toMatchObject({ mode: "Cheque", bankId: "58", chequeLotId: 1, chequeNo: "100002", chequeDate: "2026-09-21" });
+
+    // Cheque date is DateInput — a popover calendar, not a native
+    // <input type="date">. Its only real DOM input is type="hidden" (for
+    // form-submission compatibility), which React never wires a change
+    // listener onto, so a raw fireEvent.change on it silently no-ops.
+    // Driving it for real means opening the popover and clicking a day
+    // cell, same as a user would.
+    fireEvent.click(screen.getByRole("button", { name: /dd\/mm\/yyyy/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Today,/ }));
+
+    expect(state()).toMatchObject({
+      mode: "Cheque", bankId: "58", chequeLotId: 1, chequeNo: "100002",
+      chequeDate: format(new Date(), "yyyy-MM-dd"),
+    });
   });
 
   it("changing the bank drops the previously chosen lot and leaf", async () => {

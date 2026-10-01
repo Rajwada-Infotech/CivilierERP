@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { createPortal } from "react-dom";
 import {
   ChevronRight,
@@ -6,6 +6,7 @@ import {
   FolderOpen,
   Folder,
   Layers,
+  Search,
 } from "lucide-react";
 import { useTheme, isLightTheme } from "@/contexts/ThemeContext";
 
@@ -171,11 +172,35 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
   const [open, setOpen] = useState(false);
   const [openNodes, setOpenNodes] = useState<Set<string>>(new Set());
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
+  // Flat-variant-only — filters the (often long, e.g. account group filter
+  // lists) options list client-side instead of making the user scroll
+  // through every entry to find one.
+  const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const { theme } = useTheme();
   const isDark = !isLightTheme(theme);
+
+  // Fresh search on every open — a stale filter from last time shouldn't
+  // silently hide options the next time this dropdown is opened.
+  useEffect(() => {
+    if (open) {
+      setQuery("");
+      if (variant === "flat") {
+        // Let the panel mount/position first so focus doesn't fight the
+        // portal's own initial layout.
+        requestAnimationFrame(() => searchInputRef.current?.focus());
+      }
+    }
+  }, [open, variant]);
+
+  const filteredOptions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => o.label.toLowerCase().includes(q));
+  }, [options, query]);
 
   const recalcPosition = useCallback(() => {
     if (!triggerRef.current) return;
@@ -188,8 +213,9 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
     // height for a 5-item flat list was flipping it to open upward (and
     // clipping against the viewport top) even when there was plenty of
     // room below the trigger.
+    // +44 reserves room for the search row above the scrollable options.
     const panelHeight =
-      variant === "flat" ? Math.min(360, 42 + options.length * 36 + 8) : 360;
+      variant === "flat" ? Math.min(360, 44 + 42 + options.length * 36 + 8) : 360;
     const above = spaceBelow < panelHeight && spaceAbove > spaceBelow;
     const maxH = above
       ? Math.min(panelHeight, spaceAbove - 8)
@@ -386,43 +412,70 @@ const TreeDropdown: React.FC<TreeDropdownProps> = ({
               </div>
             </>
           ) : (
-            /* ── Flat panel — sole child, so flex-1 makes it consume the
-                whole outer box exactly (see tree-panel comment above). ── */
-            <div className="flex-1 min-h-0 overflow-y-auto py-1 thin-scroll">
-              {/* Placeholder / clear option */}
-              <div
-                className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
-                  !value
-                    ? "bg-primary/10 text-primary font-medium"
-                    : "text-muted-foreground hover:bg-muted/60"
-                }`}
-                onClick={() => {
-                  onChange("");
-                  setOpen(false);
-                }}
-              >
-                {placeholder}
+            /* ── Flat panel — search row pinned above a scrollable options
+                region, together consuming the whole outer box (see
+                tree-panel comment above). ── */
+            <>
+              <div className="shrink-0 relative px-2 pt-2 pb-1.5 border-b border-border/40">
+                <Search size={12} className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <input
+                  ref={searchInputRef}
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  placeholder="Search…"
+                  className="w-full text-sm rounded-md border border-border pl-7 pr-2 py-1.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+                />
               </div>
-              <div className="border-t border-border/40 mb-1" />
+              <div className="flex-1 min-h-0 overflow-y-auto py-1 thin-scroll">
+                {/* Placeholder / clear option — only while not actively
+                    narrowing the list, so a search result doesn't scroll
+                    past this static row every time. */}
+                {!query.trim() && (
+                  <>
+                    <div
+                      className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
+                        !value
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-muted-foreground hover:bg-muted/60"
+                      }`}
+                      onClick={() => {
+                        onChange("");
+                        setOpen(false);
+                      }}
+                    >
+                      {placeholder}
+                    </div>
+                    <div className="border-t border-border/40 mb-1" />
+                  </>
+                )}
 
-              {/* Options */}
-              {options.map((o) => (
-                <div
-                  key={o.value}
-                  className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
-                    value === o.value
-                      ? "bg-primary/10 text-primary font-medium"
-                      : "text-foreground hover:bg-muted/60"
-                  }`}
-                  onClick={() => {
-                    onChange(o.value);
-                    setOpen(false);
-                  }}
-                >
-                  {o.label}
-                </div>
-              ))}
-            </div>
+                {/* Options */}
+                {filteredOptions.length === 0 ? (
+                  <div className="px-3 py-3 text-sm text-muted-foreground/70 italic text-center">
+                    No matches
+                  </div>
+                ) : (
+                  filteredOptions.map((o) => (
+                    <div
+                      key={o.value}
+                      className={`px-3 py-2 text-sm cursor-pointer transition-colors ${
+                        value === o.value
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-foreground hover:bg-muted/60"
+                      }`}
+                      onClick={() => {
+                        onChange(o.value);
+                        setOpen(false);
+                      }}
+                    >
+                      {o.label}
+                    </div>
+                  ))
+                )}
+              </div>
+            </>
           )}
         </div>,
         document.body

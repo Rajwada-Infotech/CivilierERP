@@ -20,7 +20,11 @@ const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 // approval engine (services/approvalService.js). Without this, any user with
 // ReceivedPayments "edit" permission could approve a receipt and post it to
 // the ledger, because checkPermissionForMethod only checks CanEdit for a PUT.
-const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head"];
+// "director" added — the Director role is already treated as approver-tier
+// elsewhere (crm-bookings' MODULE_APPROVER_ROLE_OVERRIDES in
+// approvalService.js, and the named-director comment in approvalInbox.js),
+// it was just never added to this module's own hardcoded list.
+const APPROVER_ROLES = ["admin", "super_admin", "dba", "accounts_head", "director"];
 
 // Approve/Reject gate — kept DYNAMIC, same rule as the shared approval engine
 // (approvalService.transition) and the ApprovalActions buttons: the default

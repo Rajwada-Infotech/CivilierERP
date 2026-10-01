@@ -73,6 +73,7 @@ import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
 import { RecordCard } from "./ExpenseBooking/RecordCard";
 import { ExpenseBookingPreviewModal } from "./ExpenseBookingPreviewModal";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import {
   blankForm,
   calculateTdsPreview,
@@ -1503,6 +1504,13 @@ export default function MaterialExpenseBooking() {
       return false;
     return true;
   });
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: expenseApprovalTrails, isLoading: expenseApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "ExpenseBooking",
+    filteredRecords.map((r) => r.id),
+  );
   const totalNet = records.reduce((sum, r) => {
     if (r.status === "Draft") return sum;
     // GRN-linked records: recompute from grnTotalAmount + billing terms with
@@ -2714,6 +2722,8 @@ export default function MaterialExpenseBooking() {
                           onApprovalSuccess={fetchRecords}
                           canEdit={rights.canEdit}
                           canDelete={rights.canDelete}
+                          approvalTrail={expenseApprovalTrails.get(String(rec.id)) ?? null}
+                          approvalTrailLoading={expenseApprovalTrailsLoading}
                         />
                       ))}
                     </div>
@@ -2901,6 +2911,8 @@ export default function MaterialExpenseBooking() {
                                       table="ExpenseBooking"
                                       recordId={rec.id}
                                       fallback={<StatusBadge status={rec.status} className="text-[0.625rem] px-2 py-0.5" />}
+                                      preloaded={expenseApprovalTrails.get(String(rec.id)) ?? null}
+                                      preloadedLoading={expenseApprovalTrailsLoading}
                                     />
                                   </TableCell>
                                   <TableCell className="py-3" onClick={(e) => e.stopPropagation()}>

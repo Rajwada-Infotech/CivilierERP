@@ -279,9 +279,15 @@ router.get("/", cache("general-ledger", 300), async (req, res) => {
   try {
     const pool = getPool();
 
-    // Sanitized pagination params
+    // Sanitized pagination params — this is a bounded, human-curated chart
+    // of accounts (not an unbounded transactional log like GL entries
+    // themselves), so the cap just needs to comfortably cover "every GL
+    // head a real company has", not guard against production-scale growth.
+    // The old 100-row cap combined with the frontend's own default of 10
+    // meant the list silently stopped at whichever was smaller — see the
+    // frontend's own comment for the user-reported "caps at 10" bug.
     const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 2000);
     const offset = (page - 1) * limit;
 
     let whereClause = "WHERE lh.LHeadType = 'GL'";

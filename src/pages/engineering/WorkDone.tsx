@@ -17,6 +17,8 @@ import {
 import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { Button } from "@/components/ui/button";
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { StatusBadge } from "@/components/StatusBadge";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { printStatusLabel } from "@/utils/printStatus";
 import {
   Hammer,
@@ -1135,6 +1137,13 @@ export default function WorkDone() {
       ? entries
       : entries.filter((e) => e.Status === statusFilter);
 
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: approvalTrails, isLoading: approvalTrailsLoading } = useApprovalTrailsBulk(
+    "WorkDone",
+    filtered.map((e) => e.ID),
+  );
+
   const totalCertified = filtered.reduce(
     (sum, e) => sum + (e.CertifiedAmount ?? 0),
     0,
@@ -1346,7 +1355,13 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
       header: "Status",
       cell: ({ getValue, row }) => (
         <div>
-          <ApprovalStatusChain table="WorkDone" recordId={row.original.ID} />
+          <ApprovalStatusChain
+            table="WorkDone"
+            recordId={row.original.ID}
+            fallback={<StatusBadge status={getValue() as string} />}
+            preloaded={approvalTrails.get(String(row.original.ID)) ?? null}
+            preloadedLoading={approvalTrailsLoading}
+          />
         </div>
       ),
     },
@@ -1503,6 +1518,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                   searchable
                   paginated
                   emptyMessage="No work done entries found."
+                  getRowId={(r: any) => String(r.ID)}
                 />
               )}
             </div>

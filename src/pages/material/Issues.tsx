@@ -68,6 +68,7 @@ import {
 import { useFinYear } from "@/contexts/FinYearContext";
 
 import { ApprovalStatusChain } from "@/components/ApprovalStatusChain";
+import { useApprovalTrailsBulk } from "@/hooks/useApprovalTrailsBulk";
 import { usePageRights } from "@/hooks/usePageRights";
 import { DateInput } from "@/components/ui/date-input";
 
@@ -329,6 +330,13 @@ export default function Issues() {
         status: issueStatusFilter || undefined,
       }),
   });
+
+  // One request for every visible row's approval trail instead of one per
+  // row — see useApprovalTrailsBulk's own comment.
+  const { trails: issueApprovalTrails, isLoading: issueApprovalTrailsLoading } = useApprovalTrailsBulk(
+    "MaterialIssues",
+    (issuesData?.data || []).map((r: any) => r.IssueId),
+  );
 
   // ── Auto-select active fin year ──────────────────────────────────────────
 
@@ -831,6 +839,8 @@ export default function Issues() {
             table="MaterialIssues"
             recordId={row.original.IssueId}
             fallback={<StatusBadge status={row.original.Status} />}
+            preloaded={issueApprovalTrails.get(String(row.original.IssueId)) ?? null}
+            preloadedLoading={issueApprovalTrailsLoading}
           />
         </div>
       ),
@@ -940,6 +950,7 @@ export default function Issues() {
                 searchable={false}
                 paginated={false}
                 emptyMessage="No material issues found. Click 'New Issue' to create one."
+                getRowId={(r: any) => String(r.IssueId)}
               />
               {totalPages > 1 && (
                 <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">

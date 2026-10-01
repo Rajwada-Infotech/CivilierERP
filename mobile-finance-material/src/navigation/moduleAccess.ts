@@ -19,7 +19,24 @@ export const MODULE_PAGES: Record<string, string[]> = {
   ticket: ["ticket-dashboard", "tickets"],
   sales: ["sale-order", "sale-invoice", "sales-payment"],
   salesAutomation: ["sa-leads", "sa-inquiry", "sa-site-visits", "sa-campaigns", "sa-ads"],
-  civilworkdpr: ["civilworkdpr-dashboard", "civilworkdpr-dependency", "civilworkdpr-worker-attendance"],
+  // All 9 real Civil Work DPR page keys (was missing work-done/
+  // activity-reporting/quality-check/room-master/amendment/daily-labour) —
+  // a role whose only granted DPR page is e.g. Reporting still needs this
+  // list to include it, or hasModuleAccess() never finds a match and hides
+  // the Civil DPR dashboard card entirely despite the user having real
+  // access underneath. See backend/scripts/stripJrCivilEngDprRights.js /
+  // stripSrCivilEngDprRights.js for the page-key convention this mirrors.
+  civilworkdpr: [
+    "civilworkdpr-dashboard",
+    "civilworkdpr-dependency",
+    "civilworkdpr-work-done",
+    "civilworkdpr-quality-check",
+    "civilworkdpr-worker-attendance",
+    "civilworkdpr-activity-reporting",
+    "civilworkdpr-room-master",
+    "civilworkdpr-amendment",
+    "civilworkdpr-daily-labour",
+  ],
 };
 
 export interface ModuleAccess {

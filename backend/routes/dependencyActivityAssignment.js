@@ -128,6 +128,12 @@ router.get(
   requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "view"),
   async (req, res) => {
   const dependencyMasterId = req.query.dependencyMasterId ? parseInt(req.query.dependencyMasterId, 10) : null;
+  // "null" is a sentinel from the ScopeLocationTree leaf fetch for the
+  // "No room" bucket — those rungs have no RoomId at all, so `= @roomId`
+  // would never match them (SQL NULL comparisons are never true).
+  const roomIdParam = req.query.roomId != null ? String(req.query.roomId) : null;
+  const roomIdIsNull = roomIdParam === "null";
+  const roomId = roomIdParam && !roomIdIsNull ? parseInt(roomIdParam, 10) : null;
   const statusFilter = req.query.status ? String(req.query.status).toUpperCase() : null;
   const projectId = req.query.projectId ? parseInt(req.query.projectId, 10) : null;
   const fromDate = req.query.fromDate ? String(req.query.fromDate) : null;
@@ -145,6 +151,17 @@ router.get(
     if (Number.isFinite(dependencyMasterId)) {
       request.input("dependencyMasterId", sql.Int, dependencyMasterId);
       conds.push("dm.Id = @dependencyMasterId");
+    }
+    if (roomIdIsNull) {
+      conds.push("dm.RoomId IS NULL");
+    } else if (Number.isFinite(roomId)) {
+      // Scopes a single room's worth of activities — this is the fetch
+      // Reporting's own ScopeLocationTree leaf now does on-demand when a
+      // room node is expanded, instead of ever pulling every activity in
+      // the system up front (see /scope-summary below, which is what
+      // actually builds the tree and its counts).
+      request.input("roomId", sql.Int, roomId);
+      conds.push("dm.RoomId = @roomId");
     }
     if (statusFilter && STATUS_VALUES.has(statusFilter)) {
       request.input("statusFilter", sql.NVarChar(20), statusFilter);
@@ -245,6 +262,101 @@ router.get(
     res.status(500).json({ error: err.message });
   }
 });
+
+// GET /scope-summary — what Activity Reporting's Project > Tower > Floor >
+// Unit > Room tree (ScopeLocationTree) and its status-tile counts are
+// actually built from. The tree used to be a purely client-side rollup
+// over GET /'s full result — every single activity in the system,
+// unconditionally, fetched up front just so the tree had something to
+// count. At production's actual scale (342,000+ current rows) that's not
+// "slow", it's "never finishes rendering a browser tab": a full scan with
+// 4 correlated subqueries per row, followed by shipping and JSON-parsing
+// the whole thing client-side.
+//
+// This endpoint does the exact same grouping SQL already does far better
+// than JS ever could — two GROUP BYs, neither touching the per-row
+// correlated subqueries (engineer/QC names, materials) GET / pays for:
+//   - statusCounts: one row per Status, for the tile badges. Respects
+//     `search` (so searching narrows the tile counts too, matching the old
+//     client-side behaviour) but deliberately ignores `status` itself —
+//     that's the dimension the tiles switch between, so showing it
+//     pre-filtered to whichever tile is already selected would be circular.
+//   - rooms: one row per (project, tower, floor, unit, room), with
+//     activityCount — exactly the granularity ScopeLocationTree needs to
+//     build every level above it (a room's count rolls up into its unit's,
+//     floor's, tower's, project's). Respects both `status` and `search`.
+// Actual per-activity detail (engineer, dates, materials, QC/approval
+// state) is fetched separately, on demand, by GET /?roomId=... the moment
+// a room node is actually expanded — never for a room nobody opened.
+router.get(
+  "/scope-summary",
+  authMiddleware,
+  requireAnyPageRight(["civilworkdpr-activity-reporting", "civilworkdpr-work-done", "civilworkdpr-quality-check"], "view"),
+  async (req, res) => {
+    const statusFilter = req.query.status ? String(req.query.status).toUpperCase() : null;
+    const search = req.query.search ? String(req.query.search).trim() : null;
+    try {
+      const pool = await getPool();
+
+      const searchCond = search ? `
+          AND (
+            am.activity_name LIKE @search OR dm.Alias LIKE @search OR ep.name LIKE @search OR
+            bm.BlockName LIKE @search OR um.UnitName LIKE @search OR rm.RoomName LIKE @search
+          )` : "";
+
+      const countsReq = pool.request();
+      if (search) countsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      const countsRes = await countsReq.query(`
+        SELECT daa.Status AS status, COUNT(*) AS count
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+        LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+        LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+        WHERE daa.IsCurrent = 1${searchCond}
+        GROUP BY daa.Status
+      `);
+      const statusCounts = {};
+      let total = 0;
+      for (const row of countsRes.recordset) {
+        statusCounts[row.status] = row.count;
+        total += row.count;
+      }
+
+      const roomsReq = pool.request();
+      if (search) roomsReq.input("search", sql.NVarChar(200), `%${search}%`);
+      if (statusFilter && STATUS_VALUES.has(statusFilter)) roomsReq.input("statusFilter", sql.NVarChar(20), statusFilter);
+      const roomsRes = await roomsReq.query(`
+        SELECT
+          dm.ProjectId AS projectId, ep.name AS projectName,
+          dm.TowerId AS towerId, bm.BlockName AS towerName,
+          dm.Floor AS floor,
+          dm.FlatId AS flatId, um.UnitName AS flatName,
+          dm.RoomId AS roomId, rm.RoomName AS roomName,
+          COUNT(*) AS activityCount
+        FROM dbo.DependencyActivityAssignment daa
+        JOIN dbo.DependencyMasterActivity dma ON dma.Id = daa.DependencyMasterActivityId
+        JOIN dbo.DependencyMaster dm ON dm.Id = dma.DependencyMasterId
+        JOIN dbo.ActivityMaster am ON am.id = dma.ActivityId
+        LEFT JOIN dbo.enterprise  ep ON ep.id = dm.ProjectId AND ep.business_type = 'P'
+        LEFT JOIN dbo.BlockMaster bm ON bm.Id = dm.TowerId
+        LEFT JOIN dbo.UnitMaster  um ON um.Id = dm.FlatId
+        LEFT JOIN dbo.RoomMaster  rm ON rm.Id = dm.RoomId
+        WHERE daa.IsCurrent = 1${searchCond}
+          ${statusFilter && STATUS_VALUES.has(statusFilter) ? "AND daa.Status = @statusFilter" : ""}
+        GROUP BY dm.ProjectId, ep.name, dm.TowerId, bm.BlockName, dm.Floor, dm.FlatId, um.UnitName, dm.RoomId, rm.RoomName
+      `);
+
+      res.json({ statusCounts, total, rooms: roomsRes.recordset });
+    } catch (err) {
+      console.error("[dependency-activity-assignment] GET /scope-summary error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // GET /amendments — Civil Work DPR's Amendment page: every superseded
 // assignment attempt (IsCurrent = 0) across every chain, newest first.
