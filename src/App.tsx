@@ -219,6 +219,7 @@ const TagMaster = lazy(
 const CancelTemplateMaster = lazy(
   () => import("./pages/admin/masters/CancelTemplateMaster"),
 );
+const CrmResales = lazy(() => import("./pages/CRM/CrmResales"));
 const ProjectTypeMaster = lazy(
   () => import("./pages/admin/masters/ProjectTypeMaster"),
 );
@@ -2548,6 +2549,7 @@ function AppRoutes() {
       <Route path="/crm/setup/parking-master"      element={<ProtectedRoute pageKey="followup-parking-master"><ParkingMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/parking-slot-master" element={<ProtectedRoute pageKey="followup-parking-slot-master"><ParkingSlotMaster /></ProtectedRoute>} />
       <Route path="/crm/setup/extra-charge-master" element={<ProtectedRoute pageKey="followup-extra-charge-master"><ExtraChargeMaster /></ProtectedRoute>} />
+      <Route path="/crm/resales" element={<ProtectedRoute pageKey="crm-resales"><CrmResales /></ProtectedRoute>} />
       <Route path="/masters/project-type-master" element={<ProtectedRoute pageKey="project-type-master"><ProjectTypeMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/department-master" element={<ProtectedRoute pageKey="followup-department-master"><DepartmentMaster /></ProtectedRoute>} />
       <Route path="/followup/setup/tag-master" element={<ProtectedRoute pageKey="followup-tag-master"><TagMaster /></ProtectedRoute>} />
