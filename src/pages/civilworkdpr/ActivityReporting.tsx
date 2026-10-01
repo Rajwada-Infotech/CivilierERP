@@ -183,6 +183,11 @@ export default function ActivityReporting() {
       }
       groups.get(row.dependencyMasterId)!.rows.push(row);
     }
+    // Inside a chain, show activities in dependency order (rung sequence,
+    // then rework attempt) — recency only decides which chain comes first.
+    for (const g of groups.values()) {
+      g.rows.sort((a, b) => a.sequenceNo - b.sequenceNo || (a.attemptNo ?? 1) - (b.attemptNo ?? 1));
+    }
     return Array.from(groups.values());
   }, [filteredRows]);
 
