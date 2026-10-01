@@ -88,8 +88,14 @@ export default function StockScreen() {
   const { data: companies = [] } = useQuery({ queryKey: ["stock-companies"], queryFn: getCompanies, enabled: rights.canView });
   const { data: projects = [] } = useQuery({ queryKey: ["stock-projects"], queryFn: getProjects, enabled: rights.canView });
 
+  // Once a project is picked, its godown is the unambiguous match regardless
+  // of which company it's filed under — a project merely tagged to a
+  // company (not owned by it) has its godown listed under the OWNING
+  // company, so requiring both to match hid it entirely (same bug fixed in
+  // StockTransferFormModal.tsx and MaterialIssueFormModal.tsx). Company
+  // alone only narrows the list before a project is chosen.
   const filteredGodowns = useMemo(
-    () => godowns.filter((g) => (companyId ? String(g.companyId) === companyId : true) && (projectId ? String(g.projectId) === projectId : true)),
+    () => godowns.filter((g) => (projectId ? String(g.projectId) === projectId : companyId ? String(g.companyId) === companyId : true)),
     [godowns, companyId, projectId],
   );
 

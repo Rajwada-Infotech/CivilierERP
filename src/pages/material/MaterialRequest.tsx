@@ -496,6 +496,7 @@ export default function MaterialRequest() {
       Boolean(
         header.companyId &&
         header.projectId &&
+        header.finYearId &&
         header.requestDate &&
         header.reason.trim(),
       ),
@@ -576,24 +577,36 @@ export default function MaterialRequest() {
     setSaved(false);
   };
 
-  const handleEdit = (record: any) => {
+  // The table row (and the View overlay's own summary) only carry
+  // ItemCount/QtyByUom — the list endpoint never returns the actual item
+  // rows (see backend/routes/materialRequests.js's GET / route) — so this
+  // always re-fetches the full record first, the same way handleView does,
+  // rather than trusting whatever `record` was passed in.
+  const handleEdit = async (record: any) => {
+    let full = record;
+    try {
+      full = await mrApi.getMaterialRequestById(record.MRId);
+    } catch (err: any) {
+      toast.error(err?.message || `Failed to load Material Request #${record.MRId}`);
+      return;
+    }
     setHeader({
-      companyId: String(record.CompanyId ?? ""),
-      projectId: String(record.ProjectId ?? ""),
-      finYearId: String(record.FinYearId ?? ""),
-      docTypeId: record.DocTypeId ?? null,
+      companyId: String(full.CompanyId ?? ""),
+      projectId: String(full.ProjectId ?? ""),
+      finYearId: String(full.FinYearId ?? ""),
+      docTypeId: full.DocTypeId ?? null,
       docNoPreview: "",
-      requestDate: record.RequestDate
-        ? String(record.RequestDate).slice(0, 10)
+      requestDate: full.RequestDate
+        ? String(full.RequestDate).slice(0, 10)
         : defaultHeader.requestDate,
-      requiredByDate: record.RequiredByDate
-        ? String(record.RequiredByDate).slice(0, 10)
+      requiredByDate: full.RequiredByDate
+        ? String(full.RequiredByDate).slice(0, 10)
         : "",
-      priority: record.Priority ?? "Normal",
-      reason: record.Reason ?? "",
-      remarks: record.Remarks ?? "",
+      priority: full.Priority ?? "Normal",
+      reason: full.Reason ?? "",
+      remarks: full.Remarks ?? "",
     });
-    const items: CartItem[] = (record.items || []).map((it: any) => ({
+    const items: CartItem[] = (full.items || []).map((it: any) => ({
       _key: generateUUID(),
       ItemId: String(it.ItemId ?? ""),
       ItemName: it.ItemName,
@@ -604,7 +617,7 @@ export default function MaterialRequest() {
       CostCenterId: it.CostCenterId != null ? String(it.CostCenterId) : "",
     }));
     setCart(items.length > 0 ? items : [blankCartItem()]);
-    setEditingId(record.MRId);
+    setEditingId(full.MRId);
     setViewMode("form");
   };
 
@@ -775,6 +788,7 @@ export default function MaterialRequest() {
             <ApprovalStatusChain
               table="MaterialRequests"
               recordId={row.original.MRId}
+              fallback={<StatusBadge status={row.original.Status} />}
             />
             {pending &&
               (pending.totalPending > 0 ? (
@@ -1302,6 +1316,16 @@ export default function MaterialRequest() {
                       value={ci.ItemId}
                       onChange={(id) => pickItem(ci._key, id)}
                     />
+                    {/* Surfaces where the Required By Date floor actually
+                        comes from — without this, hitting the "can't be
+                        earlier than X" validation looks like it's coming
+                        from nowhere, since the min-date hint near the date
+                        field itself is easy to miss/scroll past. */}
+                    {Number(itemMap[ci.ItemId]?.DaysOfSupply ?? 0) > 0 && (
+                      <p className="text-[0.625rem] text-muted-foreground">
+                        {Number(itemMap[ci.ItemId].DaysOfSupply)}-day supply lead time
+                      </p>
+                    )}
                   </div>
 
                   {/* UOM selector */}

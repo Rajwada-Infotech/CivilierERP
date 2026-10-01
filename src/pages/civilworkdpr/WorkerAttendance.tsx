@@ -107,7 +107,21 @@ export function AddWorkerDialog({
 
   const { data: contractors = [] } = useQuery({
     queryKey: ["worker-attendance-contractors"],
-    queryFn: () => fetchWithAuth("/api/account-head/options?type=C").then((r) => r.json().catch(() => [])),
+    // Never let a non-array reach the <select>'s own .map() below — the old
+    // `.then((r) => r.json().catch(() => []))` never checked r.ok, so any
+    // error response (a JSON body of {error: "..."}, not an array) parsed
+    // fine and got treated as the options list. `contractors.map` then
+    // threw during render with no local error boundary, which the route's
+    // own RouteErrorBoundary caught by replacing the whole page with
+    // ErrorPage — a near-black full-screen fallback in this app's dark
+    // theme, which is what looked like "Add Worker crashes and blacks out
+    // the screen."
+    queryFn: async () => {
+      const r = await fetchWithAuth("/api/account-head/options?type=C");
+      if (!r.ok) return [];
+      const body = await r.json().catch(() => []);
+      return Array.isArray(body) ? body : [];
+    },
     enabled: open,
     staleTime: 5 * 60 * 1000,
   });
@@ -153,7 +167,12 @@ export function AddWorkerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      {/* elevated: this dialog can be opened from inside ActivityDetailModal's
+          own z-[70] backdrop, which otherwise paints over this Dialog's
+          default z-[60] overlay+content — the dialog was still there and
+          still worked, it was just invisible under the darker overlay
+          ("blacks out the screen"). Harmless when opened standalone. */}
+      <DialogContent className="max-w-md" elevated>
         <DialogHeader>
           <DialogTitle className="font-heading text-base">Select Worker</DialogTitle>
         </DialogHeader>

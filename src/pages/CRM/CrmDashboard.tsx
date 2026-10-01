@@ -66,7 +66,7 @@ const GlassPanel: React.FC<{ title: string; children: React.ReactNode }> = ({ ti
   const isDark = !isLightTheme(theme);
   return (
     <div
-      className="rounded-xl overflow-hidden bw-color-keep"
+      className="rounded-xl overflow-hidden"
       style={{
         background: isDark ? "rgba(15,12,3,0.45)" : "rgba(255,255,255,0.72)",
         border: "1px solid rgba(14,165,233,0.18)",

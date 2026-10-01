@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { projectBelongsToCompany, projectCompanyIds } from "@/lib/projectBelongsTo";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -89,6 +89,19 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
   };
   const usedIds = new Set(lines.map((l) => l.itemId).filter(Boolean));
 
+  // "Add Item" appends a row below the fold with no visual change to what's
+  // on screen — it looked like the dialog's scrollbar had frozen, when
+  // really the new row was just off-screen. Scroll it into view instead of
+  // leaving the user to find it themselves.
+  const lastRowRef = useRef<HTMLTableRowElement>(null);
+  const prevLineCount = useRef(lines.length);
+  useEffect(() => {
+    if (lines.length > prevLineCount.current) {
+      lastRowRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+    prevLineCount.current = lines.length;
+  }, [lines.length]);
+
   const save = useMutation({
     mutationFn: () =>
       updateStockUpdate(id, {
@@ -172,8 +185,8 @@ function EditStockUpdateDialog({ id, onClose }: { id: number; onClose: () => voi
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/50">
-                    {lines.map((l) => (
-                      <tr key={l.key}>
+                    {lines.map((l, i) => (
+                      <tr key={l.key} ref={i === lines.length - 1 ? lastRowRef : undefined}>
                         <td className="px-3 py-2">
                           <SearchableSelect
                             value={l.itemId}

@@ -177,7 +177,7 @@ const DonutCard: React.FC<{
   const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <div className="rounded-xl overflow-hidden bw-color-keep" style={cardStyle}>
+    <div className="rounded-xl overflow-hidden" style={cardStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
           <Icon size={11} style={{ color: ACCENT }} />
@@ -252,7 +252,7 @@ const UserPerformanceChart: React.FC<{ data: UserPerf[]; isDark: boolean; cardSt
   const { theme } = useTheme();
   const chartData = [...data].sort((a, b) => b.assigned - a.assigned).slice(0, 10);
   return (
-    <div className="rounded-xl overflow-hidden bw-color-keep" style={cardStyle}>
+    <div className="rounded-xl overflow-hidden" style={cardStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b" style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${ACCENT}26` }}>
           <TrendingUp size={11} style={{ color: ACCENT }} />

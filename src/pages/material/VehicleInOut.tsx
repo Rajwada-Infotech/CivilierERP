@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 
 const VIO_EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Doc No", accessor: "DocNo" },
-  { header: "Entry Time", accessor: (r) => r.EntryTime ? new Date(r.EntryTime as string).toLocaleString("en-IN") : "" },
+  { header: "Entry Time", accessor: (r) => r.EntryTime ? fmtServerDateTime(r.EntryTime as string) : "" },
   { header: "Vehicle No", accessor: "VehicleNo" },
   { header: "Supplier", accessor: "SupplierName" },
   { header: "PO Number", accessor: "PONumber" },
@@ -361,10 +361,7 @@ function VehicleCard({
           </p>
           <p className="truncate">
             {rec.EntryTime
-              ? new Date(rec.EntryTime).toLocaleString("en-IN", {
-                  dateStyle: "short",
-                  timeStyle: "short",
-                })
+              ? fmtServerDateTime(rec.EntryTime, { dateStyle: "short", timeStyle: "short" })
               : "—"}
           </p>
         </div>
@@ -420,6 +417,23 @@ const toLocalDateInput = (d: Date) =>
 
 const toLocalDateTimeInput = (d: Date) =>
   `${toLocalDateInput(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
+// ── Server-returned time helpers ──────────────────────────────────────────
+// EntryTime/ExitTime come back from the API as "...Z"-suffixed ISO strings
+// purely because Date -> JSON always appends "Z" — not because the value is
+// a true UTC instant. The backend round-trips the literal IST digits the
+// user typed through a UTC-configured Node process with no real conversion
+// (see vehicleInOut.js's parseIstDateTime comment), so the ISO string's UTC
+// component IS the intended IST wall-clock reading. Formatting it with
+// plain toLocaleString() applies the BROWSER's own local-timezone
+// conversion on top of that, double-shifting the displayed time by +5:30
+// (06:10 AM rendered as 11:40 AM). These read the UTC getters directly so
+// the literal digits typed in are what's ever shown or prefilled.
+const fmtServerDateTime = (iso: string | Date, opts?: Intl.DateTimeFormatOptions) =>
+  new Date(iso).toLocaleString("en-IN", { ...opts, timeZone: "UTC" });
+
+const toUtcDateTimeInput = (d: Date) =>
+  `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}T${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`;
 
 // ── Form default ───────────────────────────────────────────────────────────────
 const buildEmpty = (activeFinYear?: string) => ({
@@ -515,12 +529,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
       const v = getValue() as string;
       return (
         <span className="text-xs text-muted-foreground whitespace-nowrap">
-          {v
-            ? new Date(v).toLocaleString("en-IN", {
-                dateStyle: "short",
-                timeStyle: "short",
-              })
-            : "—"}
+          {v ? fmtServerDateTime(v, { dateStyle: "short", timeStyle: "short" }) : "—"}
         </span>
       );
     },
@@ -646,6 +655,11 @@ export default function VehicleInOut() {
   const [qualityByItem, setQualityByItem] = useState<
     Record<number, vehApi.VehicleInOutItemQuality | "">
   >({});
+
+  // Optional free-text brand per PO line item, keyed the same way as
+  // receivedQtyByItem/photoByItem/qualityByItem — reset/prefilled alongside
+  // them everywhere those are. Not mandatory.
+  const [brandByItem, setBrandByItem] = useState<Record<number, string>>({});
 
   // Quality-rejection debit note modal — raised against a single received
   // line item (VehicleInOutItemID) from the view modal.
@@ -844,6 +858,7 @@ export default function VehicleInOut() {
     setReceivedQtyByItem({});
     setPhotoByItem({});
     setQualityByItem({});
+    setBrandByItem({});
     setErrors({});
     setSearchParams(
       (prev) => {
@@ -869,6 +884,7 @@ export default function VehicleInOut() {
       setReceivedQtyByItem({});
       setPhotoByItem({});
       setQualityByItem({});
+      setBrandByItem({});
       toast.success(`Vehicle In/Out ${res.docNo} created`);
     },
     onError: (err: any) =>
@@ -888,6 +904,7 @@ export default function VehicleInOut() {
       setReceivedQtyByItem({});
       setPhotoByItem({});
       setQualityByItem({});
+      setBrandByItem({});
       toast.success("Record updated");
     },
     onError: (err: any) => toast.error(err.message || "Failed to update"),
@@ -932,9 +949,10 @@ export default function VehicleInOut() {
           receivedQty: parseFloat(raw) || 0,
           photoBase64: photoByItem[Number(poItemId)] || null,
           quality: qualityByItem[Number(poItemId)] || null,
+          brand: brandByItem[Number(poItemId)]?.trim() || null,
         }))
         .filter((it) => it.receivedQty > 0),
-    [receivedQtyByItem, photoByItem, qualityByItem],
+    [receivedQtyByItem, photoByItem, qualityByItem, brandByItem],
   );
 
   // ── Validate ──────────────────────────────────────────────────────────────────
@@ -1000,6 +1018,7 @@ export default function VehicleInOut() {
     setReceivedQtyByItem({});
     setPhotoByItem({});
     setQualityByItem({});
+    setBrandByItem({});
     setEditingId(null);
     setShowForm(false);
     setErrors({});
@@ -1051,6 +1070,13 @@ export default function VehicleInOut() {
           )
         : {},
     );
+    setBrandByItem(
+      Array.isArray(full.Items)
+        ? Object.fromEntries(
+            full.Items.filter((it: any) => it.Brand).map((it: any) => [it.POItemId, it.Brand]),
+          )
+        : {},
+    );
     setForm({
       docNo: full.DocNo ?? "",
       docDate: full.DocDate ? String(full.DocDate).slice(0, 10) : "",
@@ -1066,10 +1092,10 @@ export default function VehicleInOut() {
       poNumber: full.PONumber ?? "",
       vehicleNo: full.VehicleNo ?? "",
       entryTime: full.EntryTime
-        ? toLocalDateTimeInput(new Date(full.EntryTime))
+        ? toUtcDateTimeInput(new Date(full.EntryTime))
         : "",
       exitTime: full.ExitTime
-        ? toLocalDateTimeInput(new Date(full.ExitTime))
+        ? toUtcDateTimeInput(new Date(full.ExitTime))
         : null,
       challanNo: full.ChallanNo ?? "",
       attachments: Array.isArray(full.Attachments) ? full.Attachments : [],
@@ -1175,11 +1201,11 @@ export default function VehicleInOut() {
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px;">
     <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Entry Time</div>
-      <div style="font-size:13px;font-weight:600;">${rec.EntryTime ? new Date(rec.EntryTime).toLocaleString("en-IN") : "—"}</div>
+      <div style="font-size:13px;font-weight:600;">${rec.EntryTime ? fmtServerDateTime(rec.EntryTime) : "—"}</div>
     </div>
     <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Exit Time</div>
-      <div style="font-size:13px;font-weight:600;">${rec.ExitTime ? new Date(rec.ExitTime).toLocaleString("en-IN") : "—"}</div>
+      <div style="font-size:13px;font-weight:600;">${rec.ExitTime ? fmtServerDateTime(rec.ExitTime) : "—"}</div>
     </div>
   </div>
 
@@ -1369,6 +1395,7 @@ export default function VehicleInOut() {
                     setReceivedQtyByItem({});
                     setPhotoByItem({});
                     setQualityByItem({});
+                    setBrandByItem({});
                     setErrors({});
                   }}
                   className="btn-module inline-flex items-center gap-1.5 rounded-lg px-3 sm:px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition"
@@ -1450,6 +1477,7 @@ export default function VehicleInOut() {
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
                           setQualityByItem({});
+                          setBrandByItem({});
                         }}
                         className={`${inpSel} ${errors.companyId ? "border-destructive/60" : ""}`}
                       >
@@ -1501,6 +1529,7 @@ export default function VehicleInOut() {
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
                           setQualityByItem({});
+                          setBrandByItem({});
                         }}
                         className={`${inpSel} ${errors.projectId ? "border-destructive/60" : ""}`}
                       >
@@ -1654,6 +1683,7 @@ export default function VehicleInOut() {
                           setReceivedQtyByItem({});
                           setPhotoByItem({});
                           setQualityByItem({});
+                          setBrandByItem({});
                         }}
                         className={`${inpSel} ${errors.poId ? "border-destructive/60" : ""}`}
                       >
@@ -1771,6 +1801,7 @@ export default function VehicleInOut() {
                               <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Remaining</th>
                               <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">UOM</th>
                               <th className="px-4 py-2 text-right text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Qty This Lot</th>
+                              <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Brand</th>
                               <th className="px-4 py-2 text-left text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Quality</th>
                               <th className="px-4 py-2 text-center text-[0.625rem] uppercase tracking-wider text-muted-foreground font-heading">Photo</th>
                             </tr>
@@ -1844,6 +1875,21 @@ export default function VehicleInOut() {
                                       className={`w-24 px-2 py-1.5 rounded-lg border bg-background text-right font-mono text-xs focus:outline-none focus:ring-1 focus:ring-primary ${
                                         overLimit ? "border-destructive text-destructive" : "border-border"
                                       } ${it.remainingQty === 0 ? "opacity-50 cursor-not-allowed" : ""}`}
+                                    />
+                                  </td>
+                                  <td className="px-4 py-2.5">
+                                    <input
+                                      type="text"
+                                      value={brandByItem[it.poItemId] ?? ""}
+                                      onChange={(e) =>
+                                        setBrandByItem((prev) => ({
+                                          ...prev,
+                                          [it.poItemId]: e.target.value,
+                                        }))
+                                      }
+                                      placeholder="Optional"
+                                      maxLength={100}
+                                      className="w-28 px-2 py-1.5 rounded-lg border border-border bg-background text-xs focus:outline-none focus:ring-1 focus:ring-primary"
                                     />
                                   </td>
                                   <td className="px-4 py-2.5">
@@ -2099,6 +2145,7 @@ export default function VehicleInOut() {
                       setReceivedQtyByItem({});
                       setPhotoByItem({});
                       setQualityByItem({});
+                      setBrandByItem({});
                       setEditingId(null);
                       setErrors({});
                     }}
@@ -2442,7 +2489,7 @@ export default function VehicleInOut() {
                     </p>
                     <p className="text-xs font-semibold font-mono text-emerald-600 dark:text-emerald-400">
                       {viewingRec.EntryTime
-                        ? new Date(viewingRec.EntryTime).toLocaleString("en-IN")
+                        ? fmtServerDateTime(viewingRec.EntryTime)
                         : "—"}
                     </p>
                   </div>
@@ -2452,7 +2499,7 @@ export default function VehicleInOut() {
                     </p>
                     <p className="text-xs font-semibold font-mono text-foreground">
                       {viewingRec.ExitTime
-                        ? new Date(viewingRec.ExitTime).toLocaleString("en-IN")
+                        ? fmtServerDateTime(viewingRec.ExitTime)
                         : "Not yet exited"}
                     </p>
                   </div>
@@ -2482,6 +2529,11 @@ export default function VehicleInOut() {
                               <td className="px-3 py-2 font-medium text-foreground">
                                 <span className="inline-flex items-center gap-1.5">
                                   {it.ItemName || "—"}
+                                  {it.Brand && (
+                                    <span className="text-[0.625rem] font-normal text-muted-foreground">
+                                      ({it.Brand})
+                                    </span>
+                                  )}
                                   {it.Quality && (
                                     <span
                                       className={`inline-flex items-center px-1.5 py-0.5 rounded-full text-[0.5625rem] font-semibold uppercase tracking-wide border ${

@@ -159,11 +159,17 @@ export function VehicleInOutFormModal({
   );
 
   const filteredPOs = useMemo(() => allPOs.filter((po) => {
-    if (!["Approved", "Pending", "Received"].includes(po.Status)) return false;
+    // Always keep whatever PO is currently selected on the form — even if
+    // its status has since moved on — so editing an existing entry never
+    // finds its own PO silently missing from the list.
+    if (form.poId && String(po.PurchaseOrderID) === form.poId) return true;
+    // "Pending" means awaiting approval, not yet approved — goods can't be
+    // received against a PO nobody's signed off on yet.
+    if (!["Approved", "Received"].includes(po.Status)) return false;
     if (form.companyId && String(po.CompanyId ?? "") !== form.companyId) return false;
     if (form.projectId && String(po.ProjectId ?? "") !== form.projectId) return false;
     return true;
-  }), [allPOs, form.companyId, form.projectId]);
+  }), [allPOs, form.companyId, form.projectId, form.poId]);
 
   const { data: poItemsRemaining = [], isFetching: loadingPOItems } = useQuery<POItemRemaining[]>({
     queryKey: ["veh-po-items-remaining", form.poId, editingId],

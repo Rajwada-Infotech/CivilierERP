@@ -1641,7 +1641,10 @@ router.put("/:id/approve", async (req, res) => {
               .input("ref", sql.NVarChar(200), paymentReferenceForBrokerage(approvedRow))
               .input("notes", sql.NVarChar(sql.MAX), `Finance payment ${approvedRow.DocNo || id} approved`)
               .input("pid", sql.Int, id)
-              .input("cb", sql.Int, req.user?.id || null)
+              // req.user?.id is always undefined — the JWT payload's field
+              // is userId (see users.js's login route), same bug found and
+              // fixed in materialIssues.js's POST / CreatedBy.
+              .input("cb", sql.Int, req.user?.userId ?? req.user?.id ?? null)
               .query(`
                 INSERT INTO dbo.CrmBrokerPayment
                   (BrokerageId, Amount, PaidDate, PaymentMode, TransactionRef, Notes, SourceNewPaymentId, CreatedBy, CreatedAt)

@@ -162,7 +162,7 @@ function DonutCard({
   const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <div className="rounded-xl overflow-hidden flex-1 flex flex-col bw-color-keep" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden flex-1 flex flex-col" style={glassStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b shrink-0" style={{ borderColor: `${accentColor}26` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${accentColor}26` }}>
           <Icon size={11} style={{ color: accentColor }} />
@@ -225,7 +225,7 @@ function TrendCard({
   const { theme } = useTheme();
   const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
   return (
-    <div className="rounded-xl overflow-hidden flex-1 flex flex-col bw-color-keep" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden flex-1 flex flex-col" style={glassStyle}>
       <div className="flex items-center gap-2 px-4 py-3 border-b shrink-0" style={{ borderColor: `${accentColor}26` }}>
         <div className="w-5 h-5 rounded-md flex items-center justify-center" style={{ background: `${accentColor}26` }}>
           <Icon size={11} style={{ color: accentColor }} />

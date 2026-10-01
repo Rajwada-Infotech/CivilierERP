@@ -158,7 +158,7 @@ const DonutCard: React.FC<{
   const { theme } = useTheme();
   const total = data.reduce((s, d) => s + d.value, 0);
   return (
-    <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
       <div
         className="flex items-center gap-2 px-4 py-3 border-b"
         style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}
@@ -257,7 +257,7 @@ const TrendCard: React.FC<{
   const { theme } = useTheme();
   const hasData = data.some((d) => series.some((s) => Number(d[s.key]) > 0));
   return (
-    <div className="rounded-xl overflow-hidden bw-color-keep" style={glassStyle}>
+    <div className="rounded-xl overflow-hidden" style={glassStyle}>
       <div
         className="flex items-center gap-2 px-4 py-3 border-b"
         style={{ borderColor: isDark ? `${ACCENT}26` : `${ACCENT}1f` }}

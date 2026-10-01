@@ -105,28 +105,37 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
       }
     }
 
-    // ── UOM join strategy ────────────────────────────────────────────────────
-    // Prefer M_UOM on item table; fall back to last UOM in StockLedger.
-    // When neither exists, return NULLs for UOM columns (no join at all).
+    // ── UOM strategy ─────────────────────────────────────────────────────────
+    // Every ledger movement (GRN, Material Issue, Transfer, Stock Update, ...)
+    // records its own UOM on StockLedger.UOM. A Stock Update entered in
+    // Pieces and a GRN entered in Sq Ft for the same item are NOT the same
+    // unit and must never be summed into one "Closing Stock" number under
+    // whichever UOM happens to be the item's declared default (M_UOM) — that
+    // used to be exactly what this query did, which is why a quantity
+    // entered in one UOM could get silently relabeled and added in under a
+    // different one. So each distinct UOM actually used for an item within
+    // the filtered godown/date window becomes its own row here, keyed on
+    // sl.UOM; only an item with NO ledger rows in that window (genuinely
+    // zero stock) falls back to its own declared default UOM so it still
+    // appears in the list.
+    const uomKeyExpr = hasUomCol
+      ? hasUomOnItem
+        ? "COALESCE(sl.UOM, img.M_UOM)"
+        : "sl.UOM"
+      : hasUomOnItem
+        ? "img.M_UOM"
+        : null;
+
     let uomJoinClause = "";
     let uomSelect =
       "NULL AS UOMID, NULL AS UOMName, NULL AS UOMCode, NULL AS UOMSymbol";
     let uomGroupBy = "";
 
-    if (hasUomOnItem) {
-      uomJoinClause = "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = img.M_UOM";
+    if (uomKeyExpr) {
+      uomJoinClause = `LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = ${uomKeyExpr}`;
       uomSelect =
         "uom.Id AS UOMID, uom.UOMName AS UOMName, uom.UOMCode AS UOMCode, uom.Symbol AS UOMSymbol";
-      uomGroupBy = ", uom.Id, uom.UOMName, uom.UOMCode, uom.Symbol";
-    } else if (hasUomCol) {
-      uomJoinClause = `LEFT JOIN dbo.UOMMaster uom ON uom.Id = TRY_CAST((
-        SELECT TOP 1 sl2.UOM FROM dbo.StockLedger sl2
-        WHERE CONVERT(NVARCHAR(50), sl2.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
-        ORDER BY sl2.StockID DESC
-      ) AS INT)`;
-      uomSelect =
-        "uom.Id AS UOMID, uom.UOMName AS UOMName, uom.UOMCode AS UOMCode, uom.Symbol AS UOMSymbol";
-      uomGroupBy = ", uom.Id, uom.UOMName, uom.UOMCode, uom.Symbol";
+      uomGroupBy = `, ${uomKeyExpr}, uom.Id, uom.UOMName, uom.UOMCode, uom.Symbol`;
     }
 
     // ── Godown filter ────────────────────────────────────────────────────────
@@ -205,11 +214,11 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
       FROM dbo.Item_Master_Group img
       LEFT JOIN dbo.Item_Master_Group grp
         ON grp.M_Id = img.Parent_Id
-      ${uomJoinClause}
       LEFT JOIN dbo.StockLedger sl
         ON CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
         ${godownFilter}
         ${dateRangeFilter}
+      ${uomJoinClause}
       WHERE img.Parent_Id IS NOT NULL
       GROUP BY
         img.M_Id, img.M_Name, img.M_Group, grp.M_Name

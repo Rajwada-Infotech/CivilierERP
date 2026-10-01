@@ -12,6 +12,7 @@ import { RungAssignmentModal } from "@/pages/civilworkdpr/RungAssignmentModal";
 import { getReportedAssignments, ASSIGNMENT_STATUS_META } from "@/api/dependencyActivityAssignmentApi";
 import { AssignmentStatusSelect } from "@/components/civilworkdpr/AssignmentStatusSelect";
 import { QcBadge, AttemptBadge } from "@/components/civilworkdpr/QcBadge";
+import { ScopeLocationTree } from "@/components/civilworkdpr/ScopeLocationTree";
 import {
   Hammer,
   Layers,
@@ -26,8 +27,6 @@ import {
   UserRound,
   CalendarDays,
   ListChecks,
-  ChevronDown,
-  ChevronRight,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -147,40 +146,6 @@ export default function WorkDone() {
     allAssignments.forEach((a) => map.set(a.rungId, a));
     return map;
   }, [allAssignments]);
-
-  // Group chains by the room they're allocated to — a room with several
-  // chains (e.g. Bedroom 1 having both a Flooring Sequence and a Snag
-  // Rectification chain) now shows as one collapsible cluster instead of
-  // scattered rows, same grouping convention as GRN's PO grouping.
-  const chainGroupsByRoom = useMemo(() => {
-    const groups = new Map<
-      string,
-      { key: string; scopePath: string; projectName: string | null; chains: { chain: DependencyMasterListRow; index: number }[] }
-    >();
-    (allChains as DependencyMasterListRow[]).forEach((chain, index) => {
-      const key = chain.scopePath;
-      if (!groups.has(key)) groups.set(key, { key, scopePath: key, projectName: chain.projectName, chains: [] });
-      groups.get(key)!.chains.push({ chain, index });
-    });
-    return Array.from(groups.values());
-  }, [allChains]);
-  // Tracked as "expanded" (not "collapsed") specifically so the empty-object
-  // default means every group starts collapsed — the previous "collapsed"
-  // naming defaulted every group to expanded instead, which read fine for
-  // one or two rooms but turned into a very long, clumsy page the moment
-  // there were several. A group only opens once its key is explicitly set.
-  const [expandedChainGroups, setExpandedChainGroups] = useState<Record<string, boolean>>({});
-  const toggleChainGroup = (key: string) =>
-    setExpandedChainGroups((prev) => ({ ...prev, [key]: !prev[key] }));
-  // Single toggle to open (or close) every group at once instead of hunting
-  // down each chevron individually.
-  const allChainGroupsExpanded =
-    chainGroupsByRoom.length > 0 &&
-    chainGroupsByRoom.every((g) => expandedChainGroups[g.key]);
-  const toggleAllChainGroups = () =>
-    setExpandedChainGroups(
-      Object.fromEntries(chainGroupsByRoom.map((g) => [g.key, !allChainGroupsExpanded])),
-    );
 
   const { data: projects = [], isLoading: loadingProjects } = useQuery({
     queryKey: ["civilworkdpr-work-done-projects"],
@@ -487,114 +452,75 @@ export default function WorkDone() {
               <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
                 <GitBranch size={14} className="text-cyan-600 dark:text-cyan-400" />
                 <span className="text-sm font-heading font-semibold text-foreground">Dependency Chains</span>
-                <button
-                  type="button"
-                  onClick={toggleAllChainGroups}
-                  className="ml-auto flex items-center gap-1.5 text-[0.6875rem] font-medium text-muted-foreground hover:text-foreground px-2.5 py-1 rounded-lg border border-border hover:bg-muted/60 transition-colors"
-                >
-                  {allChainGroupsExpanded ? (
-                    <>
-                      <ChevronRight size={12} /> Collapse all
-                    </>
-                  ) : (
-                    <>
-                      <ChevronDown size={12} /> Expand all
-                    </>
-                  )}
-                </button>
               </div>
-              <div className="divide-y divide-border">
-                {chainGroupsByRoom.map((group) => {
-                  const collapsed = !expandedChainGroups[group.key];
-                  return (
-                    <div key={group.key}>
-                      {/* Group header — every chain allocated to this room */}
-                      <button
-                        type="button"
-                        onClick={() => toggleChainGroup(group.key)}
-                        className="w-full flex items-center gap-2.5 px-5 py-3 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
-                      >
-                        {collapsed ? (
-                          <ChevronRight size={14} className="text-muted-foreground shrink-0" />
-                        ) : (
-                          <ChevronDown size={14} className="text-muted-foreground shrink-0" />
-                        )}
-                        <MapPin size={13} className="text-cyan-600 dark:text-cyan-400 shrink-0" />
-                        <span className="text-sm font-heading font-semibold text-foreground truncate">
-                          {group.projectName ? `${group.projectName} > ` : ""}
-                          {group.scopePath}
-                        </span>
-                        <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
-                          {group.chains.length} chain{group.chains.length !== 1 ? "s" : ""}
-                        </span>
-                      </button>
-
-                      {!collapsed && (
-                        <div className="divide-y divide-border">
-                          {group.chains.map(({ chain }) => {
-                            const rungs = chain.activities ?? [];
-                            return (
-                              <div key={chain.id} className="px-5 py-4 space-y-2.5">
-                                <div>
-                                  <span className="text-sm font-semibold text-foreground">{chain.alias}</span>
-                                  <span
-                                    className={`ml-2 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
-                                      chain.workType === "INTERNAL"
-                                        ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
-                                        : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-                                    }`}
-                                  >
-                                    {chain.workType}
-                                  </span>
-                                </div>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {rungs.length === 0 ? (
-                                    <span className="text-xs text-muted-foreground italic">Loading activities…</span>
-                                  ) : (
-                                    rungs.map((rung) => {
-                                      const assignment = rung.rungId != null ? allAssignmentByRungId.get(rung.rungId) : undefined;
-                                      const done = assignment?.status === "COMPLETED";
-                                      // Every rung gets a real stub assignment row (Status='PENDING') the
-                                      // moment it's created (see dependencyMaster.js) — a never-allocated
-                                      // rung genuinely IS pending, matching Reporting's own Pending count.
-                                      // The "PENDING" fallback below only covers a rung from before that
-                                      // stub-row backfill (migration 487) that somehow still has none.
-                                      const meta = ASSIGNMENT_STATUS_META[assignment?.status ?? "PENDING"];
-                                      return (
-                                        <button
-                                          key={rung.rungId ?? rung.activityId}
-                                          type="button"
-                                          onClick={() => setActiveAssignment({ rung, chain })}
-                                          className={`flex items-center gap-1.5 rounded-full border pl-2 pr-2.5 py-1 text-xs transition-colors ${
-                                            done
-                                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                                              : "border-border bg-muted/40 text-foreground hover:bg-muted"
-                                          }`}
-                                          title="Assign engineer & material"
-                                        >
-                                          <span className="font-medium">
-                                            {rung.sequenceNo}. {rung.activityName}
-                                          </span>
-                                          <span
-                                            className={`text-[0.5625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${meta.className}`}
-                                          >
-                                            {meta.label}
-                                          </span>
-                                          <QcBadge qcStatus={assignment?.qcStatus} />
-                                          <AttemptBadge attemptNo={assignment?.attemptNo} />
-                                        </button>
-                                      );
-                                    })
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      )}
+              <div className="p-4">
+                <ScopeLocationTree
+                  rows={allChains as DependencyMasterListRow[]}
+                  countLabel="chain"
+                  renderLeaf={(chains) => (
+                    <div className="space-y-2.5">
+                      {chains.map((chain) => {
+                        const rungs = chain.activities ?? [];
+                        return (
+                          <div key={chain.id} className="rounded-lg border border-border/60 px-3.5 py-3 space-y-2.5">
+                            <div>
+                              <span className="text-sm font-semibold text-foreground">{chain.alias}</span>
+                              <span
+                                className={`ml-2 text-[0.625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${
+                                  chain.workType === "INTERNAL"
+                                    ? "bg-orange-500/10 text-orange-600 dark:text-orange-400"
+                                    : "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+                                }`}
+                              >
+                                {chain.workType}
+                              </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {rungs.length === 0 ? (
+                                <span className="text-xs text-muted-foreground italic">Loading activities…</span>
+                              ) : (
+                                rungs.map((rung) => {
+                                  const assignment = rung.rungId != null ? allAssignmentByRungId.get(rung.rungId) : undefined;
+                                  const done = assignment?.status === "COMPLETED";
+                                  // Every rung gets a real stub assignment row (Status='PENDING') the
+                                  // moment it's created (see dependencyMaster.js) — a never-allocated
+                                  // rung genuinely IS pending, matching Reporting's own Pending count.
+                                  // The "PENDING" fallback below only covers a rung from before that
+                                  // stub-row backfill (migration 487) that somehow still has none.
+                                  const meta = ASSIGNMENT_STATUS_META[assignment?.status ?? "PENDING"];
+                                  return (
+                                    <button
+                                      key={rung.rungId ?? rung.activityId}
+                                      type="button"
+                                      onClick={() => setActiveAssignment({ rung, chain })}
+                                      className={`flex items-center gap-1.5 rounded-full border pl-2 pr-2.5 py-1 text-xs transition-colors ${
+                                        done
+                                          ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                                          : "border-border bg-muted/40 text-foreground hover:bg-muted"
+                                      }`}
+                                      title="Assign engineer & material"
+                                    >
+                                      <span className="font-medium">
+                                        {rung.sequenceNo}. {rung.activityName}
+                                      </span>
+                                      <span
+                                        className={`text-[0.5625rem] font-heading font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${meta.className}`}
+                                      >
+                                        {meta.label}
+                                      </span>
+                                      <QcBadge qcStatus={assignment?.qcStatus} />
+                                      <AttemptBadge attemptNo={assignment?.attemptNo} />
+                                    </button>
+                                  );
+                                })
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  )}
+                />
               </div>
             </div>
           )}
