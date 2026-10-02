@@ -12,6 +12,14 @@ router.use(
 );
 
 const { getPool, sql } = require("../db");
+const { projectAllowed } = require("../services/projectScope");
+
+// An inter-company transfer belongs to BOTH of its projects: a restricted user
+// can see it if either end is theirs (the receiving project needs to see what
+// is coming in) but can only raise one out of their own sender project.
+const ictScopeIds = (scope) => scope.map(Number).filter(Number.isFinite).join(",") || "NULL";
+const ictVisibleSql = (scope, alias = "ict") =>
+  scope ? `(${alias}.SenderProjectId IN (${ictScopeIds(scope)}) OR ${alias}.ReceiverProjectId IN (${ictScopeIds(scope)}))` : "";
 const authenticateToken = require("../middleware/auth");
 const { requirePageRight } = require("../middleware/requirePageRight");
 const { bumpCacheVersion } = require("../redis");
@@ -105,12 +113,30 @@ async function getProjectGodown(pool, projectId) {
   return result.recordset[0] || null;
 }
 
+router.param("id", async (req, res, next, id) => {
+  if (!req.projectScope) return next();
+  const tid = parseInt(id, 10);
+  if (!Number.isFinite(tid)) return next();
+  try {
+    const r = await getPool().request().input("id", sql.Int, tid).query(
+      `SELECT CASE WHEN ${ictVisibleSql(req.projectScope, "ict")} THEN 1 ELSE 0 END AS visible FROM dbo.InterCompanyTransfer ict WHERE ict.ICTId = @id`,
+    );
+    if (r.recordset.length && !r.recordset[0].visible) {
+      return res.status(403).json({ error: "You don't have access to this project." });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const { companyId, projectId, dateFrom, dateTo, status, limit = 100, page = 1 } = req.query;
     const request = pool.request();
     const where = [];
+    if (req.projectScope) where.push(ictVisibleSql(req.projectScope, "ict"));
 
     if (companyId) {
       where.push("(ict.SenderCompanyId = @companyId OR ict.ReceiverCompanyId = @companyId)");
@@ -170,12 +196,15 @@ router.get("/summary", authenticateToken, async (req, res) => {
       SELECT YEAR(TransferDate) AS Year,
              COUNT(*) AS TransferCount,
              SUM(TotalAmount) AS TotalAmount
-      FROM dbo.InterCompanyTransfer
+      FROM dbo.InterCompanyTransfer ict
     `;
+    const sumWhere = [];
     if (status !== "all") {
       request.input("status", sql.NVarChar(20), status);
-      query += " WHERE Status = @status";
+      sumWhere.push("ict.Status = @status");
     }
+    if (req.projectScope) sumWhere.push(ictVisibleSql(req.projectScope, "ict"));
+    if (sumWhere.length) query += " WHERE " + sumWhere.join(" AND ");
     query += " GROUP BY YEAR(TransferDate) ORDER BY Year DESC";
     const result = await request.query(query);
     res.json(result.recordset);
@@ -433,6 +462,9 @@ router.post("/preview", authenticateToken, async (req, res) => {
     const pool = getPool();
     const senderProjectId = parsePositiveInt(req.body.SenderProjectId);
     const receiverProjectId = parsePositiveInt(req.body.ReceiverProjectId);
+    if (req.projectScope && !projectAllowed(req.projectScope, senderProjectId)) {
+      return res.status(403).json({ error: "You can only raise a transfer out of one of your own projects." });
+    }
     // Optional company overrides — used when a project is cross-tagged to a
     // company that isn't its primary company_id (e.g. Pristine Enclave tagged
     // to Delta Gardens). The override governs GL posting; purchase rate
@@ -507,6 +539,9 @@ router.post("/", authenticateToken, requirePageRight("stock-transfers", "create"
     const transferDate = req.body.TransferDate || new Date().toISOString().slice(0, 10);
     const senderProjectId = parsePositiveInt(req.body.SenderProjectId);
     const receiverProjectId = parsePositiveInt(req.body.ReceiverProjectId);
+    if (req.projectScope && !projectAllowed(req.projectScope, senderProjectId)) {
+      return res.status(403).json({ error: "You can only raise a transfer out of one of your own projects." });
+    }
     const senderCompanyOverrideId = parsePositiveInt(req.body.SenderCompanyId);
     const receiverCompanyOverrideId = parsePositiveInt(req.body.ReceiverCompanyId);
     const items = asItems(req.body.Items || req.body.TransferItems);

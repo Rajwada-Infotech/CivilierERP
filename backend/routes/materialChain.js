@@ -4,6 +4,17 @@ const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const { ebResolvedProjectSql, projectAllowed } = require("../services/projectScope");
+
+// The project the starting document of a chain belongs to, so a restricted user
+// can't walk the chain of a document from a project they can't see.
+const ROOT_PROJECT_SQL = {
+  mr: "SELECT ProjectId FROM dbo.MaterialRequests WHERE MRId = @id",
+  po: "SELECT ProjectId FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @id",
+  grn: "SELECT p.ProjectId FROM dbo.GoodsReceiptNotes g JOIN dbo.PurchaseOrders p ON p.PurchaseOrderID = g.POID WHERE g.GRNID = @id",
+  vio: "SELECT ProjectID AS ProjectId FROM dbo.VehicleInOut WHERE VehicleInOutID = @id",
+  expense: `SELECT ${ebResolvedProjectSql("eb")} AS ProjectId FROM dbo.ExpenseBooking eb WHERE eb.Eid = @id`,
+};
 
 // Resolves the full document chain (Material Request → Purchase Order →
 // GRN → Invoice/Expense Booking) around any one document in that chain, so
@@ -192,6 +203,12 @@ router.get("/:type/:id", authMiddleware, async (req, res) => {
 
   try {
     const pool = getPool();
+    if (req.projectScope && ROOT_PROJECT_SQL[type]) {
+      const root = await pool.request().input("id", sql.Int, id).query(ROOT_PROJECT_SQL[type]);
+      if (root.recordset.length && !projectAllowed(req.projectScope, root.recordset[0].ProjectId)) {
+        return res.status(403).json({ error: "You don't have access to this project." });
+      }
+    }
     let current = null;
     let upstream = [];
     let downstream = [];

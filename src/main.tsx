@@ -81,12 +81,13 @@ function markRows() {
 // colSpan, e.g. grouped two-row headers), and exactly the cells that sit in
 // the last column — header and body alike — get .sticky-act, so the header
 // stays aligned over its column. See index.css.
-function lastColumnCells(table: HTMLTableElement): { cells: HTMLTableCellElement[]; head: HTMLTableCellElement[] } {
-  const rows = Array.from(table.rows);
+// Every cell's real column range (honouring rowSpan / colSpan).
+type PlacedCell = { cell: HTMLTableCellElement; start: number; end: number; inHead: boolean };
+function placeCells(table: HTMLTableElement): { placed: PlacedCell[]; ncols: number } {
   const taken: boolean[][] = [];
-  const placed: { cell: HTMLTableCellElement; end: number; span: number; inHead: boolean }[] = [];
+  const placed: PlacedCell[] = [];
   let ncols = 0;
-  rows.forEach((row, r) => {
+  Array.from(table.rows).forEach((row, r) => {
     taken[r] = taken[r] || [];
     let c = 0;
     Array.from(row.cells).forEach((cell) => {
@@ -97,32 +98,62 @@ function lastColumnCells(table: HTMLTableElement): { cells: HTMLTableCellElement
         taken[r + dr] = taken[r + dr] || [];
         for (let dc = 0; dc < cs; dc++) taken[r + dr][c + dc] = true;
       }
-      placed.push({ cell, end: c + cs - 1, span: cs, inHead: row.parentElement?.tagName === "THEAD" });
+      placed.push({ cell, start: c, end: c + cs - 1, inHead: row.parentElement?.tagName === "THEAD" });
       c += cs;
       ncols = Math.max(ncols, c);
     });
   });
-  const last = placed.filter((p) => p.end === ncols - 1 && p.span === 1);
-  return { cells: last.map((p) => p.cell), head: last.filter((p) => p.inHead).map((p) => p.cell) };
+  return { placed, ncols };
 }
+const columnCells = (placed: PlacedCell[], col: number) =>
+  placed.filter((p) => p.start === col && p.end === col).map((p) => p.cell);
+
+// Pinned columns: a table's row-actions column (header "Action(s)", or an
+// empty header over cells holding buttons) is pinned to the right edge; a
+// "Status" column is pinned just left of it (or at the edge if there's no
+// actions column). Exactly the cells of those columns — header and body —
+// get .sticky-act / .sticky-status, so headers stay aligned over their
+// columns while everything else scrolls underneath. See index.css.
 function markStickyActions() {
   document.querySelectorAll<HTMLTableElement>("main table, [role=dialog] table").forEach((table) => {
-    const { cells, head } = lastColumnCells(table);
-    let isActions = false;
-    const label = head.map((h) => (h.textContent || "").trim()).join("");
-    if (/^actions?$/i.test(label)) isActions = true;
-    else if (!label && head.length) {
-      const bodyCell = cells.find((c) => c.parentElement?.parentElement?.tagName === "TBODY");
-      isActions = !!bodyCell && !!bodyCell.querySelector("button, a");
+    const { placed, ncols } = placeCells(table);
+    const headText = (col: number) =>
+      placed.filter((p) => p.inHead && p.start <= col && p.end >= col && p.start === p.end)
+        .map((p) => (p.cell.textContent || "").trim()).join("");
+
+    // Actions = last column
+    let actionCells: HTMLTableCellElement[] = [];
+    if (ncols > 1) {
+      const last = ncols - 1;
+      const label = headText(last);
+      const cells = columnCells(placed, last);
+      let isActions = /^actions?$/i.test(label);
+      if (!isActions && !label && cells.some((c) => c.parentElement?.parentElement?.tagName === "THEAD")) {
+        const bodyCell = cells.find((c) => c.parentElement?.parentElement?.tagName === "TBODY");
+        isActions = !!bodyCell && !!bodyCell.querySelector("button, a");
+      }
+      if (isActions) actionCells = cells;
     }
-    const want = new Set(isActions ? cells : []);
-    table.querySelectorAll<HTMLTableCellElement>(".sticky-act").forEach((c) => {
-      if (!want.has(c)) c.classList.remove("sticky-act");
-    });
-    want.forEach((c) => c.classList.add("sticky-act"));
-    table.classList.toggle("table-sticky-actions", isActions);
+    // Status = header labelled "Status" (not the actions column itself)
+    let statusCells: HTMLTableCellElement[] = [];
+    for (let col = 0; col < ncols - (actionCells.length ? 1 : 0); col++) {
+      if (/^status$/i.test(headText(col))) { statusCells = columnCells(placed, col); break; }
+    }
+    if (ncols < 3) statusCells = [];
+
+    const sync = (cls: string, want: Set<HTMLTableCellElement>) => {
+      table.querySelectorAll<HTMLTableCellElement>(`.${cls}`).forEach((c) => { if (!want.has(c)) c.classList.remove(cls); });
+      want.forEach((c) => c.classList.add(cls));
+    };
+    sync("sticky-act", new Set(actionCells));
+    sync("sticky-status", new Set(statusCells));
+    table.classList.toggle("table-sticky-actions", actionCells.length > 0 || statusCells.length > 0);
+    // Status sits exactly beside the pinned actions column.
+    const actWidth = actionCells.length ? actionCells[0].getBoundingClientRect().width : 0;
+    table.style.setProperty("--sticky-act-w", `${actWidth}px`);
   });
 }
+window.addEventListener("resize", () => requestAnimationFrame(markStickyActions));
 
 let markQueued = false;
 new MutationObserver(() => {

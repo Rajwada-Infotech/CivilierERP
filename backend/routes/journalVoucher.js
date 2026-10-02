@@ -14,6 +14,7 @@ const {
 const { transition, guardEdit, getRecordStatus } = require("../services/approvalService");
 const { resolveAllowPostApproval } = require("../middleware/permissions");
 const { postJournalVoucherApproval, hasPosting, reversePostingBySource } = require("../services/generalLedger");
+const { projectPredicate, projectParamGuard, assertProjectRawAllowed } = require("../services/projectScope");
 const { snapshotRow, recordAmendment } = require("../services/amendmentLog");
 const { ledgerOptionGroup } = require("../utils/ledgerOptionGroup");
 const { validateSettlementMode, normalizeSettlementMode, assertChequeLeafFree } = require("../utils/settlementMode");
@@ -79,12 +80,16 @@ async function assertNoGenericDrawingsHead(pool, lines) {
 }
 
 // ── GET / — list, with filters ──────────────────────────────────────────────
+// Any :id route — refuse a voucher whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.JournalVoucher WHERE JVID = @id"));
+
 router.get("/", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const { status, companyId, projectId, dateFrom, dateTo } = req.query;
     const request = pool.request();
     const conditions = [];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "jv.ProjectId", "").trim());
 
     // companyId is optional — the list page shows every company's vouchers
     // by default (no company filter in its UI); only scope when given.
@@ -203,6 +208,7 @@ router.get("/payable-lines", authenticateToken, async (req, res) => {
     const { companyId, projectId } = req.query;
     const request = pool.request();
     const conditions = [];
+    if (req.projectScope) conditions.push(projectPredicate(req.projectScope, "jv.ProjectId", "").trim());
     if (companyId) {
       conditions.push("jv.CompanyId = @companyId");
       request.input("companyId", sql.Int, parseInt(companyId, 10));
@@ -300,6 +306,7 @@ router.post("/", authenticateToken, requirePageRight("journal-voucher", "create"
   try {
     const pool = getPool();
     const { JVDate, Narration, CompanyId, ProjectId, lines = [], finYear } = req.body;
+    if (!(await assertProjectRawAllowed(req, res, ProjectId))) return;
 
     if (!JVDate) return res.status(400).json({ error: "JVDate is required." });
     const linesError = validateLines(lines);
@@ -451,6 +458,7 @@ router.put("/:id", authenticateToken, requirePageRight("journal-voucher", "edit"
     }
 
     const { JVDate, Narration, CompanyId, ProjectId, lines = [] } = req.body;
+    if (!(await assertProjectRawAllowed(req, res, ProjectId))) return;
     if (!JVDate) return res.status(400).json({ error: "JVDate is required." });
     const linesError = validateLines(lines);
     if (linesError) return res.status(400).json({ error: linesError });

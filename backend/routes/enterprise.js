@@ -429,7 +429,7 @@ router.get("/options", authMiddleware, async (req, res) => {
 
     // A project-scoped user only ever sees their assigned projects here —
     // this one endpoint feeds the project dropdown on nearly every screen.
-    if (req.projectScope && req.query.business_type === "P") {
+    if (req.projectScope && (req.query.business_type === "P" || req.query.type === "P")) {
       conditions.push(projectPredicate(req.projectScope, "id", "").trim());
     }
 

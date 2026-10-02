@@ -4,6 +4,10 @@ const router = express.Router();
 const rateLimit = require("express-rate-limit");
 router.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 1000, validate: false, message: { error: "Too many requests, please try again later." } }));
 const { getPool, sql } = require("../db");
+const { projectPredicate, projectParamGuard } = require("../services/projectScope");
+
+// Any :id route — refuse an invoice whose project is outside the user's scope.
+router.param("id", projectParamGuard("SELECT ProjectId FROM dbo.SaleInvoices WHERE SaleInvoiceID = @id"));
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { requireValidId } = require("../utils/routeHelpers");
@@ -129,6 +133,7 @@ router.get(
       if (saleOrderId) where.push("si.SaleOrderID = @saleOrderId");
       if (customerId) where.push("si.CustomerID = @customerId");
       if (companyId) where.push("si.CompanyId = @companyId");
+      if (req.projectScope) where.push(projectPredicate(req.projectScope, "si.ProjectId", "").trim());
       const extraWhere = where.length ? `AND ${where.join(" AND ")}` : "";
 
       const result = await pool
