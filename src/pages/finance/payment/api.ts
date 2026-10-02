@@ -72,6 +72,9 @@ export function bankNameFromIfsc(ifsc?: string | null): string | null {
 export const normaliseExpenseOptions = (items: any[]): ExpenseOption[] =>
   items.map((o: any) => ({
     ...o,
+    // The /options route has always sent the supplier as partyId; the merge
+    // picker reads supplierId.
+    supplierId: o.supplierId ?? o.partyId ?? null,
     companyName:
       o.companyName || o.ECompanyName || o.company_name || o.CompanyName || null,
     projectName:

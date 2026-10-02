@@ -983,6 +983,11 @@ router.get("/options", async (req, res) => {
       partyName: r.partyName || "",
       supplierName: r.supplierName || "",
       partyId: r.supplierId || null,
+      // Same value as partyId under the name the merge-invoices picker reads
+      // (types.ts ExpenseOption.supplierId) — it was never sent before, so
+      // every invoice failed the "same supplier" check.
+      supplierId: r.supplierId || null,
+      projectId: r.projectId ?? null,
       amount: parseFloat(r.amount) || 0,
       tdsAmount: parseFloat(r.tdsAmount) || 0,
       totalPaid: parseFloat(r.totalPaid) || 0,
