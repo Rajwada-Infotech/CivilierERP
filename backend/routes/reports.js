@@ -494,53 +494,26 @@ router.get("/tds", async (req, res) => {
       }
     }
 
-    // A payment shows here if TDS was actually deducted on it (the
-    // original scope), OR it's a broker/commission payment (194H) at all —
-    // those belong in a TDS report even when no TDS applied (below
-    // threshold, or the broker was flagged TDS-exempt), since "why wasn't
-    // TDS deducted on this brokerage" is exactly the kind of thing this
-    // report needs to make reviewable, not just a log of amounts withheld.
-    // Excludes Rejected/Deleted payments — those never actually moved
-    // money, so they don't belong in a report of real transactions
-    // (previously no status filter existed at all, which only stayed
-    // harmless because a rejected payment with TDS > 0 was rare; now that
-    // every broker payment qualifies regardless of TDS, a rejected one
-    // would otherwise show up looking like a real payout).
-    const whereParts = [
-      "(ISNULL(np.TDSAmount, 0) > 0 OR np.SourceCrmBrokerageId IS NOT NULL)",
-      "np.Status NOT IN ('Rejected', 'Deleted')",
-    ];
-    const request = pool.request().input("offset", sql.Int, offset).input("limit", sql.Int, limit);
-
-    if (companyId) {
-      whereParts.push("TRY_CAST(np.PCompany AS INT) = @CompanyId");
-      request.input("CompanyId", sql.Int, parseInt(companyId, 10));
-    }
-    if (dateFrom) {
-      whereParts.push("CAST(np.PDate AS DATE) >= @DateFrom");
-      request.input("DateFrom", sql.Date, dateFrom);
-    } else if (fyStart) {
-      whereParts.push("CAST(np.PDate AS DATE) >= @FYStart");
-      request.input("FYStart", sql.Date, fyStart);
-    }
-    if (dateTo) {
-      whereParts.push("CAST(np.PDate AS DATE) <= @DateTo");
-      request.input("DateTo", sql.Date, dateTo);
-    } else if (fyEnd) {
-      whereParts.push("CAST(np.PDate AS DATE) <= @FYEnd");
-      request.input("FYEnd", sql.Date, fyEnd);
-    }
-
-    const whereSQL = "WHERE " + whereParts.join(" AND ");
-
-    const result = await request.query(`
+    // Two sources of a real TDS deduction, one register:
+    //  1. Payments (NewPayment) — TDS deducted on the payment itself, plus
+    //     every CRM brokerage payment (194H) even when no TDS applied.
+    //     Rejected/Deleted payments never moved money, so they're excluded.
+    //  2. Approved Journal Vouchers — accounts also book TDS by hand in a JV
+    //     (e.g. Dr Brokerage 1,00,000 / Cr Broker 98,000 / Cr TDS 194H 2,000).
+    //     A JV line CREDITED to a TDS nature ledger is the deduction. The
+    //     ledger is recognised through TDSMaster.GLHeadId (nothing named by
+    //     hand); the party is the JV's credited non-GL head (broker,
+    //     supplier…); gross = what the party is owed + the TDS withheld.
+    // PAmount on a payment means two things — for a Direct payment it's the
+    // GROSS bill (TDS split out of its own GL posting, newPayment.js
+    // bankAndTdsLegs); for an Invoice/Brokerage payment it's already NET
+    // (TDS withheld at invoice posting / brokerage approval), so TDSAmount
+    // there is only an inherited figure — never subtract it twice.
+    const srcSQL = `
       SELECT
-        np.PPaymentID,
-        np.DocNo,
-        CONVERT(VARCHAR(10), np.PDate, 23)                  AS PayDate,
-        ISNULL(pfy.FName, '')                                AS FinYear,
-        ISNULL(ec.name, np.PCompany)                         AS Company,
-        -- Party: linked invoice's resolved supplier, else the direct party.
+        'PAY' AS Src, np.PPaymentID AS SrcId, np.DocNo,
+        CAST(np.PDate AS DATE) AS Dt, TRY_CAST(np.PCompany AS INT) AS CompanyIdNum,
+        CAST(np.PCompany AS NVARCHAR(100)) AS CompanyRaw, np.PFinYearId AS FinYearId,
         COALESCE(
           CASE
             WHEN eb.ESourceType = 'GRN' THEN grn_sup.LHeadName
@@ -548,42 +521,23 @@ router.get("/tds", async (req, res) => {
             ELSE grn2_sup.LHeadName
           END,
           party_head.LHeadName
-        )                                                    AS PartyName,
+        ) AS PartyName,
         CASE
           WHEN np.SourceCrmBrokerageId IS NOT NULL THEN 'Brokerage'
           WHEN np.PExpenseRef IS NOT NULL AND np.PExpenseRef <> '' AND np.ContractId IS NULL
-             THEN 'Invoice' ELSE 'Direct' END                AS PaymentType,
-        np.PExpenseRef                                       AS InvoiceRef,
-        np.TDSNature,
-        np.TDSName,
-        ISNULL(np.TDSPercentage, 0)                          AS TDSPercentage,
-        -- PAmount means two different things depending on how this payment
-        -- was created: for a Direct payment it's the GROSS bill amount (TDS
-        -- gets split out of THIS payment's own GL posting — see
-        -- newPayment.js's bankAndTdsLegs); for an Invoice or Brokerage
-        -- payment, PAmount is already NET of TDS (TDS was withheld
-        -- separately, at invoice-posting or brokerage-approval time — see
-        -- resolveInvoiceLinkedTds / createFinancePaymentForBrokerage), so
-        -- TDSAmount here is only an inherited display figure, not something
-        -- still to be subtracted. A single PAmount-minus-TDSAmount formula
-        -- for every row double-subtracted TDS on exactly the rows this
-        -- report cares most about.
-        CASE WHEN net.IsAlreadyNet = 1
-          THEN ISNULL(np.PAmount, 0) + ISNULL(np.TDSAmount, 0)
-          ELSE ISNULL(np.PAmount, 0) END                     AS GrossAmount,
-        ISNULL(np.TDSAmount, 0)                              AS TDSAmount,
-        CASE WHEN net.IsAlreadyNet = 1
-          THEN ISNULL(np.PAmount, 0)
-          ELSE ISNULL(np.PAmount, 0) - ISNULL(np.TDSAmount, 0) END AS NetPaid,
-        COUNT(*) OVER()                                      AS _total
+             THEN 'Invoice' ELSE 'Direct' END AS PaymentType,
+        np.PExpenseRef AS InvoiceRef,
+        np.TDSNature, np.TDSName,
+        CAST(ISNULL(np.TDSPercentage, 0) AS DECIMAL(9,2)) AS TDSPercentage,
+        CAST(CASE WHEN net.IsAlreadyNet = 1 THEN ISNULL(np.PAmount, 0) + ISNULL(np.TDSAmount, 0)
+             ELSE ISNULL(np.PAmount, 0) END AS DECIMAL(18,2)) AS GrossAmount,
+        CAST(ISNULL(np.TDSAmount, 0) AS DECIMAL(18,2)) AS TDSAmount
       FROM dbo.NewPayment np
       CROSS APPLY (SELECT CASE
           WHEN np.SourceCrmBrokerageId IS NOT NULL THEN 1
           WHEN np.PExpenseRef IS NOT NULL AND np.PExpenseRef <> '' AND np.ContractId IS NULL THEN 1
           ELSE 0
         END AS IsAlreadyNet) net
-      LEFT JOIN dbo.FinYear pfy ON pfy.FId = np.PFinYearId
-      LEFT JOIN dbo.enterprise ec ON ec.id = TRY_CAST(np.PCompany AS INT) AND ec.business_type = 'C'
       LEFT JOIN dbo.ExpenseBooking eb ON eb.EDocNo = np.PExpenseRef
       LEFT JOIN dbo.GoodsReceiptNotes grn_eb ON eb.ESourceType = 'GRN' AND grn_eb.GRNID = TRY_CAST(eb.ESourceId AS INT)
       LEFT JOIN dbo.AccountHeadMaster grn_sup ON grn_sup.LHeadId = grn_eb.SupplierID
@@ -592,52 +546,108 @@ router.get("/tds", async (req, res) => {
       LEFT JOIN dbo.GoodsReceiptNotes grn2 ON eb.ESourceType NOT IN ('GRN','PO') AND grn2.POID = po.PurchaseOrderID
       LEFT JOIN dbo.AccountHeadMaster grn2_sup ON grn2_sup.LHeadId = grn2.SupplierID
       LEFT JOIN dbo.AccountHeadMaster party_head ON party_head.LHeadId = np.PPartyId
+      WHERE (ISNULL(np.TDSAmount, 0) > 0 OR np.SourceCrmBrokerageId IS NOT NULL)
+        AND np.Status NOT IN ('Rejected', 'Deleted')
+
+      UNION ALL
+
+      SELECT
+        'JV' AS Src, jv.JVID AS SrcId, jv.JVNo AS DocNo,
+        CAST(jv.JVDate AS DATE) AS Dt, jv.CompanyId AS CompanyIdNum,
+        CAST(jv.CompanyId AS NVARCHAR(100)) AS CompanyRaw, NULL AS FinYearId,
+        party.LHeadName AS PartyName,
+        CASE WHEN party.LHeadType = 'BR' THEN 'Brokerage (JV)' ELSE 'Journal Voucher' END AS PaymentType,
+        NULL AS InvoiceRef,
+        tm.Nature AS TDSNature, tm.Name AS TDSName,
+        CAST(ROUND(100.0 * l.CreditAmount / NULLIF(ISNULL(pa.Amount, 0) + l.CreditAmount, 0), 2) AS DECIMAL(9,2)) AS TDSPercentage,
+        CAST(ISNULL(pa.Amount, 0) + l.CreditAmount AS DECIMAL(18,2)) AS GrossAmount,
+        CAST(l.CreditAmount AS DECIMAL(18,2)) AS TDSAmount
+      FROM dbo.JournalVoucherLines l
+      JOIN dbo.JournalVoucher jv ON jv.JVID = l.JVID
+      -- what the party (credited non-GL heads) is owed in this JV
+      OUTER APPLY (
+        SELECT SUM(l4.CreditAmount) AS Amount
+        FROM dbo.JournalVoucherLines l4
+        JOIN dbo.AccountHeadMaster h4 ON h4.LHeadId = l4.LHeadId
+        WHERE l4.JVID = l.JVID AND l4.CreditAmount > 0 AND h4.LHeadType <> 'GL'
+      ) pa
+      OUTER APPLY (
+        SELECT TOP 1 h2.LHeadName, h2.LHeadType
+        FROM dbo.JournalVoucherLines l2
+        JOIN dbo.AccountHeadMaster h2 ON h2.LHeadId = l2.LHeadId
+        WHERE l2.JVID = l.JVID AND l2.CreditAmount > 0 AND h2.LHeadType <> 'GL'
+        ORDER BY l2.CreditAmount DESC
+      ) party
+      -- the TDS nature ledger's TDSMaster row whose rate is closest to what
+      -- was actually withheld (194C has two rates sharing one ledger)
+      CROSS APPLY (
+        SELECT TOP 1 t.Nature, t.Name
+        FROM dbo.TDSMaster t
+        WHERE t.GLHeadId = l.LHeadId AND ISNULL(t.Percentage, 0) > 0
+        ORDER BY ABS(t.Percentage - ISNULL(100.0 * l.CreditAmount / NULLIF(ISNULL(pa.Amount, 0) + l.CreditAmount, 0), 0)), t.TDSId
+      ) tm
+      WHERE l.CreditAmount > 0 AND jv.Status = 'Approved'
+    `;
+
+    const filters = [];
+    const bind = (r) => {
+      if (companyId) r.input("CompanyId", sql.Int, parseInt(companyId, 10));
+      if (dateFrom) r.input("DateFrom", sql.Date, dateFrom); else if (fyStart) r.input("DateFrom", sql.Date, fyStart);
+      if (dateTo) r.input("DateTo", sql.Date, dateTo); else if (fyEnd) r.input("DateTo", sql.Date, fyEnd);
+      return r;
+    };
+    if (companyId) filters.push("s.CompanyIdNum = @CompanyId");
+    if (dateFrom || fyStart) filters.push("s.Dt >= @DateFrom");
+    if (dateTo || fyEnd) filters.push("s.Dt <= @DateTo");
+    const whereSQL = filters.length ? "WHERE " + filters.join(" AND ") : "";
+
+    const result = await bind(pool.request().input("offset", sql.Int, offset).input("limit", sql.Int, limit)).query(`
+      SELECT s.*,
+        CONVERT(VARCHAR(10), s.Dt, 23) AS PayDate,
+        ISNULL(ec.name, s.CompanyRaw) AS Company,
+        fy.FName AS FinYear,
+        COUNT(*) OVER() AS _total
+      FROM (${srcSQL}) s
+      LEFT JOIN dbo.enterprise ec ON ec.id = s.CompanyIdNum AND ec.business_type = 'C'
+      OUTER APPLY (
+        SELECT TOP 1 f.FName FROM dbo.FinYear f
+        WHERE f.FId = s.FinYearId OR (s.FinYearId IS NULL AND s.Dt BETWEEN f.FStartDate AND f.FEndDate)
+      ) fy
       ${whereSQL}
-      ORDER BY np.PDate DESC, np.PPaymentID DESC
+      ORDER BY s.Dt DESC, s.SrcId DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
     const rows = result.recordset;
     const total = rows.length > 0 ? parseInt(rows[0]._total) : 0;
 
-    const data = rows.map(({ _total, ...r }) => ({
-      PPaymentID: r.PPaymentID,
-      DocNo: r.DocNo,
-      PayDate: r.PayDate,
-      FinYear: r.FinYear || null,
-      Company: r.Company,
-      PartyName: r.PartyName || null,
-      PaymentType: r.PaymentType,
-      InvoiceRef: r.InvoiceRef || null,
-      TDSNature: r.TDSNature || null,
-      TDSName: r.TDSName || null,
-      TDSPercentage: parseFloat(r.TDSPercentage) || 0,
-      GrossAmount: parseFloat(r.GrossAmount) || 0,
-      TDSAmount: parseFloat(r.TDSAmount) || 0,
-      NetPaid: parseFloat(r.NetPaid) || 0,
-    }));
+    const data = rows.map((r) => {
+      const gross = parseFloat(r.GrossAmount) || 0;
+      const tds = parseFloat(r.TDSAmount) || 0;
+      return {
+        PPaymentID: r.Src === "PAY" ? r.SrcId : null,
+        JVID: r.Src === "JV" ? r.SrcId : null,
+        DocNo: r.DocNo,
+        PayDate: r.PayDate,
+        FinYear: r.FinYear || null,
+        Company: r.Company,
+        PartyName: r.PartyName || null,
+        PaymentType: r.PaymentType,
+        InvoiceRef: r.InvoiceRef || null,
+        TDSNature: r.TDSNature || null,
+        TDSName: r.TDSName || null,
+        TDSPercentage: parseFloat(r.TDSPercentage) || 0,
+        GrossAmount: gross,
+        TDSAmount: tds,
+        // GrossAmount is already normalised for net/gross payments above.
+        NetPaid: Math.round((gross - tds) * 100) / 100,
+      };
+    });
 
-    // Fresh request for the grand-total row (same filters, whole result
-    // set — not just this page) rather than reusing `request`, which
-    // already has offset/limit bound to this page.
-    const totalsRequest = pool.request();
-    if (companyId) totalsRequest.input("CompanyId", sql.Int, parseInt(companyId, 10));
-    if (dateFrom) totalsRequest.input("DateFrom", sql.Date, dateFrom);
-    else if (fyStart) totalsRequest.input("FYStart", sql.Date, fyStart);
-    if (dateTo) totalsRequest.input("DateTo", sql.Date, dateTo);
-    else if (fyEnd) totalsRequest.input("FYEnd", sql.Date, fyEnd);
-    const totalsRes = await totalsRequest.query(`
-      SELECT
-        ISNULL(SUM(np.TDSAmount), 0) AS TotalTDS,
-        -- Same Invoice/Brokerage-is-already-net adjustment as the main
-        -- query's GrossAmount column — see its comment above.
-        ISNULL(SUM(
-          CASE WHEN np.SourceCrmBrokerageId IS NOT NULL
-                 OR (np.PExpenseRef IS NOT NULL AND np.PExpenseRef <> '' AND np.ContractId IS NULL)
-            THEN ISNULL(np.PAmount, 0) + ISNULL(np.TDSAmount, 0)
-            ELSE ISNULL(np.PAmount, 0) END
-        ), 0) AS TotalGross
-      FROM dbo.NewPayment np ${whereSQL}
+    // Grand totals over the whole filtered set, not just this page.
+    const totalsRes = await bind(pool.request()).query(`
+      SELECT ISNULL(SUM(s.TDSAmount), 0) AS TotalTDS, ISNULL(SUM(s.GrossAmount), 0) AS TotalGross
+      FROM (${srcSQL}) s ${whereSQL}
     `);
 
     return res.json({

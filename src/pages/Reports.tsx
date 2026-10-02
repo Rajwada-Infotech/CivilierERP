@@ -1373,7 +1373,7 @@ const ALL_REPORTS: ReportDef[] = [
   {
     id: "tds-report",
     label: "TDS Report",
-    description: "TDS deducted on payments, plus every broker/commission payment regardless of TDS",
+    description: "TDS deducted on payments and in journal vouchers (e.g. brokerage 194H), plus every CRM brokerage payment",
     icon: Percent,
     color: "#eab308",
     apiPath: "/api/reports/tds",
@@ -1385,7 +1385,7 @@ const ALL_REPORTS: ReportDef[] = [
       dateToParam: "dateTo",
     },
     columns: [
-      { header: "Payment Doc No", accessor: "DocNo" },
+      { header: "Doc No", accessor: "DocNo" },
       { header: "Date", accessor: (r) => (r.PayDate ?? "—") as string },
       { header: "Company", accessor: (r) => (r.Company ?? "—") as string },
       { header: "Party", accessor: (r) => (r.PartyName ?? "—") as string },
