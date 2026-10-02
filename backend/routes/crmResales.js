@@ -305,7 +305,23 @@ router.put("/:id/complete", requirePageRight("crm-resales", "edit"), async (req,
               WHERE Id = @id`);
 
     await tx.commit();
-    res.json({ success: true, ToBookingId: toBookingId, holdingCreated: !!holding });
+
+    // The developer's fee posts after the resale is committed, like every
+    // other CRM posting: a ledger failure is recorded (GLPostingLog) and
+    // surfaced, never allowed to undo the transfer that already happened.
+    let ledgerWarning = null;
+    try {
+      const { postCrmResaleFeeToGL } = require("../services/crmLedger");
+      const { recordGLPosting } = require("../services/approvalService");
+      const actor = req.user?.email || req.user?.name || String(actorId(req));
+      const outcome = await postCrmResaleFeeToGL(pool, id, actor);
+      await recordGLPosting("crm-resale", id, outcome, actor);
+      if (outcome && outcome.posted === false) ledgerWarning = outcome.reason;
+    } catch (glErr) {
+      ledgerWarning = `Resale fee was not posted to the ledger: ${glErr.message}`;
+      console.error("[crm-resales] resale fee GL posting failed for", id, "—", glErr.message);
+    }
+    res.json({ success: true, ToBookingId: toBookingId, holdingCreated: !!holding, ledgerWarning });
   } catch (e) {
     try { await tx.rollback(); } catch { /* already rolled back */ }
     console.error("[crm-resales] PUT /:id/complete:", e.message);

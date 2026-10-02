@@ -35,6 +35,10 @@ const CRM_SALE_LAND_ACCOUNT = "Sale of Land";
 // name kept only as a fallback for databases predating migrations 472/484.
 const CRM_SALE_INCOME_CODE = "CRM-SALE-INCOME";
 const CRM_SALE_LAND_CODE = "CRM-SALE-LAND";
+// Migration 522. A villa built on a plot the buyer already owns is a
+// construction-only sale, kept apart from flats sold with their land.
+const CRM_SALE_VILLA_CODE = "CRM-SALE-VILLA";
+const CRM_SALE_VILLA_ACCOUNT = "Villa Construction Income";
 // Income head the company keeps when a cancelled booking is refunded (not
 // re-booked). Seeded by migration 416.
 const CRM_FORFEITURE_ACCOUNT = "Booking Cancellation Forfeiture";
@@ -93,6 +97,56 @@ async function getGstSplit(pool, bookingId, amount) {
   const ratio = Number(row.GrandTotal) > 0 ? Number(row.TotalGstAmount) / Number(row.GrandTotal) : 0;
   const gstAmount = Math.round(amount * ratio * 100) / 100;
   return { gstAmount, baseAmount: Math.round((amount - gstAmount) * 100) / 100 };
+}
+
+/**
+ * GST share of a booking's next money posting, CUMULATIVELY.
+ *
+ * Splitting each receipt or invoice on its own (getGstSplit) rounds every
+ * one separately, so a booking paid in parts and invoiced in other parts
+ * collects paise of drift: the advance released by the invoices no longer
+ * equals the advance received, and Advance from Customer is left with a
+ * permanent residue. Instead each posting takes "GST due on everything posted
+ * so far including this one, minus GST already posted" — so once the whole
+ * value has been received and invoiced, both sides land exactly on the
+ * booking's GST, whatever the instalments were.
+ *
+ * side 'receipt': money in (CrmPaymentReceipt / CrmOnAccountPayment vouchers)
+ * side 'invoice': revenue recognition (CrmInvoice vouchers)
+ */
+async function getCumulativeGstSplit(pool, bookingId, amount, side) {
+  const bk = (await pool.request().input("bid", sql.Int, bookingId)
+    .query("SELECT ISNULL(TotalGstAmount,0) AS Gst, ISNULL(GrandTotal,0) AS Grand FROM dbo.CrmBooking WHERE Id = @bid")).recordset[0] || {};
+  const ratio = Number(bk.Grand) > 0 ? Number(bk.Gst) / Number(bk.Grand) : 0;
+  const amt = Math.round((Number(amount) || 0) * 100) / 100;
+  if (ratio <= 0 || amt <= 0) return { gstAmount: 0, baseAmount: amt };
+
+  const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
+  const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
+  // Vouchers this booking has already posted on the same side.
+  const sources = side === "invoice"
+    ? `(g.SourceType = 'CrmInvoice' AND g.SourceId IN (SELECT Id FROM dbo.CrmInvoice WHERE BookingId = @bid))`
+    : `((g.SourceType = 'CrmPaymentReceipt' AND g.SourceId IN (
+           SELECT r.Id FROM dbo.CrmPaymentReceipt r JOIN dbo.CrmPaymentMilestone m ON m.Id = r.MilestoneId WHERE m.BookingId = @bid))
+        OR (g.SourceType = 'CrmOnAccountPayment' AND g.SourceId IN (SELECT Id FROM dbo.CrmOnAccountPayment WHERE BookingId = @bid)))`;
+  // Gross posted = everything debited on the receipt side (the bank leg), or
+  // the advance released + its GST on the invoice side. GST posted = the GST
+  // output credits on the receipt side; on the invoice side GST was never
+  // posted by the invoice, so it is gross minus the advance released.
+  const prior = (await pool.request().input("bid", sql.Int, bookingId)
+    .input("gst", sql.Int, gstHeadId).input("adv", sql.Int, advanceHeadId).query(side === "invoice"
+      ? `SELECT ISNULL(SUM(inv.Amount), 0) AS Gross,
+                ISNULL((SELECT SUM(g.DebitAmount) FROM dbo.GeneralLedgerEntry g WHERE ${sources} AND g.LHeadId = @adv AND ISNULL(g.IsReversed, 0) = 0), 0) AS Base
+         FROM dbo.CrmInvoice inv
+         WHERE inv.BookingId = @bid AND EXISTS (SELECT 1 FROM dbo.GeneralLedgerEntry g WHERE g.SourceType = 'CrmInvoice' AND g.SourceId = inv.Id)`
+      : `SELECT ISNULL(SUM(g.DebitAmount), 0) AS Gross,
+                ISNULL(SUM(CASE WHEN g.LHeadId = @gst THEN g.CreditAmount ELSE 0 END), 0) AS Gst
+         FROM dbo.GeneralLedgerEntry g WHERE ${sources} AND ISNULL(g.IsReversed, 0) = 0`)).recordset[0] || {};
+  const priorGross = Number(prior.Gross || 0);
+  const priorGst = side === "invoice" ? priorGross - Number(prior.Base || 0) : Number(prior.Gst || 0);
+  const target = Math.round((priorGross + amt) * ratio * 100) / 100;
+  const gstAmount = Math.min(amt, Math.max(0, Math.round((target - priorGst) * 100) / 100));
+  return { gstAmount, baseAmount: Math.round((amt - gstAmount) * 100) / 100 };
 }
 
 let _sundryDebtorsGroupId;
@@ -280,7 +334,7 @@ async function postCrmReceiptToGL(pool, receiptId, userEmail) {
   // instead of a clean liability line, and would be inconsistent with an
   // on-account deposit of the exact same kind of money.
   const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
-  const { gstAmount, baseAmount } = await getGstSplit(pool, row.BookingId, amount);
+  const { gstAmount, baseAmount } = await getCumulativeGstSplit(pool, row.BookingId, amount, "receipt");
   const legs = [
     { lHeadId: collectionsHeadId, debit: amount, narration: `${row.ReceiptNo} — CRM payment received (${row.PaymentMode || "—"})` },
   ];
@@ -392,7 +446,7 @@ async function postCrmOnAccountToGL(pool, onAccountId, userEmail) {
   // milestone later — postCrmOnAccountApplied below is a pure reallocation
   // of already-posted cash, not new income, so it correctly does NOT
   // re-split GST a second time.
-  const { gstAmount, baseAmount } = await getGstSplit(pool, row.BookingId, amount);
+  const { gstAmount, baseAmount } = await getCumulativeGstSplit(pool, row.BookingId, amount, "receipt");
   const legs = [
     { lHeadId: collectionsHeadId, debit: amount, narration: `${row.ReceiptNo} — CRM on-account deposit received` },
   ];
@@ -913,8 +967,18 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
   if (row.InvoiceType !== "Milestone" && row.InvoiceType !== "Booking")
     return { none: true, reason: `Invoice type "${row.InvoiceType}" is not a flat/parking sale invoice — no income to recognise` };
 
-  const amount = Number(row.Amount) || 0;
-  if (amount <= 0) return { posted: false, reason: `Invoice ${invoiceId} amount is ${amount} (<= 0)` };
+  const invoiceAmount = Number(row.Amount) || 0;
+  if (invoiceAmount <= 0) return { posted: false, reason: `Invoice ${invoiceId} amount is ${invoiceAmount} (<= 0)` };
+
+  // The invoice amount is GST-inclusive, but the GST share was already moved
+  // to GST Output Liability when the money was received (postCrmReceiptToGL /
+  // postCrmOnAccountToGL credit Advance with the pre-tax part only). So the
+  // invoice releases — and recognises as income — only the pre-tax part,
+  // split with the same canonical ratio. Releasing the gross amount would
+  // drive Advance from Customer negative by the GST and overstate income by
+  // the same figure.
+  const { baseAmount: amount } = await getCumulativeGstSplit(pool, row.BookingId, invoiceAmount, "invoice");
+  if (amount <= 0) return { posted: false, reason: `Invoice ${invoiceId} has no pre-tax amount to recognise` };
 
   const advanceHeadId = await getGLHeadId(pool, GL_ACCOUNTS.ADVANCE_FROM_CUSTOMERS);
 
@@ -950,6 +1014,14 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
       legs.push({ lHeadId: landHeadId, credit: landPart, narration: `${row.InvoiceNo} — land sale income recognised` });
     if (constructionPart > 0)
       legs.push({ lHeadId: incomeHeadId, credit: constructionPart, narration: `${row.InvoiceNo} — flat/villa sale income recognised` });
+  } else if (await require("./crmGst").resolveLandOwnedByBookingCustomer(pool, row.BookingId)) {
+    // A villa on a plot the buyer already owns: construction only, its own head.
+    // (crmGst is required here, not at the top: it loads modules that load this file.)
+    const villaHeadId = await getGLHeadIdByCode(pool, CRM_SALE_VILLA_CODE, CRM_SALE_VILLA_ACCOUNT);
+    legs = [
+      { lHeadId: advanceHeadId, debit: amount, narration: `${row.InvoiceNo} — invoice generated, advance released` },
+      { lHeadId: villaHeadId, credit: amount, narration: `${row.InvoiceNo} — villa construction income recognised` },
+    ];
   } else {
     const incomeHeadId = await getGLHeadIdByCode(pool, CRM_SALE_INCOME_CODE, CRM_SALE_INCOME_ACCOUNT);
     legs = [
@@ -971,7 +1043,68 @@ async function postCrmInvoiceToGL(pool, invoiceId, userEmail) {
   return { posted: true };
 }
 
+// Migration 522.
+const CRM_RESALE_FEE_CODE = "CRM-RESALE-FEE";
+const CRM_RESALE_FEE_ACCOUNT = "Plot Resale / Transfer Fee";
+
+/**
+ * The developer's fee on a completed plot resale. The land price passes
+ * between the two buyers and never touches the developer's books; the fee is
+ * the developer's only income here, charged to the ORIGINAL buyer (the
+ * transferor), with GST at the rate snapshotted on the resale (HSN 999794 by
+ * default, from the GST rules master):
+ *
+ *   Dr  original buyer's customer ledger   fee + GST
+ *       Cr  Plot Resale / Transfer Fee      fee
+ *       Cr  GST Output Liability            GST
+ *
+ * The buyer then settles it through an ordinary Received Payment against
+ * their customer ledger. Idempotent per resale.
+ */
+async function postCrmResaleFeeToGL(pool, resaleId, userEmail) {
+  if (await hasPosting(pool, "CrmUnitResale", resaleId))
+    return { posted: true, reason: "already posted (idempotent)" };
+  const r = (await pool.request().input("id", sql.Int, resaleId).query(`
+    SELECT r.Id, r.DeveloperFeeAmount, r.DeveloperFeeGstAmount, r.FromCustomerId, r.ResaleDate,
+           COALESCE(p.ProjectId, u.ProjectId) AS ProjectId, proj.company_id AS CompanyId,
+           COALESCE(p.PlotName, u.UnitName) AS Item
+    FROM dbo.CrmUnitResale r
+    LEFT JOIN dbo.PlotMaster p ON p.Id = r.PlotId
+    LEFT JOIN dbo.UnitMaster u ON u.Id = r.UnitId
+    LEFT JOIN dbo.enterprise proj ON proj.id = COALESCE(p.ProjectId, u.ProjectId)
+    WHERE r.Id = @id`)).recordset[0];
+  if (!r) return { posted: false, reason: `Resale ${resaleId} not found` };
+  const fee = Math.round(Number(r.DeveloperFeeAmount || 0) * 100) / 100;
+  const gst = Math.round(Number(r.DeveloperFeeGstAmount || 0) * 100) / 100;
+  if (fee <= 0) return { none: true, reason: "No developer fee on this resale — nothing to post" };
+  if (r.FromCustomerId == null) return { posted: false, reason: "Resale has no original buyer to charge the fee to" };
+
+  const customerHeadId = await ensureCrmCustomerLedgerHead(pool, r.FromCustomerId, userEmail);
+  const feeHeadId = await getGLHeadIdByCode(pool, CRM_RESALE_FEE_CODE, CRM_RESALE_FEE_ACCOUNT);
+  const voucherNo = `RSL-${resaleId}`;
+  const legs = [
+    { lHeadId: customerHeadId, debit: fee + gst, narration: `${voucherNo} — resale fee for ${r.Item}` },
+    { lHeadId: feeHeadId, credit: fee, narration: `${voucherNo} — plot resale / transfer fee` },
+  ];
+  if (gst > 0) {
+    const gstHeadId = await getGLHeadId(pool, CRM_GST_OUTPUT_ACCOUNT);
+    legs.push({ lHeadId: gstHeadId, credit: gst, narration: `${voucherNo} — GST output liability on resale fee` });
+  }
+  await postVoucher(pool, {
+    voucherNo,
+    voucherDate: r.ResaleDate || new Date(),
+    sourceType: "CrmUnitResale",
+    sourceId: resaleId,
+    companyId: r.CompanyId ?? null,
+    projectId: r.ProjectId ?? null,
+    createdBy: userEmail,
+    legs,
+  });
+  return { posted: true };
+}
+
 module.exports = {
+  postCrmResaleFeeToGL,
   CRM_COLLECTIONS_ACCOUNT,
   CRM_GST_OUTPUT_ACCOUNT,
   CRM_SALE_INCOME_ACCOUNT,
