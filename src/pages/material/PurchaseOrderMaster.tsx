@@ -91,6 +91,7 @@ import {
   FileDown,
   Receipt,
   ChevronDown,
+  ChevronRight,
   CalendarDays,
   FilePenLine,
   Package,
@@ -477,6 +478,11 @@ const PurchaseOrderMaster: React.FC = () => {
   const [page, setPage] = useState(1);
   const limit = 10;
   const [poTypeFilter, setPoTypeFilter] = useState<string>(""); // "" = All
+  // Same collapsible-by-project pattern as Material Request's own list —
+  // stays at the top level rather than inside a conditionally-called
+  // helper, same Rules-of-Hooks reasoning as the other list-view state here.
+  const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Record<string, boolean>>({});
+  const [projectFilter, setProjectFilter] = useState<string>("");
 
   // ── Doc number state ──────────────────────────────────────────────────────
   const [poDocTypeId, setPoDocTypeId] = useState<number | null>(null);
@@ -651,13 +657,14 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // ── Remote data ───────────────────────────────────────────────────────────
   const { data: dbData, isLoading } = useQuery({
-    queryKey: ["purchase-orders", page, limit, poTypeFilter],
+    queryKey: ["purchase-orders", page, limit, poTypeFilter, projectFilter],
     queryFn: () =>
       getPurchaseOrders({
         page,
         limit,
         poType: poTypeFilter || undefined,
         includeShortClosed: true,
+        projectId: projectFilter ? Number(projectFilter) : undefined,
       }),
   });
 
@@ -1555,6 +1562,189 @@ const PurchaseOrderMaster: React.FC = () => {
     "PurchaseOrders",
     filteredList.map((r: any) => r._id),
   );
+
+  // Grouped by Project, same collapsible pattern Material Request's own
+  // list uses — groups.set() on first appearance preserves the order rows
+  // arrive in, and the list is already newest-first (server sort), so a
+  // project's group lands wherever its most recently created PO would.
+  const groupedByProject = useMemo(() => {
+    const groups = new Map<string, { key: string; projectName: string | null; rows: any[] }>();
+    for (const r of filteredList) {
+      const key = r.projectName || "no-project";
+      if (!groups.has(key)) {
+        groups.set(key, { key, projectName: r.projectName || null, rows: [] });
+      }
+      groups.get(key)!.rows.push(r);
+    }
+    return Array.from(groups.values());
+  }, [filteredList]);
+
+  // Extracted from the DataTable JSX below so it can be rendered once per
+  // project group instead of duplicated — not memoized since it was
+  // recomputed every render as an inline literal before this too.
+  const poColumns = [
+    {
+      id: "poNumber",
+      accessorFn: (row: any) => row.poNumber || row.docNo,
+      header: "PO No",
+      size: 130,
+      cell: ({ row }: any) => {
+        const item = row.original;
+        return (
+          <div className="flex items-center gap-1.5">
+            <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+              {item.poNumber || item.docNo || "—"}
+            </span>
+            {item.poType === "WO_PO" && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                WO-PO
+              </span>
+            )}
+            {item.poType === "Direct" && (
+              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                Direct
+              </span>
+            )}
+          </div>
+        );
+      },
+    },
+    {
+      id: "poDate",
+      accessorKey: "poDate",
+      header: "Date",
+      size: 90,
+      meta: { className: "hidden sm:table-cell" },
+      cell: ({ getValue }: any) => (
+        <span className="text-sm text-muted-foreground">{fmtDate(getValue() as string)}</span>
+      ),
+    },
+    {
+      id: "supplierName",
+      accessorKey: "supplierName",
+      header: "Supplier",
+      size: 130,
+      meta: { className: "hidden sm:table-cell" },
+      cell: ({ getValue }: any) => (
+        <span className="text-sm font-medium">{String(getValue() || "—")}</span>
+      ),
+    },
+    {
+      id: "companyName",
+      accessorKey: "companyName",
+      header: "Company",
+      size: 120,
+      meta: { className: "hidden md:table-cell" },
+      cell: ({ getValue }: any) => (
+        <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
+      ),
+    },
+    {
+      id: "projectName",
+      accessorKey: "projectName",
+      header: "Project / Site",
+      size: 130,
+      meta: { className: "hidden lg:table-cell" },
+      cell: ({ getValue }: any) => (
+        <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
+      ),
+    },
+    {
+      id: "effectiveMRDocNo",
+      accessorKey: "effectiveMRDocNo",
+      header: "MR Ref",
+      size: 100,
+      meta: { className: "hidden lg:table-cell" },
+      cell: ({ getValue }: any) => {
+        const v = getValue() as string | null;
+        return v ? (
+          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-mono font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
+            {v}
+          </span>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        );
+      },
+    },
+    {
+      id: "totalAmount",
+      accessorKey: "totalAmount",
+      header: "Amount",
+      size: 100,
+      meta: { className: "hidden sm:table-cell" },
+      cell: ({ getValue }: any) => (
+        <span className="text-sm font-semibold">{fmt(getValue() as number)}</span>
+      ),
+    },
+    {
+      id: "status",
+      accessorKey: "status",
+      header: "Status",
+      size: 140,
+      meta: { className: "hidden sm:table-cell" },
+      cell: ({ row }: any) => (
+        <div className="flex flex-col items-start gap-1">
+          <ApprovalStatusChain
+            table="PurchaseOrders"
+            recordId={row.original._id}
+            fallback={<StatusChip status={row.original.status} />}
+            preloaded={poApprovalTrails.get(String(row.original._id)) ?? null}
+            preloadedLoading={poApprovalTrailsLoading}
+          />
+        </div>
+      ),
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      size: 120,
+      cell: ({ row }: any) => {
+        const item = row.original;
+        return (
+          <div className="flex items-center justify-end gap-1">
+            <ApprovalActions
+              status={item.status}
+              recordId={item._id}
+              endpoint="/api/purchase-orders"
+              submitOnly
+              onSuccess={(action) => handleApprovalSuccess(item._id, action)}
+            />
+            <button data-row-view
+              onClick={async () => {
+                setViewingTab("details");
+                try {
+                  const full = await getPurchaseOrderById(item._id);
+                  setViewingPO(full);
+                } catch {
+                  setViewingPO(item);
+                }
+              }}
+              className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
+              title="View details"
+            >
+              <Eye size={15} />
+            </button>
+            <button
+              onClick={() => handleGeneratePdf(item)}
+              className="p-1 rounded text-emerald-500 hover:bg-emerald-500/10 transition-colors"
+              title="Generate PDF"
+            >
+              <FileDown size={15} />
+            </button>
+            {rights.canDelete && (
+              <button
+                onClick={() => handleDelete(item._id)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
+                title="Delete this order"
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
+          </div>
+        );
+      },
+    },
+  ] as ColumnDef<any, unknown>[];
 
   // ── Computed totals ───────────────────────────────────────────────────────
   const { subtotal, totalCgst, totalSgst, totalIgst, totalTax, grandTotal } =
@@ -2694,17 +2884,34 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
                       {totalRecords} record{totalRecords !== 1 ? "s" : ""}
                     </p>
                   </div>
-                  <div className="relative w-full sm:w-64">
-                    <Search
-                      size={13}
-                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                    />
-                    <Input
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search PO number, supplier…"
-                      className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
-                    />
+                  <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <div className="relative w-full sm:w-64">
+                      <Search
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
+                      <Input
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search PO number, supplier…"
+                        className="pl-9 h-9 text-sm focus-visible:ring-emerald-500/30 focus-visible:ring-offset-0"
+                      />
+                    </div>
+                    <select
+                      value={projectFilter}
+                      onChange={(e) => {
+                        setProjectFilter(e.target.value);
+                        setPage(1);
+                      }}
+                      className="h-9 w-full sm:w-48 px-2.5 rounded-lg border border-border bg-background text-sm text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/30"
+                    >
+                      <option value="">All projects</option>
+                      {allProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -2733,177 +2940,53 @@ ${remarksEsc ? `<div style="margin-top:20px;"><div style="font-size:10px;font-we
               </div>
             </CardHeader>
             <CardContent className="p-0">
-              <DataTable
-                data={filteredList}
-                loading={isLoading}
-                searchable={false}
-                paginated={false}
-                emptyMessage="No purchase orders found. Click 'New PO' to create one."
-                getRowId={(r: any) => String(r._id)}
-                columns={[
-                  {
-                    id: "poNumber",
-                    accessorFn: (row: any) => row.poNumber || row.docNo,
-                    header: "PO No",
-                    size: 130,
-                    cell: ({ row }: any) => {
-                      const item = row.original;
-                      return (
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                            {item.poNumber || item.docNo || "—"}
-                          </span>
-                          {item.poType === "WO_PO" && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-bold bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                              WO-PO
-                            </span>
-                          )}
-                          {item.poType === "Direct" && (
-                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
-                              Direct
-                            </span>
-                          )}
-                        </div>
-                      );
-                    },
-                  },
-                  {
-                    id: "poDate",
-                    accessorKey: "poDate",
-                    header: "Date",
-                    size: 90,
-                    meta: { className: "hidden sm:table-cell" },
-                    cell: ({ getValue }: any) => (
-                      <span className="text-sm text-muted-foreground">{fmtDate(getValue() as string)}</span>
-                    ),
-                  },
-                  {
-                    id: "supplierName",
-                    accessorKey: "supplierName",
-                    header: "Supplier",
-                    size: 130,
-                    meta: { className: "hidden sm:table-cell" },
-                    cell: ({ getValue }: any) => (
-                      <span className="text-sm font-medium">{String(getValue() || "—")}</span>
-                    ),
-                  },
-                  {
-                    id: "companyName",
-                    accessorKey: "companyName",
-                    header: "Company",
-                    size: 120,
-                    meta: { className: "hidden md:table-cell" },
-                    cell: ({ getValue }: any) => (
-                      <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
-                    ),
-                  },
-                  {
-                    id: "projectName",
-                    accessorKey: "projectName",
-                    header: "Project / Site",
-                    size: 130,
-                    meta: { className: "hidden lg:table-cell" },
-                    cell: ({ getValue }: any) => (
-                      <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
-                    ),
-                  },
-                  {
-                    id: "effectiveMRDocNo",
-                    accessorKey: "effectiveMRDocNo",
-                    header: "MR Ref",
-                    size: 100,
-                    meta: { className: "hidden lg:table-cell" },
-                    cell: ({ getValue }: any) => {
-                      const v = getValue() as string | null;
-                      return v ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[0.625rem] font-mono font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border border-indigo-500/20">
-                          {v}
+              {isLoading ? (
+                <div className="flex items-center justify-center py-14 text-sm text-muted-foreground">
+                  Loading…
+                </div>
+              ) : filteredList.length === 0 ? (
+                <p className="text-center text-muted-foreground text-sm py-10">
+                  No purchase orders found. Click 'New PO' to create one.
+                </p>
+              ) : (
+                groupedByProject.map((group) => {
+                  const collapsed = !!collapsedProjectGroups[group.key];
+                  return (
+                    <div key={group.key} className="border-b border-border last:border-0">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCollapsedProjectGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))
+                        }
+                        className="w-full flex items-center gap-2.5 px-4 py-3 bg-muted/20 hover:bg-muted/30 transition-colors text-left"
+                      >
+                        {collapsed ? (
+                          <ChevronRight size={14} className="text-muted-foreground shrink-0" />
+                        ) : (
+                          <ChevronDown size={14} className="text-muted-foreground shrink-0" />
+                        )}
+                        <Building2 size={13} className="text-primary shrink-0" />
+                        <span className="text-sm font-heading font-semibold text-foreground">
+                          {group.projectName || "No Project"}
                         </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      );
-                    },
-                  },
-                  {
-                    id: "totalAmount",
-                    accessorKey: "totalAmount",
-                    header: "Amount",
-                    size: 100,
-                    meta: { className: "hidden sm:table-cell" },
-                    cell: ({ getValue }: any) => (
-                      <span className="text-sm font-semibold">{fmt(getValue() as number)}</span>
-                    ),
-                  },
-                  {
-                    id: "status",
-                    accessorKey: "status",
-                    header: "Status",
-                    size: 140,
-                    meta: { className: "hidden sm:table-cell" },
-                    cell: ({ row }: any) => (
-                      <div className="flex flex-col items-start gap-1">
-                        <ApprovalStatusChain
-                          table="PurchaseOrders"
-                          recordId={row.original._id}
-                          fallback={<StatusChip status={row.original.status} />}
-                          preloaded={poApprovalTrails.get(String(row.original._id)) ?? null}
-                          preloadedLoading={poApprovalTrailsLoading}
+                        <span className="ml-auto text-[0.625rem] font-medium text-muted-foreground bg-muted px-2 py-0.5 rounded-full">
+                          {group.rows.length} order{group.rows.length !== 1 ? "s" : ""}
+                        </span>
+                      </button>
+                      {!collapsed && (
+                        <DataTable
+                          data={group.rows}
+                          searchable={false}
+                          paginated={false}
+                          emptyMessage="No purchase orders found."
+                          getRowId={(r: any) => String(r._id)}
+                          columns={poColumns}
                         />
-                      </div>
-                    ),
-                  },
-                  {
-                    id: "actions",
-                    header: "Actions",
-                    size: 120,
-                    cell: ({ row }: any) => {
-                      const item = row.original;
-                      return (
-                        <div className="flex items-center justify-end gap-1">
-                          <ApprovalActions
-                            status={item.status}
-                            recordId={item._id}
-                            endpoint="/api/purchase-orders"
-                            submitOnly
-                            onSuccess={(action) => handleApprovalSuccess(item._id, action)}
-                          />
-                          <button data-row-view
-                            onClick={async () => {
-                              setViewingTab("details");
-                              try {
-                                const full = await getPurchaseOrderById(item._id);
-                                setViewingPO(full);
-                              } catch {
-                                setViewingPO(item);
-                              }
-                            }}
-                            className="p-1 rounded text-sky-500 hover:bg-sky-500/10 transition-colors"
-                            title="View details"
-                          >
-                            <Eye size={15} />
-                          </button>
-                          <button
-                            onClick={() => handleGeneratePdf(item)}
-                            className="p-1 rounded text-emerald-500 hover:bg-emerald-500/10 transition-colors"
-                            title="Generate PDF"
-                          >
-                            <FileDown size={15} />
-                          </button>
-                          {rights.canDelete && (
-                            <button
-                              onClick={() => handleDelete(item._id)}
-                              className="p-1 rounded text-destructive hover:bg-destructive/10 transition-colors"
-                              title="Delete this order"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          )}
-                        </div>
-                      );
-                    },
-                  },
-                ] as ColumnDef<any, unknown>[]}
-              />
+                      )}
+                    </div>
+                  );
+                })
+              )}
               {/* Pagination */}
               <div className="flex items-center justify-between px-4 py-3 border-t border-border bg-muted/10 text-xs text-muted-foreground">
                 <span>
