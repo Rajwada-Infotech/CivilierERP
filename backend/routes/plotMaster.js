@@ -187,21 +187,38 @@ router.put("/:id/adjacent", requirePageRight("crm-auto-project-setup", "edit"), 
       const candidateRequest = pool.request();
       adjacentIds.forEach((id, i) => candidateRequest.input(`a${i}`, sql.Int, id));
       const candidates = await candidateRequest.query(`
-        SELECT Id, ProjectId, BlockId FROM dbo.PlotMaster
-        WHERE Id IN (${adjacentIds.map((_, i) => `@a${i}`).join(",")}) AND IsActive = 1 AND ConvertedUnitId IS NULL
+        SELECT Id, ProjectId, BlockId, ConvertedUnitId FROM dbo.PlotMaster
+        WHERE Id IN (${adjacentIds.map((_, i) => `@a${i}`).join(",")}) AND IsActive = 1
       `);
       const origin = source.recordset[0];
       if (candidates.recordset.length !== adjacentIds.length || candidates.recordset.some((p) => p.ProjectId !== origin.ProjectId || p.BlockId !== origin.BlockId)) {
-        return res.status(400).json({ error: "Adjacent plots must be active, unconverted, and in the same project and block" });
+        return res.status(400).json({ error: "Adjacent plots must be active and in the same project and block" });
+      }
+      // A plot already converted to a villa keeps the links it had (they record
+      // which plots the villa stands on) but cannot gain a new one.
+      const converted = candidates.recordset.filter((p) => p.ConvertedUnitId != null).map((p) => p.Id);
+      if (converted.length) {
+        const linked = new Set((await pool.request().input("plotId", sql.Int, plotId).query(`
+          SELECT CASE WHEN PlotId = @plotId THEN AdjacentPlotId ELSE PlotId END AS Other
+          FROM dbo.PlotAdjacency WHERE PlotId = @plotId OR AdjacentPlotId = @plotId`)).recordset.map((r) => r.Other));
+        if (converted.some((id) => !linked.has(id))) {
+          return res.status(400).json({ error: "A plot already converted to a villa cannot get a new neighbour" });
+        }
       }
     }
     const tx = pool.transaction();
     await tx.begin();
     try {
+      // Links to converted plots are never removed here — they belong to a villa.
       await tx.request().input("plotId", sql.Int, plotId).query(`
-        DELETE FROM dbo.PlotAdjacency WHERE PlotId = @plotId OR AdjacentPlotId = @plotId
+        DELETE pa FROM dbo.PlotAdjacency pa
+        JOIN dbo.PlotMaster other ON other.Id = CASE WHEN pa.PlotId = @plotId THEN pa.AdjacentPlotId ELSE pa.PlotId END
+        WHERE (pa.PlotId = @plotId OR pa.AdjacentPlotId = @plotId) AND other.ConvertedUnitId IS NULL
       `);
-      for (const adjacentId of adjacentIds) {
+      const kept = new Set((await tx.request().input("plotId", sql.Int, plotId).query(`
+        SELECT CASE WHEN PlotId = @plotId THEN AdjacentPlotId ELSE PlotId END AS Other
+        FROM dbo.PlotAdjacency WHERE PlotId = @plotId OR AdjacentPlotId = @plotId`)).recordset.map((r) => r.Other));
+      for (const adjacentId of adjacentIds.filter((id) => !kept.has(id))) {
         await tx.request().input("left", sql.Int, Math.min(plotId, adjacentId)).input("right", sql.Int, Math.max(plotId, adjacentId))
           .input("by", sql.Int, req.user?.userId || null).query(`
             INSERT INTO dbo.PlotAdjacency (PlotId, AdjacentPlotId, CreatedBy, CreatedAt)
@@ -314,14 +331,23 @@ router.put("/layout/:blockId", requirePageRight(PAGE, "edit"), async (req, res) 
 
     let pairs = null;
     if (Array.isArray(req.body?.Adjacency)) {
+      // Links that already exist are kept even when a side has since been
+      // converted to a villa: plots bought together are linked first and
+      // converted afterwards, and the editor sends every loaded link back on
+      // save. Only a NEW link to a converted plot is refused.
+      const existingPairs = new Set((await pool.request().input("b", sql.Int, blockId).query(`
+        SELECT pa.PlotId, pa.AdjacentPlotId FROM dbo.PlotAdjacency pa
+        JOIN dbo.PlotMaster p ON p.Id = pa.PlotId WHERE p.BlockId = @b`)).recordset
+        .map((r) => `${Math.min(r.PlotId, r.AdjacentPlotId)}-${Math.max(r.PlotId, r.AdjacentPlotId)}`));
       pairs = new Map();
       for (const pair of req.body.Adjacency) {
         const a = Number(pair?.[0]), b = Number(pair?.[1]);
         if (!plotById.has(a) || !plotById.has(b) || a === b) {
           return res.status(400).json({ error: "Neighbours must be two different active plots of this block" });
         }
-        if (plotById.get(a).ConvertedUnitId || plotById.get(b).ConvertedUnitId) {
-          return res.status(400).json({ error: "Converted plots cannot have neighbours" });
+        const key = `${Math.min(a, b)}-${Math.max(a, b)}`;
+        if ((plotById.get(a).ConvertedUnitId || plotById.get(b).ConvertedUnitId) && !existingPairs.has(key)) {
+          return res.status(400).json({ error: "A plot already converted to a villa cannot get a new neighbour" });
         }
         pairs.set(`${Math.min(a, b)}-${Math.max(a, b)}`, [Math.min(a, b), Math.max(a, b)]);
       }

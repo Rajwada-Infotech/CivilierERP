@@ -96,7 +96,8 @@ router.get("/", requirePageRight("crm-pre-possession", "view"), async (req, res)
 
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
-    const sortExpr = PP_SORT[req.query.sortKey] || PP_SORT.Priority;
+    // Own keys only: "constructor" / "__proto__" would otherwise resolve to built-ins and break the SQL.
+    const sortExpr = Object.hasOwn(PP_SORT, req.query.sortKey) ? PP_SORT[req.query.sortKey] : PP_SORT.Priority;
     const dir = req.query.sortDir === "desc" ? "DESC" : "ASC";
 
     const countReq = pool.request();
@@ -201,7 +202,8 @@ router.get("/gateway-status", requirePageRight("crm-pre-possession", "view"), as
     //   → { rows, total, counts: { All, Eligible } }   (counts ignore the Eligible filter)
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
-    const sortCol = { BookingNo: "BookingNo", ApplicantName: "ApplicantName", UnitNo: "UnitNo" }[req.query.sortKey] || "BookingNo";
+    const GW_SORT = { BookingNo: "BookingNo", ApplicantName: "ApplicantName", UnitNo: "UnitNo" };
+    const sortCol = Object.hasOwn(GW_SORT, req.query.sortKey) ? GW_SORT[req.query.sortKey] : "BookingNo";
     const dir = req.query.sortDir === "desc" ? "DESC" : "ASC";
     const eligibleOnly = req.query.status === "Eligible";
 
