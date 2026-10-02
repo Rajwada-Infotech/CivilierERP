@@ -169,3 +169,47 @@ export function useModuleSwitchShortcut(): void {
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [currentUser, canAccessPage, setActiveModule, setModuleSwitching, setCollapsed, navigate]);
 }
+
+// ── Calculator: hold Space, press C ─────────────────────────────────────────────
+// Same held-key chord style as Compass (Enter + Space): Space is not a modifier,
+// so the hook tracks it itself. Ignored while typing in a field — a fast "a c"
+// in a text box can have Space still down when C lands, and must stay a letter.
+// (Shift+C is the CRM module switch above; a plain C with no modifiers is free.)
+
+/** C pressed while Space is held, no modifiers. */
+export function isCalculatorShortcut(e: KeyLike, spaceHeld: boolean): boolean {
+  if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return false;
+  return spaceHeld && e.code === "KeyC";
+}
+
+/** Toggles the calculator on Space + C — mount once (CalculatorHost, in AppLayout). */
+export function useCalculatorShortcut(onToggle: () => void): void {
+  useEffect(() => {
+    let spaceHeld = false;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.isComposing) return;
+      if (e.code === "Space") spaceHeld = true;
+      if (e.repeat || isEditableTarget(e.target)) return;
+      if (isCalculatorShortcut(e, spaceHeld)) {
+        e.preventDefault();
+        onToggle();
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") spaceHeld = false;
+    };
+    // A keyup that lands outside the window never fires — reset on blur so a
+    // stuck "held" flag can't arm the chord later.
+    const onBlur = () => {
+      spaceHeld = false;
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [onToggle]);
+}
