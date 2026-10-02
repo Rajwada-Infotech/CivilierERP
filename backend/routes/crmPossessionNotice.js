@@ -129,7 +129,8 @@ router.get("/", requirePageRight("crm-possession-notice", "view"), async (req, r
 
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 25));
-    const sortCol = PN_SORT[req.query.sortKey] || PN_SORT.CreatedAt;
+    // Own keys only: "constructor" / "__proto__" would otherwise resolve to built-ins and break the SQL.
+    const sortCol = Object.hasOwn(PN_SORT, req.query.sortKey) ? PN_SORT[req.query.sortKey] : PN_SORT.CreatedAt;
     const dir = req.query.sortDir === "asc" ? "ASC" : "DESC";
 
     const countReq = pool.request();
