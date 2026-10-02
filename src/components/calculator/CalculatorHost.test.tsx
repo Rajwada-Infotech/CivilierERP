@@ -6,7 +6,7 @@ import { isCalculatorShortcut } from "@/hooks/useGlobalShortcuts";
 
 afterEach(() => cleanup());
 
-const key = (type: "keydown" | "keyup", code: string, init: KeyboardEventInit = {}, target: EventTarget = window) =>
+const key = (type: "keydown" | "keyup", code: string, init: KeyboardEventInit = {}, target: Element | Window = window) =>
   fireEvent(target, new KeyboardEvent(type, { code, key: code.replace("Key", "").toLowerCase(), bubbles: true, cancelable: true, ...init }));
 
 const panel = () => screen.queryByRole("dialog", { name: "Calculator" });

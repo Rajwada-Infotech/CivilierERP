@@ -264,6 +264,16 @@ const PlotLayoutStep: React.FC<{
               />
             </div>
           );
+          // Plots entered or imported directly in Plot Master: nothing to lay out here.
+          if (t?.FromPlotMaster) return (
+            <div key={b.Id} className="rounded-lg border border-border p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-foreground">{b.BlockName}</span>
+                <span className="text-[0.6875rem] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 font-medium">{t.PlotsCreated} plot(s) in Plot Master</span>
+              </div>
+              <p className="text-xs text-muted-foreground">These plots were entered in Plot Master, each with its own number and area. Edit them there.</p>
+            </div>
+          );
           return (
             <div key={b.Id} className="rounded-lg border border-border p-3 space-y-2">
               <div className="flex items-center justify-between gap-2">
