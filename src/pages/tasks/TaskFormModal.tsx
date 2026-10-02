@@ -6,6 +6,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 export default function TaskFormModal({ onClose, editTask }: { onClose: () => void; editTask?: any }) {
   const { addTask, updateTask } = useTask();
@@ -103,11 +104,11 @@ export default function TaskFormModal({ onClose, editTask }: { onClose: () => vo
 
           <div>
             <label className="block text-xs font-heading text-muted-foreground mb-1">Assign To *</label>
-            <select value={form.assignedTo} onChange={e => handleAssign(e.target.value)} required
+            <SearchableNativeSelect value={form.assignedTo} onChange={e => handleAssign(e.target.value)} required
               className={`w-full px-3 py-2 rounded-lg text-sm bg-muted border text-foreground focus:outline-none focus:ring-2 focus:ring-primary ${submitAttempted && !form.assignedTo ? "border-destructive" : "border-border"}`}>
               <option value="">Select user...</option>
               {allUsers.map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
+            </SearchableNativeSelect>
             {submitAttempted && !form.assignedTo && (
               <p className="mt-1 text-xs text-destructive">Assignee is required</p>
             )}

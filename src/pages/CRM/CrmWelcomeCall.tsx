@@ -18,6 +18,7 @@ import { translateError } from "@/lib/translateError";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
 import { DateInput, DateTimeInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/welcome-calls";
 const CO_API = "/api/crm/co-applicants";
@@ -1442,11 +1443,11 @@ const IntakeDialog: React.FC<{ booking: any; editingCall?: any | null; onCancelE
                       <button type="button" onClick={() => setCalledByLocked(false)} className="text-xs text-primary hover:underline shrink-0">Change</button>
                     </div>
                   ) : (
-                    <select value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
+                    <SearchableNativeSelect value={form.CalledBy} onChange={(e) => setForm((f) => ({ ...f, CalledBy: e.target.value }))}
                       className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                       <option value="">— Self —</option>
                       {users.map((u) => <option key={u.value} value={u.value}>{u.label}</option>)}
-                    </select>
+                    </SearchableNativeSelect>
                   )}
                 </div>
                 <div>

@@ -5,6 +5,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { HrPayrollShell } from "@/components/hrpayroll/HrPayrollShell";
 import { getEmployees, getEmployeeSalaryBreakup, type SalaryBreakupResult } from "@/api/employeeMasterApi";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const inputBase =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground";
@@ -58,14 +59,14 @@ const SalaryCalculation: React.FC = () => {
             <div className="p-5 flex flex-wrap items-end gap-3">
               <div style={{ minWidth: 260 }}>
                 <label className={labelBase}>Employee</label>
-                <select value={employeeId} onChange={(e) => { setEmployeeId(e.target.value); setResult(null); setErrorMsg(null); }} className={inputBase} disabled={employeesLoading}>
+                <SearchableNativeSelect value={employeeId} onChange={(e) => { setEmployeeId(e.target.value); setResult(null); setErrorMsg(null); }} className={inputBase} disabled={employeesLoading}>
                   <option value="">Select...</option>
                   {employees.map((e) => (
                     <option key={e.EmployeeId} value={String(e.EmployeeId)}>
                       {e.EmployeeName} ({e.EmployeeCode})
                     </option>
                   ))}
-                </select>
+                </SearchableNativeSelect>
               </div>
               <div>
                 <label className={labelBase}>As Of Date</label>

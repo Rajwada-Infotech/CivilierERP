@@ -82,6 +82,7 @@ import {
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { DateInput } from "@/components/ui/date-input";
 import { BodyPortal } from "@/components/ui/body-portal";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // ─── WO Chain Status Hook ─────────────────────────────────────────────────────
 interface WOChainStatus {
@@ -612,7 +613,7 @@ const MaterialBreakdownModal: React.FC<{
                           {loadingItems ? (
                             <div className="flex-1 h-[34px] rounded-md border border-border bg-muted/30 animate-pulse" />
                           ) : (
-                            <select
+                            <SearchableNativeSelect
                               value={mat.itemId}
                               onChange={(e) =>
                                 handleItemChange(idx, e.target.value)
@@ -629,7 +630,7 @@ const MaterialBreakdownModal: React.FC<{
                                   {it.name}
                                 </option>
                               ))}
-                            </select>
+                            </SearchableNativeSelect>
                           )}
                           <button
                             onClick={() => deleteMaterial(idx)}

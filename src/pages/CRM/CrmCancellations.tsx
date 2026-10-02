@@ -15,6 +15,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { CrmPaginationBar } from "@/components/crm/CrmPaginationBar";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/cancellations";
 const BKG_API = "/api/crm/bookings";
@@ -256,13 +257,13 @@ const CrmCancellations: React.FC = () => {
           <div className="space-y-3">
             <div>
               <label className="text-xs text-muted-foreground block mb-1">Booking *</label>
-              <select value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
+              <SearchableNativeSelect value={form.BookingId} onChange={(e) => setForm((f) => ({ ...f, BookingId: e.target.value }))}
                 className="w-full text-sm border border-border rounded px-2 py-1.5 bg-background">
                 <option value="">Select booking</option>
                 {activeBookings.map((b: any) => (
                   <option key={b.Id} value={String(b.Id)}>{b.BookingNo} — {b.ApplicantName}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
 
             {/* Policy info card — shown once a booking is selected and the

@@ -28,6 +28,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { DateInput, DateTimeInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/task-master";
 const PRIORITIES = ["Very Important", "Important", "Normal"];
@@ -1424,7 +1425,7 @@ const TaskMaster: React.FC = () => {
             </div>
             <div>
               <label className="text-xs font-medium text-muted-foreground">Assignee</label>
-              <select
+              <SearchableNativeSelect
                 value={subtaskForm.assignedTo}
                 onChange={(e) => setSubtaskForm((f) => ({ ...f, assignedTo: e.target.value }))}
                 className="w-full mt-1 px-3 py-2 rounded-lg text-sm bg-muted/40 border border-border focus:outline-none focus:ring-1 focus:ring-primary"
@@ -1433,7 +1434,7 @@ const TaskMaster: React.FC = () => {
                 {assigneeOptions.map((u) => (
                   <option key={u.value} value={u.value}>{u.label}</option>
                 ))}
-              </select>
+              </SearchableNativeSelect>
             </div>
           </div>
           <DialogFooter>

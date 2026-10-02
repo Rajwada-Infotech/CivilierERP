@@ -16,6 +16,7 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { BankNamePicker } from "@/components/finance/BankNamePicker";
 import { CrmCompanyProjectBlockFilter, type CrmCompanyProjectBlockValue } from "@/components/crm/CrmCompanyProjectBlockFilter";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 const API = "/api/crm/payments";
 const BKG_API = "/api/crm/bookings";
@@ -679,7 +680,7 @@ const CrmPaymentMilestones: React.FC = () => {
             <label className="text-xs text-muted-foreground block mb-1">
               Select Booking <span className="text-muted-foreground/60">({(bookings as any[]).length} in scope)</span>
             </label>
-            <select value={selectedBookingId} onChange={(e) => setSp(e.target.value ? { bookingId: e.target.value } : {}, { replace: true })}
+            <SearchableNativeSelect value={selectedBookingId} onChange={(e) => setSp(e.target.value ? { bookingId: e.target.value } : {}, { replace: true })}
               className="w-full text-sm border border-border rounded-lg px-3 py-2 bg-background">
               <option value="">— Choose a booking —</option>
               {(bookings as any[]).map((b: any) => (
@@ -687,7 +688,7 @@ const CrmPaymentMilestones: React.FC = () => {
                   {b.BookingNo} — {b.ApplicantName} · {b.UnitNo} {b.ProjectName ? `(${b.ProjectName})` : ""}
                 </option>
               ))}
-            </select>
+            </SearchableNativeSelect>
           </div>
           {selectedBookingId && (
             <>

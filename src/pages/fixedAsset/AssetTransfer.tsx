@@ -27,6 +27,7 @@ import {
 } from "@/api/assetTransferApi";
 import { getDepartmentOptions, type DepartmentOption } from "@/api/departmentMasterApi";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 function ensureArray<T>(v: unknown): T[] {
   return Array.isArray(v) ? (v as T[]) : [];
@@ -708,7 +709,7 @@ export default function AssetTransfer() {
               </div>
               <div>
                 <label className={labelCls}><User size={11} /> To User *</label>
-                <select value={form.toUserId}
+                <SearchableNativeSelect value={form.toUserId}
                   onChange={(e) => {
                     const toUserId = e.target.value;
                     const selectedUser = toUserOptions.find((u) => String(u.id) === toUserId);
@@ -722,7 +723,7 @@ export default function AssetTransfer() {
                   disabled={!form.fromUserId}>
                   <option value="">Select user…</option>
                   {toUserOptions.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
+                </SearchableNativeSelect>
                 {toUser && (
                   <div className="mt-1.5">
                     <UserChip user={toUser} empty="" />

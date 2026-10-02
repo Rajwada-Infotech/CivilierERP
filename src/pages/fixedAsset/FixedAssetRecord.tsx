@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { DateInput } from "@/components/ui/date-input";
+import { SearchableNativeSelect } from "@/components/SearchableNativeSelect";
 
 // ── constants ─────────────────────────────────────────────────────────────────
 const ASSET_STATUS_OPTIONS = ["Pending", "Active", "Sold", "Scrapped", "Under Maintenance"] as const;
@@ -1304,10 +1305,10 @@ export default function FixedAssetRecord() {
               </div>
               <div className="sm:col-span-2">
                 <label className={labelCls}>Supplier</label>
-                <select value={form.supplierId} onChange={(e) => setField("supplierId", e.target.value)} className={inputCls}>
+                <SearchableNativeSelect value={form.supplierId} onChange={(e) => setField("supplierId", e.target.value)} className={inputCls}>
                   <option value="">Select supplier…</option>
                   {suppliers.map((s) => <option key={s.LHeadId} value={s.LHeadId}>{s.LHeadName}</option>)}
-                </select>
+                </SearchableNativeSelect>
               </div>
             </SubGroup>
 
