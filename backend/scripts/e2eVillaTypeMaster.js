@@ -93,6 +93,13 @@ const check = (name, cond, extra) => {
     r = await call("DELETE", `/api/villa-type-master/${typeId}`);
     check("removal blocked while a plot plans the type", r.status === 400, r);
 
+    const other = (await q("SELECT TOP 1 Id FROM dbo.PlotMaster WHERE ProjectId = @p AND IsActive = 1 AND ConvertedUnitId IS NULL AND Id <> @id", { p: [sql.Int, PROJECT], id: [sql.Int, plot.Id] }))[0];
+    if (other) {
+      r = await call("POST", "/api/crm/project-auto-setup/plots/convert", {
+        PlotIds: [plot.Id, other.Id], UnitName: `${TAG} Merge`, UnitType: unitType, UnitKind: "VILLA", RatePerSqFt: 3000, VillaTypeId: typeId,
+      });
+      check("several plots are not merged without Combine", r.status === 400 && /Combine/.test(r.body.error || ""), r);
+    }
     r = await call("POST", "/api/crm/project-auto-setup/plots/convert", {
       PlotIds: [plot.Id], UnitName: `${TAG} Villa VT`, UnitType: unitType, UnitKind: "VILLA", RatePerSqFt: 3000, VillaTypeId: typeId,
     });

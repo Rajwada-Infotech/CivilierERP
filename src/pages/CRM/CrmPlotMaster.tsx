@@ -372,7 +372,7 @@ const CrmPlotMaster: React.FC = () => {
       const response = await fetchWithAuth(`${SETUP_API}/plots/convert`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          PlotIds: selectedPlots.map((plot) => plot.Id), UnitName: unitName.trim(), UnitType: unitType, UnitKind: unitKind,
+          PlotIds: selectedPlots.map((plot) => plot.Id), Combine: selectedPlots.length > 1 && conversionConfirmed, UnitName: unitName.trim(), UnitType: unitType, UnitKind: unitKind,
           RatePerSqFt: Number(villaRate), VillaTypeId: villaTypeId ? Number(villaTypeId) : null, BuiltUpAreaSqFt: builtUpArea ? Number(builtUpArea) : null, SuperBuiltUpAreaSqFt: superBuiltUpArea ? Number(superBuiltUpArea) : null,
         }),
       });

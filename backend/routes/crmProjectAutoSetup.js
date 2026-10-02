@@ -1809,6 +1809,11 @@ router.post("/plots/convert", requirePageRight("crm-auto-project-setup", "create
   const unitType = String(req.body?.UnitType || "").trim();
   const unitKind = String(req.body?.UnitKind || "").trim();
   if (!plotIds.length || !unitName || !unitType || !unitKind) return res.status(400).json({ error: "PlotIds, UnitName, UnitType, and UnitKind are required" });
+  // Merging plots into one villa cannot be undone, so it must be asked for
+  // explicitly; one villa per plot is the default and needs no flag.
+  if (new Set(plotIds).size > 1 && req.body?.Combine !== true) {
+    return res.status(400).json({ error: "Several plots make ONE villa only when Combine is confirmed. To build one villa per plot, convert each plot on its own." });
+  }
   // The villa's own construction rate. Never the plot's land rate: the plot's
   // owner has already paid for the land, and a villa priced at the land rate
   // would charge them for it again.
